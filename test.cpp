@@ -80,7 +80,7 @@ TEST_CASE_FIXTURE(AS, "gc allocation") {
   CHECK(f.bits);
 }
 
-#define FLONUMS_PER_BLOCK GC::align(8, ARETE_BLOCK_SIZE / sizeof(Flonum))
+#define FLONUMS_PER_BLOCK (ARETE_BLOCK_SIZE / sizeof(Flonum))
 
 TEST_CASE_FIXTURE(AS, "gc allocation correctly adds a block") {
   arete::Block* b = new arete::Block(ARETE_BLOCK_SIZE, state.gc.mark_bit);
@@ -143,83 +143,78 @@ TEST_CASE_FIXTURE(AS, "gc marking recursive values") {
   std::cout << p << std::endl;
 }
 
-/*
 TEST_CASE_FIXTURE(AS, "gc collection failure") {
   // Exhaust memory by allocating a bunch of living objects that can't be collected
 
-  Value* vars[FIXNUMS_PER_BLOCK];
-  Value** roots[FIXNUMS_PER_BLOCK];
-  memset(roots, 0, FIXNUMS_PER_BLOCK);
-  Frame f(state, FIXNUMS_PER_BLOCK, roots);
+  Value vars[FLONUMS_PER_BLOCK];
+  HeapValue** roots[FLONUMS_PER_BLOCK];
+  memset(roots, 0, FLONUMS_PER_BLOCK * sizeof(HeapValue*));
+  Frame f(state, FLONUMS_PER_BLOCK, roots);
 
   {
     CHECK(state.gc.frames.size() == 1);
-
-    for(size_t i = 0; i != FIXNUMS_PER_BLOCK; i++) {
-      vars[i] = state.gc.allocate<Fixnum>();
-      ((Fixnum*) vars[i])->data = i;
-      roots[i] = &vars[i];
+    for(size_t i = 0; i != FLONUMS_PER_BLOCK; i++) {
+      vars[i] = state.make_flonum(0.0);
+      static_cast<Flonum*>(vars[i].heap)->number = i;
+      roots[i] = &(vars[i].heap);
     }
 
     state.gc.collect();
   }
-  CHECK(state.gc.frames.size() == 1);
-  // Memory should grow at this point.
-  CHECK_MESSAGE(state.gc.live_objects_after_collection == FIXNUMS_PER_BLOCK, "all fixnums survived collection");
 
+  CHECK(state.gc.frames.size() == 1);
+  CHECK_MESSAGE(state.gc.live_objects_after_collection == FLONUMS_PER_BLOCK, "all fixnums survived collection");
   CHECK_MESSAGE(state.gc.blocks.size() == 2, "additional block was allocated");
 }
 
 TEST_CASE_FIXTURE(AS, "gc allocating dead objects works correctly") {
   // Allocate fixnums and make half of them dead
-  Value* vars[FIXNUMS_PER_BLOCK];
-  memset(vars, 0, FIXNUMS_PER_BLOCK * sizeof(Value*));
-  Value** roots[FIXNUMS_PER_BLOCK];
-  memset(roots, 0, FIXNUMS_PER_BLOCK * sizeof(Value*));
-  Frame f(state, FIXNUMS_PER_BLOCK, roots);
+  Value vars[FLONUMS_PER_BLOCK];
+  memset(vars, 0, FLONUMS_PER_BLOCK * sizeof(Value));
+  HeapValue** roots[FLONUMS_PER_BLOCK];
+  memset(roots, 0, FLONUMS_PER_BLOCK * sizeof(HeapValue*));
+  Frame f(state, FLONUMS_PER_BLOCK, roots);
 
-  for(size_t i = 0; i != FIXNUMS_PER_BLOCK; i++) {
-    vars[i] = state.gc.allocate<Fixnum>();
-    ((Fixnum*) vars[i])->data =i;
+  for(size_t i = 0; i != FLONUMS_PER_BLOCK; i++) {
+    vars[i] = state.make_flonum(i);
     if((i % 2) == 0) {
-      roots[i] = &vars[i];
+      roots[i] = &vars[i].heap;
     } else {
-      vars[i] = 0;
+      vars[i].bits = 0;
     }
   }
   state.gc.collect();
 
-  Value* vars2[FIXNUMS_PER_BLOCK / 2];
-  memset(vars2, 0, (FIXNUMS_PER_BLOCK / 2) * sizeof(Value*));
-  Value** roots2[FIXNUMS_PER_BLOCK / 2];
-  memset(roots2, 0, (FIXNUMS_PER_BLOCK / 2) * sizeof(Value*));
-  Frame f2(state, FIXNUMS_PER_BLOCK / 2, roots2);
+  Value vars2[FLONUMS_PER_BLOCK / 2];
+  memset(vars2, 0, (FLONUMS_PER_BLOCK / 2) * sizeof(Value));
+  HeapValue** roots2[FLONUMS_PER_BLOCK / 2];
+  memset(roots2, 0, (FLONUMS_PER_BLOCK / 2) * sizeof(HeapValue*));
+  Frame f2(state, FLONUMS_PER_BLOCK / 2, roots2);
 
-  for(size_t i = 0; i != (FIXNUMS_PER_BLOCK / 2); i++) { 
+  for(size_t i = 0; i != (FLONUMS_PER_BLOCK / 2); i++) { 
     // New fixnums will have negative values
-    vars2[i] = state.gc.allocate<Fixnum>();
-    ((Fixnum*) vars2[i])->data = (0 - i);
-    roots2[i] = &vars2[i];
+    vars2[i] = state.make_flonum(0 - i);
+    roots2[i] = &vars2[i].heap;
   }
 
   state.gc.collect();
-  for(size_t i = 0; i != FIXNUMS_PER_BLOCK; i++) {
+  for(size_t i = 0; i != FLONUMS_PER_BLOCK; i++) {
     if(i % 2 == 0) {
-      CHECK_MESSAGE(((Fixnum*)vars[i])->data == i, "live objects were not overwritten");
+      CHECK_MESSAGE(((Flonum*)vars[i].heap)->number == i, "live objects were not overwritten");
     } 
   }
 
-  for(size_t i = 0; i != FIXNUMS_PER_BLOCK / 2; i++) {
-    CHECK_MESSAGE((((Fixnum*)vars2[i])->data == -i), "new objects were correctly allocated over dead objects");
+  for(size_t i = 0; i != FLONUMS_PER_BLOCK / 2; i++) {
+    CHECK_MESSAGE((((Flonum*)vars2[i].heap)->number == -i), "new objects were correctly allocated over dead objects");
   }
 }
 
+/*
+TODO Large object allocation
 TEST_CASE_FIXTURE(AS, "gc large object allocation") {
   Fixnum* f = 0;
   ARETE_FRAME(state, f);
 
   f = state.gc.allocate<Fixnum>(ARETE_BLOCK_SIZE * 2);
 }
-
-// TEST_CASE_FIXTURE(AS, "gc ")
 */

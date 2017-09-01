@@ -394,7 +394,7 @@ struct GC {
         block_cursor += v->size;
       }
 
-      ARETE_LOG_GC("block " << block_i << " out of room, moving on");
+      ARETE_LOG_GC("block " << block_i << " ( " << blocks[block_i]->size << "b) out of room, moving on");
 
       block_i++;
       block_cursor = 0;
