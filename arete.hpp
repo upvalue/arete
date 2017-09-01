@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <iostream>
 #include <vector>
+#include <unordered_map>
 
 // Assertion macro
 #ifndef AR_ASSERT
@@ -67,24 +68,32 @@ struct Value;
 // Scheme values can be either immediate (fixed-point integers and constants) or allocated on the heap.
 
 // Scheme values are generally referenced using an instance of the Value struct, which contains methods that
-// help interact with these values in a safe manner and are tracked by the garbage collector.
+// help interact with these values in a safe manner and can be tracked by the garbage collector.
 
-// Under the hood, a Value is a ptrdiff_t sized integer which can be either a pointer to the heap or an immediate
-// value.
+// Under the hood, a Value is a ptrdiff_t sized struct which can be either a pointer to a HeapValue
+// or an immediate value.
 
-// The bits of these integers look like this:
+// HeapValues only exist in garbage-collected memory and generally are only used internall.
+
+// The actual bits of a Value look like this:
 
 // - ...1 Fixnum
 // - ..10 Constant
-// - ..00 Pointer
+// - ..00 Pointer to heap value
 
 enum {
+  // Should never be encountered
   RESERVED = 0,
-  BLOCK = 1,
-  FIXNUM = 2,
-  CONSTANT = 3,
+  // Immediate values
+  FIXNUM = 1,
+  CONSTANT = 2,
+  // Should never be encountered except in GC code
+  BLOCK = 3,
+  // No pointers
   FLONUM = 4,
-  PAIR = 5
+  SYMBOL = 5,
+  // Pointers
+  PAIR = 6
 };
 
 // Constants:
@@ -127,10 +136,14 @@ struct HeapValue {
   }
 };
 
+// Floating point number
 struct Flonum : HeapValue {
   double number;  
 };
 
+struct Symbol : HeapValue {
+  const char* name;
+};
 
 struct Value {
   union {
@@ -182,6 +195,12 @@ struct Value {
     return static_cast<Flonum*>(heap)->number;
   }
 
+  // SYMBOLS
+  const char* symbol_name() const {
+    AR_ASSERT(type() == SYMBOL);
+    return static_cast<Symbol*>(heap)->name;
+  }
+
   // PAIRS
   Value car() const;
   Value cdr() const;
@@ -190,6 +209,7 @@ struct Value {
 struct Pair : HeapValue {
   Value data_car, data_cdr;
 };
+
   
 inline Value Value::car() const {
   AR_ASSERT(type() == PAIR);
@@ -228,6 +248,10 @@ struct Frame {
   size_t size;
   HeapValue*** values;
 };
+
+#define AR_FRAME(state, ...) \
+  FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
+  Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
 
 struct Block {
   char* data;
@@ -421,16 +445,42 @@ struct GC {
 
 /** A re-entrant instance of the Arete runtime */
 struct State {
+  typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
+
   GC gc;
+  symbol_table_t symbol_table;
 
   State(): gc() {}
-  ~State() {}
+  ~State() {
+    // Free symbol names
+    for(symbol_table_t::const_iterator x = symbol_table.begin(); x != symbol_table.end(); ++x) {
+      free((void*) x->second->name);
+    }
+  }
 
+  // Value creation; all of these will cause allocations
   Value make_flonum(double number) {
     Flonum* heap = (Flonum*) gc.allocate(FLONUM, sizeof(Flonum));
     heap->number = number;
     Value v(heap);
     return v;
+  }
+
+  Value get_symbol(const std::string& name) {
+    symbol_table_t::const_iterator x = symbol_table.find(name);
+    if(x == symbol_table.end()) {
+      Symbol* heap = static_cast<Symbol*>(gc.allocate(SYMBOL, sizeof(Symbol)));
+      const char* name_s = name.c_str();
+      size_t size = name.size();
+      const char* name_copy = strndup(name_s, size);
+
+      heap->name = name_copy;
+
+      symbol_table.insert(std::make_pair(name, heap));
+      return heap;
+    } else {
+      return x->second;
+    }
   }
 
   Value make_pair(Value car = Value::f(), Value cdr = Value::f()) {
@@ -452,9 +502,6 @@ inline Frame::~Frame() {
   gc.frames.pop_back();
 }
 
-#define AR_FRAME(state, ...) \
-  FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
-  Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
 
 // Output Scheme values
 
@@ -468,6 +515,8 @@ inline std::ostream& operator<<(std::ostream& os, Value& v) {
       }
     case FLONUM:
       return os << v.flonum_value(); 
+    case SYMBOL:
+      return os << v.symbol_name();
     case PAIR: {
       os << '('; 
       Value pare = v;

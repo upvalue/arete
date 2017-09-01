@@ -1,4 +1,4 @@
-# Arete
+# Arete Scheme
 
 Arete is a simple, embeddable Scheme interpreter in C++. It's written with the following goals in mind:
 
@@ -7,3 +7,5 @@ Arete is a simple, embeddable Scheme interpreter in C++. It's written with the f
 - Incremental garbage collector and speed suitable for writing games
 - Hygienic macros and modules
 - Highly practical feature set (type-checking, generics and methods)
+
+But mostly just for fun!

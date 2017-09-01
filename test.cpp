@@ -1,7 +1,6 @@
 // test.cpp - arete runtime tests with doctest
 
 #define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
-#define ARETE_LINK
 
 #include <assert.h>
 
@@ -218,3 +217,11 @@ TEST_CASE_FIXTURE(AS, "gc large object allocation") {
   f = state.gc.allocate<Fixnum>(ARETE_BLOCK_SIZE * 2);
 }
 */
+
+TEST_CASE_FIXTURE(AS, "symbol interning") {
+  Value x, y;
+  AR_FRAME(state, x, y);
+  x = state.get_symbol("hello-world");
+  y = state.get_symbol("hello-world");
+  CHECK_MESSAGE(x.bits == y.bits, "symbols intern");
+}

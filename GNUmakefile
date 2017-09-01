@@ -2,7 +2,7 @@
 
 # Variables
 CXX := clang++
-CXXFLAGS := -Wall -Werror -g3 -Os -fno-exceptions
+CXXFLAGS := -std=c++11 -Wall -g3 -Os -fno-exceptions -fno-rtti
 LDFLAGS := -g3 
 
 # Fancy color compilation
