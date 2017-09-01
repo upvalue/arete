@@ -2,14 +2,77 @@
 #define ARETE_LINK
 
 #include <assert.h>
-#include "arete.hpp"
 
+#include "arete.hpp"
 
 using namespace arete;
 
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
+// Enum usage causes bizarre errors with doctest for some reason
+static const int TFIXNUM = FIXNUM, TCONSTANT = CONSTANT, TFLONUM = FLONUM;
+
+TEST_CASE("fixnum representation") {
+  Value x = Value::make_fixnum(12345);
+
+  CHECK(x.type() == TFIXNUM);
+  CHECK(x.fixnum_value() == 12345);
+  
+  for(size_t i = 0; i != 100; i++) {
+    Value y = Value::make_fixnum(i);
+    CHECK(y.type() == TFIXNUM);
+    CHECK(y.fixnum_value() == i);
+  }
+}
+
+TEST_CASE("constant representation") {
+  Value t = Value::t(), f = Value::f();
+  
+  CHECK(t.type() == TCONSTANT);
+  CHECK(f.type() == TCONSTANT);
+
+  CHECK(t.bits == 2);
+  CHECK(f.bits == 6);
+
+  std::cout << t << ' ' << f << std::endl;
+}
+
+TEST_CASE("gc alignment works") {
+  CHECK(GC::align(8, 63) == 64);
+  CHECK(GC::align(4096, 4095) == 4096);
+}
+
+TEST_CASE("frames successfully save pointers to stack values") {
+  State state;
+  Value v = Value::make_fixnum(12345);
+  Value y = Value::make_fixnum(555);
+  AR_FRAME(state, v);
+
+  (*state.gc.frames[0]->values[0]) = (HeapValue*) y.bits;
+  CHECK(v.fixnum_value() == 555);
+}
+
+TEST_CASE("heap values work") {
+  HeapValue v;
+  v.initialize(FLONUM, 0, sizeof(Flonum));
+
+  CHECK(v.get_type() == TFLONUM);
+  CHECK(v.get_mark_bit() == 0);
+  CHECK(v.size == sizeof(Flonum));
+
+  v.flip_mark_bit();
+
+  CHECK(v.get_mark_bit() == 1);
+}
+
+TEST_CASE("gc successfully allocates") {
+
+}
+
+
+
+/*
 
 // A fixture that creates and deletes a new state for each test. 
 struct AS {
@@ -170,3 +233,4 @@ TEST_CASE_FIXTURE(AS, "gc large object allocation") {
 }
 
 // TEST_CASE_FIXTURE(AS, "gc ")
+*/

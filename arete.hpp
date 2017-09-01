@@ -1,4 +1,13 @@
 // arete.hpp - an embeddable scheme implementation
+
+/*
+ * Search for these to navigate the source.
+ * (TYPE) Representation of Scheme values.
+ * (GC) Garbage collector
+ * (RT) Runtime
+ * (READ) S-expression reader
+ */
+
 #ifndef ARETE_HPP
 #define ARETE_HPP
 
@@ -9,7 +18,20 @@
 #include <iostream>
 #include <vector>
 
-#define ARETE_ASSERT assert
+// Assertion macro
+#ifndef AR_ASSERT
+# define AR_ASSERT assert
+#endif 
+
+// Block size.
+#ifndef AR_BLOCK_SIZE
+# define AR_BLOCK_SIZE 4096
+#endif
+
+// If more than ARETE_GC_LOAD_FACTOR% is in use after a collection, the garbage collector will double in-use memory.
+#ifndef ARETE_GC_LOAD_FACTOR
+# define ARETE_GC_LOAD_FACTOR 80
+#endif
 
 #ifndef ARETE_LOG_TAGS
 # define ARETE_LOG_TAGS 0
@@ -19,24 +41,18 @@
 # define ARETE_BLOCK_SIZE 4096
 #endif
 
-#ifndef ARETE_GC_LOAD_FACTOR
-# define ARETE_GC_LOAD_FACTOR 77
-# endif
 
 #define ARETE_LOG_TAG_GC (1 << 0)
 
-#ifndef ARETE_COLOR_RED
 # define ARETE_COLOR_RED "\033[1;31m"
-#endif 
-
-#ifndef ARETE_COLOR_RESET
 # define ARETE_COLOR_RESET "\033[0m"
-#endif
 
-#define ARETE_LOG(tag, prefix, msg) \
+#ifndef ARETE_LOG
+# define ARETE_LOG(tag, prefix, msg) \
   if((ARETE_LOG_TAGS) & (tag)) { \
     std::cout << ARETE_COLOR_RED << "arete:" << prefix << ": " << ARETE_COLOR_RESET << msg << std::endl; \
   }
+#endif 
 
 #define ARETE_LOG_GC(msg) ARETE_LOG((ARETE_LOG_TAG_GC), "gc", msg)
 
@@ -46,145 +62,157 @@ namespace arete {
 struct State;
 struct Block;
 
-//
-///// REPRESENTATION OF SCHEME VALUES
-//
+///// # (TYPE) REPRESENTATION OF SCHEME VALUES
 
-/** A Scheme value */
-struct Value {
-  enum Type {
-    /** A fixed-point integer */
-    FIXNUM,
-    /** A unique symbol */
-    SYMBOL,
-    STRING,
-    PAIR,
-    /** A constant */
-    CONSTANT
-  };
+// Scheme values can be either immediate (fixed-point integers and constants) or allocated on the heap.
 
-  /** Size of the object */
+// Scheme values are generally referenced using an instance of the Value struct, which contains methods that
+// help interact with these values in a safe manner and are tracked by the garbage collector.
+
+// Under the hood, a Value is a ptrdiff_t sized integer which can be either a pointer to the heap or an immediate
+// value.
+
+// The bits of these integers look like this:
+
+// - ...1 Fixnum
+// - ..10 Constant
+// - ..00 Pointer
+
+enum {
+  RESERVED = 0,
+  BLOCK = 1,
+  FIXNUM = 2,
+  CONSTANT = 3,
+  FLONUM = 4,
+  PAIR = 5
+};
+
+// Constants:
+
+// 0010 #t
+// 0110 #f
+
+enum { C_TRUE, C_FALSE };
+
+// A heap-allocated, garbage-collected value.
+struct HeapValue {
+  // Heap value headers are formatted like this:
+
+  // ...m tttt tttt
+  // m = mark
+  // t = value type
+  size_t header;
   size_t size;
-  /** 
-    * Whether or not an object is marked alive. Note that the meaning of this may change depending
-    * on GC state. See GC docs for more information.
-    */
-  unsigned char mark_bit;
 
-  Value() {}
-  virtual ~Value() {}
-
-  virtual void print_to_ostream(std::ostream& os) {}
-  virtual Type type() const { return FIXNUM; }
-  /** Returns true if this is an immediate value e.g. a fixed-point integer */
-  virtual bool immediatep() const { return false; }
-
-  void* operator new(size_t size, char* memory) {
-    return memory;
-  }
-};
-
-struct Constant : Value {
-  enum {
-    T, F, NIL
-  };
-
-  unsigned char data;
-
-  virtual Type type() const { return CONSTANT; }
-  virtual bool immediatep() const { return true; }
-};
-
-struct Fixnum : Value {
-  ptrdiff_t data;
-
-  virtual Value::Type type() const {
-    return Value::FIXNUM;
+  void initialize(unsigned type, unsigned mark_bit, size_t size_) {
+    header = (type) + (mark_bit << 8);
+    size = size_;
   }
 
-  virtual void print_to_ostream(std::ostream& os) {
-    os << data;
+  unsigned get_type() const {
+    return header & 255;
   }
 
-  virtual bool immediatep() const { return true; }
-};
-
-struct Pair : Value {
-  Value *data_car, *data_cdr;
-
-  virtual Type type() const {
-    return PAIR;
+  unsigned char get_mark_bit() const {
+    return (header >> 8) & 1;
   }
 
-  virtual void print_to_ostream(std::ostream& os) {
-    os << '(';
-    Value* pare = this;
-    while(true) {
-      static_cast<Pair*>(pare)->data_car->print_to_ostream(os);
-      if(static_cast<Pair*>(pare)->data_cdr->type() == PAIR) {
-        os << ' ';
-        pare = static_cast<Pair*>(pare)->data_cdr;
-      } else if(static_cast<Pair*>(pare)->data_cdr->type() == CONSTANT &&
-        static_cast<Constant*>(pare)->data == Constant::NIL) {
-        os << ')';
-        break;
-      } else {
-        os << " . ";
-        static_cast<Pair*>(pare)->data_cdr->print_to_ostream(os);
-        os << ')';
-        break;
-      }
+  void flip_mark_bit() {
+    if(get_mark_bit()) {
+      header -= 256;
+    } else {
+      header += 256;
     }
-
   }
+
 };
 
-struct Symbol : Value {
-  const char data[1];
+struct Flonum : HeapValue {
+  double data;  
+};
 
-  virtual Type type() const {
-    return SYMBOL;
+struct Value {
+  union {
+    HeapValue* heap;
+    ptrdiff_t bits;
+  };
+
+  Value(): bits(0) {}
+  Value(HeapValue* heap_): heap(heap_) {}
+  Value(ptrdiff_t bits_): bits(bits_) {}
+
+  // GENERIC METHODS
+
+  bool immediatep() const { return (bits & 3) == 0 && bits != 0; }
+
+  /** Safely retrieve the type of an object */
+  unsigned int type() const {
+    if(bits & 1) return FIXNUM;
+    else if(bits & 2) return CONSTANT;    
+    else return heap->get_type();
   }
+
+  // FIXNUMS
+
+  /** Get the value of a fixnum */
+  ptrdiff_t fixnum_value() const {
+    AR_ASSERT(type() == FIXNUM);
+    
+    return bits >> 1;
+  }
+
+  static Value make_fixnum(ptrdiff_t fixnum) {
+    return Value(((fixnum << 1) + 1));
+  }
+
+  // CONSTANTS
+  unsigned constant_value() const {
+    AR_ASSERT(type() == CONSTANT);
+    return bits == 2 ? C_TRUE : C_FALSE;
+  }
+
+  static Value t() { return Value(2); }
+  static Value f() { return Value(6); }
 };
 
-//
-///// GARBAGE COLLECTOR
-//
+///// (GC) Garbage collector
 
-struct Frame {
-  Frame(State&, size_t, Value*** roots);
-  ~Frame();
+// The Arete garbage collector is a simple semispace garbage collector.
 
-  State& state;
-  size_t size;
-  Value*** roots;
-};
+// It uses some very hacky C++ code to save pointers to stack-values so that they can be replaced when values are
+// moved.
 
+struct GC;
+
+/** FrameHack turns a Value& into a pointer to a stack-allocated Value */
 struct FrameHack {
-  FrameHack(Fixnum*& fx): v((Value**) &fx) {}
-  FrameHack(Pair*& fx): v((Value**) &fx) {}
+  FrameHack(Value& value_): value((HeapValue**) &value_.bits) {}
   ~FrameHack() {}
 
-  Value** v;
+  HeapValue** value;
 };
 
-#define ARETE_FRAME(state, ...) \
-  FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ }; \
-  Frame __arete_frame(state, sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (Value***) __arete_frame_ptrs);
+/** Frames are stack-allocated structures that save pointers to stack Values, allowing the garbage collector to move
+ * objects and update pointers to them if necessary */
+struct Frame {
+  Frame(State& state, size_t size, HeapValue*** values);
+  ~Frame();
 
-/** A block of allocated memory */
+  GC& gc;
+  size_t size;
+  HeapValue*** values;
+};
+
 struct Block {
   char* data;
   size_t size;
 
   Block(size_t size_, unsigned char mark_bit): size(size_) {
     data = static_cast<char*>(calloc(1, size));
-    Value* header = (Value*) data;
-    header->size = size_;
-    header->mark_bit = !mark_bit;
+    ((HeapValue*) data)->initialize(BLOCK, mark_bit, size_);
   }
 
-  ~Block() {}
+  ~Block() { free(data); }
 
   /** Returns true if there is room in a block for a given allocation */
   bool has_room(size_t position, size_t room) const {
@@ -192,6 +220,145 @@ struct Block {
   }
 };
 
+/** Garbage collector */
+struct GC {
+  std::vector<Frame*> frames;
+  std::vector<Block*> blocks;
+  // Position in the *blocks* vector
+  size_t block_i;
+  // Position in *blocks_i* block
+  size_t block_cursor;
+  // Number of total allocations
+  size_t allocations;
+  // Number of total collections
+  size_t collections;
+  size_t live_objects_after_collection, live_memory_after_collection, allocated_memory;
+  unsigned char mark_bit;
+  size_t block_size;
+
+  GC(): block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
+      live_memory_after_collection(0), allocated_memory(ARETE_BLOCK_SIZE), mark_bit(1), block_size(ARETE_BLOCK_SIZE) {
+    Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
+    blocks.push_back(b);
+  }
+
+  ~GC() {
+    for(size_t i = 0; i != blocks.size(); i++) {
+      delete blocks[i];
+    }
+  }
+
+  bool live(HeapValue* v) const {
+    return v->get_mark_bit() == mark_bit;
+  }
+
+  HeapValue* allocate(unsigned type, size_t size) {
+    size_t sz = align(8, size);
+    // This is actually the meat of the garbage collection algorithm
+
+    // It searches through live memory in a first-fit fashion for somewhere to allocate the value; if it fails,
+    // a collection will be triggered.
+
+    while(block_i != blocks.size()) {
+      while(blocks[block_i]->has_room(block_cursor, sz)) {
+        HeapValue* v = (HeapValue*)(blocks[block_i]->data + block_cursor);
+
+        AR_ASSERT(v->size > 0); // assert that memory has been initialized with some kind of size
+        if((!live(v) && v->size >= sz)) {
+          size_t mem_size = v->size;
+
+          // Success!
+          char* memory = blocks[block_i]->data + block_cursor;
+
+          // If there is enough room after this memory to handle another object, note down its
+          // size and move on
+
+          // TODO: Coalesce memory
+          if(mem_size - sz >= sizeof(Flonum)) {
+            // ARETE_LOG_GC("additional " << (mem_size - sz) << " bytes after object");
+            HeapValue* next_object = ((HeapValue*) ((blocks[block_i]->data + block_cursor) + sz));
+            next_object->initialize(BLOCK, !mark_bit, mem_size - sz);
+
+            AR_ASSERT(!live(next_object));
+            AR_ASSERT(next_object->size >= sizeof(Flonum));
+
+            block_cursor += sz;
+          } else {
+            // Otherwise, just allocate room for the object
+            sz = mem_size;
+            block_cursor += sz;
+          }
+
+          memset(memory, 0, sz);
+          HeapValue* ret = (HeapValue *) memory;
+          ret->initialize(type, mark_bit, sz);
+          AR_ASSERT(live(ret));
+
+          // Break up memory as necessary
+          ret->size = sz;
+          return ret;
+        }
+
+        block_cursor += v->size;
+      }
+
+      ARETE_LOG_GC("block " << block_i << " out of room, moving on");
+
+      block_i++;
+      block_cursor = 0;
+    }
+    return 0;
+  }
+
+  static size_t align(size_t boundary, size_t value) {
+    return (((((value) - 1) / (boundary)) + 1) * (boundary));
+  }
+};
+
+/** A re-entrant instance of the Arete runtime */
+struct State {
+  GC gc;
+
+  State(): gc() {}
+  ~State() {}
+
+  Value make_flonum(double d) {
+    HeapValue* heap = gc.allocate(FLONUM, sizeof(Flonum));
+    Value v(heap);
+    return v;
+  }
+};
+
+inline Frame::Frame(State& state, size_t size_, HeapValue*** ptrs): gc(state.gc), size(size_), values(ptrs) {
+  gc.frames.push_back(this);
+}
+
+inline Frame::~Frame() {
+  AR_ASSERT(gc.frames.back() == this);
+  gc.frames.pop_back();
+}
+
+#define AR_FRAME(state, ...) \
+  FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
+  Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
+
+// Output Scheme values
+
+inline std::ostream& operator<<(std::ostream& os, Value& v) {
+  switch(v.type()) {
+    case FIXNUM: return os << v.fixnum_value(); break;
+    case CONSTANT: 
+      switch(v.constant_value()) {
+        case C_TRUE: return os << "#t";
+        case C_FALSE: return os << "#f";
+      }
+  }
+  return os;
+}
+
+
+
+#if 0
 /** Garbage collector */
 struct GC {
   std::vector<Block*> blocks;
@@ -424,7 +591,9 @@ inline std::ostream& operator<<(std::ostream& os, arete::Value* value) {
   value->print_to_ostream(os);
   return os;
 }
+#endif
 
 } // namespace arete
+
 
 #endif // ARETE_HPP
