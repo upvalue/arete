@@ -41,11 +41,10 @@
 # define ARETE_BLOCK_SIZE 4096
 #endif
 
-
 #define ARETE_LOG_TAG_GC (1 << 0)
 
-# define ARETE_COLOR_RED "\033[1;31m"
-# define ARETE_COLOR_RESET "\033[0m"
+#define ARETE_COLOR_RED "\033[1;31m"
+#define ARETE_COLOR_RESET "\033[0m"
 
 #ifndef ARETE_LOG
 # define ARETE_LOG(tag, prefix, msg) \
@@ -61,6 +60,7 @@ namespace arete {
 // Forward declarations
 struct State;
 struct Block;
+struct Value;
 
 ///// # (TYPE) REPRESENTATION OF SCHEME VALUES
 
@@ -91,8 +91,9 @@ enum {
 
 // 0010 #t
 // 0110 #f
+// 1010 ()
 
-enum { C_TRUE, C_FALSE };
+enum { C_TRUE, C_FALSE, C_NIL };
 
 // A heap-allocated, garbage-collected value.
 struct HeapValue {
@@ -124,12 +125,12 @@ struct HeapValue {
       header += 256;
     }
   }
-
 };
 
 struct Flonum : HeapValue {
-  double data;  
+  double number;  
 };
+
 
 struct Value {
   union {
@@ -143,7 +144,7 @@ struct Value {
 
   // GENERIC METHODS
 
-  bool immediatep() const { return (bits & 3) == 0 && bits != 0; }
+  bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
 
   /** Safely retrieve the type of an object */
   unsigned int type() const {
@@ -173,7 +174,32 @@ struct Value {
 
   static Value t() { return Value(2); }
   static Value f() { return Value(6); }
+  static Value nil() { return Value(10); }
+
+  // FLONUMS
+  double flonum_value() const {
+    AR_ASSERT(type() == FLONUM);
+    return static_cast<Flonum*>(heap)->number;
+  }
+
+  // PAIRS
+  Value car() const;
+  Value cdr() const;
 };
+
+struct Pair : HeapValue {
+  Value data_car, data_cdr;
+};
+  
+inline Value Value::car() const {
+  AR_ASSERT(type() == PAIR);
+  return static_cast<Pair*>(heap)->data_car;
+}
+
+inline Value Value::cdr() const {
+  AR_ASSERT(type() == PAIR);
+  return static_cast<Pair*>(heap)->data_cdr;
+}
 
 ///// (GC) Garbage collector
 
@@ -209,7 +235,7 @@ struct Block {
 
   Block(size_t size_, unsigned char mark_bit): size(size_) {
     data = static_cast<char*>(calloc(1, size));
-    ((HeapValue*) data)->initialize(BLOCK, mark_bit, size_);
+    ((HeapValue*) data)->initialize(BLOCK, !mark_bit, size_);
   }
 
   ~Block() { free(data); }
@@ -240,6 +266,9 @@ struct GC {
       live_memory_after_collection(0), allocated_memory(ARETE_BLOCK_SIZE), mark_bit(1), block_size(ARETE_BLOCK_SIZE) {
     Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
     blocks.push_back(b);
+
+    // Blocks should be allocated dead
+    AR_ASSERT(!live((HeapValue*) b->data));
   }
 
   ~GC() {
@@ -252,13 +281,76 @@ struct GC {
     return v->get_mark_bit() == mark_bit;
   }
 
+  void mark(HeapValue* v) {
+    // We use a GOTO here to avoid creating unnecessary stack frames
+  again: 
+    // If there is no object or object has already been marked
+    if(v == 0 || Value(v).immediatep() || live(v))
+      return;
+    
+    live_objects_after_collection++;
+    live_memory_after_collection += v->size;
+
+    v->flip_mark_bit();
+
+    AR_ASSERT(live(v));
+
+    switch(v->get_type()) {
+      case BLOCK: case FIXNUM: case CONSTANT:
+        AR_ASSERT(!"arete:gc: bad value on heap; probably a GC bug"); break;
+      case FLONUM:
+        return;
+      case PAIR:
+        mark(static_cast<Pair*>(v)->data_car.heap);
+        v = static_cast<Pair*>(v)->data_cdr.heap;
+        goto again;
+    }
+  }
+
+  void collect() {
+    ARETE_LOG_GC("collecting");
+    collections++;
+    live_objects_after_collection = 0;
+    live_memory_after_collection = 0;
+
+    block_i = 0;
+    block_cursor = 0;
+
+    // Reverse meaning of mark bit
+    mark_bit = !mark_bit;
+
+    // Mark all live objects
+    ARETE_LOG_GC("scanning " << frames.size() << " frames for roots");
+    for(size_t i = 0; i != frames.size(); i++) {
+      Frame* f = frames[i];
+      for(size_t j = 0; j != f->size; j++) {
+        if(f->values[j]) {
+          mark(*(f->values[j]));
+        }
+      }
+    }
+
+    ARETE_LOG_GC("found " << live_objects_after_collection << " live objects taking up " <<
+      live_memory_after_collection << "b")
+
+    // Allocate a new block if memory is getting a little overloaded
+    double load_factor = (live_memory_after_collection * 100) / allocated_memory;
+    if(load_factor >= ARETE_GC_LOAD_FACTOR) {
+      ARETE_LOG_GC(load_factor << "% of memory is still live after collection, adding a block");
+      block_size *= 2;
+      Block* b = new Block(block_size, mark_bit);
+      blocks.push_back(b);
+    }
+  }
+
   HeapValue* allocate(unsigned type, size_t size) {
     size_t sz = align(8, size);
+    bool collected = false;
     // This is actually the meat of the garbage collection algorithm
 
     // It searches through live memory in a first-fit fashion for somewhere to allocate the value; if it fails,
     // a collection will be triggered.
-
+  retry:
     while(block_i != blocks.size()) {
       while(blocks[block_i]->has_room(block_cursor, sz)) {
         HeapValue* v = (HeapValue*)(blocks[block_i]->data + block_cursor);
@@ -307,7 +399,19 @@ struct GC {
       block_i++;
       block_cursor = 0;
     }
-    return 0;
+
+    ARETE_LOG_GC("reached end of " << blocks.size() << " blocks");
+
+    if(!collected) {
+      // No room, run a collection
+      collect();
+      collected = true;
+      goto retry;
+    } else {
+      // Collection has failed to create enough space. Give up.
+      AR_ASSERT(!"out of room; allocation failed");
+      return 0;
+    }
   }
 
   static size_t align(size_t boundary, size_t value) {
@@ -322,10 +426,20 @@ struct State {
   State(): gc() {}
   ~State() {}
 
-  Value make_flonum(double d) {
-    HeapValue* heap = gc.allocate(FLONUM, sizeof(Flonum));
+  Value make_flonum(double number) {
+    Flonum* heap = (Flonum*) gc.allocate(FLONUM, sizeof(Flonum));
+    heap->number = number;
     Value v(heap);
     return v;
+  }
+
+  Value make_pair(Value car = Value::f(), Value cdr = Value::f()) {
+    //HeapValue* pair = gc.allocate(PAIR, sizeof(Pair));
+    //return pair;
+    Pair* heap = (Pair*) gc.allocate(PAIR, sizeof(Pair));
+    heap->data_car = car;
+    heap->data_cdr = cdr;
+    return heap;
   }
 };
 
@@ -352,246 +466,33 @@ inline std::ostream& operator<<(std::ostream& os, Value& v) {
         case C_TRUE: return os << "#t";
         case C_FALSE: return os << "#f";
       }
+    case FLONUM:
+      return os << v.flonum_value(); 
+    case PAIR: {
+      os << '('; 
+      Value pare = v;
+      while(true) {
+        Value car = pare.car();
+        os << car;
+        Value cdr = pare.cdr();
+        if(cdr.type() == PAIR) {
+          pare = cdr;
+        } else if(cdr.type() == CONSTANT && cdr.constant_value() == C_NIL) {
+          os << ')';
+          break;
+        } else {
+          os << " . ";
+          os << cdr;
+          break;
+        }
+      }
+      return os << ')';
+    }
+    default: 
+      return os << "<unknown>";
   }
   return os;
 }
-
-
-
-#if 0
-/** Garbage collector */
-struct GC {
-  std::vector<Block*> blocks;
-  size_t block_i;
-  size_t block_cursor;
-  size_t allocations;
-  size_t collections;
-  size_t live_objects_after_collection;
-  size_t live_memory_after_collection;
-  size_t allocated_memory;
-  std::vector<Frame*> frames;
-  unsigned char mark_bit;
-  size_t block_size;
-
-  GC(): block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
-      live_memory_after_collection(0), allocated_memory(ARETE_BLOCK_SIZE), mark_bit(1), block_size(ARETE_BLOCK_SIZE) {
-    Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
-
-    ARETE_ASSERT(!live((Value*) b->data));
-    blocks.push_back(b);
-  }
-
-  ~GC() {
-    for(size_t i = 0; i != blocks.size(); i++) {
-      Block* b = blocks[i];
-      free(b->data);
-      delete b;
-    }
-  }
-
-  void mark(Value* v) {
-    // If there is no object or object has already been marked
-    if(v == 0 || v->mark_bit == mark_bit) {
-      return;
-    }
-
-    live_objects_after_collection++;
-
-    v->mark_bit = mark_bit;
-
-    if(v->immediatep()) {
-      live_memory_after_collection += sizeof(Fixnum);
-      return;
-    }
-
-    switch(v->type()) { 
-      case Value::PAIR:
-        live_memory_after_collection += sizeof(Pair);
-        mark(static_cast<Pair*>(v)->data_car);
-        mark(static_cast<Pair*>(v)->data_cdr);
-        break;
-      case Value::CONSTANT:
-      case Value::FIXNUM:
-      default:
-        ARETE_ASSERT(!"could not mark object");
-        break;
-    }
-  }
-
-  void collect() {
-    ARETE_LOG_GC("collecting");
-    collections++;
-    live_objects_after_collection = 0;
-    live_memory_after_collection = 0;
-
-    block_i = 0;
-    block_cursor = 0;
-
-    // Reverse meaning of mark bit
-    mark_bit = !mark_bit;
-
-    // Mark all live objects
-    ARETE_LOG_GC("scanning " << frames.size() << " frames for roots");
-    for(size_t i = 0; i != frames.size(); i++) {
-      Frame* f = frames[i];
-      for(size_t j = 0; j != f->size; j++) {
-        if(f->roots[j]) {
-          mark(*(f->roots[j]));
-        }
-      }
-    }
-
-    ARETE_LOG_GC("found " << live_objects_after_collection << " live objects taking up " <<
-      live_memory_after_collection << "b")
-
-    // Allocate a new block if memory is getting a little overloaded
-    double load_factor = (live_memory_after_collection * 100) / allocated_memory;
-    if(load_factor >= ARETE_GC_LOAD_FACTOR) {
-      ARETE_LOG_GC(load_factor << "% of memory is still live after collection, adding a block");
-      block_size *= 2;
-      Block* b = new Block(block_size, mark_bit);
-      blocks.push_back(b);
-    }
-  }
-
-  bool live(Value* v) const {
-    return v->mark_bit == mark_bit;
-  }
-
-  template <class T>
-  T* allocate(size_t additional = 0) {
-    allocations++;
-
-    // TODO align to 8 bytes
-    size_t sz = sizeof(T) + additional;
-
-    // TODO: Allocate for overly large objects
-    bool collected = false;
-
-  retry:
-    // Mark and don't sweep garbage collection
-
-    // If there is room in the current block, simply use it
-    while(block_i != blocks.size()) {
-      while(blocks[block_i]->has_room(block_cursor, sz)) {
-        Value* v = (Value*)(blocks[block_i]->data + block_cursor);
-
-        ARETE_ASSERT(v->size > 0); // assert that memory has been initialized with some kind of size
-        if((!live(v) && v->size >= sz)) {
-          size_t mem_size = v->size;
-
-          // Success!
-          char* memory = blocks[block_i]->data + block_cursor;
-
-          // If there is enough room after this memory to handle another object, note down its
-          // size and move on
-
-          // TODO: Coalesce memory
-          if(mem_size - sz >= sizeof(Constant)) {
-            // ARETE_LOG_GC("additional " << (mem_size - sz) << " bytes after object");
-            Value* next_object = ((Value*) ((blocks[block_i]->data + block_cursor) + sz));
-            next_object->mark_bit = !mark_bit;
-            next_object->size = mem_size - sz;
-
-            ARETE_ASSERT(!live(next_object));
-            ARETE_ASSERT(next_object->size >= sizeof(Constant));
-
-            block_cursor += sz;
-          } else {
-            sz = mem_size;
-            block_cursor += sz;
-          }
-
-          memset(memory, 0, sz);
-          T* ret = new (memory) T();
-          //T* ret = reinterpret_cast<T*>(memory);
-          ret->mark_bit = mark_bit;
-          ARETE_ASSERT(live(ret));
-
-          // Break up memory as necessary
-          ret->size = sz;
-          return ret;
-        }
-
-        block_cursor += v->size;
-
-      }
-
-      ARETE_LOG_GC("block " << block_i << " out of room, moving on");
-
-      block_i++;
-      block_cursor = 0;
-    }
-
-    ARETE_LOG_GC("reached end of " << blocks.size() << " blocks");
-
-
-    if(!collected) {
-      // No room, run a collection
-
-      collect();
-      collected = true;
-      goto retry;
-    } else {
-      // Collection has failed to create enough space. Give up.
-      // ARETE_ASSERT(!"out of room; allocation failed");
-      return 0;
-    }
-  }
-};
-
-/** Reader; reads S-expressions */
-struct Reader {
-  Reader(State& state_, std::istream& stream_): state(state_), stream(stream_) {
-
-  }
-  ~Reader() {}
-
-  State& state;
-  std::istream& stream;
-
-  Value* read();
-};
-
-/** Compiles s-expressions to Functions */
-struct Compiler {
-  Compiler() {}
-  ~Compiler() {}
-  
-  void compile();
-};
-
-/** Toplevel state object. Contains common functionality and runtime state. */
-struct State {
-  State() {}
-  ~State() {}
-
-  GC gc;
-
-  Pair* make_pair(Value *car = 0, Value* cdr = 0) {
-    Pair* p = gc.allocate<Pair>();
-    p->data_car = car;
-    p->data_cdr = cdr;
-    return p;
-  }
-};
-
-Frame::Frame(State& state_, size_t size_, Value*** roots_): state(state_), size(size_), roots(roots_) {
-  state.gc.frames.push_back(this);
-  ARETE_ASSERT(state.gc.frames.back() == this);
-}
-
-Frame::~Frame() {
-  ARETE_ASSERT(state.gc.frames.back() == this);
-  state.gc.frames.pop_back();
-}
-
-// Print objects to stdout
-inline std::ostream& operator<<(std::ostream& os, arete::Value* value) {
-  value->print_to_ostream(os);
-  return os;
-}
-#endif
 
 } // namespace arete
 

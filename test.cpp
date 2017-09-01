@@ -1,3 +1,5 @@
+// test.cpp - arete runtime tests with doctest
+
 #define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
 #define ARETE_LINK
 
@@ -27,15 +29,17 @@ TEST_CASE("fixnum representation") {
 }
 
 TEST_CASE("constant representation") {
-  Value t = Value::t(), f = Value::f();
+  Value t = Value::t(), f = Value::f(), nil = Value::nil();
   
   CHECK(t.type() == TCONSTANT);
   CHECK(f.type() == TCONSTANT);
+  CHECK(nil.type() == TCONSTANT);
 
   CHECK(t.bits == 2);
   CHECK(f.bits == 6);
+  CHECK(nil.bits == 10);
 
-  std::cout << t << ' ' << f << std::endl;
+  std::cout << t << ' ' << f << ' ' << nil << std::endl;
 }
 
 TEST_CASE("gc alignment works") {
@@ -66,34 +70,26 @@ TEST_CASE("heap values work") {
   CHECK(v.get_mark_bit() == 1);
 }
 
-TEST_CASE("gc successfully allocates") {
-
-}
-
-
-
-/*
-
 // A fixture that creates and deletes a new state for each test. 
 struct AS {
   State state;
 };
 
 TEST_CASE_FIXTURE(AS, "gc allocation") {
-  Fixnum *f = state.gc.allocate<Fixnum>();
-  CHECK(f != (Fixnum*)0);
+  Value f = state.make_flonum(0.0);
+  CHECK(f.bits);
 }
 
-#define FIXNUMS_PER_BLOCK ARETE_BLOCK_SIZE / sizeof(Fixnum)
+#define FLONUMS_PER_BLOCK GC::align(8, ARETE_BLOCK_SIZE / sizeof(Flonum))
 
-TEST_CASE_FIXTURE(AS, "gc allocation with multiple blocks") {
+TEST_CASE_FIXTURE(AS, "gc allocation correctly adds a block") {
   arete::Block* b = new arete::Block(ARETE_BLOCK_SIZE, state.gc.mark_bit);
   state.gc.blocks.push_back(b);
 
   CHECK(state.gc.blocks.size() == 2);
 
-  for(size_t i = 0; i != (FIXNUMS_PER_BLOCK) + 1; i++) {
-    state.gc.allocate<Fixnum>();
+  for(size_t i = 0; i != (FLONUMS_PER_BLOCK) + 1; i++) {
+    state.make_flonum(0.0);
   }
 
   CHECK(state.gc.collections == 0);
@@ -101,60 +97,53 @@ TEST_CASE_FIXTURE(AS, "gc allocation with multiple blocks") {
 
 TEST_CASE_FIXTURE(AS, "gc collection") {
   // Exhaust memory by allocating more than initial block
-  for(size_t i = 0; i != (ARETE_BLOCK_SIZE / sizeof(Fixnum)) + 1; i++) {
-    state.gc.allocate<Fixnum>();
+  for(size_t i = 0; i != (ARETE_BLOCK_SIZE / sizeof(Flonum)) + 1; i++) {
+    state.make_flonum(0.0);
   }
 
   CHECK(state.gc.collections == 1);
 }
 
-TEST_CASE_FIXTURE(AS, "gc frame tracking") {
-  Fixnum* f = 0;
-  ARETE_FRAME(state, f);
-
-  CHECK(state.gc.frames.size() == 1);
-  CHECK(state.gc.frames[0]->size == 1);
-  CHECK_MESSAGE(((ptrdiff_t)state.gc.frames[0]->roots[0]) == (ptrdiff_t)&f, "frame successfully captures pointer to stack variable");
-
-  f = (Fixnum*) 12345;
-  CHECK_MESSAGE(((ptrdiff_t)*state.gc.frames[0]->roots[0]) == (ptrdiff_t)12345, "frame successfully captures pointer to stack variable");
-}
-
 TEST_CASE_FIXTURE(AS, "gc marking simple immediate values") {
-  Fixnum* f = 0, *f2 = 0;
+  Value f, f2;
   // Intentionally leave out f2; only f should be marked as live
-  ARETE_FRAME(state, f);
+  AR_FRAME(state, f);
 
-  f = state.gc.allocate<Fixnum>();
-  f2 = state.gc.allocate<Fixnum>();
+  f = state.make_flonum(0.0);
+  f2 = state.make_flonum(0.0);
 
-  CHECK(f->mark_bit == state.gc.mark_bit);
-  CHECK(f->mark_bit == 1);
-  CHECK(f2->mark_bit == state.gc.mark_bit);
+  // Objects should be marked upon allocation
+  CHECK(f.heap->get_mark_bit() == state.gc.mark_bit);
+  CHECK(f.heap->get_mark_bit() == 1);
+  CHECK(f2.heap->get_mark_bit() == state.gc.mark_bit);
 
   state.gc.collect();
 
-  CHECK(f->mark_bit == state.gc.mark_bit);
-  CHECK(f->mark_bit == 0);
-  // f2 is dead
-  CHECK(f2->mark_bit != state.gc.mark_bit);
+  // And now f2 should be dead
+  CHECK(f.heap->get_mark_bit() == state.gc.mark_bit);
+  CHECK(f2.heap->get_mark_bit() != state.gc.mark_bit);
+  CHECK(!state.gc.live(f2.heap));
 }
 
 TEST_CASE_FIXTURE(AS, "gc marking recursive values") {
-  Pair* p = 0;
-  Fixnum *f1 = 0, *f2 = 0;
-  ARETE_FRAME(state, p);
+  Value p, f1, f2;
+  AR_FRAME(state, p, f1, f2);
 
-  f1 = state.gc.allocate<Fixnum>();
-  f2 = state.gc.allocate<Fixnum>();
+  f1 = state.make_flonum(0.0);
+  f2 = state.make_flonum(0.0);
+
   p = state.make_pair(f1, f2);
 
   state.gc.collect();
-  CHECK(p->mark_bit == state.gc.mark_bit);
-  CHECK(f1->mark_bit == state.gc.mark_bit);
-  CHECK(f2->mark_bit == state.gc.mark_bit);
+
+  std::cout << f1 << std::endl;
+  CHECK(state.gc.live(p.heap));
+  CHECK(state.gc.live(f1.heap));
+  CHECK(state.gc.live(f2.heap));
+  std::cout << p << std::endl;
 }
 
+/*
 TEST_CASE_FIXTURE(AS, "gc collection failure") {
   // Exhaust memory by allocating a bunch of living objects that can't be collected
 

@@ -18,12 +18,12 @@ endef
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 
-all: arete
+all: test
 
-cli.o: cli.cpp arete.hpp
+test.o: test.cpp arete.hpp
 
 # Link 
-arete: cli.o 
+test: test.o 
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $<
 
