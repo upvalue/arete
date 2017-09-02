@@ -238,6 +238,13 @@ TEST_CASE_FIXTURE(AS, "symbol interning") {
   CHECK_MESSAGE(x.bits == y.bits, "symbols intern");
 }
 
+TEST_CASE_FIXTURE(AS, "strings") {
+  Value s;
+  s = state.make_string("hello world");
+  s.string_equals("hello world");
+  std::cout << s << std::endl;
+}
+
 ///// READER
 TEST_CASE_FIXTURE(AS, "read fixnum") {
   std::stringstream ss("12345");
@@ -297,20 +304,13 @@ TEST_CASE_FIXTURE(AS, "read a dotted list") {
 }
 
 struct ASB {
-  ASB() {
-    state.boot();
-  }
-
-  ~ASB() {
-
-  }
+  ASB() { state.boot(); }
+  ~ASB() {}
 
   State state;
 };
 
-TEST_CASE_FIXTURE(ASB, "state.boot") {
-
-}
+TEST_CASE_FIXTURE(ASB, "state.boot") {}
 
 TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
   std::stringstream ss("'hello");
@@ -332,12 +332,9 @@ TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
   AR_ASSERT(found);
 }
 
-
-/*
 TEST_CASE_FIXTURE(AS, "read a list") {
   std::stringstream ss("(1 2 3)");
   Reader reader(state, ss);
 
   Value sym;
 }
-*/

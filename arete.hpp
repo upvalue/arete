@@ -23,6 +23,7 @@
 // Assertion macro
 #ifndef AR_ASSERT
 # define AR_ASSERT assert
+# define AR_TYPE_ASSERT assert
 #endif 
 
 // Block size.
@@ -102,7 +103,8 @@ enum {
   // Pointers
   VECTOR = 8,
   VECTOR_DATA = 9,
-  PAIR = 10
+  PAIR = 10, 
+  EXCEPTION = 11,
 };
 
 // Constants:
@@ -151,7 +153,8 @@ struct Symbol : HeapValue {
 };
 
 struct String : HeapValue {
-  const char data[1];
+  size_t bytes;
+  char data[1];
 };
 
 struct VectorData;
@@ -208,13 +211,33 @@ struct Value {
 
   // FLONUMS
   double flonum_value() const {
-    AR_ASSERT(type() == FLONUM);
+    AR_TYPE_ASSERT(type() == FLONUM);
     return static_cast<Flonum*>(heap)->number;
+  }
+
+  // STRINGS
+  const char* string_data() const {
+    AR_TYPE_ASSERT(type() == STRING);
+    return static_cast<String*>(heap)->data;
+  }
+
+  size_t string_bytes() const {
+    AR_TYPE_ASSERT(type() == STRING);
+    return static_cast<String*>(heap)->bytes;
+  }
+
+  bool string_equals(const std::string& cmp) const {
+    return cmp.compare(string_data()) == 0;
+  }
+
+  bool string_equals(const char* s) const {
+    std::string cmp(s);
+    return string_equals(cmp);
   }
 
   // SYMBOLS
   const char* symbol_name() const {
-    AR_ASSERT(type() == SYMBOL);
+    AR_TYPE_ASSERT(type() == SYMBOL);
     return static_cast<Symbol*>(heap)->name;
   }
 
@@ -225,7 +248,7 @@ struct Value {
   void set_cdr(Value);
 
   bool pair_has_source() const {
-    AR_ASSERT(type() == PAIR);
+    AR_TYPE_ASSERT(type() == PAIR);
     return heap->get_header() & 512;
   }
 
@@ -259,37 +282,38 @@ struct Pair : HeapValue {
 };
 
 struct Exception : HeapValue {
-  Value message, irritants;
+  Value tag, message, irritants;
 };
 
 inline SourceLocation* Value::pair_src() const {
-  AR_ASSERT(type() == PAIR);
+  AR_TYPE_ASSERT(type() == PAIR);
+  AR_TYPE_ASSERT(pair_has_source());
   return &(static_cast<Pair*>(heap)->src);
 }
 
 inline void Value::set_pair_src(SourceLocation& loc) {
-  AR_ASSERT(type() == PAIR);
-  AR_ASSERT(pair_has_source());
+  AR_TYPE_ASSERT(type() == PAIR);
+  AR_TYPE_ASSERT(pair_has_source());
   static_cast<Pair*>(heap)->src = loc;
 }
 
 inline Value Value::car() const {
-  AR_ASSERT(type() == PAIR);
+  AR_TYPE_ASSERT(type() == PAIR);
   return static_cast<Pair*>(heap)->data_car;
 }
 
 inline Value Value::cdr() const {
-  AR_ASSERT(type() == PAIR);
+  AR_TYPE_ASSERT(type() == PAIR);
   return static_cast<Pair*>(heap)->data_cdr;
 }
 
 inline void Value::set_car(Value v) {
-  AR_ASSERT(type() == PAIR);
+  AR_TYPE_ASSERT(type() == PAIR);
   static_cast<Pair*>(heap)->data_car = v;
 }
 
 inline void Value::set_cdr(Value v) {
-  AR_ASSERT(type() == PAIR);
+  AR_TYPE_ASSERT(type() == PAIR);
   static_cast<Pair*>(heap)->data_cdr = v;
 }
 
@@ -399,14 +423,23 @@ struct GC {
     AR_ASSERT(live(v));
 
     switch(v->get_type()) {
-      case BLOCK: case FIXNUM: case CONSTANT:
-        AR_ASSERT(!"arete:gc: bad value on heap; probably a GC bug"); break;
       case FLONUM:
         return;
       case PAIR:
         mark(static_cast<Pair*>(v)->data_car.heap);
         v = static_cast<Pair*>(v)->data_cdr.heap;
         goto again;
+      case EXCEPTION:
+        mark(static_cast<Exception*>(v)->message.heap);
+        mark(static_cast<Exception*>(v)->tag.heap);
+        v = static_cast<Exception*>(v)->irritants.heap;
+        goto again;
+      case VECTOR:
+        v = static_cast<Vector*>(v)->data;
+        goto again;
+      default:
+      case BLOCK: case FIXNUM: case CONSTANT:
+        AR_ASSERT(!"arete:gc: bad value on heap; probably a GC bug"); break;
     }
   }
 
@@ -559,6 +592,7 @@ struct State {
     // We do these side-effecting calls here to ensure that no allocations are required
     // when these symbols are used.
     get_symbol("quote"); get_symbol("quasiquote"); get_symbol("unquote");
+    // get_symbol("read-error");
   }
 
   // Value creation; all of these will cause allocations
@@ -598,14 +632,33 @@ struct State {
   /** Generate a pair with source code information */
   Value make_src_pair(Value car, Value cdr, SourceLocation& loc) {
     AR_FRAME(this, car, cdr);
-    Pair* heap = (Pair*) gc.allocate(PAIR, sizeof(Pair));
+    Pair* heap = static_cast<Pair*>(gc.allocate(PAIR, sizeof(Pair)));
+    heap->data_car = car;
+    heap->data_cdr = cdr;
     heap->header += 512;
-    Value ret = heap;
-    AR_ASSERT(ret.type() == PAIR);
-    ret.set_car(car);
-    ret.set_cdr(cdr);
-    ret.set_pair_src(loc);
+    Value pare(heap);
+    pare.set_pair_src(loc);
+
+    AR_ASSERT(pare.type() == PAIR);
+    AR_ASSERT(pare.pair_has_source());
+
+    return pare;
+  }
+
+  Value make_string(const std::string& body) {
+    String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + body.size()));
+    heap->bytes = body.size();
+    strncpy(heap->data, body.c_str(), body.size());
+    AR_ASSERT(heap->data[heap->bytes] == '\0');
+    heap->data[heap->bytes] = '\0';
+
     return heap;
+  }
+
+  Value make_exception(const std::string& cname, const std::string& cmessage, Value irritants = C_FALSE) {
+    Value name, message, exc;
+    AR_FRAME(this, name, message, irritants, exc);
+    return C_FALSE;
   }
 
   /** Return a description of the source location of an expression */
@@ -621,6 +674,7 @@ struct State {
     }
     return ss.str();
   }
+
 };
 
 inline void GC::mark_symbol_table() {
@@ -641,9 +695,20 @@ struct Reader {
   Reader(State& state_, std::istream& is_): state(state_), is(is_.rdbuf()), file(0), line(1) {}
   ~Reader() {}
 
+  enum Token {
+    TK_NONE, 
+    TK_RPAREN,
+    TK_DOT,
+  };
+  
+  struct EofHandler {
+    SourceLocation loc;
+  } eof;
+
   static bool is_separator(char c) {
     return c == '#' || c == '(' || c == ')' ||
-      c == ' ' || c == '\t' || c == '\n' || c == '\r';
+      c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '[' 
+      || c == ']';
   }
 
   // Read quasiquote & friends
@@ -669,7 +734,7 @@ struct Reader {
   }
 
   /** Read a single expression */
-  Value read() {
+  Value read_expr(Token& token) {
     char c;
     while(is >> c) {
       if(c >= '0' && c <= '9') {
@@ -744,8 +809,10 @@ struct Reader {
         // Read a list.
         return head;
       } else if(c == ')') {
+        token = TK_RPAREN;
         return C_TK_RPAREN;
       } else if(c == '.') {
+        token = TK_DOT;
         return C_TK_DOT;
       } else if(c == '\'') {
         return read_aux("quote");
@@ -773,6 +840,12 @@ struct Reader {
       }
     }
     return Value::eof();
+  }
+
+  Value read() {
+    Token tk;
+    Value exp = read_expr(tk);
+    return exp;
   }
 };
 
@@ -838,6 +911,8 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       return os << v.flonum_value(); 
     case SYMBOL:
       return os << v.symbol_name();
+    case STRING:
+      return os << '"' << v.string_data() << '"';
     case PAIR: {
       os << '(' << v.car();
       for(v = v.cdr(); v.type() == PAIR; v = v.cdr())  {
