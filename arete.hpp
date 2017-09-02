@@ -373,7 +373,7 @@ struct Frame {
   HeapValue*** values;
 };
 
-#define AR_FRAME(state, ...) \
+#define AR_FRAME(state, ...)  \
   FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
   Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
 
@@ -840,7 +840,6 @@ struct Reader {
         // Read a list
         Value head, tail, elt, swap;
         SourceLocation list_start = save();
-        std::cout << line << ' ' << list_start.line << std::endl;
         AR_FRAME(state, head, tail, elt, swap);
 
         // Attach source code information

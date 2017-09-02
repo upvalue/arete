@@ -369,7 +369,6 @@ TEST_CASE_FIXTURE(ASB, "EOF in dotted list") {
 }
 
 TEST_CASE_FIXTURE(ASB, "EOF in list") {
-  std::cout << "checking some stuff out" << std::endl;
   AR_STRING_READER(reader, state, "\n\n(\n\n");
 
   Value x = reader->read();
@@ -377,12 +376,11 @@ TEST_CASE_FIXTURE(ASB, "EOF in list") {
   std::cout << x.exception_message() << std::endl;
 }
 
-
 TEST_CASE_FIXTURE(ASB, "EOF in list") {
-  std::cout << "checking some stuff out" << std::endl;
   AR_STRING_READER(reader, state, ")");
 
   Value x = reader->read();
   CHECK(x.type() == EXCEPTION);
-  std::cout << x.exception_message() << std::endl;
 }
+
+// TEST_CASE_FIXTURE(ASB, G)

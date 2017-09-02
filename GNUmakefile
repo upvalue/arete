@@ -2,7 +2,8 @@
 
 # Variables
 CXX := clang++
-CXXFLAGS := -std=c++11 -Wall -g3 -O3 -fno-exceptions -fno-rtti
+CFLAGS := -g3 -O3
+CXXFLAGS := -std=c++11 -fno-exceptions -fno-rtti $(CFLAGS)
 LDFLAGS := -g3  -O3
 
 # Fancy color compilation
@@ -17,20 +18,23 @@ endef
 	$(call colorecho, "CC $< ")
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
+%.o: %.c
+	$(call colorecho, "CC $< ")
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 all: arete test
 
 cli.o: cli.cpp arete.hpp
-
 test.o: test.cpp arete.hpp
 
 # Link 
-arete: cli.o
+arete: cli.o linenoise.o
 	$(call colorecho, "LD $@ ")
-	$(CXX) $(LDFLAGS) -o $@ $<
+	$(CXX) $(LDFLAGS) -o $@ $^
 
-test: test.o 
+test: test.o linenoise.o
 	$(call colorecho, "LD $@ ")
-	$(CXX) $(LDFLAGS) -o $@ $<
+	$(CXX) $(LDFLAGS) -o $@ $^
 
 .PHONY: count clean
 
