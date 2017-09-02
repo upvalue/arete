@@ -17,11 +17,17 @@ endef
 	$(call colorecho, "CC $< ")
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-all: test
+all: arete test
+
+cli.o: cli.cpp arete.hpp
 
 test.o: test.cpp arete.hpp
 
 # Link 
+arete: cli.o
+	$(call colorecho, "LD $@ ")
+	$(CXX) $(LDFLAGS) -o $@ $<
+
 test: test.o 
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $<

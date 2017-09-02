@@ -593,10 +593,10 @@ inline void GC::mark_symbol_table() {
 // Reader.
 struct Reader {
   State& state;
-  std::istream& is;
+  std::istream is;
   size_t file, line;
 
-  Reader(State& state_, std::istream& is_): state(state_), is(is_), file(0), line(1) {
+  Reader(State& state_, std::istream& is_): state(state_), is(is_.rdbuf()), file(0), line(1) {
 
   }
 
@@ -664,6 +664,9 @@ struct Reader {
 
           if(elt == C_TK_DOT) {
             elt = read();
+            if(tail.bits == 0) {
+              AR_ASSERT(!"unexpected dot");
+            }
             if(elt == C_TK_RPAREN) {
               AR_ASSERT(!"unexpected RPAREN");
             }
