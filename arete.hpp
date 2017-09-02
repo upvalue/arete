@@ -92,17 +92,22 @@ enum {
   // No pointers
   FLONUM = 4,
   SYMBOL = 5,
+  STRING = 6,
   // Pointers
-  PAIR = 6
+  VECTOR = 8,
+  VECTOR_DATA = 9,
+  PAIR = 10
 };
 
 // Constants:
 
-// 0010 #t
-// 0110 #f
-// 1010 ()
-
-enum { C_TRUE, C_FALSE, C_NIL };
+enum {
+  C_TRUE = 2,          // 0000 0010 #t
+  C_FALSE = 6,         // 0000 0110 #f
+  C_NIL = 10,          // 0000 1010 ()
+  C_UNSPECIFIED = 14 , // 0000 1110 #<unspecified> 
+  C_EOF = 18,          // 0001 0010 #<eof>
+};
 
 // A heap-allocated, garbage-collected value.
 struct HeapValue {
@@ -112,6 +117,8 @@ struct HeapValue {
   // m = mark
   // t = value type
   size_t header;
+
+  // Size of the object
   size_t size;
 
   void initialize(unsigned type, unsigned mark_bit, size_t size_) {
@@ -119,21 +126,11 @@ struct HeapValue {
     size = size_;
   }
 
-  unsigned get_type() const {
-    return header & 255;
-  }
+  unsigned get_header() const { return header; }
+  unsigned get_type() const { return header & 255; }
+  unsigned char get_mark_bit() const { return (header >> 8) & 1; }
 
-  unsigned char get_mark_bit() const {
-    return (header >> 8) & 1;
-  }
-
-  void flip_mark_bit() {
-    if(get_mark_bit()) {
-      header -= 256;
-    } else {
-      header += 256;
-    }
-  }
+  void flip_mark_bit() { header += get_mark_bit() ? -256 : 256; }
 };
 
 // Floating point number
@@ -143,6 +140,10 @@ struct Flonum : HeapValue {
 
 struct Symbol : HeapValue {
   const char* name;
+};
+
+struct String : HeapValue {
+  const char data[1];
 };
 
 struct Value {
@@ -185,9 +186,11 @@ struct Value {
     return bits == 2 ? C_TRUE : C_FALSE;
   }
 
-  static Value t() { return Value(2); }
-  static Value f() { return Value(6); }
-  static Value nil() { return Value(10); }
+  static Value t() { return C_TRUE; }
+  static Value f() { return C_FALSE; }
+  static Value nil() { return C_NIL; }
+  static Value unspecified() { return C_UNSPECIFIED; }
+  static Value eof() { return C_EOF; }
 
   // FLONUMS
   double flonum_value() const {
@@ -204,13 +207,23 @@ struct Value {
   // PAIRS
   Value car() const;
   Value cdr() const;
+
+  bool pair_has_source() const {
+    AR_ASSERT(type() == PAIR);
+    return heap->get_header() & 512;
+  }
+};
+
+/** Identifies a particular piece of code */
+struct SourceInfo {
+  size_t file, procedure, line, column;
 };
 
 struct Pair : HeapValue {
   Value data_car, data_cdr;
+  SourceInfo src;
 };
 
-  
 inline Value Value::car() const {
   AR_ASSERT(type() == PAIR);
   return static_cast<Pair*>(heap)->data_car;
@@ -410,6 +423,8 @@ struct GC {
           ret->initialize(type, mark_bit, sz);
           AR_ASSERT(live(ret));
 
+          AR_ASSERT(((ptrdiff_t) ret & 3) == 0);
+
           // Break up memory as necessary
           ret->size = sz;
           return ret;
@@ -438,6 +453,7 @@ struct GC {
     }
   }
 
+  // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) ==6
   static size_t align(size_t boundary, size_t value) {
     return (((((value) - 1) / (boundary)) + 1) * (boundary));
   }
@@ -449,6 +465,7 @@ struct State {
 
   GC gc;
   symbol_table_t symbol_table;
+  std::vector<std::string> source_names;
 
   State(): gc() {}
   ~State() {
@@ -470,6 +487,7 @@ struct State {
     symbol_table_t::const_iterator x = symbol_table.find(name);
     if(x == symbol_table.end()) {
       Symbol* heap = static_cast<Symbol*>(gc.allocate(SYMBOL, sizeof(Symbol)));
+
       const char* name_s = name.c_str();
       size_t size = name.size();
       const char* name_copy = strndup(name_s, size);
@@ -484,12 +502,40 @@ struct State {
   }
 
   Value make_pair(Value car = Value::f(), Value cdr = Value::f()) {
-    //HeapValue* pair = gc.allocate(PAIR, sizeof(Pair));
-    //return pair;
-    Pair* heap = (Pair*) gc.allocate(PAIR, sizeof(Pair));
+    Pair* heap = (Pair*) gc.allocate(PAIR, sizeof(Pair) - sizeof(Pair::src));
     heap->data_car = car;
     heap->data_cdr = cdr;
     return heap;
+  }
+
+  /** Generate a pair with source code information */
+  Value make_src_pair() {
+    Pair* heap = (Pair*) gc.allocate(PAIR, sizeof(Pair));
+    heap->data_car = Value::f();
+    heap->data_cdr = Value::f();
+    return heap;
+  }
+
+  ///// (READ) Reader
+  Value read(std::istream& is) {
+    char c;
+    while(is >> c) {
+      if(c >= '0' && c <= '9') {
+        ptrdiff_t number = c - '0';
+        while(true) {
+          c = is.peek();
+          if(c >= '0' && c <= '9') {
+            is >> c;
+            number = (number * 10) + (c - '0');
+          } else {
+            break;
+          }
+        }
+        return Value::make_fixnum(number);
+      }
+    }
+    // Read a number.
+    return Value::f();
   }
 };
 
@@ -502,7 +548,6 @@ inline Frame::~Frame() {
   gc.frames.pop_back();
 }
 
-
 // Output Scheme values
 
 inline std::ostream& operator<<(std::ostream& os, Value& v) {
@@ -512,6 +557,9 @@ inline std::ostream& operator<<(std::ostream& os, Value& v) {
       switch(v.constant_value()) {
         case C_TRUE: return os << "#t";
         case C_FALSE: return os << "#f";
+        case C_EOF: return os << "#<eof>";
+        case C_UNSPECIFIED: return os << "#<unspecified>";
+        case C_NIL: return os << "()";
       }
     case FLONUM:
       return os << v.flonum_value(); 

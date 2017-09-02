@@ -1,0 +1,10 @@
+* TODO Value representation
+  + [ ] Vectors
+  + [ ] Chars
+* TODO Garbage collector
+  + [ ] Compaction
+* TODO Reader
+  + [ ] Reads R4RS tests
+* TODO Interpreter
+  + [ ] Evaluation
+  + [ ] Forms

@@ -2,7 +2,7 @@
 
 #define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
 
-#include <assert.h>
+#include <sstream>
 
 #include "arete.hpp"
 
@@ -13,6 +13,12 @@ using namespace arete;
 
 // Enum usage causes bizarre errors with doctest for some reason
 static const int TFIXNUM = FIXNUM, TCONSTANT = CONSTANT, TFLONUM = FLONUM;
+
+TEST_CASE("info") {
+  std::cout << "sizeof(Value): " << sizeof(Value) << std::endl;
+  std::cout << "sizeof(State): " << sizeof(State) << std::endl;
+  std::cout << "sizeof(HeapValue): " << sizeof(HeapValue) << std::endl;
+}
 
 TEST_CASE("fixnum representation") {
   Value x = Value::make_fixnum(12345);
@@ -28,15 +34,20 @@ TEST_CASE("fixnum representation") {
 }
 
 TEST_CASE("constant representation") {
-  Value t = Value::t(), f = Value::f(), nil = Value::nil();
+  Value t = Value::t(), f = Value::f(), nil = Value::nil(), eof = Value::eof(), unspec =
+    Value::unspecified();
   
   CHECK(t.type() == TCONSTANT);
   CHECK(f.type() == TCONSTANT);
   CHECK(nil.type() == TCONSTANT);
+  CHECK(eof.type() == TCONSTANT);
+  CHECK(unspec.type() == TCONSTANT);
 
   CHECK(t.bits == 2);
   CHECK(f.bits == 6);
   CHECK(nil.bits == 10);
+  CHECK(eof.bits == 18);
+  CHECK(unspec.bits == 14);
 
   std::cout << t << ' ' << f << ' ' << nil << std::endl;
 }
@@ -224,4 +235,12 @@ TEST_CASE_FIXTURE(AS, "symbol interning") {
   x = state.get_symbol("hello-world");
   y = state.get_symbol("hello-world");
   CHECK_MESSAGE(x.bits == y.bits, "symbols intern");
+}
+
+///// READER
+TEST_CASE_FIXTURE(AS, "read fixnum") {
+  std::stringstream ss("12345");
+  Value x = state.read(ss);
+  CHECK(x.type() == FIXNUM);
+  CHECK(x.fixnum_value() == 12345);
 }

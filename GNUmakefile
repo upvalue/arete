@@ -17,7 +17,6 @@ endef
 	$(call colorecho, "CC $< ")
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-
 all: test
 
 test.o: test.cpp arete.hpp
