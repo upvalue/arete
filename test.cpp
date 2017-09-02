@@ -303,7 +303,15 @@ TEST_CASE_FIXTURE(AS, "read a dotted list") {
   AR_FRAME(state, lst);
   lst = reader.read();
 
-  CHECK(lst.cdr() == Value::make_fixnum(2));
+  CHECK(lst.car() == Value::make_fixnum(1));
+  CHECK(lst.cdr().car() == Value::make_fixnum(2));
+}
+
+TEST_CASE_FIXTURE(AS, "read a list") {
+  std::stringstream ss("(1 2 3)");
+  Reader reader(state, ss);
+
+  Value sym;
 }
 
 TEST_CASE_FIXTURE(AS, "exceptions") {
@@ -326,6 +334,8 @@ struct ASB {
   State state;
 };
 
+///// $MORE READER TESTS
+
 TEST_CASE_FIXTURE(ASB, "state.boot") {}
 
 TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
@@ -335,7 +345,6 @@ TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
   Value x;
   AR_FRAME(state, x)
   x = reader.read();
-
 }
 
 TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
@@ -348,13 +357,32 @@ TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
   AR_ASSERT(found);
 }
 
-TEST_CASE_FIXTURE(AS, "read a list") {
-  std::stringstream ss("(1 2 3)");
-  Reader reader(state, ss);
 
-  Value sym;
+
+TEST_CASE_FIXTURE(ASB, "EOF in dotted list") {
+  AR_STRING_READER(reader, state, "(.\n");
+
+  Value x = reader->read();
+
+  CHECK(x.type() == EXCEPTION);
+  std::cout << x << std::endl;
 }
 
-TEST_CASE_FIXTURE(AS, "reader errors") {
+TEST_CASE_FIXTURE(ASB, "EOF in list") {
+  std::cout << "checking some stuff out" << std::endl;
+  AR_STRING_READER(reader, state, "\n\n(\n\n");
 
+  Value x = reader->read();
+  CHECK(x.type() == EXCEPTION);
+  std::cout << x.exception_message() << std::endl;
+}
+
+
+TEST_CASE_FIXTURE(ASB, "EOF in list") {
+  std::cout << "checking some stuff out" << std::endl;
+  AR_STRING_READER(reader, state, ")");
+
+  Value x = reader->read();
+  CHECK(x.type() == EXCEPTION);
+  std::cout << x.exception_message() << std::endl;
 }

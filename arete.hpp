@@ -690,20 +690,24 @@ struct State {
     return heap;
   }
 
-  /** Return a description of the source location of an expression */
-  std::string source_info(Value expr, bool& found) {
-    found = false;
+  /** Return a description of a source location */
+  std::string source_info(const SourceLocation* loc) {
     std::ostringstream ss;
-    if(expr.type() == PAIR && expr.pair_has_source()) {
-      SourceLocation* loc = expr.pair_src();
-      ss << source_names[loc->file] << ':' << loc->line;
-      found = true;
-    } else {
-      ss << "unknown";
-    }
+    ss << source_names[loc->file] << ':' << loc->line;
     return ss.str();
   }
 
+  /** Return a description of the source location of a pair */
+  std::string source_info(Value expr, bool& found) {
+    found = false;
+    if(expr.type() == PAIR && expr.pair_has_source()) {
+      SourceLocation* loc = expr.pair_src();
+      found = true;
+      return source_info(loc);
+    } else {
+      return "unknown";
+    }
+  }
 };
 
 inline void GC::mark_symbol_table() {
@@ -719,9 +723,13 @@ inline void GC::mark_symbol_table() {
 struct Reader {
   State& state;
   std::istream is;
-  size_t file, line;
+  size_t file, line, column;
 
-  Reader(State& state_, std::istream& is_): state(state_), is(is_.rdbuf()), file(0), line(1) {}
+  Reader(State& state_, std::istream& is_):
+    state(state_), is(is_.rdbuf()), file(0), line(1), column(1) {
+    // No skipping whitespace because we need to track lines
+    is >> std::noskipws;
+    }
   ~Reader() {}
 
   enum Token {
@@ -734,13 +742,20 @@ struct Reader {
     SourceLocation loc;
   } eof;
 
+  /** Returns true if a char is a separator and therefore
+    * should stop reading of symbols, numbers etc */
   static bool is_separator(char c) {
     return c == '#' || c == '(' || c == ')' ||
       c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '[' 
       || c == ']';
   }
 
-  // Read quasiquote & friends
+  // Save source location
+  SourceLocation save() {
+    return SourceLocation(file, line);
+  }
+
+  /** Read quasiquote and friends */
   Value read_aux(const std::string& name) {
     Value symbol, expr;
     AR_FRAME(state, symbol, expr);
@@ -762,10 +777,26 @@ struct Reader {
     return pair;
   }
 
+  /** Return an error */
+  Value read_error(const std::string& description, bool begin = false, size_t begin_line = 0) {
+    std::ostringstream os;
+    SourceLocation loc(file, begin ? begin_line : line);
+
+    os << state.source_info(&loc) << ' ';
+    if(begin) {
+      os << "in list beginning at: ";
+    } 
+    os << description;
+
+    return state.make_exception("read-error", os.str());
+  }
+
   /** Read a single expression */
-  Value read_expr(Token& token) {
+  Value read_expr(Token& return_token) {
+    return_token = TK_NONE;
     char c;
     while(is >> c) {
+      column++;
       if(c >= '0' && c <= '9') {
         // Fixnums
         ptrdiff_t number = c - '0';
@@ -795,21 +826,45 @@ struct Reader {
         // Comments
         while(true) {
           c = is.peek();
-          if(is.eof() || c == '\n') continue;
+          if(is.eof() || c == '\n')  {
+            if(c == '\n') line++;
+            continue;
+          }
         }
       } else if(c == '\n') {
+        column = 1;
         line++;
       } else if(c == ' ' || c == '\r' || c == '\t') {
         // Ignore
       } else if(c == '(') {
         // Read a list
         Value head, tail, elt, swap;
+        SourceLocation list_start = save();
+        std::cout << line << ' ' << list_start.line << std::endl;
         AR_FRAME(state, head, tail, elt, swap);
 
         // Attach source code information
         while(true) {
-          elt = read();
+          Token tk;
+          elt = read_expr(tk);
 
+          if(elt == C_EOF) {
+            return read_error("unexpected EOF in list", true, list_start.line);
+          }
+
+          if(tk == TK_DOT) {
+            elt = read_expr(tk);
+            if(elt == C_EOF) {
+              return read_error("unexpected EOF after dot", true, list_start.line);
+            } else if(tk == TK_RPAREN) {
+              return read_error("unexpected ) after dot", true, list_start.line);
+            }
+            tail.set_cdr(elt);
+          } else if(tk == TK_RPAREN) {
+            break;
+          }
+
+          /*
           if(elt == C_TK_DOT) {
             elt = read();
             if(tail.bits == 0) {
@@ -825,6 +880,7 @@ struct Reader {
             break;
           }
 
+          */
           swap = make_pair(elt, Value::nil());
 
           if(head.bits == 0) {
@@ -838,11 +894,11 @@ struct Reader {
         // Read a list.
         return head;
       } else if(c == ')') {
-        token = TK_RPAREN;
-        return C_TK_RPAREN;
+        return_token = TK_RPAREN;
+        return C_FALSE;
       } else if(c == '.') {
-        token = TK_DOT;
-        return C_TK_DOT;
+        return_token = TK_DOT;
+        return C_FALSE;
       } else if(c == '\'') {
         return read_aux("quote");
       } else if(c == '`') {
@@ -864,6 +920,7 @@ struct Reader {
           }
           buffer += c;
           is >> c;
+          column++;
         }
         return state.get_symbol(buffer);
       }
@@ -874,6 +931,12 @@ struct Reader {
   Value read() {
     Token tk;
     Value exp = read_expr(tk);
+    if(tk == TK_DOT) {
+      return read_error("unexpected . at toplevel");
+    } else if(tk == TK_RPAREN) {
+      return read_error("unexpected ) at toplevel");
+    } 
+
     return exp;
   }
 };
@@ -899,13 +962,12 @@ struct StringReader {
 
 /** Macro for giving descriptive source info for Scheme code in C strings e.g.
   * asdf.cpp:57:c-string */
-#define AR_STRING_READER_AUX(x) #x
+#define AR_STRINGIZE2(x) #x
 
-#define AR_STRING_READER_AUX2(x) AR_STRING_READER_AUX(x)
+#define AR_STRINGIZE(x) AR_STRINGIZE2(x)
 
 #define AR_STRING_READER(name, state, string) \
-  StringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRING_READER_AUX2(__LINE__)));
-
+  StringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRINGIZE(__LINE__)));
 
 // Various inline functions
 
