@@ -240,9 +240,12 @@ TEST_CASE_FIXTURE(AS, "symbol interning") {
 
 TEST_CASE_FIXTURE(AS, "strings") {
   Value s;
+  AR_FRAME(state, s);
   s = state.make_string("hello world");
-  s.string_equals("hello world");
-  std::cout << s << std::endl;
+  AR_ASSERT(s.type() == STRING);
+  AR_ASSERT(s.string_equals("hello world"));
+
+  state.gc.collect();
 }
 
 ///// READER
@@ -303,6 +306,19 @@ TEST_CASE_FIXTURE(AS, "read a dotted list") {
   CHECK(lst.cdr() == Value::make_fixnum(2));
 }
 
+TEST_CASE_FIXTURE(AS, "exceptions") {
+  Value exc, msg;
+  AR_FRAME(state, exc);
+  exc = state.make_exception("fake-error", "my message");
+  msg = exc.exception_message();
+
+  CHECK(exc.is_active_exception());
+  CHECK(msg.type() == STRING);
+
+  CHECK(msg.string_equals("my message"));
+
+}
+
 struct ASB {
   ASB() { state.boot(); }
   ~ASB() {}
@@ -337,4 +353,8 @@ TEST_CASE_FIXTURE(AS, "read a list") {
   Reader reader(state, ss);
 
   Value sym;
+}
+
+TEST_CASE_FIXTURE(AS, "reader errors") {
+
 }

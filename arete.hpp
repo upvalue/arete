@@ -257,6 +257,9 @@ struct Value {
 
   // EXCEPTION
   bool is_active_exception() const;
+  Value exception_tag() const;
+  Value exception_message() const;
+  Value exception_irritants() const;
 
   // OPERATORS
 
@@ -279,10 +282,6 @@ struct SourceLocation {
 struct Pair : HeapValue {
   Value data_car, data_cdr;
   SourceLocation src;
-};
-
-struct Exception : HeapValue {
-  Value tag, message, irritants;
 };
 
 inline SourceLocation* Value::pair_src() const {
@@ -315,6 +314,29 @@ inline void Value::set_car(Value v) {
 inline void Value::set_cdr(Value v) {
   AR_TYPE_ASSERT(type() == PAIR);
   static_cast<Pair*>(heap)->data_cdr = v;
+}
+
+struct Exception : HeapValue {
+  Value tag, message, irritants;
+};
+
+inline bool Value::is_active_exception() const {
+  return type() == EXCEPTION;
+}
+
+inline Value Value::exception_tag() const {
+  AR_TYPE_ASSERT(type() == EXCEPTION);
+  return static_cast<Exception*>(heap)->tag;
+}
+
+inline Value Value::exception_message() const {
+  AR_TYPE_ASSERT(type() == EXCEPTION);
+  return static_cast<Exception*>(heap)->message;
+}
+
+inline Value Value::exception_irritants() const {
+  AR_TYPE_ASSERT(type() == EXCEPTION);
+  return static_cast<Exception*>(heap)->irritants;
 }
 
 struct VectorData: HeapValue {
@@ -424,6 +446,7 @@ struct GC {
 
     switch(v->get_type()) {
       case FLONUM:
+      case STRING:
         return;
       case PAIR:
         mark(static_cast<Pair*>(v)->data_car.heap);
@@ -655,10 +678,16 @@ struct State {
     return heap;
   }
 
-  Value make_exception(const std::string& cname, const std::string& cmessage, Value irritants = C_FALSE) {
-    Value name, message, exc;
-    AR_FRAME(this, name, message, irritants, exc);
-    return C_FALSE;
+  Value make_exception(const std::string& ctag, const std::string& cmessage, Value irritants = C_FALSE) {
+    Value tag, message, exc;
+    AR_FRAME(this, tag, message, irritants, exc);
+    Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
+    tag = get_symbol(ctag);
+    message = make_string(cmessage);
+    heap->tag = tag;
+    heap->message = message;
+    heap->irritants = irritants;
+    return heap;
   }
 
   /** Return a description of the source location of an expression */
