@@ -107,6 +107,7 @@ enum {
   C_NIL = 10,          // 0000 1010 ()
   C_UNSPECIFIED = 14 , // 0000 1110 #<unspecified> 
   C_EOF = 18,          // 0001 0010 #<eof>
+  C_RPAREN = 30,       // 0001 1110 #<rparen>
 };
 
 // A heap-allocated, garbage-collected value.
@@ -211,6 +212,13 @@ struct Value {
   bool pair_has_source() const {
     AR_ASSERT(type() == PAIR);
     return heap->get_header() & 512;
+  }
+
+  // OPERATORS
+
+  // Identity comparison
+  inline bool operator==(const Value& other) const {
+    return bits == other.bits;
   }
 };
 
@@ -516,11 +524,35 @@ struct State {
     return heap;
   }
 
-  ///// (READ) Reader
-  Value read(std::istream& is) {
+};
+
+///// (READ) Reader
+
+// Reader.
+struct Reader {
+  State& state;
+  std::istream& is;
+  size_t file, line;
+
+  Reader(State& state_, std::istream& is_): state(state_), is(is_), file(0), line(1) {
+
+  }
+
+  ~Reader() {}
+
+  static bool is_separator(char c) {
+    return c == '#' || c == '(' || c == ')' ||
+      c == ' ' || c == '\t' || c == '\n' || c == '\r';
+  }
+
+  /** Read a single expression */
+  Value read() {
     char c;
+    Value head, current;
+    AR_FRAME(state, head, current);
     while(is >> c) {
       if(c >= '0' && c <= '9') {
+        // Fixnums
         ptrdiff_t number = c - '0';
         while(true) {
           c = is.peek();
@@ -532,12 +564,53 @@ struct State {
           }
         }
         return Value::make_fixnum(number);
+      } else if(c == '#') {
+        // Constants (#t, #f)
+        c = is.peek();
+        if(c == 't') {
+          is >> c;
+          return Value::t();
+        } else if(c == 'f') {
+          is >> c;
+          return Value::f();
+        } else {
+          AR_ASSERT(!"bad!");
+        }
+      } else if(c == ';') {
+        // Comments
+        while(true) {
+          c = is.peek();
+          if(is.eof() || c == '\n') continue;
+        }
+      } else if(c == '\n') {
+        line++;
+      } else if(c == ' ' || c == '\r' || c == '\t') {
+        // Ignore
+      } else if(c == '(') {
+
+      } else if(c == ')') {
+        return C_RPAREN;
+      } else {
+        // Symbols
+        std::string buffer;
+        buffer += c;
+        while(true) {
+          c = is.peek();
+          if(is.eof() || is_separator(c)) {
+            break;
+          }
+          buffer += c;
+          is >> c;
+        }
+        current = state.get_symbol(buffer);
+        return current;
       }
     }
-    // Read a number.
-    return Value::f();
+    return Value::eof();
   }
 };
+
+// Various inline functions
 
 inline Frame::Frame(State& state, size_t size_, HeapValue*** ptrs): gc(state.gc), size(size_), values(ptrs) {
   gc.frames.push_back(this);

@@ -11,9 +11,6 @@ using namespace arete;
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
-// Enum usage causes bizarre errors with doctest for some reason
-static const int TFIXNUM = FIXNUM, TCONSTANT = CONSTANT, TFLONUM = FLONUM;
-
 TEST_CASE("info") {
   std::cout << "sizeof(Value): " << sizeof(Value) << std::endl;
   std::cout << "sizeof(State): " << sizeof(State) << std::endl;
@@ -23,12 +20,12 @@ TEST_CASE("info") {
 TEST_CASE("fixnum representation") {
   Value x = Value::make_fixnum(12345);
 
-  CHECK(x.type() == TFIXNUM);
+  CHECK(x.type() == FIXNUM);
   CHECK(x.fixnum_value() == 12345);
   
   for(size_t i = 0; i != 100; i++) {
     Value y = Value::make_fixnum(i);
-    CHECK(y.type() == TFIXNUM);
+    CHECK(y.type() == FIXNUM);
     CHECK(y.fixnum_value() == i);
   }
 }
@@ -37,11 +34,14 @@ TEST_CASE("constant representation") {
   Value t = Value::t(), f = Value::f(), nil = Value::nil(), eof = Value::eof(), unspec =
     Value::unspecified();
   
-  CHECK(t.type() == TCONSTANT);
-  CHECK(f.type() == TCONSTANT);
-  CHECK(nil.type() == TCONSTANT);
-  CHECK(eof.type() == TCONSTANT);
-  CHECK(unspec.type() == TCONSTANT);
+  CHECK(t.type() == CONSTANT);
+  CHECK(f.type() == CONSTANT);
+  CHECK(nil.type() == CONSTANT);
+  CHECK(eof.type() == CONSTANT);
+  CHECK(unspec.type() == CONSTANT);
+
+  // Comparison operator
+  CHECK(t == Value::t());
 
   CHECK(t.bits == 2);
   CHECK(f.bits == 6);
@@ -71,7 +71,7 @@ TEST_CASE("heap values work") {
   HeapValue v;
   v.initialize(FLONUM, 0, sizeof(Flonum));
 
-  CHECK(v.get_type() == TFLONUM);
+  CHECK(v.get_type() == FLONUM);
   CHECK(v.get_mark_bit() == 0);
   CHECK(v.size == sizeof(Flonum));
 
@@ -240,7 +240,38 @@ TEST_CASE_FIXTURE(AS, "symbol interning") {
 ///// READER
 TEST_CASE_FIXTURE(AS, "read fixnum") {
   std::stringstream ss("12345");
-  Value x = state.read(ss);
+  Reader reader(state, ss);
+  Value x = reader.read();
   CHECK(x.type() == FIXNUM);
   CHECK(x.fixnum_value() == 12345);
+  Value e = reader.read();
+  CHECK(e == Value::eof());
+}
+
+TEST_CASE_FIXTURE(AS, "read boolean constants") {
+  std::stringstream ss("#f#t");
+  Reader reader(state, ss);
+
+  Value f = reader.read();
+  Value t = reader.read();
+
+  std::cout << "value: " << t.bits << std::endl;
+  std::cout << f << std::endl;
+
+  CHECK(t.type() == CONSTANT);
+  CHECK(f.type() == CONSTANT);
+
+  CHECK(t == Value::t());
+  CHECK(f == Value::f());
+}
+
+TEST_CASE_FIXTURE(AS, "read a symbol") {
+  std::stringstream ss("hello");
+  Reader reader(state, ss);
+
+  Value sym;
+  sym = reader.read();
+
+  std::string check("hello");
+  CHECK(check.compare(sym.symbol_name()) == 0);
 }
