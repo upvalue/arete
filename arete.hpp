@@ -16,6 +16,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <iostream>
+#include <sstream>
 #include <vector>
 #include <unordered_map>
 
@@ -29,7 +30,8 @@
 # define AR_BLOCK_SIZE 4096
 #endif
 
-// If more than ARETE_GC_LOAD_FACTOR% is in use after a collection, the garbage collector will double in-use memory.
+// If more than ARETE_GC_LOAD_FACTOR% is in use after a collection, the garbage collector will
+// double in-use memory.
 #ifndef ARETE_GC_LOAD_FACTOR
 # define ARETE_GC_LOAD_FACTOR 80
 #endif
@@ -228,6 +230,10 @@ struct Value {
   }
 
   SourceLocation* pair_src() const;
+  void set_pair_src(SourceLocation&);
+
+  // EXCEPTION
+  bool is_active_exception() const;
 
   // OPERATORS
 
@@ -241,8 +247,10 @@ struct Value {
 
 /** Identifies a particular piece of code */
 struct SourceLocation {
-  SourceLocation(): file(0), line(0), column(0) {}
-  size_t file, line, column;
+  SourceLocation(): file(0), line(0) {}
+  SourceLocation(size_t file_, size_t line_): file(file_), line(line_) {}
+
+  size_t file, line;
 };
 
 struct Pair : HeapValue {
@@ -250,9 +258,19 @@ struct Pair : HeapValue {
   SourceLocation src;
 };
 
+struct Exception : HeapValue {
+  Value message, irritants;
+};
+
 inline SourceLocation* Value::pair_src() const {
   AR_ASSERT(type() == PAIR);
   return &(static_cast<Pair*>(heap)->src);
+}
+
+inline void Value::set_pair_src(SourceLocation& loc) {
+  AR_ASSERT(type() == PAIR);
+  AR_ASSERT(pair_has_source());
+  static_cast<Pair*>(heap)->src = loc;
 }
 
 inline Value Value::car() const {
@@ -527,14 +545,20 @@ struct State {
     }
   }
 
+  // Source code location tracking
+  unsigned register_file(const std::string& path) {
+    source_names.push_back(path);
+    return source_names.size() - 1;
+  }
+
   /** Performs various initializations required for an instance of Arete;
     * this is separate so the State itself can be used for lightweight testing */
   void boot() {
+    source_names.push_back("unknown");
+    source_names.push_back("c-string");
     // We do these side-effecting calls here to ensure that no allocations are required
     // when these symbols are used.
-
     get_symbol("quote"); get_symbol("quasiquote"); get_symbol("unquote");
-
   }
 
   // Value creation; all of these will cause allocations
@@ -572,13 +596,31 @@ struct State {
   }
 
   /** Generate a pair with source code information */
-  Value make_src_pair() {
+  Value make_src_pair(Value car, Value cdr, SourceLocation& loc) {
+    AR_FRAME(this, car, cdr);
     Pair* heap = (Pair*) gc.allocate(PAIR, sizeof(Pair));
-    heap->data_car = Value::f();
-    heap->data_cdr = Value::f();
+    heap->header += 512;
+    Value ret = heap;
+    AR_ASSERT(ret.type() == PAIR);
+    ret.set_car(car);
+    ret.set_cdr(cdr);
+    ret.set_pair_src(loc);
     return heap;
   }
 
+  /** Return a description of the source location of an expression */
+  std::string source_info(Value expr, bool& found) {
+    found = false;
+    std::ostringstream ss;
+    if(expr.type() == PAIR && expr.pair_has_source()) {
+      SourceLocation* loc = expr.pair_src();
+      ss << source_names[loc->file] << ':' << loc->line;
+      found = true;
+    } else {
+      ss << "unknown";
+    }
+    return ss.str();
+  }
 };
 
 inline void GC::mark_symbol_table() {
@@ -596,15 +638,34 @@ struct Reader {
   std::istream is;
   size_t file, line;
 
-  Reader(State& state_, std::istream& is_): state(state_), is(is_.rdbuf()), file(0), line(1) {
-
-  }
-
+  Reader(State& state_, std::istream& is_): state(state_), is(is_.rdbuf()), file(0), line(1) {}
   ~Reader() {}
 
   static bool is_separator(char c) {
     return c == '#' || c == '(' || c == ')' ||
       c == ' ' || c == '\t' || c == '\n' || c == '\r';
+  }
+
+  // Read quasiquote & friends
+  Value read_aux(const std::string& name) {
+    Value symbol, expr;
+    AR_FRAME(state, symbol, expr);
+    symbol = state.get_symbol(name);
+    expr = read();
+    expr = state.make_pair(expr, C_NIL);
+    expr = state.make_pair(symbol, expr);
+    return expr;
+  }
+
+  /** Make a pair at current source location */
+  Value make_pair(Value car, Value cdr = C_NIL) {
+    Value pair;
+    AR_FRAME(state, pair, car, cdr);
+    SourceLocation loc(file, line);
+    pair = state.make_src_pair(car, cdr, loc);
+    AR_ASSERT(pair.type() == PAIR);
+    AR_ASSERT(pair.pair_has_source());
+    return pair;
   }
 
   /** Read a single expression */
@@ -652,13 +713,6 @@ struct Reader {
         AR_FRAME(state, head, tail, elt, swap);
 
         // Attach source code information
-        /*
-        SourceLocation loc;
-        loc.file = file;
-        loc.line = line;
-        *(head.pair_src()) = loc;
-        */
-
         while(true) {
           elt = read();
 
@@ -677,7 +731,7 @@ struct Reader {
             break;
           }
 
-          swap = state.make_pair(elt, Value::nil());
+          swap = make_pair(elt, Value::nil());
 
           if(head.bits == 0) {
             head = tail = swap;
@@ -694,19 +748,15 @@ struct Reader {
       } else if(c == '.') {
         return C_TK_DOT;
       } else if(c == '\'') {
-        Value expr;
-        AR_FRAME(state, expr);
-        expr = read();
-        expr = state.make_pair(expr, C_NIL);
-        expr = state.make_pair(state.get_symbol("quote"), expr);
-        return expr;
+        return read_aux("quote");
       } else if(c == '`') {
-        Value expr;
-        AR_FRAME(state, expr);
-        expr = read();
-        expr = state.make_pair(expr, C_NIL);
-        expr = state.make_pair(state.get_symbol("quasiquote"), expr);
-        return expr;
+        return read_aux("quasiquote");
+      } else if(c == ',') {
+        c = is.peek();
+        if(c == '@') {
+          return read_aux("unquote-splicing");
+        } 
+        return read_aux("unquote");
       } else {
         // Symbols
         std::string buffer;
@@ -725,6 +775,35 @@ struct Reader {
     return Value::eof();
   }
 };
+
+struct StringReader {
+  Reader* reader;
+  std::stringstream ss;
+
+  StringReader(State& state, std::string str, const std::string& desc = "anonymous") {
+    ss << str;
+    reader = new Reader(state, ss);
+    reader->file = desc.compare("anoymous") == 0 ? 1 : state.register_file(desc);
+  }
+
+  ~StringReader() {
+    delete reader;
+  }
+
+  Reader* operator->() {
+    return reader;
+  }
+};
+
+/** Macro for giving descriptive source info for Scheme code in C strings e.g.
+  * asdf.cpp:57:c-string */
+#define AR_STRING_READER_AUX(x) #x
+
+#define AR_STRING_READER_AUX2(x) AR_STRING_READER_AUX(x)
+
+#define AR_STRING_READER(name, state, string) \
+  StringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRING_READER_AUX2(__LINE__)));
+
 
 // Various inline functions
 
@@ -776,6 +855,5 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
 }
 
 } // namespace arete
-
 
 #endif // ARETE_HPP

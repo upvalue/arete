@@ -2,8 +2,8 @@
 
 # Variables
 CXX := clang++
-CXXFLAGS := -std=c++11 -Wall -g3 -Os -fno-exceptions -fno-rtti
-LDFLAGS := -g3 
+CXXFLAGS := -std=c++11 -Wall -g3 -O3 -fno-exceptions -fno-rtti
+LDFLAGS := -g3  -O3
 
 # Fancy color compilation
 define colorecho

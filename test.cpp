@@ -320,8 +320,18 @@ TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
   AR_FRAME(state, x)
   x = reader.read();
 
-  std::cout << x << std::endl;
 }
+
+TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
+  AR_STRING_READER(reader, state, "(hello)");
+  Value x = reader->read();
+
+  bool found;
+  std::cout << x << std::endl;
+  std::cout << state.source_info(x, found) << std::endl;
+  AR_ASSERT(found);
+}
+
 
 /*
 TEST_CASE_FIXTURE(AS, "read a list") {
