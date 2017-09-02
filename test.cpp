@@ -46,6 +46,7 @@ TEST_CASE("constant representation") {
   CHECK(t.bits == 2);
   CHECK(f.bits == 6);
   CHECK(nil.bits == 10);
+  CHECK(nil.bits != f.bits);
   CHECK(eof.bits == 18);
   CHECK(unspec.bits == 14);
 
@@ -255,9 +256,6 @@ TEST_CASE_FIXTURE(AS, "read boolean constants") {
   Value f = reader.read();
   Value t = reader.read();
 
-  std::cout << "value: " << t.bits << std::endl;
-  std::cout << f << std::endl;
-
   CHECK(t.type() == CONSTANT);
   CHECK(f.type() == CONSTANT);
 
@@ -275,3 +273,61 @@ TEST_CASE_FIXTURE(AS, "read a symbol") {
   std::string check("hello");
   CHECK(check.compare(sym.symbol_name()) == 0);
 }
+
+TEST_CASE_FIXTURE(AS, "read a list") {
+  std::stringstream ss("(1 2 3)");
+  Reader reader(state, ss);
+
+  Value lst;
+  AR_FRAME(state, lst);
+  lst = reader.read();
+
+  CHECK(lst.type() == PAIR);
+}
+
+TEST_CASE_FIXTURE(AS, "read a dotted list") {
+  std::stringstream ss("(1 . 2)");
+  Reader reader(state, ss);
+
+  Value lst;
+  AR_FRAME(state, lst);
+  lst = reader.read();
+
+  CHECK(lst.cdr() == Value::make_fixnum(2));
+}
+
+struct ASB {
+  ASB() {
+    state.boot();
+  }
+
+  ~ASB() {
+
+  }
+
+  State state;
+};
+
+TEST_CASE_FIXTURE(ASB, "state.boot") {
+
+}
+
+TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
+  std::stringstream ss("'hello");
+  Reader reader(state, ss);
+
+  Value x;
+  AR_FRAME(state, x)
+  x = reader.read();
+
+  std::cout << x << std::endl;
+}
+
+/*
+TEST_CASE_FIXTURE(AS, "read a list") {
+  std::stringstream ss("(1 2 3)");
+  Reader reader(state, ss);
+
+  Value sym;
+}
+*/

@@ -62,6 +62,10 @@ namespace arete {
 struct State;
 struct Block;
 struct Value;
+struct SourceLocation;
+struct Pair;
+
+std::ostream& operator<<(std::ostream& os,  Value);
 
 ///// # (TYPE) REPRESENTATION OF SCHEME VALUES
 
@@ -102,12 +106,13 @@ enum {
 // Constants:
 
 enum {
-  C_TRUE = 2,          // 0000 0010 #t
-  C_FALSE = 6,         // 0000 0110 #f
-  C_NIL = 10,          // 0000 1010 ()
-  C_UNSPECIFIED = 14 , // 0000 1110 #<unspecified> 
-  C_EOF = 18,          // 0001 0010 #<eof>
-  C_RPAREN = 30,       // 0001 1110 #<rparen>
+  C_TRUE = 2,             // 0000 0010 #t
+  C_FALSE = 6,            // 0000 0110 #f
+  C_NIL = 10,             // 0000 1010 ()
+  C_UNSPECIFIED = 14 ,    // 0000 1110 #<unspecified> 
+  C_EOF = 18,             // 0001 0010 #<eof>
+  C_TK_RPAREN = 30,       // 0001 1110 #<token-rparen>
+  C_TK_DOT  = 46,         // 0010 1110 #<token-dot>
 };
 
 // A heap-allocated, garbage-collected value.
@@ -147,6 +152,12 @@ struct String : HeapValue {
   const char data[1];
 };
 
+struct VectorData;
+
+struct Vector : HeapValue {
+  VectorData* data;
+};
+
 struct Value {
   union {
     HeapValue* heap;
@@ -184,7 +195,7 @@ struct Value {
   // CONSTANTS
   unsigned constant_value() const {
     AR_ASSERT(type() == CONSTANT);
-    return bits == 2 ? C_TRUE : C_FALSE;
+    return bits;
   }
 
   static Value t() { return C_TRUE; }
@@ -208,11 +219,15 @@ struct Value {
   // PAIRS
   Value car() const;
   Value cdr() const;
+  void set_car(Value);
+  void set_cdr(Value);
 
   bool pair_has_source() const {
     AR_ASSERT(type() == PAIR);
     return heap->get_header() & 512;
   }
+
+  SourceLocation* pair_src() const;
 
   // OPERATORS
 
@@ -220,17 +235,25 @@ struct Value {
   inline bool operator==(const Value& other) const {
     return bits == other.bits;
   }
+
+  inline bool operator!=(const Value& other) const { return bits != other.bits; }
 };
 
 /** Identifies a particular piece of code */
-struct SourceInfo {
-  size_t file, procedure, line, column;
+struct SourceLocation {
+  SourceLocation(): file(0), line(0), column(0) {}
+  size_t file, line, column;
 };
 
 struct Pair : HeapValue {
   Value data_car, data_cdr;
-  SourceInfo src;
+  SourceLocation src;
 };
+
+inline SourceLocation* Value::pair_src() const {
+  AR_ASSERT(type() == PAIR);
+  return &(static_cast<Pair*>(heap)->src);
+}
 
 inline Value Value::car() const {
   AR_ASSERT(type() == PAIR);
@@ -241,6 +264,21 @@ inline Value Value::cdr() const {
   AR_ASSERT(type() == PAIR);
   return static_cast<Pair*>(heap)->data_cdr;
 }
+
+inline void Value::set_car(Value v) {
+  AR_ASSERT(type() == PAIR);
+  static_cast<Pair*>(heap)->data_car = v;
+}
+
+inline void Value::set_cdr(Value v) {
+  AR_ASSERT(type() == PAIR);
+  static_cast<Pair*>(heap)->data_cdr = v;
+}
+
+struct VectorData: HeapValue {
+  size_t length, capacity;
+  Value data[1];
+};
 
 ///// (GC) Garbage collector
 
@@ -263,6 +301,7 @@ struct FrameHack {
  * objects and update pointers to them if necessary */
 struct Frame {
   Frame(State& state, size_t size, HeapValue*** values);
+  Frame(State* state, size_t size, HeapValue*** values);
   ~Frame();
 
   GC& gc;
@@ -293,6 +332,7 @@ struct Block {
 
 /** Garbage collector */
 struct GC {
+  State& state;
   std::vector<Frame*> frames;
   std::vector<Block*> blocks;
   // Position in the *blocks* vector
@@ -307,7 +347,7 @@ struct GC {
   unsigned char mark_bit;
   size_t block_size;
 
-  GC(): block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
+  GC(State& state_): state(state_), block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
       live_memory_after_collection(0), allocated_memory(ARETE_BLOCK_SIZE), mark_bit(1), block_size(ARETE_BLOCK_SIZE) {
     Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
     blocks.push_back(b);
@@ -352,6 +392,8 @@ struct GC {
     }
   }
 
+  void mark_symbol_table();
+
   void collect() {
     ARETE_LOG_GC("collecting");
     collections++;
@@ -374,6 +416,8 @@ struct GC {
         }
       }
     }
+
+    mark_symbol_table();
 
     ARETE_LOG_GC("found " << live_objects_after_collection << " live objects taking up " <<
       live_memory_after_collection << "b")
@@ -475,12 +519,22 @@ struct State {
   symbol_table_t symbol_table;
   std::vector<std::string> source_names;
 
-  State(): gc() {}
+  State(): gc(*this) {}
   ~State() {
     // Free symbol names
     for(symbol_table_t::const_iterator x = symbol_table.begin(); x != symbol_table.end(); ++x) {
       free((void*) x->second->name);
     }
+  }
+
+  /** Performs various initializations required for an instance of Arete;
+    * this is separate so the State itself can be used for lightweight testing */
+  void boot() {
+    // We do these side-effecting calls here to ensure that no allocations are required
+    // when these symbols are used.
+
+    get_symbol("quote"); get_symbol("quasiquote"); get_symbol("unquote");
+
   }
 
   // Value creation; all of these will cause allocations
@@ -510,6 +564,7 @@ struct State {
   }
 
   Value make_pair(Value car = Value::f(), Value cdr = Value::f()) {
+    AR_FRAME(this, car, cdr);
     Pair* heap = (Pair*) gc.allocate(PAIR, sizeof(Pair) - sizeof(Pair::src));
     heap->data_car = car;
     heap->data_cdr = cdr;
@@ -525,6 +580,13 @@ struct State {
   }
 
 };
+
+inline void GC::mark_symbol_table() {
+  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
+  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
+    mark(x->second);
+  }
+}
 
 ///// (READ) Reader
 
@@ -548,8 +610,6 @@ struct Reader {
   /** Read a single expression */
   Value read() {
     char c;
-    Value head, current;
-    AR_FRAME(state, head, current);
     while(is >> c) {
       if(c >= '0' && c <= '9') {
         // Fixnums
@@ -587,9 +647,63 @@ struct Reader {
       } else if(c == ' ' || c == '\r' || c == '\t') {
         // Ignore
       } else if(c == '(') {
+        // Read a list
+        Value head, tail, elt, swap;
+        AR_FRAME(state, head, tail, elt, swap);
 
+        // Attach source code information
+        /*
+        SourceLocation loc;
+        loc.file = file;
+        loc.line = line;
+        *(head.pair_src()) = loc;
+        */
+
+        while(true) {
+          elt = read();
+
+          if(elt == C_TK_DOT) {
+            elt = read();
+            if(elt == C_TK_RPAREN) {
+              AR_ASSERT(!"unexpected RPAREN");
+            }
+            tail.set_cdr(elt);
+            break;
+            AR_ASSERT(!"no dots");
+          } else if(elt == C_TK_RPAREN) {
+            break;
+          }
+
+          swap = state.make_pair(elt, Value::nil());
+
+          if(head.bits == 0) {
+            head = tail = swap;
+          } else {
+            tail.set_cdr(swap);
+            tail = swap;
+          }
+        }
+
+        // Read a list.
+        return head;
       } else if(c == ')') {
-        return C_RPAREN;
+        return C_TK_RPAREN;
+      } else if(c == '.') {
+        return C_TK_DOT;
+      } else if(c == '\'') {
+        Value expr;
+        AR_FRAME(state, expr);
+        expr = read();
+        expr = state.make_pair(expr, C_NIL);
+        expr = state.make_pair(state.get_symbol("quote"), expr);
+        return expr;
+      } else if(c == '`') {
+        Value expr;
+        AR_FRAME(state, expr);
+        expr = read();
+        expr = state.make_pair(expr, C_NIL);
+        expr = state.make_pair(state.get_symbol("quasiquote"), expr);
+        return expr;
       } else {
         // Symbols
         std::string buffer;
@@ -602,8 +716,7 @@ struct Reader {
           buffer += c;
           is >> c;
         }
-        current = state.get_symbol(buffer);
-        return current;
+        return state.get_symbol(buffer);
       }
     }
     return Value::eof();
@@ -616,6 +729,10 @@ inline Frame::Frame(State& state, size_t size_, HeapValue*** ptrs): gc(state.gc)
   gc.frames.push_back(this);
 }
 
+inline Frame::Frame(State* state, size_t size_, HeapValue*** ptrs): gc(state->gc), size(size_), values(ptrs) {
+  gc.frames.push_back(this);
+}
+
 inline Frame::~Frame() {
   AR_ASSERT(gc.frames.back() == this);
   gc.frames.pop_back();
@@ -623,38 +740,29 @@ inline Frame::~Frame() {
 
 // Output Scheme values
 
-inline std::ostream& operator<<(std::ostream& os, Value& v) {
+inline std::ostream& operator<<(std::ostream& os, Value v) {
   switch(v.type()) {
     case FIXNUM: return os << v.fixnum_value(); break;
     case CONSTANT: 
       switch(v.constant_value()) {
         case C_TRUE: return os << "#t";
+        case C_NIL: return os << "()";
         case C_FALSE: return os << "#f";
         case C_EOF: return os << "#<eof>";
         case C_UNSPECIFIED: return os << "#<unspecified>";
-        case C_NIL: return os << "()";
+        default: os << "<unknown constant>";
       }
     case FLONUM:
       return os << v.flonum_value(); 
     case SYMBOL:
       return os << v.symbol_name();
     case PAIR: {
-      os << '('; 
-      Value pare = v;
-      while(true) {
-        Value car = pare.car();
-        os << car;
-        Value cdr = pare.cdr();
-        if(cdr.type() == PAIR) {
-          pare = cdr;
-        } else if(cdr.type() == CONSTANT && cdr.constant_value() == C_NIL) {
-          os << ')';
-          break;
-        } else {
-          os << " . ";
-          os << cdr;
-          break;
-        }
+      os << '(' << v.car();
+      for(v = v.cdr(); v.type() == PAIR; v = v.cdr())  {
+        os << ' ' << v.car();
+      }
+      if(v != C_NIL) {
+        os << " . " << v;
       }
       return os << ')';
     }
