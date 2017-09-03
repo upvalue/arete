@@ -979,10 +979,12 @@ struct Reader {
 
           if(is.eof()) return read_error("unexpected EOF in character literal");
 
+          if(c2 == ' ') return state.make_char(c2);
+
           // Get character afterwards; if it's a letter, this
           // may be #\space or #\newline etc
           char c3 = is.peek();
-          if(!is.eof() && ((c3 >= 'A' && c3 <= 'Z') || (c3 >= 'a' || c <= 'z'))) {
+          if(!is.eof() && ((c3 >= 'A' && c3 <= 'Z') || (c3 >= 'a' && c <= 'z'))) {
             Value symbol = read_symbol(c2);
             // TODO: These should be saved off
             // and compared by identity
@@ -991,6 +993,8 @@ struct Reader {
             } else if(symbol.symbol_equals("space")) {
               c2 = ' ';
             } else {
+              std::string s(symbol.symbol_name());
+              std::cout << s.size() << " \"" << s << "\"" << std::endl;
               std::ostringstream os;
               os << "unknown character constant #\\" << symbol;
               return read_error(os.str());
