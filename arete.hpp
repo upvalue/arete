@@ -1287,21 +1287,19 @@ struct Reader {
 
 /** Converts a C++ string to an std::istream for reading expressions */
 struct StringReader {
-  Reader* reader;
   std::stringstream ss;
+  Reader reader;
 
-  StringReader(State& state, std::string str, const std::string& desc = "anonymous") {
-    ss << str;
-    reader = new Reader(state, ss);
-    reader->file = desc.compare("anoymous") == 0 ? 1 : state.register_file(desc);
+  StringReader(State& state, std::string str, const std::string& desc = "anonymous"): ss(str), reader(state, ss) {
+    reader.file = desc.compare("anoymous") == 0 ? 1 : state.register_file(desc);
   }
 
   ~StringReader() {
-    delete reader;
+    // delete reader;
   }
 
   Reader* operator->() {
-    return reader;
+    return &reader;
   }
 };
 

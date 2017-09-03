@@ -1,5 +1,6 @@
 * TODO Runtime
   Write a type-checking cast rather than using a bunch of asserts. Should also give a backtrace?
+
 * TODO Value representation
   + [ ] Vectors
   + [x] Chars
