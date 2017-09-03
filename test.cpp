@@ -1,6 +1,5 @@
 // test.cpp - arete runtime tests with doctest
 
-#define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
 
 #include <sstream>
 
@@ -33,8 +32,7 @@ TEST_CASE("fixnum representation") {
 }
 
 TEST_CASE("constant representation") {
-  Value t = Value::t(), f = Value::f(), nil = Value::nil(), eof = Value::eof(), unspec =
-    Value::unspecified();
+  Value t = C_TRUE, f = C_FALSE, nil = C_NIL, eof = C_EOF, unspec = C_UNSPECIFIED;
   
   CHECK(t.type() == CONSTANT);
   CHECK(f.type() == CONSTANT);
@@ -43,7 +41,7 @@ TEST_CASE("constant representation") {
   CHECK(unspec.type() == CONSTANT);
 
   // Comparison operator
-  CHECK(t == Value::t());
+  CHECK(t == C_TRUE);
 
   CHECK(t.bits == 2);
   CHECK(f.bits == 6);
@@ -52,7 +50,6 @@ TEST_CASE("constant representation") {
   CHECK(eof.bits == 18);
   CHECK(unspec.bits == 14);
 
-  std::cout << t << ' ' << f << ' ' << nil << std::endl;
 }
 
 TEST_CASE("gc alignment works") {
@@ -161,11 +158,9 @@ TEST_CASE_FIXTURE(AS, "gc marking recursive values") {
 
   state.gc.collect();
 
-  std::cout << f1 << std::endl;
   CHECK(state.gc.live(p.heap));
   CHECK(state.gc.live(f1.heap));
   CHECK(state.gc.live(f2.heap));
-  std::cout << p << std::endl;
 }
 
 TEST_CASE_FIXTURE(AS, "gc collection failure") {
@@ -294,7 +289,6 @@ TEST_CASE_FIXTURE(AS, "character literals") {
   AR_FRAME(state, s);
   s = state.make_char('a');
   CHECK(s.type() == CHARACTER);
-  std::cout << s << std::endl;
   CHECK(s.character() == 'a');
 }
 
@@ -307,7 +301,7 @@ TEST_CASE_FIXTURE(AS, "read fixnum") {
   CHECK(x.type() == FIXNUM);
   CHECK(x.fixnum_value() == 12345);
   Value e = reader.read();
-  CHECK(e == Value::eof());
+  CHECK(e == C_EOF);
 }
 
 TEST_CASE_FIXTURE(AS, "read boolean constants") {
@@ -320,8 +314,8 @@ TEST_CASE_FIXTURE(AS, "read boolean constants") {
   CHECK(t.type() == CONSTANT);
   CHECK(f.type() == CONSTANT);
 
-  CHECK(t == Value::t());
-  CHECK(f == Value::f());
+  CHECK(t == C_TRUE);
+  CHECK(f == C_FALSE);
 }
 
 TEST_CASE_FIXTURE(AS, "read a symbol") {
@@ -390,7 +384,6 @@ TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
 TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
   AR_STRING_READER(reader, state, "(hello)");
   Value x = reader->read();
-  std::cout << x << std::endl;
 
 }
 
@@ -484,7 +477,6 @@ TEST_CASE_FIXTURE(ASB, "reader vectors") {
   CHECK(x.type() == VECTOR);
   CHECK(x.vector_length() == 0);
 
-  std::cout << x << std::endl;
 
   AR_STRING_READER(reader2, state, "#(0 1 2 3 4)");
   x = reader2->read();

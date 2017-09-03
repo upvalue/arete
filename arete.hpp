@@ -113,14 +113,15 @@ enum {
   BLOCK = 3,
   // No pointers
   FLONUM = 4,
-  SYMBOL = 5,
-  STRING = 6,
-  CHARACTER = 7,
+  STRING = 5,
+  CHARACTER = 6,
+  SYMBOL = 7,
   // Pointers
   VECTOR = 9,
   VECTOR_STORAGE = 10,
   PAIR = 11, 
   EXCEPTION = 12,
+  FUNCTION = 13,
 };
 
 // Constants:
@@ -162,9 +163,6 @@ struct Flonum : HeapValue {
   double number;  
 };
 
-struct Symbol : HeapValue {
-  const char* name;
-};
 
 struct String : HeapValue {
   size_t bytes;
@@ -193,7 +191,7 @@ struct Value {
   /** Safely retrieve the type of an object */
   unsigned int type() const {
     if(bits & 1) return FIXNUM;
-    else if(bits & 2) return CONSTANT;    
+    else if(bits & 2 || bits == 0) return CONSTANT;    
     else return heap->get_type();
   }
 
@@ -215,12 +213,6 @@ struct Value {
     AR_ASSERT(type() == CONSTANT);
     return bits;
   }
-
-  static Value t() { return C_TRUE; }
-  static Value f() { return C_FALSE; }
-  static Value nil() { return C_NIL; }
-  static Value unspecified() { return C_UNSPECIFIED; }
-  static Value eof() { return C_EOF; }
 
   // FLONUMS
   double flonum_value() const {
@@ -260,10 +252,7 @@ struct Value {
   }
 
   // SYMBOLS
-  const char* symbol_name() const {
-    AR_TYPE_ASSERT(type() == SYMBOL);
-    return static_cast<Symbol*>(heap)->name;
-  }
+  const char* symbol_name() const;
 
   bool symbol_equals(const char* s) const {
     std::string cmp(s);
@@ -302,6 +291,15 @@ struct Value {
 };
 
 // Below here: inline definitions of things that need Value to be declared
+
+struct Symbol : HeapValue {
+  const char* name;
+};
+
+inline const char* Value::symbol_name() const {
+  AR_TYPE_ASSERT(type() == SYMBOL);
+  return static_cast<Symbol*>(heap)->name;
+}
 
 /** 
  * Identifies a location in source code. File is an integer that corresponds to a string in
@@ -570,6 +568,7 @@ struct GC {
       ARETE_LOG_GC(load_factor << "% of memory is still live after collection, adding a block");
       block_size *= 2;
       Block* b = new Block(block_size, mark_bit);
+      allocated_memory += block_size;
       blocks.push_back(b);
     }
   }
@@ -713,7 +712,7 @@ struct State {
   }
 
   /** cons */
-  Value make_pair(Value car = Value::f(), Value cdr = Value::f(),
+  Value make_pair(Value car = C_FALSE, Value cdr = C_FALSE,
       size_t size = sizeof(Pair) - sizeof(Pair::src)) {
     AR_FRAME(this, car, cdr);
     Pair* heap = (Pair*) gc.allocate(PAIR, size);
@@ -767,6 +766,7 @@ struct State {
 
   /** Mutating vector append */
   void vector_append(Value vector, Value value) {
+    AR_TYPE_ASSERT(vector.type() == VECTOR);
     // std::cout << "vector_append" << std::endl;
     VectorStorage* store = static_cast<VectorStorage*>(vector.vector_storage().heap);
 
@@ -899,12 +899,13 @@ struct Reader {
   }
 
   /** Return an error */
-  Value read_error(const std::string& description, bool begin = false, size_t begin_line = 0) {
+  Value read_error(const std::string& description, size_t begin_line = 0) {
     std::ostringstream os;
-    SourceLocation loc(file, begin ? begin_line : line);
+    SourceLocation loc(file, begin_line || line);
 
     os << state.source_info(&loc) << ' ';
-    if(begin) {
+    if(begin_line != 0) {
+      // If a beginning line has been provided
       os << "in list: ";
     } 
     os << description;
@@ -945,8 +946,7 @@ struct Reader {
     return_token = TK_NONE;
     while(!is.eof()) {
       switch(c) {
-        case ' ': case '\r': case '\t': case '\n':
-          getc(c); return;
+        case ' ': case '\r': case '\t': case '\n': getc(c); continue;
         case ')': getc(c); return_token = TK_RPAREN; return;
         case ']': getc(c); return_token = TK_RBRACKET; return;
         case '.': getc(c); return_token = TK_DOT; return;
@@ -1050,15 +1050,19 @@ struct Reader {
         Value head, tail, elt, swap;
         SourceLocation list_start = save();
         AR_FRAME(state, head, tail, elt, swap);
+        bool dotted = false;
 
         // Attach source code information
         while(true) {
           Token tk;
           elt = read_expr(tk);
+          if(dotted) {
+            return read_error("expected one expression after dot in list but got multiple", list_start.line);
+          }
 
           if(elt == C_EOF) {
             AR_ASSERT(is.eof());
-            return read_error("unexpected EOF in list", true, list_start.line);
+            return read_error("unexpected EOF in list", list_start.line);
           } else if(elt.is_active_exception()) {
             return elt;
           }
@@ -1070,13 +1074,14 @@ struct Reader {
 
           // TODO: NEED A WAY TO CHECK ) HERE
           if(tk == TK_DOT) {
+            dotted = true;
             elt = read_expr(tk);
             if(elt == C_EOF) {
-              return read_error("unexpected EOF after dot", true, list_start.line);
+              return read_error("unexpected EOF after dot", list_start.line);
             } else if(elt.is_active_exception()) {
               return elt;
             } else if(tk == match) {
-              return read_error(") right after dot (expected expression)", true, list_start.line);
+              return read_error("expected expression after dot but got )", list_start.line);
             } 
 
             peek_token(tk);
@@ -1084,9 +1089,8 @@ struct Reader {
               tail.set_cdr(elt);
               return head;
             } else {
-              return read_error("expected ) after last element in dotted list", true, list_start.line);
+              dotted = true;
             }
-
           } else if(tk == match) {
             break;
           } else if(tk == TK_RPAREN || tk == TK_RBRACKET) {
@@ -1094,10 +1098,10 @@ struct Reader {
             // which bracket shouldn't match
 
             // TODO: Do a better job of reporting mismatch
-            return read_error("unexpected bracket in list", true, list_start.line);
+            return read_error("unexpected bracket in list",  list_start.line);
           }
 
-          swap = make_pair(elt, Value::nil());
+          swap = make_pair(elt, C_NIL);
 
           if(head.bits == 0) {
             head = tail = swap;

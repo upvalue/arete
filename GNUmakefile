@@ -1,10 +1,11 @@
--include site.mk
-
 # Variables
 CXX := clang++
-CFLAGS := -g3 -O3
-CXXFLAGS := -std=c++11 -fno-exceptions -fno-rtti $(CFLAGS)
-LDFLAGS := -g3  -O3
+CFLAGS := $(CFLAGS) -g3 -O3
+CXXFLAGS := $(CPPFLAGS) -std=c++11 -fno-exceptions -fno-rtti $(CFLAGS)
+LDFLAGS := $(LDFLAGS) -g3  -O3
+
+-include site.mk
+
 
 # Fancy color compilation
 define colorecho
