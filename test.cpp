@@ -355,7 +355,7 @@ TEST_CASE_FIXTURE(AS, "read a dotted list") {
   lst = reader.read();
 
   CHECK(lst.car() == Value::make_fixnum(1));
-  CHECK(lst.cdr().car() == Value::make_fixnum(2));
+  CHECK(lst.cdr() == Value::make_fixnum(2));
 }
 
 TEST_CASE_FIXTURE(AS, "read a list") {

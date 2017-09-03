@@ -30,6 +30,13 @@
 # define AR_TYPE_ASSERT assert
 #endif 
 
+#define AR_GC_INCREMENTAL 0
+#define AR_GC_SEMISPACE 1
+
+#ifndef AR_GC_MODE
+# define AR_GC_MODE AR_GC_SEMISPACE
+#endif 
+
 #define AR_FRAME(state, ...)  \
   FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
   Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
@@ -292,12 +299,14 @@ struct Value {
 
   inline bool operator!=(const Value& other) const { return bits != other.bits; }
 
-  // CASTING
 };
 
 // Below here: inline definitions of things that need Value to be declared
 
-/** Identifies a particular piece of code */
+/** 
+ * Identifies a location in source code. File is an integer that corresponds to a string in
+ * State::source_files
+ */
 struct SourceLocation {
   SourceLocation(): file(0), line(0) {}
   SourceLocation(size_t file_, size_t line_): file(file_), line(line_) {}
@@ -308,6 +317,8 @@ struct SourceLocation {
 struct Pair : HeapValue {
   Value data_car, data_cdr;
   SourceLocation src;
+
+  static const unsigned char CLASS_TYPE = PAIR;
 };
 
 inline SourceLocation* Value::pair_src() const {
@@ -826,7 +837,10 @@ inline void GC::mark_symbol_table() {
 
 ///// (READ) Reader
 
-// Reader.
+/**
+ * The reader is a dead simple recursive s-expression reader.
+ * It does take pains to track source code information, when possible.
+ */
 struct Reader {
   State& state;
   std::istream is;
@@ -846,10 +860,6 @@ struct Reader {
     TK_RBRACKET,
   };
   
-  struct EofHandler {
-    SourceLocation loc;
-  } eof;
-
   /** Returns true if a char is a separator and therefore
     * should stop reading of symbols, numbers etc */
   static bool is_separator(char c) {
@@ -858,7 +868,8 @@ struct Reader {
       || c == ']' || c == '"';
   }
 
-  // Save source location
+  /** Return current source code location so we'll know where e.g.
+   * an erronous multi-line list began */
   SourceLocation save() {
     return SourceLocation(file, line);
   }
@@ -913,6 +924,7 @@ struct Reader {
     return !is.eof();
   }
 
+  /** Read a symbol */
   Value read_symbol(char c) {
     std::string buffer;
     buffer += c;
@@ -925,6 +937,22 @@ struct Reader {
       is >> c;
     }
     return state.get_symbol(buffer);
+  }
+
+  /** Consumes whitespace until the next token, if there is one */
+  void peek_token(Token& return_token) {
+    char c = is.peek();
+    return_token = TK_NONE;
+    while(!is.eof()) {
+      switch(c) {
+        case ' ': case '\r': case '\t': case '\n':
+          getc(c); return;
+        case ')': getc(c); return_token = TK_RPAREN; return;
+        case ']': getc(c); return_token = TK_RBRACKET; return;
+        case '.': getc(c); return_token = TK_DOT; return;
+        default: return;
+      }
+    }
   }
 
   /** Read a single expression */
@@ -1040,6 +1068,7 @@ struct Reader {
             return C_NIL;
           }
 
+          // TODO: NEED A WAY TO CHECK ) HERE
           if(tk == TK_DOT) {
             elt = read_expr(tk);
             if(elt == C_EOF) {
@@ -1047,14 +1076,24 @@ struct Reader {
             } else if(elt.is_active_exception()) {
               return elt;
             } else if(tk == match) {
-              return read_error("unexpected ) after dot", true, list_start.line);
+              return read_error(") right after dot (expected expression)", true, list_start.line);
             } 
-            tail.set_cdr(elt);
+
+            peek_token(tk);
+            if(tk == match) {
+              tail.set_cdr(elt);
+              return head;
+            } else {
+              return read_error("expected ) after last element in dotted list", true, list_start.line);
+            }
+
           } else if(tk == match) {
             break;
           } else if(tk == TK_RPAREN || tk == TK_RBRACKET) {
             // Little silly: this relies on the above else if failing to catch
             // which bracket shouldn't match
+
+            // TODO: Do a better job of reporting mismatch
             return read_error("unexpected bracket in list", true, list_start.line);
           }
 
@@ -1146,6 +1185,7 @@ struct Reader {
   }
 };
 
+/** Converts a C++ string to an std::istream for reading expressions */
 struct StringReader {
   Reader* reader;
   std::stringstream ss;
@@ -1208,8 +1248,18 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       return os << v.flonum_value(); 
     case SYMBOL:
       return os << v.symbol_name();
-    case STRING:
-      return os << '"' << v.string_data() << '"';
+    case STRING: {
+      const char* data = v.string_data();
+      os << '"';
+      for(size_t i = 0; i != v.string_bytes(); i++) {
+        switch(data[i]) { 
+          case '"': os << "\\\""; break;
+          case '\\': os << "\\\\"; break;
+          default: os << data[i]; break;
+        }
+      }
+      return os << '"';;
+    }
     case PAIR: {
       os << '(' << v.car();
       for(v = v.cdr(); v.type() == PAIR; v = v.cdr())  {

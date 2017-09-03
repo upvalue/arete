@@ -44,6 +44,7 @@ int main(int argc, const char **argv) {
     std::cout << "Arete 0.1" << std::endl;
 
     char* line = 0;
+    linenoiseHistorySetMaxLen(1024);
 
     while(i++) {
       line = linenoise("> ");
@@ -51,6 +52,8 @@ int main(int argc, const char **argv) {
       if(!line) {
         break;
       }
+
+      linenoiseHistoryAdd(line);
 
       std::ostringstream os;
       os << "repl:" << i - 1;
