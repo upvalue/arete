@@ -272,9 +272,7 @@ TEST_CASE_FIXTURE(AS, "vectors") {
     CHECK(v.type() == VECTOR);
     for(size_t i = 0; i != 100; i++) {
       state.vector_append(v, Value::make_fixnum(i));
-      state.gc.collect();
     }
-    state.gc.collect();
     for(size_t i = 0; i != 100; i++) {
       CHECK(v.vector_ref(i) == Value::make_fixnum(i));
     }
@@ -383,11 +381,8 @@ TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
 TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
   AR_STRING_READER(reader, state, "(hello)");
   Value x = reader->read();
-
-  bool found;
   std::cout << x << std::endl;
-  std::cout << state.source_info(x, found) << std::endl;
-  CHECK(found);
+
 }
 
 
@@ -453,11 +448,23 @@ TEST_CASE_FIXTURE(ASB, "reader string") {
   CHECK(x.string_equals("hello world"));
 }
 
-/*
 TEST_CASE_FIXTURE(ASB, "reader character literals") {
-  AR_STRING_READER(reader, state, "#\a");
+  AR_STRING_READER(reader, state, "#\\a");
   Value x = reader->read();
   CHECK(x.type() == CHARACTER);
   CHECK(x.character() == 'a');
+
+  AR_STRING_READER(reader2, state, "#\\newline");
+  x = reader2->read();
+  CHECK(x.type() == CHARACTER);
+  CHECK(x.character() == '\n');
+
+  AR_STRING_READER(reader3, state, "#\\unknown");
+  x = reader3->read();
+  CHECK(x.type() == EXCEPTION);
+
+  // eof in character literal
+  AR_STRING_READER(reader4, state, "#\\")
+  x = reader4->read();
+  CHECK(x.type() == EXCEPTION);
 }
-*/

@@ -291,6 +291,8 @@ struct Value {
   }
 
   inline bool operator!=(const Value& other) const { return bits != other.bits; }
+
+  // CASTING
 };
 
 // Below here: inline definitions of things that need Value to be declared
@@ -734,7 +736,6 @@ struct State {
 
   Value make_vector_storage(size_t capacity) {
     size_t size = (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity);
-    std::cout << "allocating vector storage of capacity " << capacity << std::endl;
     VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE,
       (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity)));
 
@@ -952,23 +953,34 @@ struct Reader {
         if(c == 't' || c == 'f') {
           is >> c;
           return c == 't' ? C_TRUE : C_FALSE;
-        } else if(c == '\'') {
+        } else if(c == '\\') {
+          is >> c; // consume \
+
           // Character literals
           // Get character
-          getc(c);
+          char c2;
+          getc(c2);
+
+          if(is.eof()) return read_error("unexpected EOF in character literal");
 
           // Get character afterwards; if it's a letter, this
           // may be #\space or #\newline etc
           char c3 = is.peek();
-          if((c3 >= 'A' && c3 <= 'Z') || (c3 >= 'a' || c <= 'z')) {
-            Value symbol = read_symbol(c3);
+          if(!is.eof() && ((c3 >= 'A' && c3 <= 'Z') || (c3 >= 'a' || c <= 'z'))) {
+            Value symbol = read_symbol(c2);
+            // TODO: These should be saved off
+            // and compared by identity
             if(symbol.symbol_equals("newline")) {
-              c = '\n';
+              c2 = '\n';
             } else if(symbol.symbol_equals("space")) {
-              c = ' ';
+              c2 = ' ';
+            } else {
+              std::ostringstream os;
+              os << "unknown character constant #\\" << symbol;
+              return read_error(os.str());
             }
-          }
-          return state.make_char(c);
+          } 
+          return state.make_char(c2);
         } else {
           return read_error("invalid sharp syntax");
         }

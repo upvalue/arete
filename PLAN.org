@@ -2,10 +2,13 @@
   Write a type-checking cast rather than using a bunch of asserts. Should also give a backtrace?
 * TODO Value representation
   + [ ] Vectors
-  + [ ] Chars
+  + [x] Chars
+  + [ ] Chars should not be allocated on heap unless necessary (but also UTF-8 support)
+
 * TODO Garbage collector
-  + [ ] Compaction
+  + [ ] Write a semispace collector
 * TODO Reader
+  + [ ] Bad numbers e.g. "12345cat"
   + [ ] Reads R4RS tests
 * TODO Interpreter
   + [ ] Evaluation
