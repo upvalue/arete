@@ -20,11 +20,19 @@
 #include <vector>
 #include <unordered_map>
 
-// Assertion macro
+/** General assertions. */
 #ifndef AR_ASSERT
 # define AR_ASSERT assert
+#endif
+
+/** Type assertions when dealing with dynamic types; should probably be left on */
+#ifndef AR_TYPE_ASSERT
 # define AR_TYPE_ASSERT assert
 #endif 
+
+#define AR_FRAME(state, ...)  \
+  FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
+  Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
 
 // Block size.
 #ifndef AR_BLOCK_SIZE
@@ -115,8 +123,6 @@ enum {
   C_NIL = 10,             // 0000 1010 ()
   C_UNSPECIFIED = 14 ,    // 0000 1110 #<unspecified> 
   C_EOF = 18,             // 0001 0010 #<eof>
-  C_TK_RPAREN = 30,       // 0001 1110 #<token-rparen>
-  C_TK_DOT  = 46,         // 0010 1110 #<token-dot>
 };
 
 // A heap-allocated, garbage-collected value.
@@ -373,9 +379,6 @@ struct Frame {
   HeapValue*** values;
 };
 
-#define AR_FRAME(state, ...)  \
-  FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
-  Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
 
 struct Block {
   char* data;
@@ -447,6 +450,7 @@ struct GC {
     switch(v->get_type()) {
       case FLONUM:
       case STRING:
+      case SYMBOL:
         return;
       case PAIR:
         mark(static_cast<Pair*>(v)->data_car.heap);
@@ -462,6 +466,7 @@ struct GC {
         goto again;
       default:
       case BLOCK: case FIXNUM: case CONSTANT:
+        std::cout << v->get_type() << std::endl;
         AR_ASSERT(!"arete:gc: bad value on heap; probably a GC bug"); break;
     }
   }
@@ -644,9 +649,12 @@ struct State {
     }
   }
 
-  Value make_pair(Value car = Value::f(), Value cdr = Value::f()) {
+  /** cons */
+  Value make_pair(Value car = Value::f(), Value cdr = Value::f(),
+      size_t size = sizeof(Pair) - sizeof(Pair::src)) {
     AR_FRAME(this, car, cdr);
-    Pair* heap = (Pair*) gc.allocate(PAIR, sizeof(Pair) - sizeof(Pair::src));
+    Pair* heap = (Pair*) gc.allocate(PAIR, size);
+
     heap->data_car = car;
     heap->data_cdr = cdr;
     return heap;
@@ -654,12 +662,10 @@ struct State {
 
   /** Generate a pair with source code information */
   Value make_src_pair(Value car, Value cdr, SourceLocation& loc) {
-    AR_FRAME(this, car, cdr);
-    Pair* heap = static_cast<Pair*>(gc.allocate(PAIR, sizeof(Pair)));
-    heap->data_car = car;
-    heap->data_cdr = cdr;
-    heap->header += 512;
-    Value pare(heap);
+    Value pare;
+    AR_FRAME(this, pare, car, cdr);
+    pare = make_pair(car, cdr, sizeof(Pair));
+    pare.heap->header += 512;
     pare.set_pair_src(loc);
 
     AR_ASSERT(pare.type() == PAIR);
@@ -678,7 +684,7 @@ struct State {
     return heap;
   }
 
-  Value make_exception(const std::string& ctag, const std::string& cmessage, Value irritants = C_FALSE) {
+  Value make_exception(const std::string& ctag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
     Value tag, message, exc;
     AR_FRAME(this, tag, message, irritants, exc);
     Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
@@ -726,7 +732,7 @@ struct Reader {
   size_t file, line, column;
 
   Reader(State& state_, std::istream& is_):
-    state(state_), is(is_.rdbuf()), file(0), line(1), column(1) {
+    state(state_), is(is_.rdbuf()), file(0), line(1), column(0) {
     // No skipping whitespace because we need to track lines
     is >> std::noskipws;
     }
@@ -736,6 +742,7 @@ struct Reader {
     TK_NONE, 
     TK_RPAREN,
     TK_DOT,
+    TK_RBRACKET,
   };
   
   struct EofHandler {
@@ -747,7 +754,7 @@ struct Reader {
   static bool is_separator(char c) {
     return c == '#' || c == '(' || c == ')' ||
       c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '[' 
-      || c == ']';
+      || c == ']' || c == '"';
   }
 
   // Save source location
@@ -766,7 +773,7 @@ struct Reader {
     return expr;
   }
 
-  /** Make a pair at current source location */
+  /** Make a pair annotated with current source location */
   Value make_pair(Value car, Value cdr = C_NIL) {
     Value pair;
     AR_FRAME(state, pair, car, cdr);
@@ -804,6 +811,7 @@ struct Reader {
           c = is.peek();
           if(c >= '0' && c <= '9') {
             is >> c;
+            column++;
             number = (number * 10) + (c - '0');
           } else {
             break;
@@ -813,30 +821,31 @@ struct Reader {
       } else if(c == '#') {
         // Constants (#t, #f)
         c = is.peek();
-        if(c == 't') {
+        if(c == 't' || c == 'f') {
           is >> c;
-          return Value::t();
-        } else if(c == 'f') {
-          is >> c;
-          return Value::f();
+          column++;
+          return c == 't' ? C_TRUE : C_FALSE;
         } else {
-          AR_ASSERT(!"bad!");
+          return read_error("invalid sharp syntax");
         }
       } else if(c == ';') {
         // Comments
         while(true) {
           c = is.peek();
-          if(is.eof() || c == '\n')  {
-            if(c == '\n') line++;
-            continue;
+          // EOF in comment
+          if(is.eof()) return C_EOF;
+          else if(c == '\n') {
+            break;
           }
+          is >> c;
         }
       } else if(c == '\n') {
         column = 1;
         line++;
       } else if(c == ' ' || c == '\r' || c == '\t') {
         // Ignore
-      } else if(c == '(') {
+      } else if(c == '(' || c == '[') {
+        Token match = c == '(' ? TK_RPAREN : TK_RBRACKET;
         // Read a list
         Value head, tail, elt, swap;
         SourceLocation list_start = save();
@@ -851,35 +860,27 @@ struct Reader {
             return read_error("unexpected EOF in list", true, list_start.line);
           }
 
+          // ()
+          if(tk == match && head.bits == 0) {
+            return C_NIL;
+          }
+
           if(tk == TK_DOT) {
             elt = read_expr(tk);
             if(elt == C_EOF) {
               return read_error("unexpected EOF after dot", true, list_start.line);
-            } else if(tk == TK_RPAREN) {
+            } else if(tk == match) {
               return read_error("unexpected ) after dot", true, list_start.line);
-            }
+            } 
             tail.set_cdr(elt);
-          } else if(tk == TK_RPAREN) {
+          } else if(tk == match) {
             break;
+          } else if(tk == TK_RPAREN || tk == TK_RBRACKET) {
+            // Little silly: this relies on the above else if failing to catch
+            // which bracket shouldn't match
+            return read_error("unexpected bracket in list", true, list_start.line);
           }
 
-          /*
-          if(elt == C_TK_DOT) {
-            elt = read();
-            if(tail.bits == 0) {
-              AR_ASSERT(!"unexpected dot");
-            }
-            if(elt == C_TK_RPAREN) {
-              AR_ASSERT(!"unexpected RPAREN");
-            }
-            tail.set_cdr(elt);
-            break;
-            AR_ASSERT(!"no dots");
-          } else if(elt == C_TK_RPAREN) {
-            break;
-          }
-
-          */
           swap = make_pair(elt, Value::nil());
 
           if(head.bits == 0) {
@@ -895,6 +896,9 @@ struct Reader {
       } else if(c == ')') {
         return_token = TK_RPAREN;
         return C_FALSE;
+      } else if(c == ']') {
+        return_token = TK_RBRACKET;
+        return C_FALSE;
       } else if(c == '.') {
         return_token = TK_DOT;
         return C_FALSE;
@@ -905,6 +909,7 @@ struct Reader {
       } else if(c == ',') {
         c = is.peek();
         if(c == '@') {
+          is >> c;
           return read_aux("unquote-splicing");
         } 
         return read_aux("unquote");
@@ -959,8 +964,9 @@ struct StringReader {
   }
 };
 
+
 /** Macro for giving descriptive source info for Scheme code in C strings e.g.
-  * asdf.cpp:57:c-string */
+  * c-string@asdf.cpp:351 */
 #define AR_STRINGIZE2(x) #x
 
 #define AR_STRINGIZE(x) AR_STRINGIZE2(x)
@@ -1013,6 +1019,12 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os << ')';
     }
+    case EXCEPTION:
+      os << "#<exception '" << v.exception_tag() << " " << v.exception_message();
+      if(v.exception_irritants() != C_UNSPECIFIED) {
+        os << ' ' << v.exception_irritants();
+      }
+      return os << '>';
     default: 
       return os << "<unknown>";
   }

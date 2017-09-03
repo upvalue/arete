@@ -40,3 +40,6 @@ test: test.o linenoise.o
 
 count:
 	cloc arete.hpp
+
+clean:
+	rm -f arete test *.o

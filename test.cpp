@@ -373,7 +373,6 @@ TEST_CASE_FIXTURE(ASB, "EOF in list") {
 
   Value x = reader->read();
   CHECK(x.type() == EXCEPTION);
-  std::cout << x.exception_message() << std::endl;
 }
 
 TEST_CASE_FIXTURE(ASB, "EOF in list") {
@@ -383,4 +382,42 @@ TEST_CASE_FIXTURE(ASB, "EOF in list") {
   CHECK(x.type() == EXCEPTION);
 }
 
+TEST_CASE_FIXTURE(ASB, "dot at toplevel") {
+  AR_STRING_READER(reader, state, ".");
+  CHECK(reader->read().type() == EXCEPTION);
+}
+
+TEST_CASE_FIXTURE(ASB, "nil") {
+  AR_STRING_READER(reader, state, "()");
+  CHECK(reader->read() == C_NIL);
+  AR_STRING_READER(reader2, state, "(                       )");
+  CHECK(reader2->read() == C_NIL);
+  AR_STRING_READER(reader3, state, "[]");
+  CHECK(reader3->read() == C_NIL);
+}
+
+TEST_CASE_FIXTURE(ASB, "bracketed nil") {
+}
+
+TEST_CASE_FIXTURE(ASB, "mismatched brackets") {
+  AR_STRING_READER(reader, state, "(]");
+  CHECK(reader->read().type() == EXCEPTION);
+}
 // TEST_CASE_FIXTURE(ASB, G)
+
+TEST_CASE_FIXTURE(ASB, "define") {
+  AR_STRING_READER(reader, state, "(define x #t)");
+  Value x = reader->read();
+  std::cout << x.type() << std::endl;
+}
+
+TEST_CASE_FIXTURE(ASB, "comment EOF") {
+  AR_STRING_READER(reader, state, ";; hello world");
+  CHECK(reader->read() == C_EOF);
+}
+
+TEST_CASE_FIXTURE(ASB, "comment lines") {
+  AR_STRING_READER(reader, state, ";;1\n;;2\n;;3\n")
+  CHECK(reader->read() == C_EOF);
+  CHECK(reader->line == 4);
+}
