@@ -508,7 +508,6 @@ struct GC {
         v = static_cast<Vector*>(v)->storage.heap;
         goto again;
       case VECTOR_STORAGE: {
-        std::cout << "collecting vector storage of size " << v->size << std::endl;
         size_t length = static_cast<VectorStorage*>(v)->length;
         if(length == 0) return;
         for(size_t i = 0; i != length - 1; i++) {
@@ -1085,16 +1084,30 @@ struct Reader {
         // Strings
         std::string buffer;
         while(true) {
-          c = is.peek();
+          getc(c);
           if(is.eof()) {
             return read_error("unexpected EOF in string");
           } else if(c == '"') {
-            is >> c;
             break;
+          } else if(c == '\\') {
+            getc(c); // get escape code
+            if(c == 'n') {
+              buffer += '\n';
+            } else if(c == 't') {
+              buffer += '\t';
+            } else if(c == 'r') {
+              buffer += '\r';
+            } else if(c == '"' || c == '\\') {
+              buffer += c;
+            } else {
+              std::ostringstream os;
+              os << "unknown string escape \\" << c;
+              return read_error(os.str());
+            }
+            continue;
           }
           
           buffer += c;
-          is >> c;
         }
         return state.make_string(buffer);
       } else if(c == ',') {

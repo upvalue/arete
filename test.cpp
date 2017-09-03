@@ -264,6 +264,15 @@ TEST_CASE_FIXTURE(AS, "strings") {
   state.gc.collect();
 }
 
+TEST_CASE_FIXTURE(AS, "string escapes") {
+  Value s;
+  AR_FRAME(state, s);
+  AR_STRING_READER(reader, state, "\"hey\\n\"");
+  s = reader->read();
+  CHECK(s.type() == STRING);
+  CHECK(s.string_equals("hey\n"));
+}
+
 TEST_CASE_FIXTURE(AS, "vectors") {
   Value v;
   {
