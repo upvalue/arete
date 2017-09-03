@@ -468,3 +468,26 @@ TEST_CASE_FIXTURE(ASB, "reader character literals") {
   x = reader4->read();
   CHECK(x.type() == EXCEPTION);
 }
+
+TEST_CASE_FIXTURE(ASB, "reader vectors") {
+  AR_STRING_READER(reader, state, "#()");
+  Value x = reader->read();
+  CHECK(x.type() == VECTOR);
+  CHECK(x.vector_length() == 0);
+
+  std::cout << x << std::endl;
+
+  AR_STRING_READER(reader2, state, "#(0 1 2 3 4)");
+  x = reader2->read();
+  CHECK(x.type() == VECTOR);
+  CHECK(x.vector_length() == 5);
+
+  for(size_t i = 0; i != x.vector_length(); i++) {
+    CHECK(x.vector_ref(i) == Value::make_fixnum(i));
+  }
+
+  // EOF in vector
+  AR_STRING_READER(reader3, state, "#(1 2");
+  x = reader3->read();
+  CHECK(x.type() == EXCEPTION);
+}

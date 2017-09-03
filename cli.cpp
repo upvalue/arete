@@ -43,7 +43,6 @@ int main(int argc, const char **argv) {
 
     std::cout << "Arete 0.1" << std::endl;
 
-
     char* line = 0;
 
     while(i++) {
@@ -54,7 +53,7 @@ int main(int argc, const char **argv) {
       }
 
       std::ostringstream os;
-      os << "repl:" << i;
+      os << "repl:" << i - 1;
       StringReader reader(state, line, os.str());
       
       while(x != C_EOF) { 

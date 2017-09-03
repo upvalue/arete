@@ -425,7 +425,6 @@ struct Frame {
   HeapValue*** values;
 };
 
-
 struct Block {
   char* data;
   size_t size;
@@ -948,15 +947,32 @@ struct Reader {
         }
         return Value::make_fixnum(number);
       } else if(c == '#') {
-        // Constants (#t, #f)
-        c = is.peek();
+        getc(c); // consume first char
         if(c == 't' || c == 'f') {
-          is >> c;
+          // Constants (#t, #f)
           return c == 't' ? C_TRUE : C_FALSE;
-        } else if(c == '\\') {
-          is >> c; // consume \
+        } else if(c == '(') {
+          // Vectors 
+          Value vec, x;
+          AR_FRAME(state, vec, x);
 
+          vec = state.make_vector();
+          Token tk = TK_NONE;
+          while(true) {
+            x = read_expr(tk);
+            if(x == C_EOF) {
+              return read_error("unexpected EOF in vector");
+            }
+            if(tk == TK_RPAREN) break;
+            else if(tk == TK_DOT || tk == TK_RBRACKET) {
+              return read_error("unexpected token in vector");
+            }
+            state.vector_append(vec, x);
+          }
+          return vec;
+        } else if(c == '\\') {
           // Character literals
+
           // Get character
           char c2;
           getc(c2);
@@ -1196,6 +1212,12 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       return os << v.character();
     }
     case VECTOR:
+      os << "#(";
+      for(size_t i = 0; i != v.vector_length(); i++) {
+        os << v.vector_ref(i);
+        if(i != v.vector_length() - 1) os << ' ';
+      }
+      return os << ')';
     case EXCEPTION:
       os << "#<exception '" << v.exception_tag() << " " << v.exception_message();
       if(v.exception_irritants() != C_UNSPECIFIED) {
