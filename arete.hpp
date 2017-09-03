@@ -564,7 +564,7 @@ struct GC {
         block_cursor += v->size;
       }
 
-      ARETE_LOG_GC("block " << block_i << " ( " << blocks[block_i]->size << "b) out of room, moving on");
+      ARETE_LOG_GC("block " << block_i << " (" << blocks[block_i]->size << "b) out of room, moving on");
 
       block_i++;
       block_cursor = 0;
@@ -906,7 +906,28 @@ struct Reader {
         return read_aux("quote");
       } else if(c == '`') {
         return read_aux("quasiquote");
+      } else if(c == '"') {
+        // Strings
+        std::string buffer;
+        while(true) {
+          c = is.peek();
+          if(is.eof())
+            return read_error("unexpected EOF in string");
+          else if(c == '\n') {
+            line++;
+            column = 0;
+          } else if(c == '"') {
+            column++;
+            break;
+          }
+          
+          buffer += c;
+          is >> c;
+          column++;
+        }
+        return state.make_string(buffer);
       } else if(c == ',') {
+        // unquote and unquote-splicing
         c = is.peek();
         if(c == '@') {
           is >> c;

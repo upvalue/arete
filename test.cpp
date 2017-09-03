@@ -17,6 +17,8 @@ TEST_CASE("info") {
   std::cout << "sizeof(HeapValue): " << sizeof(HeapValue) << std::endl;
 }
 
+///// (TYPE) Testing value representation
+
 TEST_CASE("fixnum representation") {
   Value x = Value::make_fixnum(12345);
 
@@ -85,6 +87,18 @@ TEST_CASE("heap values work") {
 struct AS {
   State state;
 };
+
+// A fixture that creates, boots and deletes a new state for each test
+struct ASB {
+  ASB() { state.boot(); }
+  ~ASB() {}
+
+  State state;
+};
+
+TEST_CASE_FIXTURE(ASB, "state.boot") {}
+
+///// (GC) GARBAGE COLLECTOR TESTS
 
 TEST_CASE_FIXTURE(AS, "gc allocation") {
   Value f = state.make_flonum(0.0);
@@ -230,6 +244,8 @@ TEST_CASE_FIXTURE(AS, "gc large object allocation") {
 }
 */
 
+///// VALUES
+
 TEST_CASE_FIXTURE(AS, "symbol interning") {
   Value x, y;
   AR_FRAME(state, x, y);
@@ -248,7 +264,8 @@ TEST_CASE_FIXTURE(AS, "strings") {
   state.gc.collect();
 }
 
-///// READER
+///// (READ) READER
+
 TEST_CASE_FIXTURE(AS, "read fixnum") {
   std::stringstream ss("12345");
   Reader reader(state, ss);
@@ -327,16 +344,6 @@ TEST_CASE_FIXTURE(AS, "exceptions") {
 
 }
 
-struct ASB {
-  ASB() { state.boot(); }
-  ~ASB() {}
-
-  State state;
-};
-
-///// $MORE READER TESTS
-
-TEST_CASE_FIXTURE(ASB, "state.boot") {}
 
 TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
   std::stringstream ss("'hello");
@@ -358,19 +365,15 @@ TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
 }
 
 
-
 TEST_CASE_FIXTURE(ASB, "EOF in dotted list") {
   AR_STRING_READER(reader, state, "(.\n");
 
   Value x = reader->read();
-
   CHECK(x.type() == EXCEPTION);
-  std::cout << x << std::endl;
 }
 
 TEST_CASE_FIXTURE(ASB, "EOF in list") {
   AR_STRING_READER(reader, state, "\n\n(\n\n");
-
   Value x = reader->read();
   CHECK(x.type() == EXCEPTION);
 }
@@ -408,7 +411,6 @@ TEST_CASE_FIXTURE(ASB, "mismatched brackets") {
 TEST_CASE_FIXTURE(ASB, "define") {
   AR_STRING_READER(reader, state, "(define x #t)");
   Value x = reader->read();
-  std::cout << x.type() << std::endl;
 }
 
 TEST_CASE_FIXTURE(ASB, "comment EOF") {
@@ -417,7 +419,15 @@ TEST_CASE_FIXTURE(ASB, "comment EOF") {
 }
 
 TEST_CASE_FIXTURE(ASB, "comment lines") {
-  AR_STRING_READER(reader, state, ";;1\n;;2\n;;3\n")
+  AR_STRING_READER(reader, state, ";;1\n;;2\n;;3\n");
   CHECK(reader->read() == C_EOF);
   CHECK(reader->line == 4);
+}
+
+TEST_CASE_FIXTURE(ASB, "reader string") {
+  AR_STRING_READER(reader, state, "\"hello world\"");
+  Value x = reader->read();
+  std::cout << x << std::endl;
+  //CHECK(x.type() == STRING);
+  //CHECK(x.string_equals("hello world"));
 }
