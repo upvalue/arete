@@ -258,10 +258,37 @@ TEST_CASE_FIXTURE(AS, "strings") {
   Value s;
   AR_FRAME(state, s);
   s = state.make_string("hello world");
-  AR_ASSERT(s.type() == STRING);
-  AR_ASSERT(s.string_equals("hello world"));
+  CHECK(s.type() == STRING);
+  CHECK(s.string_equals("hello world"));
 
   state.gc.collect();
+}
+
+TEST_CASE_FIXTURE(AS, "vectors") {
+  Value v;
+  {
+    AR_FRAME(state, v);
+    v = state.make_vector();
+    CHECK(v.type() == VECTOR);
+    for(size_t i = 0; i != 100; i++) {
+      state.vector_append(v, Value::make_fixnum(i));
+      state.gc.collect();
+    }
+    state.gc.collect();
+    for(size_t i = 0; i != 100; i++) {
+      CHECK(v.vector_ref(i) == Value::make_fixnum(i));
+    }
+    CHECK(v.vector_length() == 100);
+  }
+}
+
+TEST_CASE_FIXTURE(AS, "character literals") {
+  Value s;
+  AR_FRAME(state, s);
+  s = state.make_char('a');
+  CHECK(s.type() == CHARACTER);
+  std::cout << s << std::endl;
+  CHECK(s.character() == 'a');
 }
 
 ///// (READ) READER
@@ -344,7 +371,6 @@ TEST_CASE_FIXTURE(AS, "exceptions") {
 
 }
 
-
 TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
   std::stringstream ss("'hello");
   Reader reader(state, ss);
@@ -361,7 +387,7 @@ TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
   bool found;
   std::cout << x << std::endl;
   std::cout << state.source_info(x, found) << std::endl;
-  AR_ASSERT(found);
+  CHECK(found);
 }
 
 
@@ -385,12 +411,12 @@ TEST_CASE_FIXTURE(ASB, "EOF in list") {
   CHECK(x.type() == EXCEPTION);
 }
 
-TEST_CASE_FIXTURE(ASB, "dot at toplevel") {
+TEST_CASE_FIXTURE(ASB, "reader dot at toplevel") {
   AR_STRING_READER(reader, state, ".");
   CHECK(reader->read().type() == EXCEPTION);
 }
 
-TEST_CASE_FIXTURE(ASB, "nil") {
+TEST_CASE_FIXTURE(ASB, "reader nil") {
   AR_STRING_READER(reader, state, "()");
   CHECK(reader->read() == C_NIL);
   AR_STRING_READER(reader2, state, "(                       )");
@@ -399,26 +425,22 @@ TEST_CASE_FIXTURE(ASB, "nil") {
   CHECK(reader3->read() == C_NIL);
 }
 
-TEST_CASE_FIXTURE(ASB, "bracketed nil") {
-}
-
-TEST_CASE_FIXTURE(ASB, "mismatched brackets") {
+TEST_CASE_FIXTURE(ASB, "reader mismatched brackets") {
   AR_STRING_READER(reader, state, "(]");
   CHECK(reader->read().type() == EXCEPTION);
 }
-// TEST_CASE_FIXTURE(ASB, G)
 
-TEST_CASE_FIXTURE(ASB, "define") {
+TEST_CASE_FIXTURE(ASB, "reader define") {
   AR_STRING_READER(reader, state, "(define x #t)");
   Value x = reader->read();
 }
 
-TEST_CASE_FIXTURE(ASB, "comment EOF") {
+TEST_CASE_FIXTURE(ASB, "reader comment EOF") {
   AR_STRING_READER(reader, state, ";; hello world");
   CHECK(reader->read() == C_EOF);
 }
 
-TEST_CASE_FIXTURE(ASB, "comment lines") {
+TEST_CASE_FIXTURE(ASB, "reader comment lines") {
   AR_STRING_READER(reader, state, ";;1\n;;2\n;;3\n");
   CHECK(reader->read() == C_EOF);
   CHECK(reader->line == 4);
@@ -427,7 +449,15 @@ TEST_CASE_FIXTURE(ASB, "comment lines") {
 TEST_CASE_FIXTURE(ASB, "reader string") {
   AR_STRING_READER(reader, state, "\"hello world\"");
   Value x = reader->read();
-  std::cout << x << std::endl;
-  //CHECK(x.type() == STRING);
-  //CHECK(x.string_equals("hello world"));
+  CHECK(x.type() == STRING);
+  CHECK(x.string_equals("hello world"));
 }
+
+/*
+TEST_CASE_FIXTURE(ASB, "reader character literals") {
+  AR_STRING_READER(reader, state, "#\a");
+  Value x = reader->read();
+  CHECK(x.type() == CHARACTER);
+  CHECK(x.character() == 'a');
+}
+*/

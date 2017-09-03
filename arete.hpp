@@ -108,11 +108,12 @@ enum {
   FLONUM = 4,
   SYMBOL = 5,
   STRING = 6,
+  CHARACTER = 7,
   // Pointers
-  VECTOR = 8,
-  VECTOR_DATA = 9,
-  PAIR = 10, 
-  EXCEPTION = 11,
+  VECTOR = 9,
+  VECTOR_STORAGE = 10,
+  PAIR = 11, 
+  EXCEPTION = 12,
 };
 
 // Constants:
@@ -163,10 +164,9 @@ struct String : HeapValue {
   char data[1];
 };
 
-struct VectorData;
-
-struct Vector : HeapValue {
-  VectorData* data;
+// TODO: These should not be heap-allocated if possible.
+struct Char : HeapValue {
+  char datum;
 };
 
 struct Value {
@@ -221,6 +221,11 @@ struct Value {
     return static_cast<Flonum*>(heap)->number;
   }
 
+  // VECTORS
+  Value vector_storage() const;
+  Value vector_ref(size_t i) const;
+  size_t vector_length() const;
+
   // STRINGS
   const char* string_data() const {
     AR_TYPE_ASSERT(type() == STRING);
@@ -241,10 +246,21 @@ struct Value {
     return string_equals(cmp);
   }
 
+  // CHARACTERS
+  char character() const {
+    AR_TYPE_ASSERT(type() == CHARACTER);
+    return static_cast<Char*>(heap)->datum;
+  }
+
   // SYMBOLS
   const char* symbol_name() const {
     AR_TYPE_ASSERT(type() == SYMBOL);
     return static_cast<Symbol*>(heap)->name;
+  }
+
+  bool symbol_equals(const char* s) const {
+    std::string cmp(s);
+    return cmp.compare(symbol_name()) == 0;
   }
 
   // PAIRS
@@ -276,6 +292,8 @@ struct Value {
 
   inline bool operator!=(const Value& other) const { return bits != other.bits; }
 };
+
+// Below here: inline definitions of things that need Value to be declared
 
 /** Identifies a particular piece of code */
 struct SourceLocation {
@@ -322,6 +340,8 @@ inline void Value::set_cdr(Value v) {
   static_cast<Pair*>(heap)->data_cdr = v;
 }
 
+/// EXCEPTIONS
+
 struct Exception : HeapValue {
   Value tag, message, irritants;
 };
@@ -345,10 +365,34 @@ inline Value Value::exception_irritants() const {
   return static_cast<Exception*>(heap)->irritants;
 }
 
-struct VectorData: HeapValue {
+/// VECTORS
+
+struct VectorStorage : HeapValue {
   size_t length, capacity;
   Value data[1];
 };
+
+struct Vector : HeapValue {
+  Value storage;
+};
+
+inline Value Value::vector_storage() const {
+  AR_TYPE_ASSERT(type() == VECTOR);
+  return static_cast<Vector*>(heap)->storage;
+}
+
+inline Value Value::vector_ref(size_t i) const {
+  // TODO: Should this enforce bounds checking? Should it return an exception?
+  AR_TYPE_ASSERT(type() == VECTOR);
+  VectorStorage* store = static_cast<VectorStorage*>(static_cast<Vector*>(heap)->storage.heap);
+  return store->data[i];
+}
+
+inline size_t Value::vector_length() const {
+  AR_TYPE_ASSERT(type() == VECTOR);
+  VectorStorage* store = static_cast<VectorStorage*>(static_cast<Vector*>(heap)->storage.heap);
+  return store->length;
+}
 
 ///// (GC) Garbage collector
 
@@ -448,9 +492,7 @@ struct GC {
     AR_ASSERT(live(v));
 
     switch(v->get_type()) {
-      case FLONUM:
-      case STRING:
-      case SYMBOL:
+      case FLONUM: case STRING: case SYMBOL: case CHARACTER:
         return;
       case PAIR:
         mark(static_cast<Pair*>(v)->data_car.heap);
@@ -462,8 +504,18 @@ struct GC {
         v = static_cast<Exception*>(v)->irritants.heap;
         goto again;
       case VECTOR:
-        v = static_cast<Vector*>(v)->data;
+        v = static_cast<Vector*>(v)->storage.heap;
         goto again;
+      case VECTOR_STORAGE: {
+        std::cout << "collecting vector storage of size " << v->size << std::endl;
+        size_t length = static_cast<VectorStorage*>(v)->length;
+        if(length == 0) return;
+        for(size_t i = 0; i != length - 1; i++) {
+          mark(static_cast<VectorStorage*>(v)->data[i].heap);
+        }
+        v = static_cast<VectorStorage*>(v)->data[length - 1].heap;
+        goto again;
+      }
       default:
       case BLOCK: case FIXNUM: case CONSTANT:
         std::cout << v->get_type() << std::endl;
@@ -674,6 +726,56 @@ struct State {
     return pare;
   }
 
+  Value make_char(char c) {
+    Char* heap = static_cast<Char*>(gc.allocate(CHARACTER, sizeof(Char)));
+    heap->datum = c;
+    return heap;
+  }
+
+  Value make_vector_storage(size_t capacity) {
+    size_t size = (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity);
+    std::cout << "allocating vector storage of capacity " << capacity << std::endl;
+    VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE,
+      (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity)));
+
+    storage->capacity = capacity;
+    storage->length = 0;
+
+    return storage;
+  }
+
+  Value make_vector(size_t capacity = 2) {
+    Value vec, storage;
+
+    AR_FRAME(this, vec, storage);
+    vec.heap = static_cast<Vector*>(gc.allocate(VECTOR, sizeof(Vector)));
+    storage = make_vector_storage(capacity);
+    static_cast<Vector*>(vec.heap)->storage = storage;
+
+    return vec;
+  }
+
+  /** Mutating vector append */
+  void vector_append(Value vector, Value value) {
+    // std::cout << "vector_append" << std::endl;
+    VectorStorage* store = static_cast<VectorStorage*>(vector.vector_storage().heap);
+
+    store->data[store->length++] = value;
+    
+    AR_ASSERT(store->length <= store->capacity);
+    if(store->length == store->capacity) {
+      Value storage = store, new_storage;
+      AR_FRAME(this, vector, value, storage);
+
+      new_storage = make_vector_storage(store->capacity * 2);
+      store = static_cast<VectorStorage*>(vector.vector_storage().heap);
+      static_cast<VectorStorage*>(new_storage.heap)->length = store->length;
+      
+      memcpy(static_cast<VectorStorage*>(new_storage.heap)->data, store->data, sizeof(Value) * store->length);
+      static_cast<Vector*>(vector.heap)->storage = new_storage;
+    }
+  }
+
   Value make_string(const std::string& body) {
     String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + body.size()));
     heap->bytes = body.size();
@@ -762,7 +864,7 @@ struct Reader {
     return SourceLocation(file, line);
   }
 
-  /** Read quasiquote and friends */
+  /** cons quote/quasiquote and friends with an expression */
   Value read_aux(const std::string& name) {
     Value symbol, expr;
     AR_FRAME(state, symbol, expr);
@@ -800,6 +902,7 @@ struct Reader {
     return state.make_exception("read-error", os.str());
   }
 
+  /** getc that tracks line/column information */
   bool getc(char& c) {
     is >> c;
     if(is.eof()) return false;
@@ -809,6 +912,20 @@ struct Reader {
     }
     column++;
     return !is.eof();
+  }
+
+  Value read_symbol(char c) {
+    std::string buffer;
+    buffer += c;
+    while(true) {
+      c = is.peek();
+      if(is.eof() || is_separator(c)) {
+        break;
+      }
+      buffer += c;
+      is >> c;
+    }
+    return state.get_symbol(buffer);
   }
 
   /** Read a single expression */
@@ -835,6 +952,23 @@ struct Reader {
         if(c == 't' || c == 'f') {
           is >> c;
           return c == 't' ? C_TRUE : C_FALSE;
+        } else if(c == '\'') {
+          // Character literals
+          // Get character
+          getc(c);
+
+          // Get character afterwards; if it's a letter, this
+          // may be #\space or #\newline etc
+          char c3 = is.peek();
+          if((c3 >= 'A' && c3 <= 'Z') || (c3 >= 'a' || c <= 'z')) {
+            Value symbol = read_symbol(c3);
+            if(symbol.symbol_equals("newline")) {
+              c = '\n';
+            } else if(symbol.symbol_equals("space")) {
+              c = ' ';
+            }
+          }
+          return state.make_char(c);
         } else {
           return read_error("invalid sharp syntax");
         }
@@ -946,17 +1080,7 @@ struct Reader {
           return_token = TK_DOT;
           return C_FALSE;
         }
-        std::string buffer;
-        buffer += c;
-        while(true) {
-          c = is.peek();
-          if(is.eof() || is_separator(c)) {
-            break;
-          }
-          buffer += c;
-          is >> c;
-        }
-        return state.get_symbol(buffer);
+        return read_symbol(c);
       }
     }
     // Should not be reached unless there is an actual EOF
@@ -1051,6 +1175,15 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os << ')';
     }
+    case CHARACTER: {
+      os << "#\\";
+      switch(v.character()) {
+        case '\n': return os << "newline";
+        case ' ': return os << "space";
+      }
+      return os << v.character();
+    }
+    case VECTOR:
     case EXCEPTION:
       os << "#<exception '" << v.exception_tag() << " " << v.exception_message();
       if(v.exception_irritants() != C_UNSPECIFIED) {
