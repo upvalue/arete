@@ -24,6 +24,7 @@ int main(int argc, const char **argv) {
     std::stringstream ss;
     ss << file_handle.rdbuf();
     Reader reader(state, ss);
+    reader.file = state.register_file(argv[1]);
     while(true) {
       x = reader.read();
       if(x == C_EOF) {

@@ -766,8 +766,10 @@ struct Reader {
   Value read_aux(const std::string& name) {
     Value symbol, expr;
     AR_FRAME(state, symbol, expr);
-    symbol = state.get_symbol(name);
     expr = read();
+    if(expr.is_active_exception())
+      return expr;
+    symbol = state.get_symbol(name);
     expr = state.make_pair(expr, C_NIL);
     expr = state.make_pair(symbol, expr);
     return expr;
@@ -791,19 +793,29 @@ struct Reader {
 
     os << state.source_info(&loc) << ' ';
     if(begin) {
-      os << "in list beginning at: ";
+      os << "in list: ";
     } 
     os << description;
 
     return state.make_exception("read-error", os.str());
   }
 
+  bool getc(char& c) {
+    is >> c;
+    if(is.eof()) return false;
+    if(c == '\n') {
+      line++;
+      column = 0;
+    }
+    column++;
+    return !is.eof();
+  }
+
   /** Read a single expression */
   Value read_expr(Token& return_token) {
     return_token = TK_NONE;
     char c;
-    while(is >> c) {
-      column++;
+    while(getc(c)) {
       if(c >= '0' && c <= '9') {
         // Fixnums
         ptrdiff_t number = c - '0';
@@ -811,7 +823,6 @@ struct Reader {
           c = is.peek();
           if(c >= '0' && c <= '9') {
             is >> c;
-            column++;
             number = (number * 10) + (c - '0');
           } else {
             break;
@@ -823,7 +834,6 @@ struct Reader {
         c = is.peek();
         if(c == 't' || c == 'f') {
           is >> c;
-          column++;
           return c == 't' ? C_TRUE : C_FALSE;
         } else {
           return read_error("invalid sharp syntax");
@@ -839,11 +849,8 @@ struct Reader {
           }
           is >> c;
         }
-      } else if(c == '\n') {
-        column = 1;
-        line++;
-      } else if(c == ' ' || c == '\r' || c == '\t') {
-        // Ignore
+      } else if(c == ' ' || c == '\r' || c == '\t' || c == '\n') {
+        // Eat whitespace
       } else if(c == '(' || c == '[') {
         Token match = c == '(' ? TK_RPAREN : TK_RBRACKET;
         // Read a list
@@ -857,7 +864,10 @@ struct Reader {
           elt = read_expr(tk);
 
           if(elt == C_EOF) {
+            AR_ASSERT(is.eof());
             return read_error("unexpected EOF in list", true, list_start.line);
+          } else if(elt.is_active_exception()) {
+            return elt;
           }
 
           // ()
@@ -869,6 +879,8 @@ struct Reader {
             elt = read_expr(tk);
             if(elt == C_EOF) {
               return read_error("unexpected EOF after dot", true, list_start.line);
+            } else if(elt.is_active_exception()) {
+              return elt;
             } else if(tk == match) {
               return read_error("unexpected ) after dot", true, list_start.line);
             } 
@@ -899,9 +911,6 @@ struct Reader {
       } else if(c == ']') {
         return_token = TK_RBRACKET;
         return C_FALSE;
-      } else if(c == '.') {
-        return_token = TK_DOT;
-        return C_FALSE;
       } else if(c == '\'') {
         return read_aux("quote");
       } else if(c == '`') {
@@ -911,19 +920,15 @@ struct Reader {
         std::string buffer;
         while(true) {
           c = is.peek();
-          if(is.eof())
+          if(is.eof()) {
             return read_error("unexpected EOF in string");
-          else if(c == '\n') {
-            line++;
-            column = 0;
           } else if(c == '"') {
-            column++;
+            is >> c;
             break;
           }
           
           buffer += c;
           is >> c;
-          column++;
         }
         return state.make_string(buffer);
       } else if(c == ',') {
@@ -936,6 +941,11 @@ struct Reader {
         return read_aux("unquote");
       } else {
         // Symbols
+        // Special case: .. is also a valid symbol (really?)
+        if(c == '.' && is.peek() != '.') {
+          return_token = TK_DOT;
+          return C_FALSE;
+        }
         std::string buffer;
         buffer += c;
         while(true) {
@@ -945,12 +955,13 @@ struct Reader {
           }
           buffer += c;
           is >> c;
-          column++;
         }
         return state.get_symbol(buffer);
       }
     }
-    return Value::eof();
+    // Should not be reached unless there is an actual EOF
+    AR_ASSERT(is.eof());
+    return C_EOF;
   }
 
   Value read() {
