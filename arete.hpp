@@ -5,6 +5,7 @@
  * (TYPE) Representation of Scheme values.
  * (GC) Garbage collector
  * (RT) Runtime
+ * (EVAL) Interpreter
  * (READ) S-expression reader
  */
 
@@ -223,6 +224,7 @@ struct Value {
   // VECTORS
   Value vector_storage() const;
   Value vector_ref(size_t i) const;
+  void vector_set(size_t i, Value);
   size_t vector_length() const;
 
   // STRINGS
@@ -253,6 +255,7 @@ struct Value {
 
   // SYMBOLS
   const char* symbol_name() const;
+  Value symbol_value() const;
 
   bool symbol_equals(const char* s) const {
     std::string cmp(s);
@@ -288,17 +291,32 @@ struct Value {
 
   inline bool operator!=(const Value& other) const { return bits != other.bits; }
 
+  // CASTING
+  template <class T> T* as() const {
+    AR_TYPE_ASSERT(type() == T::CLASS_TYPE);
+    return static_cast<T*>(heap);
+  }
+
+  template <class T> T* as() {
+    AR_TYPE_ASSERT(type() == T::CLASS_TYPE);
+    return static_cast<T*>(heap);
+  }
 };
 
 // Below here: inline definitions of things that need Value to be declared
 
 struct Symbol : HeapValue {
   const char* name;
+  Value value;
+  static const unsigned CLASS_TYPE = SYMBOL;
 };
 
 inline const char* Value::symbol_name() const {
-  AR_TYPE_ASSERT(type() == SYMBOL);
-  return static_cast<Symbol*>(heap)->name;
+  return as<Symbol>()->name;
+}
+
+inline Value Value::symbol_value() const {
+  return as<Symbol>()->value;
 }
 
 /** 
@@ -396,7 +414,15 @@ inline Value Value::vector_ref(size_t i) const {
   // TODO: Should this enforce bounds checking? Should it return an exception?
   AR_TYPE_ASSERT(type() == VECTOR);
   VectorStorage* store = static_cast<VectorStorage*>(static_cast<Vector*>(heap)->storage.heap);
+  AR_ASSERT(i < store->length);
   return store->data[i];
+}
+
+inline void Value::vector_set(size_t i, Value val) {
+  AR_TYPE_ASSERT(type() == VECTOR);
+  VectorStorage* store = static_cast<VectorStorage*>(static_cast<Vector*>(heap)->storage.heap);
+  AR_ASSERT(i < store->length);
+  store->data[i] = val;
 }
 
 inline size_t Value::vector_length() const {
@@ -502,8 +528,11 @@ struct GC {
     AR_ASSERT(live(v));
 
     switch(v->get_type()) {
-      case FLONUM: case STRING: case SYMBOL: case CHARACTER:
+      case FLONUM: case STRING: case CHARACTER:
         return;
+      case SYMBOL:
+        v = static_cast<Symbol*>(v)->value.heap;
+        goto again;
       case PAIR:
         mark(static_cast<Pair*>(v)->data_car.heap);
         v = static_cast<Pair*>(v)->data_cdr.heap;
@@ -534,6 +563,10 @@ struct GC {
 
   void mark_symbol_table();
 
+  void compact() {
+
+  }
+
   void collect() {
     ARETE_LOG_GC("collecting");
     collections++;
@@ -557,6 +590,7 @@ struct GC {
       }
     }
 
+    // TODO: Symbol table should be weak
     mark_symbol_table();
 
     ARETE_LOG_GC("found " << live_objects_after_collection << " live objects taking up " <<
@@ -826,6 +860,69 @@ struct State {
       return "unknown";
     }
   }
+
+  ///// (EVAL) Interpreter
+  Value make_env(Value parent = C_FALSE) {
+    Value vec;
+    AR_FRAME(this, vec, parent);
+    vec = make_vector(3);
+    vector_append(vec, parent);
+    return vec;
+  }
+
+  std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
+
+  void env_define(Value env, const std::string& names, Value val) {
+    Value name;
+    AR_FRAME(this, env, name, val);
+    name = get_symbol(names);
+    for(size_t i = 1; i != env.vector_length(); i += 2) {
+      if(env.vector_ref(i) == name) {
+        warn() << "shadowing definition " << names << std::endl;
+        env.vector_set(i+1, val);
+        return;
+      }
+    }
+  }
+
+  void env_set(Value env, const std::string& names, Value val) {
+    Value name;
+    AR_FRAME(this, env, name, val);
+    name = get_symbol(names);
+    for(size_t i = 1; i != env.vector_length(); i += 2) {
+      // TODO error handling
+      if(env.vector_ref(i) == name) {
+        env.vector_set(i+1, val);
+      }
+    }
+  }
+
+  Value env_get(Value env, Value name) {
+    while(env != C_FALSE) {
+      for(size_t i = 1; i != env.vector_length(); i += 2) {
+        if(env.vector_ref(i) == name)
+          return env.vector_ref(i+1);
+      }
+      env = env.vector_ref(0); // check parent environment
+    }
+    // reached toplevel, check symbol.
+    return name.as<Symbol>()->value;
+  }
+
+  Value eval(Value env, Value exp) {
+    if(exp.immediatep()) {
+      return exp;
+    } 
+
+    switch(exp.type()) {
+      case VECTOR: case VECTOR_STORAGE: 
+        return exp;
+      case SYMBOL:
+        return exp.symbol_value();
+    }
+
+    return C_UNSPECIFIED;
+  }
 };
 
 inline void GC::mark_symbol_table() {
@@ -1021,7 +1118,6 @@ struct Reader {
               c2 = ' ';
             } else {
               std::string s(symbol.symbol_name());
-              std::cout << s.size() << " \"" << s << "\"" << std::endl;
               std::ostringstream os;
               os << "unknown character constant #\\" << symbol;
               return read_error(os.str());

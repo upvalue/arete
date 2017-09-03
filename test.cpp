@@ -1,5 +1,7 @@
 // test.cpp - arete runtime tests with doctest
 
+// TODO: These are overly verbose in a lot of places and should be simplified
+
 
 #include <sstream>
 
@@ -187,7 +189,7 @@ TEST_CASE_FIXTURE(AS, "gc collection failure") {
   CHECK_MESSAGE(state.gc.blocks.size() == 2, "additional block was allocated");
 }
 
-TEST_CASE_FIXTURE(AS, "gc allocating dead objects works correctly") {
+TEST_CASE_FIXTURE(AS, "gc reallocating dead objects works correctly") {
   // Allocate fixnums and make half of them dead
   Value vars[FLONUMS_PER_BLOCK];
   memset(vars, 0, FLONUMS_PER_BLOCK * sizeof(Value));
@@ -259,15 +261,6 @@ TEST_CASE_FIXTURE(AS, "strings") {
   state.gc.collect();
 }
 
-TEST_CASE_FIXTURE(AS, "string escapes") {
-  Value s;
-  AR_FRAME(state, s);
-  AR_STRING_READER(reader, state, "\"hey\\n\"");
-  s = reader->read();
-  CHECK(s.type() == STRING);
-  CHECK(s.string_equals("hey\n"));
-}
-
 TEST_CASE_FIXTURE(AS, "vectors") {
   Value v;
   {
@@ -294,22 +287,31 @@ TEST_CASE_FIXTURE(AS, "character literals") {
 
 ///// (READ) READER
 
+TEST_SUITE_BEGIN("reader");
+
 TEST_CASE_FIXTURE(AS, "read fixnum") {
-  std::stringstream ss("12345");
-  Reader reader(state, ss);
-  Value x = reader.read();
+  AR_STRING_READER(reader, state, "12345");
+  Value x = reader->read();
   CHECK(x.type() == FIXNUM);
   CHECK(x.fixnum_value() == 12345);
-  Value e = reader.read();
+  Value e = reader->read();
   CHECK(e == C_EOF);
 }
 
-TEST_CASE_FIXTURE(AS, "read boolean constants") {
-  std::stringstream ss("#f#t");
-  Reader reader(state, ss);
+TEST_CASE_FIXTURE(AS, "read string escapes") {
+  Value s;
+  AR_FRAME(state, s);
+  AR_STRING_READER(reader, state, "\"hey\\n\"");
+  s = reader->read();
+  CHECK(s.type() == STRING);
+  CHECK(s.string_equals("hey\n"));
+}
 
-  Value f = reader.read();
-  Value t = reader.read();
+TEST_CASE_FIXTURE(AS, "read boolean constants") {
+  AR_STRING_READER(reader, state, "#f#t");
+
+  Value f = reader->read();
+  Value t = reader->read();
 
   CHECK(t.type() == CONSTANT);
   CHECK(f.type() == CONSTANT);
@@ -319,44 +321,34 @@ TEST_CASE_FIXTURE(AS, "read boolean constants") {
 }
 
 TEST_CASE_FIXTURE(AS, "read a symbol") {
-  std::stringstream ss("hello");
-  Reader reader(state, ss);
+  AR_STRING_READER(reader, state, "hello");
 
   Value sym;
-  sym = reader.read();
+  sym = reader->read();
 
   std::string check("hello");
   CHECK(check.compare(sym.symbol_name()) == 0);
 }
 
 TEST_CASE_FIXTURE(AS, "read a list") {
-  std::stringstream ss("(1 2 3)");
-  Reader reader(state, ss);
+  AR_STRING_READER(reader, state, "(1 2 3)");
 
   Value lst;
   AR_FRAME(state, lst);
-  lst = reader.read();
+  lst = reader->read();
 
   CHECK(lst.type() == PAIR);
 }
 
 TEST_CASE_FIXTURE(AS, "read a dotted list") {
-  std::stringstream ss("(1 . 2)");
-  Reader reader(state, ss);
+  AR_STRING_READER(reader, state, "(1 . 2)");
 
   Value lst;
   AR_FRAME(state, lst);
-  lst = reader.read();
+  lst = reader->read();
 
   CHECK(lst.car() == Value::make_fixnum(1));
   CHECK(lst.cdr() == Value::make_fixnum(2));
-}
-
-TEST_CASE_FIXTURE(AS, "read a list") {
-  std::stringstream ss("(1 2 3)");
-  Reader reader(state, ss);
-
-  Value sym;
 }
 
 TEST_CASE_FIXTURE(AS, "exceptions") {
@@ -384,9 +376,8 @@ TEST_CASE_FIXTURE(ASB, "read a quoted expression") {
 TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
   AR_STRING_READER(reader, state, "(hello)");
   Value x = reader->read();
-
+  CHECK(x.pair_has_source());
 }
-
 
 TEST_CASE_FIXTURE(ASB, "EOF in dotted list") {
   AR_STRING_READER(reader, state, "(.\n");
@@ -491,4 +482,22 @@ TEST_CASE_FIXTURE(ASB, "reader vectors") {
   AR_STRING_READER(reader3, state, "#(1 2");
   x = reader3->read();
   CHECK(x.type() == EXCEPTION);
+}
+
+TEST_SUITE_END();
+
+///// INTERPRETER TESTS
+
+TEST_CASE_FIXTURE(ASB, "eval") {
+  Value x = Value::make_fixnum(12345);
+  AR_FRAME(state, x);
+
+  x = state.eval(C_FALSE, x);
+  CHECK(x == Value::make_fixnum(12345));
+}
+
+TEST_CASE_FIXTURE(ASB, "eval undefined variable") {
+  Value x = state.get_symbol("hello"), res;
+  AR_FRAME(state, x, res);
+  // res = state.eval(C_FALSE, x);
 }
