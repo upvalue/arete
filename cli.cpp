@@ -1,6 +1,8 @@
 // cli.cpp - arete command line interface 
 // #define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
 
+#define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
+
 #include <fstream>
 #include <iostream>
 
@@ -17,7 +19,7 @@ int main(int argc, const char **argv) {
   Value x, vec;
   AR_FRAME(state, x, vec);
 
-  vec = state.make_vector();
+  // vec = state.make_vector();
   if(argc > 1) {
     // read a file
     const char* file_path = argv[1];
@@ -33,7 +35,7 @@ int main(int argc, const char **argv) {
         break;
       }
 
-      state.vector_append(vec, x);
+      // state.vector_append(vec, x);
 
       if(x.type() == EXCEPTION) {
         std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
@@ -42,7 +44,7 @@ int main(int argc, const char **argv) {
         std::cout << x << std::endl;
       }
     }
-    state.gc.collect();
+    // state.gc.collect();
     // std::cout << vec << std::endl;
   } else {
     size_t i = 1;
@@ -86,5 +88,6 @@ int main(int argc, const char **argv) {
     if(line) free(line);
   }
 
+  std::cout << (state.gc.heap_size / 1024) << "kb after " << state.gc.collections << " collections " << std::endl;
   return 0;
 }

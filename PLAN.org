@@ -10,7 +10,8 @@
   + [ ] Write a semispace collector
 * TODO Reader
   + [ ] Bad numbers e.g. "12345cat"
-  + [ ] Reads R4RS tests
+  + [x] Reads R4RS tests
+  + [ ] R4RS tests GC bug
 * TODO Interpreter
   + [ ] Evaluation
   + [ ] Forms

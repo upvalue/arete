@@ -2,7 +2,6 @@
 
 // TODO: These are overly verbose in a lot of places and should be simplified
 
-
 #include <sstream>
 
 #include "arete.hpp"
@@ -51,7 +50,6 @@ TEST_CASE("constant representation") {
   CHECK(nil.bits != f.bits);
   CHECK(eof.bits == 18);
   CHECK(unspec.bits == 14);
-
 }
 
 TEST_CASE("gc alignment works") {

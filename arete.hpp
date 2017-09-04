@@ -508,17 +508,17 @@ struct GC {
   size_t allocations;
   // Number of total collections
   size_t collections;
-  size_t live_objects_after_collection, live_memory_after_collection, allocated_memory;
+  size_t live_objects_after_collection, live_memory_after_collection, heap_size;
   unsigned char mark_bit;
   size_t block_size;
 
   GC(State& state_): state(state_), handle_list(0), block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
-      live_memory_after_collection(0), allocated_memory(ARETE_BLOCK_SIZE), mark_bit(1), block_size(ARETE_BLOCK_SIZE) {
+      live_memory_after_collection(0), heap_size(ARETE_BLOCK_SIZE), mark_bit(1), block_size(ARETE_BLOCK_SIZE) {
     Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
     blocks.push_back(b);
 
     // Blocks should be allocated dead
-    AR_ASSERT(!live((HeapValue*) b->data));
+    AR_ASSERT(!marked((HeapValue*) b->data));
   }
 
   ~GC() {
@@ -527,7 +527,7 @@ struct GC {
     }
   }
 
-  bool live(HeapValue* v) const {
+  bool marked(HeapValue* v) const {
     return v->get_mark_bit() == mark_bit;
   }
 
@@ -535,15 +535,16 @@ struct GC {
     // We use a GOTO here to avoid creating unnecessary stack frames
   again: 
     // If there is no object or object has already been marked
-    if(v == 0 || Value(v).immediatep() || live(v))
+    if(v == 0 || Value(v).immediatep() || marked(v))
       return;
     
     live_objects_after_collection++;
+    // std::cout << "object of type " << v->get_type() << " is size " << v->size << std::endl;
     live_memory_after_collection += v->size;
 
     v->flip_mark_bit();
 
-    AR_ASSERT(live(v));
+    AR_ASSERT(marked(v));
 
     switch(v->get_type()) {
       case FLONUM: case STRING: case CHARACTER:
@@ -581,18 +582,11 @@ struct GC {
 
   void mark_symbol_table();
 
-  void compact() {
-
-  }
-
   void collect() {
-    ARETE_LOG_GC("collecting");
+    // ARETE_LOG_GC("collecting");
     collections++;
-    live_objects_after_collection = 0;
-    live_memory_after_collection = 0;
-
-    block_i = 0;
-    block_cursor = 0;
+    live_objects_after_collection = live_memory_after_collection = 0;
+    block_i = block_cursor = 0;
 
     // Reverse meaning of mark bit
     mark_bit = !mark_bit;
@@ -615,12 +609,19 @@ struct GC {
       live_memory_after_collection << "b")
 
     // Allocate a new block if memory is getting a little overloaded
-    double load_factor = (live_memory_after_collection * 100) / allocated_memory;
+    double load_factor = (live_memory_after_collection * 100) / heap_size;
+
+    ARETE_LOG_GC("load factor " << live_memory_after_collection << " " << live_objects_after_collection << " " << load_factor);
+    std::cout << "heap_size " << heap_size << std::endl;
+    AR_ASSERT(live_memory_after_collection <= heap_size);
+
     if(load_factor >= ARETE_GC_LOAD_FACTOR) {
       ARETE_LOG_GC(load_factor << "% of memory is still live after collection, adding a block");
       block_size *= 2;
       Block* b = new Block(block_size, mark_bit);
-      allocated_memory += block_size;
+      AR_ASSERT(b->size == block_size);
+      AR_ASSERT(!marked((HeapValue*)b->data));
+      heap_size += block_size;
       blocks.push_back(b);
     }
   }
@@ -638,7 +639,23 @@ struct GC {
         HeapValue* v = (HeapValue*)(blocks[block_i]->data + block_cursor);
 
         AR_ASSERT(v->size > 0); // assert that memory has been initialized with some kind of size
-        if((!live(v) && v->size >= sz)) {
+
+        if((!marked(v))) {
+          // Combine dead objects
+          while(true) {
+            HeapValue* v2 = (HeapValue*)(blocks[block_i]->data + block_cursor + v->size);
+            // If this is at the end of the heap, or this object is alive
+            if(block_cursor + v->size >= blocks[block_i]->size || marked(v2)) {
+              break;
+            }
+            // std::cout << "combining two dead objects " << std::endl;
+            size_t dead_size = v2->size;
+            v->size += dead_size;
+            memset(v2, 0, dead_size);
+          }
+        }
+
+        if((!marked(v) && v->size >= sz)) {
           size_t mem_size = v->size;
 
           // Success!
@@ -653,7 +670,7 @@ struct GC {
             HeapValue* next_object = ((HeapValue*) ((blocks[block_i]->data + block_cursor) + sz));
             next_object->initialize(BLOCK, !mark_bit, mem_size - sz);
 
-            AR_ASSERT(!live(next_object));
+            AR_ASSERT(!marked(next_object));
             AR_ASSERT(next_object->size >= sizeof(Flonum));
 
             block_cursor += sz;
@@ -666,14 +683,18 @@ struct GC {
           memset(memory, 0, sz);
           HeapValue* ret = (HeapValue *) memory;
           ret->initialize(type, mark_bit, sz);
-          AR_ASSERT(live(ret));
+          AR_ASSERT(marked(ret));
 
           AR_ASSERT(((ptrdiff_t) ret & 3) == 0);
 
           // Break up memory as necessary
           ret->size = sz;
           return ret;
+        } else if(!marked(v)) {
+          // Finally mark the object so that when all marks are reversed it will be dead
+          v->flip_mark_bit();
         }
+        // MARK OBJECT AS DEAD AND MOVE ON
 
         block_cursor += v->size;
       }
@@ -688,11 +709,13 @@ struct GC {
 
     if(!collected) {
       // No room, run a collection
+      ARETE_LOG_GC("out of room, attempting collection for allocation of size " << size);
       collect();
       collected = true;
       goto retry;
     } else {
       // Collection has failed to create enough space. Give up.
+      ARETE_LOG_GC("allocation of size " << size << " failed");
       AR_ASSERT(!"out of room; allocation failed");
       return 0;
     }
@@ -735,9 +758,6 @@ struct State {
     // when these symbols are used.
     get_symbol("quote"); get_symbol("quasiquote"); get_symbol("unquote");
     get_symbol("read-error");
-    static const char* global_symbols[] = {
-      "quote", "quasiquote", "unquote"
-    };
   }
 
   // Value creation; all of these will cause allocations
