@@ -69,6 +69,19 @@ TEST_CASE("frames successfully save pointers to stack values") {
   CHECK(v.fixnum_value() == 555);
 }
 
+TEST_CASE("handles work") {
+  State state;
+  {
+    Handle h1(state, Value::make_fixnum(1));
+    Handle h2(state, Value::make_fixnum(2));
+    Handle h3(state, Value::make_fixnum(3));
+    CHECK(state.gc.handle_list->ref == Value::make_fixnum(3));
+    CHECK(state.gc.handle_list->previous->next == state.gc.handle_list);
+    CHECK(state.gc.handle_list->previous->ref == Value::make_fixnum(2));
+    CHECK(state.gc.handle_list->previous->previous->ref == Value::make_fixnum(1));
+  }
+}
+
 TEST_CASE("heap values work") {
   HeapValue v;
   v.initialize(FLONUM, 0, sizeof(Flonum));
@@ -495,9 +508,15 @@ TEST_CASE_FIXTURE(ASB, "eval") {
   x = state.eval(C_FALSE, x);
   CHECK(x == Value::make_fixnum(12345));
 }
-
 TEST_CASE_FIXTURE(ASB, "eval undefined variable") {
   Value x = state.get_symbol("hello"), res;
   AR_FRAME(state, x, res);
+  // res = state.eval(C_FALSE, x);
+}
+
+
+TEST_CASE_FIXTURE(ASB, "eval undefined variable") {
+  // Value x = state.get_symbol("hello");
+  // x.car();
   // res = state.eval(C_FALSE, x);
 }

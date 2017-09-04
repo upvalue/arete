@@ -451,13 +451,30 @@ struct FrameHack {
 /** Frames are stack-allocated structures that save pointers to stack Values, allowing the garbage collector to move
  * objects and update pointers to them if necessary */
 struct Frame {
-  Frame(State& state, size_t size, HeapValue*** values);
-  Frame(State* state, size_t size, HeapValue*** values);
-  ~Frame();
-
   GC& gc;
   size_t size;
   HeapValue*** values;
+
+  Frame(State& state, size_t size, HeapValue*** values);
+  Frame(State* state, size_t size, HeapValue*** values);
+  ~Frame();
+};
+
+/** An individual tracked pointer. Can be allocated on the heap. */
+struct Handle {
+  State& state;
+  Value ref;
+  Handle *next, *previous;
+
+  Handle(State&);
+  Handle(State&, Value);
+  ~Handle();
+
+  Value operator*() const { return ref; }
+  Value operator->() const { return ref; }
+  void operator=(Value ref_) { ref = ref_; }
+
+  void initialize();
 };
 
 struct Block {
@@ -481,6 +498,7 @@ struct Block {
 struct GC {
   State& state;
   std::vector<Frame*> frames;
+  Handle* handle_list;
   std::vector<Block*> blocks;
   // Position in the *blocks* vector
   size_t block_i;
@@ -494,7 +512,7 @@ struct GC {
   unsigned char mark_bit;
   size_t block_size;
 
-  GC(State& state_): state(state_), block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
+  GC(State& state_): state(state_), handle_list(0), block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
       live_memory_after_collection(0), allocated_memory(ARETE_BLOCK_SIZE), mark_bit(1), block_size(ARETE_BLOCK_SIZE) {
     Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
     blocks.push_back(b);
@@ -716,7 +734,10 @@ struct State {
     // We do these side-effecting calls here to ensure that no allocations are required
     // when these symbols are used.
     get_symbol("quote"); get_symbol("quasiquote"); get_symbol("unquote");
-    // get_symbol("read-error");
+    get_symbol("read-error");
+    static const char* global_symbols[] = {
+      "quote", "quasiquote", "unquote"
+    };
   }
 
   // Value creation; all of these will cause allocations
@@ -1326,6 +1347,26 @@ inline Frame::Frame(State* state, size_t size_, HeapValue*** ptrs): gc(state->gc
 inline Frame::~Frame() {
   AR_ASSERT(gc.frames.back() == this);
   gc.frames.pop_back();
+}
+
+inline Handle::Handle(State& state_): state(state_), ref(), previous(0), next(0) { initialize(); }
+inline Handle::Handle(State& state_, Value ref_): state(state_), ref(ref_), previous(0), next(0) { initialize(); }
+
+inline void Handle::initialize() {
+  if(state.gc.handle_list) {
+    state.gc.handle_list->next = this;
+    previous = state.gc.handle_list;
+  }
+  state.gc.handle_list = this;
+}
+
+inline Handle::~Handle() {
+  if(previous) previous->next = next;
+  if(next) next->previous = previous;
+  if(state.gc.handle_list == this) {
+    AR_ASSERT(!next);
+    state.gc.handle_list = previous;
+  }
 }
 
 // Output Scheme values

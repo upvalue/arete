@@ -6,7 +6,6 @@ LDFLAGS := $(LDFLAGS) -g3  -O3
 
 -include site.mk
 
-
 # Fancy color compilation
 define colorecho
       @tput setaf 3
