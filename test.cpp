@@ -157,7 +157,7 @@ TEST_CASE_FIXTURE(AS, "gc marking simple immediate values") {
   // And now f2 should be dead
   CHECK(f.heap->get_mark_bit() == state.gc.mark_bit);
   CHECK(f2.heap->get_mark_bit() != state.gc.mark_bit);
-  CHECK(!state.gc.live(f2.heap));
+  CHECK(!state.gc.marked(f2.heap));
 }
 
 TEST_CASE_FIXTURE(AS, "gc marking recursive values") {
@@ -171,9 +171,9 @@ TEST_CASE_FIXTURE(AS, "gc marking recursive values") {
 
   state.gc.collect();
 
-  CHECK(state.gc.live(p.heap));
-  CHECK(state.gc.live(f1.heap));
-  CHECK(state.gc.live(f2.heap));
+  CHECK(state.gc.marked(p.heap));
+  CHECK(state.gc.marked(f1.heap));
+  CHECK(state.gc.marked(f2.heap));
 }
 
 TEST_CASE_FIXTURE(AS, "gc collection failure") {
@@ -338,7 +338,7 @@ TEST_CASE_FIXTURE(AS, "read a symbol") {
   sym = reader->read();
 
   std::string check("hello");
-  CHECK(check.compare(sym.symbol_name()) == 0);
+  CHECK(check.compare(sym.symbol_name_bytes()) == 0);
 }
 
 TEST_CASE_FIXTURE(AS, "read a list") {
@@ -492,7 +492,13 @@ TEST_CASE_FIXTURE(ASB, "reader vectors") {
   // EOF in vector
   AR_STRING_READER(reader3, state, "#(1 2");
   x = reader3->read();
-  CHECK(x.type() == EXCEPTION);
+  CHECK(x.is_active_exception());
+}
+
+TEST_CASE_FIXTURE(ASB, "reader flonums") {
+  AR_STRING_READER(reader, state, "123.456");
+  Value x = reader->read();
+  CHECK(x.type() == FLONUM);
 }
 
 TEST_SUITE_END();

@@ -1,14 +1,5 @@
 // arete.hpp - an embeddable scheme implementation
 
-/*
- * Search for these to navigate the source.
- * (TYPE) Representation of Scheme values.
- * (GC) Garbage collector
- * (RT) Runtime
- * (EVAL) Interpreter
- * (READ) S-expression reader
- */
-
 #ifndef ARETE_HPP
 #define ARETE_HPP
 
@@ -21,45 +12,42 @@
 #include <vector>
 #include <unordered_map>
 
-/** General assertions. */
+//= ## Configuration macros
+//= As Arete is contained in a single header, it is configured in part through the use of #defines.
+//= These should be defined before every inclusion of arete.hpp if changing them is desired.
+//= In most cases, the defaults should be sane.
+
+//= ### AR_ASSERT(expression)
+//= This assertion is used throughout Arete to check internal invariants. Can be safely turned off.
 #ifndef AR_ASSERT
 # define AR_ASSERT assert
 #endif
 
-/** Type assertions when dealing with dynamic types; should probably be left on */
+//= ### AR_TYPE_ASSERT(expression)
+//= This assertion is used internally to type-check [#Value]() method calls. It should probably be
+//= left on unless you're sure your code is type-safe.
 #ifndef AR_TYPE_ASSERT
 # define AR_TYPE_ASSERT assert
-#endif 
-
-#define AR_GC_INCREMENTAL 0
-#define AR_GC_SEMISPACE 1
-
-#ifndef AR_GC_MODE
-# define AR_GC_MODE AR_GC_SEMISPACE
 #endif 
 
 #define AR_FRAME(state, ...)  \
   FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
   Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
 
-// Block size.
-#ifndef AR_BLOCK_SIZE
-# define AR_BLOCK_SIZE 4096
-#endif
+#define ARETE_BLOCK_SIZE 4096
 
-// If more than ARETE_GC_LOAD_FACTOR% is in use after a collection, the garbage collector will
-// double in-use memory.
+//= ### ARETE_GC_LOAD_FACTOR = 80
+//= If more than ARETE_GC_LOAD_FACTOR percent memory is used after a collection, Arete will allocate
+//= more memory up to ARETE_GC_MAX_HEAP_SIZE
 #ifndef ARETE_GC_LOAD_FACTOR
 # define ARETE_GC_LOAD_FACTOR 80
 #endif
 
+//= ### ARETE_GC_MAX_HEAP_SIZE = 0
+//= Maximum heap size. If zero, heap will grow as needed.
 #ifndef ARETE_LOG_TAGS
 # define ARETE_LOG_TAGS 0
 #endif 
-
-#ifndef ARETE_BLOCK_SIZE
-# define ARETE_BLOCK_SIZE 4096
-#endif
 
 #define ARETE_LOG_TAG_GC (1 << 0)
 
@@ -86,23 +74,23 @@ struct Pair;
 
 std::ostream& operator<<(std::ostream& os,  Value);
 
-///// # (TYPE) REPRESENTATION OF SCHEME VALUES
+//= # Value representation
 
-// Scheme values can be either immediate (fixed-point integers and constants) or allocated on the heap.
+//= Scheme values can be either immediate (fixed-point integers and constants) or allocated on the heap.
 
-// Scheme values are generally referenced using an instance of the Value struct, which contains methods that
-// help interact with these values in a safe manner and can be tracked by the garbage collector.
+//= Scheme values are generally referenced using an instance of the Value struct, which contains methods that
+//= help interact with these values in a safe manner and can be tracked by the garbage collector.
 
-// Under the hood, a Value is a ptrdiff_t sized struct which can be either a pointer to a HeapValue
-// or an immediate value.
+//= Under the hood, a Value is a ptrdiff_t sized struct which can be either a pointer to a HeapValue
+//= or an immediate value manipulated using ptrdiff_t Value::bits.
 
-// HeapValues only exist in garbage-collected memory and generally are only used internall.
+//= HeapValues only exist in garbage-collected memory and generally are only used internally.
 
-// The actual bits of a Value look like this:
+//= The actual bits of a Value look like this:
 
-// - ...1 Fixnum
-// - ..10 Constant
-// - ..00 Pointer to heap value
+//= - `...1` - Fixnum
+//= - `..10` - Constant
+//= - `..00` - Pointer to heap value
 
 enum {
   // Should never be encountered
@@ -116,8 +104,8 @@ enum {
   FLONUM = 4,
   STRING = 5,
   CHARACTER = 6,
-  SYMBOL = 7,
   // Pointers
+  SYMBOL = 7,
   VECTOR = 9,
   VECTOR_STORAGE = 10,
   PAIR = 11, 
@@ -140,8 +128,9 @@ struct HeapValue {
   // Heap value headers are formatted like this:
 
   // ...m tttt tttt
-  // m = mark
-  // t = value type
+  // m = mark bit
+  // t = type
+  // . = object-specific flags
   size_t header;
 
   // Size of the object
@@ -155,6 +144,8 @@ struct HeapValue {
   unsigned get_header() const { return header; }
   unsigned get_type() const { return header & 255; }
   unsigned char get_mark_bit() const { return (header >> 8) & 1; }
+  unsigned get_header_bit(unsigned bit) const { return header & bit; }
+  void set_header_bit(unsigned bit) { header += bit; }
 
   void flip_mark_bit() { header += get_mark_bit() ? -256 : 256; }
 };
@@ -168,6 +159,8 @@ struct Flonum : HeapValue {
 struct String : HeapValue {
   size_t bytes;
   char data[1];
+
+  static const unsigned CLASS_TYPE = STRING;
 };
 
 // TODO: These should not be heap-allocated if possible.
@@ -185,8 +178,7 @@ struct Value {
   Value(HeapValue* heap_): heap(heap_) {}
   Value(ptrdiff_t bits_): bits(bits_) {}
 
-  // GENERIC METHODS
-
+  /** Returns true if this value is immediate */
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
 
   /** Safely retrieve the type of an object */
@@ -205,6 +197,7 @@ struct Value {
     return bits >> 1;
   }
 
+  /** Create a fixnum */
   static Value make_fixnum(ptrdiff_t fixnum) {
     return Value(((fixnum << 1) + 1));
   }
@@ -254,12 +247,14 @@ struct Value {
   }
 
   // SYMBOLS
-  const char* symbol_name() const;
+  Value symbol_name() const;
+  const char* symbol_name_bytes() const;
   Value symbol_value() const;
 
+  /** Quickly compare symbol to string */
   bool symbol_equals(const char* s) const {
     std::string cmp(s);
-    return cmp.compare(symbol_name()) == 0;
+    return cmp.compare(symbol_name_bytes()) == 0;
   }
 
   // PAIRS
@@ -268,15 +263,18 @@ struct Value {
   void set_car(Value);
   void set_cdr(Value);
 
+  static const unsigned PAIR_SOURCE_BIT = 1 << 9; 
+
   bool pair_has_source() const {
     AR_TYPE_ASSERT(type() == PAIR);
-    return heap->get_header() & 512;
+    return heap->get_header_bit(PAIR_SOURCE_BIT);
   }
 
   SourceLocation* pair_src() const;
   void set_pair_src(SourceLocation&);
 
   // EXCEPTION
+  static const unsigned EXCEPTION_ACTIVE_BIT = 1 << 9;
   bool is_active_exception() const;
   Value exception_tag() const;
   Value exception_message() const;
@@ -304,16 +302,17 @@ struct Value {
 };
 
 // Below here: inline definitions of things that need Value to be declared
-
 struct Symbol : HeapValue {
-  const char* name;
-  Value value;
+  Value name, value;
+
   static const unsigned CLASS_TYPE = SYMBOL;
 };
 
-inline const char* Value::symbol_name() const {
+inline Value Value::symbol_name() const {
   return as<Symbol>()->name;
 }
+
+inline const char* Value::symbol_name_bytes() const { return as<Symbol>()->name.as<String>()->data; }
 
 inline Value Value::symbol_value() const {
   return as<Symbol>()->value;
@@ -349,6 +348,7 @@ inline void Value::set_pair_src(SourceLocation& loc) {
   static_cast<Pair*>(heap)->src = loc;
 }
 
+//= ### Value::car() const
 inline Value Value::car() const {
   AR_TYPE_ASSERT(type() == PAIR);
   return static_cast<Pair*>(heap)->data_car;
@@ -433,17 +433,13 @@ inline size_t Value::vector_length() const {
 
 ///// (GC) Garbage collector
 
-// The Arete garbage collector is a simple semispace garbage collector.
-
-// It uses some very hacky C++ code to save pointers to stack-values so that they can be replaced when values are
-// moved.
-
 struct GC;
 
-/** FrameHack turns a Value& into a pointer to a stack-allocated Value */
-struct FrameHack {
-  FrameHack(Value& value_): value((HeapValue**) &value_.bits) {}
-  ~FrameHack() {}
+/** 
+ * FrameHack turns a Value& into a pointer to a stack-allocated Value. This is done to allow for the
+ * possibility of a compaction step in the future; it's not necessary otherwise.
+ */
+struct FrameHack { FrameHack(Value& value_): value((HeapValue**) &value_.bits) {} ~FrameHack() {}
 
   HeapValue** value;
 };
@@ -550,6 +546,7 @@ struct GC {
       case FLONUM: case STRING: case CHARACTER:
         return;
       case SYMBOL:
+        mark(static_cast<Symbol*>(v)->name.heap);
         v = static_cast<Symbol*>(v)->value.heap;
         goto again;
       case PAIR:
@@ -612,7 +609,6 @@ struct GC {
     double load_factor = (live_memory_after_collection * 100) / heap_size;
 
     ARETE_LOG_GC("load factor " << live_memory_after_collection << " " << live_objects_after_collection << " " << load_factor);
-    std::cout << "heap_size " << heap_size << std::endl;
     AR_ASSERT(live_memory_after_collection <= heap_size);
 
     if(load_factor >= ARETE_GC_LOAD_FACTOR) {
@@ -664,7 +660,6 @@ struct GC {
           // If there is enough room after this memory to handle another object, note down its
           // size and move on
 
-          // TODO: Coalesce memory
           if(mem_size - sz >= sizeof(Flonum)) {
             // ARETE_LOG_GC("additional " << (mem_size - sz) << " bytes after object");
             HeapValue* next_object = ((HeapValue*) ((blocks[block_i]->data + block_cursor) + sz));
@@ -738,9 +733,9 @@ struct State {
   State(): gc(*this) {}
   ~State() {
     // Free symbol names
-    for(symbol_table_t::const_iterator x = symbol_table.begin(); x != symbol_table.end(); ++x) {
-      free((void*) x->second->name);
-    }
+    // for(symbol_table_t::const_iterator x = symbol_table.begin(); x != symbol_table.end(); ++x) {
+    //  free((void*) x->second->name);
+    // }
   }
 
   // Source code location tracking
@@ -749,16 +744,38 @@ struct State {
     return source_names.size() - 1;
   }
 
+  #define AR_SYMBOLS(_) \
+    _(quote), _(quasiquote), _(unquote), _(read)
+
+
+
+  #define AR_SYMBOLS_AUX(name) S_##name
+
+
+  enum { AR_SYMBOLS(AR_SYMBOLS_AUX),
+    S_read_error };
+  
+
   /** Performs various initializations required for an instance of Arete;
     * this is separate so the State itself can be used for lightweight testing */
   void boot() {
     source_names.push_back("unknown");
     source_names.push_back("c-string");
-    // We do these side-effecting calls here to ensure that no allocations are required
-    // when these symbols are used.
-    get_symbol("quote"); get_symbol("quasiquote"); get_symbol("unquote");
-    get_symbol("read-error");
+    // Initialize built-in symbols
+    static const char* symbols[] = { 
+      #define AR_SYMBOLS_AUX2(x) #x
+      AR_SYMBOLS(AR_SYMBOLS_AUX2),
+      "read-error"
+    };
+
+    for(size_t i = 0; i != sizeof(symbols) / sizeof(const char*); i++) {
+      get_symbol(symbols[i]);
+    }
+    // get_symbol("quote"); get_symbol("quasiquote"); get_symbol("unquote");
+    // get_symbol("read-error");
   }
+
+#undef AR_SYMBOLS
 
   // Value creation; all of these will cause allocations
   Value make_flonum(double number) {
@@ -773,11 +790,20 @@ struct State {
     if(x == symbol_table.end()) {
       Symbol* heap = static_cast<Symbol*>(gc.allocate(SYMBOL, sizeof(Symbol)));
 
+      Value sym = heap, string;
+      AR_FRAME(this, sym, string);
+
+      string = make_string(name);
+
+      // TODO: This should be a Scheme string.
+
+      /*
       const char* name_s = name.c_str();
       size_t size = name.size();
       const char* name_copy = strndup(name_s, size);
+      */
 
-      heap->name = name_copy;
+      heap->name = string;
 
       symbol_table.insert(std::make_pair(name, heap));
       return heap;
@@ -802,7 +828,7 @@ struct State {
     Value pare;
     AR_FRAME(this, pare, car, cdr);
     pare = make_pair(car, cdr, sizeof(Pair));
-    pare.heap->header += 512;
+    pare.heap->set_header_bit(Value::PAIR_SOURCE_BIT);
     pare.set_pair_src(loc);
 
     AR_ASSERT(pare.type() == PAIR);
@@ -1101,11 +1127,22 @@ struct Reader {
       if(c >= '0' && c <= '9') {
         // Fixnums
         ptrdiff_t number = c - '0';
+        ptrdiff_t length = 1;
         while(true) {
           c = is.peek();
           if(c >= '0' && c <= '9') {
             is >> c;
+            length++;
             number = (number * 10) + (c - '0');
+          } else if(c == '.') {
+            is >> c;
+            c = is.peek();
+            //if(c == '\r' || c == '\t' || c == '\n' || c == ' ')
+            //  return state.make_flonum(number);
+            is.seekg(-(length + 1), is.cur);
+            double d;
+            is >> d;
+            return state.make_flonum(d);
           } else {
             break;
           }
@@ -1158,7 +1195,6 @@ struct Reader {
             } else if(symbol.symbol_equals("space")) {
               c2 = ' ';
             } else {
-              std::string s(symbol.symbol_name());
               std::ostringstream os;
               os << "unknown character constant #\\" << symbol;
               return read_error(os.str());
@@ -1354,7 +1390,7 @@ struct StringReader {
 #define AR_STRING_READER(name, state, string) \
   StringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRINGIZE(__LINE__)));
 
-// Various inline functions
+// Various inline garbage collector functions
 
 inline Frame::Frame(State& state, size_t size_, HeapValue*** ptrs): gc(state.gc), size(size_), values(ptrs) {
   gc.frames.push_back(this);
@@ -1389,8 +1425,7 @@ inline Handle::~Handle() {
   }
 }
 
-// Output Scheme values
-
+/** Output Arete values */
 inline std::ostream& operator<<(std::ostream& os, Value v) {
   switch(v.type()) {
     case FIXNUM: return os << v.fixnum_value(); break;
@@ -1406,7 +1441,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
     case FLONUM:
       return os << v.flonum_value(); 
     case SYMBOL:
-      return os << v.symbol_name();
+      return os << v.symbol_name_bytes();
     case STRING: {
       const char* data = v.string_data();
       os << '"';
