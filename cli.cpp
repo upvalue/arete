@@ -41,7 +41,7 @@ int main(int argc, const char **argv) {
         std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
         break;
       } else {
-        std::cout << x << std::endl;
+        // std::cout << x << std::endl;
       }
     }
     // state.gc.collect();
@@ -64,7 +64,7 @@ int main(int argc, const char **argv) {
       linenoiseHistoryAdd(line);
 
       std::ostringstream os;
-      os << "repl:" << i - 1;
+      os << "repl-line-" << i - 1;
       StringReader reader(state, line, os.str());
       
       while(x != C_EOF) { 
@@ -76,8 +76,13 @@ int main(int argc, const char **argv) {
         if(x.type() == EXCEPTION) {
           std::cout << "Reader error: " << x.exception_message().string_data() << std::endl;
         } else {
-          std::cout << x << std::endl;
-
+          x = state.eval_toplevel(x);
+          if(x.type() == EXCEPTION) {
+            std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
+            break;
+          } else {
+            std::cout << x << std::endl;
+          }
         }
       }
       

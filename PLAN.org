@@ -19,3 +19,5 @@
 * TODO Macro-expansion/processing
   + [ ] Start by writing a simple non-hygienic macro expander for a subset of Scheme and work from there towards R5RS.
         You have to get a feel for how this thing will look before you really accomplish anything
+
+    What to do about null?

@@ -44,8 +44,6 @@
 # define ARETE_GC_LOAD_FACTOR 80
 #endif
 
-//= ### ARETE_GC_MAX_HEAP_SIZE = 0
-//= Maximum heap size. If zero, heap will grow as needed.
 #ifndef ARETE_LOG_TAGS
 # define ARETE_LOG_TAGS 0
 #endif 
@@ -465,6 +463,7 @@ struct Handle {
 
   Handle(State&);
   Handle(State&, Value);
+  Handle(const Handle&);
   ~Handle();
 
   Value operator*() const { return ref; }
@@ -627,10 +626,12 @@ struct GC {
   HeapValue* allocate(unsigned type, size_t size) {
     size_t sz = align(8, size);
     bool collected = false;
-    // This is actually the meat of the garbage collection algorithm
 
-    // It searches through live memory in a first-fit fashion for somewhere to allocate the value; if it fails,
+    // Searches through live memory in a first-fit fashion for somewhere to allocate the value; if it fails,
     // a collection will be triggered.
+
+    // TODO: Some of this code is a little awkward. A HeapIterator struct with 
+    // -> and * overloaded might make it easier to read.
   retry:
     while(block_i != blocks.size()) {
       while(blocks[block_i]->has_room(block_cursor, sz)) {
@@ -753,22 +754,25 @@ struct State {
   #define AR_SYMBOLS_AUX(name) S_##name
 
   enum BuiltinSymbol { AR_SYMBOLS(AR_SYMBOLS_AUX),
-    S_read_error };
+    S_read_error, S_eval_error };
+  
+  std::vector<Handle> builtin_symbols;
 
   /** Performs various initializations required for an instance of Arete;
     * this is separate so the State itself can be used for lightweight testing */
   void boot() {
     source_names.push_back("unknown");
     source_names.push_back("c-string");
+
     // Initialize built-in symbols
     static const char* symbols[] = { 
       #define AR_SYMBOLS_AUX2(x) #x
       AR_SYMBOLS(AR_SYMBOLS_AUX2),
-      "read-error"
+      "read-error", "eval_error"
     };
 
     for(size_t i = 0; i != sizeof(symbols) / sizeof(const char*); i++) {
-      get_symbol(symbols[i]);
+      builtin_symbols.push_back(Handle(*this, get_symbol(symbols[i])));
     }
     // get_symbol("quote"); get_symbol("quasiquote"); get_symbol("unquote");
     // get_symbol("read-error");
@@ -782,6 +786,10 @@ struct State {
     heap->number = number;
     Value v(heap);
     return v;
+  }
+
+  Value get_symbol(BuiltinSymbol sym) {
+    return *builtin_symbols.at((size_t) sym);
   }
 
   Value get_symbol(const std::string& name) {
@@ -888,16 +896,26 @@ struct State {
     return heap;
   }
 
-  Value make_exception(const std::string& ctag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
-    Value tag, message, exc;
+  Value make_exception(Value tag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
+    Value message, exc;
     AR_FRAME(this, tag, message, irritants, exc);
     Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
-    tag = get_symbol(ctag);
     message = make_string(cmessage);
     heap->tag = tag;
     heap->message = message;
     heap->irritants = irritants;
     return heap;
+  }
+
+  Value make_exception(const std::string& ctag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) { 
+    Value tag;
+    AR_FRAME(this, tag, irritants);
+    tag = get_symbol(ctag);
+    return make_exception(tag, cmessage, irritants);
+  }
+  
+  Value make_exception(BuiltinSymbol s, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
+    return make_exception(get_symbol(s), cmessage, irritants);
   }
 
   /** Return a description of a source location */
@@ -920,6 +938,15 @@ struct State {
   }
 
   ///// (EVAL) Interpreter
+
+  std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
+
+  // Environments are just vectors containing the parent environment in the first position
+  // and variable names/values in the even/odd positions afterwards e.g.
+
+  // #(#f hello 12345)
+  // for a environment one level below toplevel after a (define hello 12345)
+
   Value make_env(Value parent = C_FALSE) {
     Value vec;
     AR_FRAME(this, vec, parent);
@@ -927,8 +954,6 @@ struct State {
     vector_append(vec, parent);
     return vec;
   }
-
-  std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
 
   void env_define(Value env, const std::string& names, Value val) {
     Value name;
@@ -955,7 +980,7 @@ struct State {
     }
   }
 
-  Value env_get(Value env, Value name) {
+  Value env_lookup(Value env, Value name) {
     while(env != C_FALSE) {
       for(size_t i = 1; i != env.vector_length(); i += 2) {
         if(env.vector_ref(i) == name)
@@ -967,28 +992,53 @@ struct State {
     return name.as<Symbol>()->value;
   }
 
-  Value eval(Value env, Value exp) {
-    if(exp.immediatep()) {
-      return exp;
-    } 
+  /** Return an eval error with source code information */
+  Value eval_error(const std::string& msg, Value exp) {
+    std::ostringstream os;
 
+    if(exp.type() == PAIR) {
+      os << source_info(exp.pair_src()) << ": ";
+    }
+
+    os << msg;
+    return make_exception("eval-error", os.str());
+  }
+
+  Value eval(Value env, Value exp) {
+    if(exp.immediatep())
+      return exp;
+
+    std::cout << "Eval " << exp << std::endl;
     switch(exp.type()) {
-      case VECTOR: case VECTOR_STORAGE: 
+      case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING:
         return exp;
-      case SYMBOL:
-        return exp.symbol_value();
+      case PAIR: {
+        Value car = exp.car();
+        AR_FRAME(this, car, exp);
+        if(car.type() != SYMBOL) {
+          return eval_error("attempt to apply non-procedure", exp);
+        }
+
+        // if(car == get_symbol(S_define)) {
+        // }
+        // if(car == get_symbol(S_define));
+        return exp;
+      }
+      case SYMBOL: {
+        Value res = env_lookup(env, exp);
+        if(res.bits == 0)
+          return C_UNSPECIFIED;
+        return res;
+      }
     }
 
     return C_UNSPECIFIED;
   }
-};
 
-inline void GC::mark_symbol_table() {
-  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
-  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
-    mark(x->second);
+  Value eval_toplevel(Value exp) {
+    return eval(C_FALSE, exp);
   }
-}
+};
 
 ///// (READ) Reader
 
@@ -1110,34 +1160,39 @@ struct Reader {
     }
   }
 
+  Value read_number(ptrdiff_t start, bool negative) {
+    // Fixnums
+    ptrdiff_t number = start;
+    ptrdiff_t length = 1;
+    while(true) {
+      char c = is.peek();
+      if(c >= '0' && c <= '9') {
+        is >> c;
+        length++;
+        number = (number * 10) + (c - '0');
+      } else if(c == '.') {
+        is >> c;
+        c = is.peek();
+        is.seekg(-(length + 1), is.cur);
+        double d;
+        // TODO This definitely probably isn't compliant with whatever standards
+        is >> d;
+        return state.make_flonum(d);
+      } else {
+        break;
+      }
+    }
+    return Value::make_fixnum(negative ? -number : number);
+
+  }
+
   /** Read a single expression */
   Value read_expr(Token& return_token) {
     return_token = TK_NONE;
     char c;
     while(getc(c)) {
       if(c >= '0' && c <= '9') {
-        // Fixnums
-        ptrdiff_t number = c - '0';
-        ptrdiff_t length = 1;
-        while(true) {
-          c = is.peek();
-          if(c >= '0' && c <= '9') {
-            is >> c;
-            length++;
-            number = (number * 10) + (c - '0');
-          } else if(c == '.') {
-            is >> c;
-            c = is.peek();
-            is.seekg(-(length + 1), is.cur);
-            double d;
-            // TODO This definitely probably isn't compliant with whatever standards
-            is >> d;
-            return state.make_flonum(d);
-          } else {
-            break;
-          }
-        }
-        return Value::make_fixnum(number);
+        return read_number(c - '0', false);
       } else if(c == '#') {
         getc(c); // consume first char
         if(c == 't' || c == 'f') {
@@ -1331,6 +1386,14 @@ struct Reader {
           return_token = TK_DOT;
           return C_FALSE;
         }
+        // Negative numvers
+        if(c == '-'){
+          c = is.peek();
+          if(c >= '0' && c <= '9') {
+            getc(c);
+            return read_number(c - '0', true);
+          }
+        }
         return read_symbol(c);
       }
     }
@@ -1382,6 +1445,13 @@ struct StringReader {
 
 // Various inline garbage collector functions
 
+inline void GC::mark_symbol_table() {
+  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
+  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
+    mark(x->second);
+  }
+}
+
 inline Frame::Frame(State& state, size_t size_, HeapValue*** ptrs): gc(state.gc), size(size_), values(ptrs) {
   gc.frames.push_back(this);
 }
@@ -1397,6 +1467,9 @@ inline Frame::~Frame() {
 
 inline Handle::Handle(State& state): gc(state.gc), ref() { initialize(); }
 inline Handle::Handle(State& state, Value ref_): gc(state.gc), ref(ref_) { initialize(); }
+inline Handle::Handle(const Handle& cpy): gc(cpy.gc), ref(cpy.ref) {
+  it = gc.handles.insert(gc.handles.end(), this);
+}
 
 inline void Handle::initialize() {
   it = gc.handles.insert(gc.handles.end(), this);
