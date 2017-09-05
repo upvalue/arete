@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
+#include <list>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -154,7 +155,6 @@ struct HeapValue {
 struct Flonum : HeapValue {
   double number;  
 };
-
 
 struct String : HeapValue {
   size_t bytes;
@@ -458,9 +458,10 @@ struct Frame {
 
 /** An individual tracked pointer. Can be allocated on the heap. */
 struct Handle {
-  State& state;
+  GC& gc;
   Value ref;
-  Handle *next, *previous;
+  std::list<Handle*>::iterator it;
+  // Handle *next, *previous;
 
   Handle(State&);
   Handle(State&, Value);
@@ -494,7 +495,8 @@ struct Block {
 struct GC {
   State& state;
   std::vector<Frame*> frames;
-  Handle* handle_list;
+  std::list<Handle*> handles;
+  // Handle* handle_list;
   std::vector<Block*> blocks;
   // Position in the *blocks* vector
   size_t block_i;
@@ -508,7 +510,7 @@ struct GC {
   unsigned char mark_bit;
   size_t block_size;
 
-  GC(State& state_): state(state_), handle_list(0), block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
+  GC(State& state_): state(state_), handles(0), block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
       live_memory_after_collection(0), heap_size(ARETE_BLOCK_SIZE), mark_bit(1), block_size(ARETE_BLOCK_SIZE) {
     Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
     blocks.push_back(b);
@@ -745,16 +747,13 @@ struct State {
   }
 
   #define AR_SYMBOLS(_) \
-    _(quote), _(quasiquote), _(unquote), _(read)
-
-
+    _(quote), _(quasiquote), _(unquote),  \
+    _(define), _(lambda)
 
   #define AR_SYMBOLS_AUX(name) S_##name
 
-
-  enum { AR_SYMBOLS(AR_SYMBOLS_AUX),
+  enum BuiltinSymbol { AR_SYMBOLS(AR_SYMBOLS_AUX),
     S_read_error };
-  
 
   /** Performs various initializations required for an instance of Arete;
     * this is separate so the State itself can be used for lightweight testing */
@@ -794,14 +793,6 @@ struct State {
       AR_FRAME(this, sym, string);
 
       string = make_string(name);
-
-      // TODO: This should be a Scheme string.
-
-      /*
-      const char* name_s = name.c_str();
-      size_t size = name.size();
-      const char* name_copy = strndup(name_s, size);
-      */
 
       heap->name = string;
 
@@ -1137,10 +1128,9 @@ struct Reader {
           } else if(c == '.') {
             is >> c;
             c = is.peek();
-            //if(c == '\r' || c == '\t' || c == '\n' || c == ' ')
-            //  return state.make_flonum(number);
             is.seekg(-(length + 1), is.cur);
             double d;
+            // TODO This definitely probably isn't compliant with whatever standards
             is >> d;
             return state.make_flonum(d);
           } else {
@@ -1405,24 +1395,15 @@ inline Frame::~Frame() {
   gc.frames.pop_back();
 }
 
-inline Handle::Handle(State& state_): state(state_), ref(), previous(0), next(0) { initialize(); }
-inline Handle::Handle(State& state_, Value ref_): state(state_), ref(ref_), previous(0), next(0) { initialize(); }
+inline Handle::Handle(State& state): gc(state.gc), ref() { initialize(); }
+inline Handle::Handle(State& state, Value ref_): gc(state.gc), ref(ref_) { initialize(); }
 
 inline void Handle::initialize() {
-  if(state.gc.handle_list) {
-    state.gc.handle_list->next = this;
-    previous = state.gc.handle_list;
-  }
-  state.gc.handle_list = this;
+  it = gc.handles.insert(gc.handles.end(), this);
 }
 
 inline Handle::~Handle() {
-  if(previous) previous->next = next;
-  if(next) next->previous = previous;
-  if(state.gc.handle_list == this) {
-    AR_ASSERT(!next);
-    state.gc.handle_list = previous;
-  }
+  gc.handles.erase(it);
 }
 
 /** Output Arete values */

@@ -73,10 +73,11 @@ TEST_CASE("handles work") {
     Handle h1(state, Value::make_fixnum(1));
     Handle h2(state, Value::make_fixnum(2));
     Handle h3(state, Value::make_fixnum(3));
-    CHECK(state.gc.handle_list->ref == Value::make_fixnum(3));
-    CHECK(state.gc.handle_list->previous->next == state.gc.handle_list);
-    CHECK(state.gc.handle_list->previous->ref == Value::make_fixnum(2));
-    CHECK(state.gc.handle_list->previous->previous->ref == Value::make_fixnum(1));
+
+    CHECK(state.gc.handles.back() == &h3);
+    CHECK(state.gc.handles.front() == &h1);
+    CHECK(state.gc.handles.size() == 3);
+
   }
 }
 
