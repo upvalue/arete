@@ -120,6 +120,7 @@ enum {
   C_NIL = 10,             // 0000 1010 ()
   C_UNSPECIFIED = 14 ,    // 0000 1110 #<unspecified> 
   C_EOF = 18,             // 0001 0010 #<eof>
+  C_SYNTAX = 34,          // 0100 0010 #<syntax>
 };
 
 // A heap-allocated, garbage-collected value.
@@ -256,7 +257,12 @@ struct Value {
   }
 
   // PAIRS
+  bool listp() const;
+  size_t length() const;
+
   Value car() const;
+  Value cadr() const;
+  Value caddr() const;
   Value cdr() const;
   void set_car(Value);
   void set_cdr(Value);
@@ -352,6 +358,27 @@ inline Value Value::car() const {
   return static_cast<Pair*>(heap)->data_car;
 }
 
+inline bool Value::listp() const {
+  Value check(bits);
+  while(check.type() == PAIR) {
+    check = check.cdr();
+    if(check.type() != PAIR || check != C_NIL) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline Value Value::cadr() const {
+  AR_TYPE_ASSERT(type() == PAIR);
+  return cdr().car();
+}
+
+inline Value Value::caddr() const {
+  AR_TYPE_ASSERT(type() == PAIR);
+  return cdr().cdr().car();
+}
+
 inline Value Value::cdr() const {
   AR_TYPE_ASSERT(type() == PAIR);
   return static_cast<Pair*>(heap)->data_cdr;
@@ -391,6 +418,12 @@ inline Value Value::exception_irritants() const {
   AR_TYPE_ASSERT(type() == EXCEPTION);
   return static_cast<Exception*>(heap)->irritants;
 }
+
+/// FUNCTIONS
+
+struct Function : HeapValue {
+  Value name, env, arguments, rest_arguments, body;
+};
 
 /// VECTORS
 
@@ -550,6 +583,12 @@ struct GC {
         mark(static_cast<Symbol*>(v)->name.heap);
         v = static_cast<Symbol*>(v)->value.heap;
         goto again;
+      case FUNCTION:
+        mark(static_cast<Function*>(v)->name.heap);
+        mark(static_cast<Function*>(v)->env.heap);
+        mark(static_cast<Function*>(v)->arguments.heap);
+        mark(static_cast<Function*>(v)->rest_arguments.heap);
+        v = static_cast<Function*>(v)->body.heap;
       case PAIR:
         mark(static_cast<Pair*>(v)->data_car.heap);
         v = static_cast<Pair*>(v)->data_cdr.heap;
@@ -754,6 +793,7 @@ struct State {
   #define AR_SYMBOLS_AUX(name) S_##name
 
   enum BuiltinSymbol { AR_SYMBOLS(AR_SYMBOLS_AUX),
+    S_unquote_splicing,
     S_read_error, S_eval_error };
   
   std::vector<Handle> builtin_symbols;
@@ -768,14 +808,19 @@ struct State {
     static const char* symbols[] = { 
       #define AR_SYMBOLS_AUX2(x) #x
       AR_SYMBOLS(AR_SYMBOLS_AUX2),
+      "unquote-splicing",
       "read-error", "eval_error"
     };
 
     for(size_t i = 0; i != sizeof(symbols) / sizeof(const char*); i++) {
       builtin_symbols.push_back(Handle(*this, get_symbol(symbols[i])));
     }
-    // get_symbol("quote"); get_symbol("quasiquote"); get_symbol("unquote");
-    // get_symbol("read-error");
+
+    get_symbol(S_define).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_lambda).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_quote).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_quasiquote).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_unquote).as<Symbol>()->value = C_SYNTAX;
   }
 
 #undef AR_SYMBOLS
@@ -802,6 +847,7 @@ struct State {
 
       string = make_string(name);
 
+      heap->value = C_UNSPECIFIED;
       heap->name = string;
 
       symbol_table.insert(std::make_pair(name, heap));
@@ -955,13 +1001,17 @@ struct State {
     return vec;
   }
 
-  void env_define(Value env, const std::string& names, Value val) {
-    Value name;
+  void env_set(Value env, Value name, Value val) {
     AR_FRAME(this, env, name, val);
-    name = get_symbol(names);
+    AR_TYPE_ASSERT(name.type() == SYMBOL);
+    // Toplevel set
+    if(env == C_FALSE) {
+      std::cout << "SET VALUE " << name << " " << val << std::endl;
+      name.as<Symbol>()->value = val;
+      return;
+    }
     for(size_t i = 1; i != env.vector_length(); i += 2) {
       if(env.vector_ref(i) == name) {
-        warn() << "shadowing definition " << names << std::endl;
         env.vector_set(i+1, val);
         return;
       }
@@ -972,6 +1022,11 @@ struct State {
     Value name;
     AR_FRAME(this, env, name, val);
     name = get_symbol(names);
+    // Toplevel set
+    if(env == C_FALSE) {
+      name.as<Symbol>()->value = val;
+      return;
+    }
     for(size_t i = 1; i != env.vector_length(); i += 2) {
       // TODO error handling
       if(env.vector_ref(i) == name) {
@@ -980,13 +1035,14 @@ struct State {
     }
   }
 
-  Value env_lookup(Value env, Value name) {
+  Value env_lookup(Value env, Value name, bool one_level = false) {
     while(env != C_FALSE) {
       for(size_t i = 1; i != env.vector_length(); i += 2) {
         if(env.vector_ref(i) == name)
           return env.vector_ref(i+1);
       }
       env = env.vector_ref(0); // check parent environment
+      if(one_level) break;
     }
     // reached toplevel, check symbol.
     return name.as<Symbol>()->value;
@@ -1003,8 +1059,36 @@ struct State {
     os << msg;
     return make_exception("eval-error", os.str());
   }
+  
+
+  Value eval_define(Value env, Value exp) {
+    Value name, body, tmp;
+    AR_FRAME(this, name, body, tmp);
+
+    name = exp.cadr();
+
+    body = exp.caddr();
+
+    if(name.type() != SYMBOL) {
+      return eval_error("first argument to define must be a symbol", exp);
+    }
+
+    tmp = env_lookup(env, name, true);
+    if(tmp != C_UNSPECIFIED) {
+      warn() << source_info(exp.pair_src()) << " shadows existing definition of " << name;
+    }
+
+    tmp = eval(env, body);
+
+    env_set(env, name, tmp);
+
+    return C_UNSPECIFIED;
+  }
 
   Value eval(Value env, Value exp) {
+    Value res, car;
+
+    AR_FRAME(this, env, exp, res, car)
     if(exp.immediatep())
       return exp;
 
@@ -1013,15 +1097,19 @@ struct State {
       case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING:
         return exp;
       case PAIR: {
-        Value car = exp.car();
-        AR_FRAME(this, car, exp);
-        if(car.type() != SYMBOL) {
+        car = exp.car();
+        if(car.type() != SYMBOL && car.type() != FUNCTION) {
           return eval_error("attempt to apply non-procedure", exp);
         }
 
-        // if(car == get_symbol(S_define)) {
-        // }
-        // if(car == get_symbol(S_define));
+        if(car.type() == SYMBOL && car.symbol_value() == C_SYNTAX) {
+          if(car == get_symbol(S_define)) {
+            return eval_define(env, exp);
+          } else if(car == get_symbol(S_lambda)) {
+            std::cout << "lambda" << std::endl;
+          }
+        }
+
         return exp;
       }
       case SYMBOL: {
@@ -1421,7 +1509,7 @@ struct StringReader {
   Reader reader;
 
   StringReader(State& state, std::string str, const std::string& desc = "anonymous"): ss(str), reader(state, ss) {
-    reader.file = desc.compare("anoymous") == 0 ? 1 : state.register_file(desc);
+    reader.file = desc.compare("anonymous") == 0 ? 1 : state.register_file(desc);
   }
 
   ~StringReader() {
@@ -1490,7 +1578,8 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         case C_FALSE: return os << "#f";
         case C_EOF: return os << "#<eof>";
         case C_UNSPECIFIED: return os << "#<unspecified>";
-        default: os << "<unknown constant>";
+        case C_SYNTAX: return os << "#<syntax>";
+        default: return os << "<unknown constant>";
       }
     case FLONUM:
       return os << v.flonum_value(); 
