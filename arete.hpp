@@ -32,8 +32,8 @@
 #endif 
 
 #define AR_FRAME(state, ...)  \
-  FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
-  Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
+  arete::FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
+  arete::Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
 
 #define ARETE_BLOCK_SIZE 4096
 
@@ -117,6 +117,7 @@ enum {
   PAIR = 11, 
   EXCEPTION = 12,
   FUNCTION = 13,
+  CFUNCTION = 14,
 };
 
 
@@ -270,6 +271,7 @@ struct Value {
 
   Value car() const;
   Value cadr() const;
+  Value cddr() const;
   Value caddr() const;
   Value cadddr() const;
   Value cdr() const;
@@ -294,12 +296,14 @@ struct Value {
   Value exception_irritants() const;
   
   // FUNCTIONS
+  static const unsigned FUNCTION_EVAL_ARGUMENTS_BIT = 1 << 9;
+
   Value function_name() const;
   Value function_arguments() const;
   Value function_rest_arguments() const;
   Value function_body() const;
+  bool function_eval_args() const;
 
-  static const unsigned FUNCTION_EVAL_ARGUMENTS_BIT = 1 << 9;
 
   // OPERATORS
 
@@ -377,8 +381,8 @@ inline Value Value::car() const {
 
 inline size_t Value::list_length() const {
   Value check(bits);
-  AR_TYPE_ASSERT(type() == PAIR);
   if(check == C_NIL) return 0;
+  AR_TYPE_ASSERT(type() == PAIR);
   size_t len = 0;
   while(check.type() == PAIR) {
     ++len;
@@ -406,6 +410,11 @@ inline Value Value::list_ref(size_t n) const {
 inline Value Value::cadr() const {
   AR_TYPE_ASSERT(type() == PAIR);
   return cdr().car();
+}
+
+inline Value Value::cddr() const {
+  AR_TYPE_ASSERT(type() == PAIR);
+  return cdr().cdr();
 }
 
 inline Value Value::caddr() const {
@@ -480,6 +489,11 @@ inline Value Value::function_rest_arguments() const {
 
 inline Value Value::function_body() const {
   return as<Function>()->body;
+}
+
+inline bool Value::function_eval_args() const {
+  AR_TYPE_ASSERT(type() == FUNCTION);
+  return heap->get_header_bit(FUNCTION_EVAL_ARGUMENTS_BIT);
 }
 
 /// VECTORS
@@ -1109,7 +1123,7 @@ struct State {
   Value eval_error(const std::string& msg, Value exp) {
     std::ostringstream os;
 
-    if(exp.type() == PAIR) {
+    if(exp.type() == PAIR && exp.pair_has_source()) {
       os << source_info(exp.pair_src()) << ": ";
     }
 
@@ -1117,15 +1131,15 @@ struct State {
     return make_exception("eval-error", os.str());
   }
   
-  Value eval_lambda(Value env, Value exp) {
-    Value fn_env, args;
+  Value eval_lambda(Value env, Value exp, bool eval_args = false) {
+    Value fn_env, args, args_head, args_tail;
     AR_FRAME(*this, env, exp, fn_env, args);
     Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
     args = exp.cadr();
     fn->name = C_FALSE;
     fn->parent_env = fn_env;
     if(args.type() == SYMBOL) {
-      fn->arguments = C_FALSE;
+      fn->arguments = C_NIL;
       fn->rest_arguments = args;
     } else {
       // First case: (lambda rest ...)
@@ -1133,10 +1147,11 @@ struct State {
         fn->rest_arguments = args;
         fn->arguments = C_NIL;
       } else if(args == C_NIL) {
-        fn->arguments = C_FALSE;
+        fn->arguments = C_NIL;
         fn->rest_arguments = C_FALSE;
       } else {
         // Second case
+        fn->rest_arguments = C_FALSE;
         Value argi = args;
         while(argi.type() == PAIR) {
           if(argi.car().type() != SYMBOL) {
@@ -1154,9 +1169,14 @@ struct State {
           }
           argi = argi.cdr();
         }
-        fn->arguments = argi;
+        // TODO this should not modify the source list.
+        fn->arguments = args;
+
+        std::cout << fn->arguments << std::endl;
+        std::cout << fn->rest_arguments << std::endl;
       }
     }
+    fn->body = exp.cddr();
     return fn;
   }
 
@@ -1185,8 +1205,74 @@ struct State {
   }
 
   
-  Value apply(Value fn, Value args) {
-    // Value env;
+  Value apply(Value env, Value fn, Value args, Value src_exp = C_FALSE) {
+    Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
+    AR_FRAME(this, env, fn, args, new_env, fn_args, tmp, src_exp, rest_args_name, rest_args_head,
+      rest_args_tail, body);
+    new_env = make_vector();
+    vector_append(new_env, env);
+    bool eval_args = fn.function_eval_args();
+
+    fn_args = fn.function_arguments();
+    size_t arity = fn.function_arguments().list_length();
+    size_t given_args = args.list_length();
+
+    if(given_args < arity) {
+      std::ostringstream os;
+      os << "function " << fn << " expected at least " << arity << " arguments but got " << given_args;
+      return eval_error(os.str(), src_exp);
+    }
+
+    rest_args_name = fn.function_rest_arguments();
+
+    if(rest_args_name == C_FALSE && given_args > arity) {
+      std::ostringstream os;
+      os << "function " << fn << " expected at most " << arity << " arguments but got " << given_args;
+      return eval_error(os.str(), src_exp);
+    }
+
+    // Evaluate arguments left to right
+    while(args.type() == PAIR && fn_args.type() == PAIR) {
+      tmp = eval(env, args.car());
+      vector_append(new_env, fn_args.car());
+      fn_args = fn_args.cdr();
+      vector_append(new_env, tmp);
+      args = args.cdr();
+    }
+
+    // std::cout << "Args " << args << " " << args.type() << std::endl;
+    if(fn.function_rest_arguments() != C_FALSE) {
+      while(args.type() == PAIR) {
+        tmp = eval(env, args.car());
+        if(rest_args_head == C_NIL) {
+          rest_args_head = rest_args_tail = make_pair(tmp, C_NIL);
+        } else {
+          tmp = make_pair(tmp, C_NIL);
+          rest_args_tail.set_cdr(tmp);
+          rest_args_tail = tmp;
+        }
+        args = args.cdr();
+      }
+
+      vector_append(new_env, fn.function_rest_arguments());
+      vector_append(new_env, rest_args_head);
+    }
+
+    // Now eval body left to right
+    body = fn.function_body();
+
+    // std::cout << "eval body " << body << std::endl;
+    while(body.type() == PAIR) {
+      tmp = eval(new_env, body.car());
+      if(body.cdr() == C_NIL) {
+        return tmp;
+      }
+    }
+
+
+    // std::cout << "created new environment " << new_env << std::endl;
+
+    return C_UNSPECIFIED;
 
   }
 
@@ -1210,7 +1296,6 @@ struct State {
     } else if(cond != C_FALSE) {
       res = eval(env, then_branch);
     } else {
-
       res = eval(env, else_branch);
     }
 
@@ -1248,6 +1333,7 @@ struct State {
 
             return eval_if(env, exp, length == 4);
           } else if(car == get_symbol(S_quote)) {
+            if(length > 2) return eval_error("quote takes exactly 1 argument", exp);
             return exp.cadr();
           }
           // form, let, set!, if, quote
@@ -1255,8 +1341,12 @@ struct State {
 
         car = eval(env, exp.car());
 
+        if(car.is_active_exception()) return car;
+
         if(car.type() != FUNCTION) {
           return eval_error("attempt to apply non-function", exp);
+        } else {
+          return apply(env, car, exp.cdr(), exp);
         }
 
         return exp;
@@ -1683,7 +1773,7 @@ struct StringReader {
 #define AR_STRINGIZE(x) AR_STRINGIZE2(x)
 
 #define AR_STRING_READER(name, state, string) \
-  StringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRINGIZE(__LINE__)));
+  arete::StringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRINGIZE(__LINE__)));
 
 // Various inline garbage collector functions
 

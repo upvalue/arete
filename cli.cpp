@@ -81,7 +81,8 @@ int main(int argc, const char **argv) {
             std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
             break;
           } else {
-            std::cout << x << std::endl;
+            if(x != C_UNSPECIFIED)
+              std::cout << x << std::endl;
           }
         }
       }
@@ -92,6 +93,7 @@ int main(int argc, const char **argv) {
 
     if(line) free(line);
   }
+  state.gc.collect();
 
   std::cout << (state.gc.heap_size / 1024) << "kb after " << state.gc.collections << " collections " << std::endl;
   return 0;
