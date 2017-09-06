@@ -44,6 +44,13 @@
 # define ARETE_GC_LOAD_FACTOR 80
 #endif
 
+#define ARETE_GC_SEMISPACE 0
+#define ARETE_GC_INCREMENTAL 1
+
+#ifndef ARETE_GC_STRATEGY
+# define ARETE_GC_STRATEGY ARETE_GC_SEMISPACE
+#endif 
+
 #ifndef ARETE_LOG_TAGS
 # define ARETE_LOG_TAGS 0
 #endif 
@@ -111,6 +118,7 @@ enum {
   EXCEPTION = 12,
   FUNCTION = 13,
 };
+
 
 // Constants:
 
@@ -257,12 +265,13 @@ struct Value {
   }
 
   // PAIRS
-  bool listp() const;
-  size_t length() const;
+  size_t list_length() const;
+  Value list_ref(size_t) const;
 
   Value car() const;
   Value cadr() const;
   Value caddr() const;
+  Value cadddr() const;
   Value cdr() const;
   void set_car(Value);
   void set_cdr(Value);
@@ -283,6 +292,14 @@ struct Value {
   Value exception_tag() const;
   Value exception_message() const;
   Value exception_irritants() const;
+  
+  // FUNCTIONS
+  Value function_name() const;
+  Value function_arguments() const;
+  Value function_rest_arguments() const;
+  Value function_body() const;
+
+  static const unsigned FUNCTION_EVAL_ARGUMENTS_BIT = 1 << 9;
 
   // OPERATORS
 
@@ -358,15 +375,32 @@ inline Value Value::car() const {
   return static_cast<Pair*>(heap)->data_car;
 }
 
-inline bool Value::listp() const {
+inline size_t Value::list_length() const {
   Value check(bits);
+  AR_TYPE_ASSERT(type() == PAIR);
+  if(check == C_NIL) return 0;
+  size_t len = 0;
   while(check.type() == PAIR) {
+    ++len;
     check = check.cdr();
-    if(check.type() != PAIR || check != C_NIL) {
-      return false;
+    if(check.type() != PAIR && check != C_NIL) {
+      return 0;
     }
   }
-  return true;
+  return len;
+}
+
+inline Value Value::list_ref(size_t n) const {
+  Value check(bits);
+  size_t i = 0;
+  while(check.type() == PAIR && i++ != n) {
+    check = check.cdr();
+    if(check.type() != PAIR && check != C_NIL) {
+      AR_TYPE_ASSERT(!"list-ref in non-list");
+      return C_NIL;
+    }
+  }
+  return check.car();
 }
 
 inline Value Value::cadr() const {
@@ -377,6 +411,11 @@ inline Value Value::cadr() const {
 inline Value Value::caddr() const {
   AR_TYPE_ASSERT(type() == PAIR);
   return cdr().cdr().car();
+}
+
+inline Value Value::cadddr() const {
+  AR_TYPE_ASSERT(type() == PAIR);
+  return cdr().cdr().cdr().car();
 }
 
 inline Value Value::cdr() const {
@@ -422,8 +461,26 @@ inline Value Value::exception_irritants() const {
 /// FUNCTIONS
 
 struct Function : HeapValue {
-  Value name, env, arguments, rest_arguments, body;
+  Value name, parent_env, arguments, rest_arguments, body;
+
+  static const unsigned CLASS_TYPE = FUNCTION;
 };
+
+inline Value Value::function_name() const {
+  return as<Function>()->name;
+}
+
+inline Value Value::function_arguments() const {
+  return as<Function>()->arguments;
+}
+
+inline Value Value::function_rest_arguments() const {
+  return as<Function>()->rest_arguments;
+}
+
+inline Value Value::function_body() const {
+  return as<Function>()->body;
+}
 
 /// VECTORS
 
@@ -585,7 +642,7 @@ struct GC {
         goto again;
       case FUNCTION:
         mark(static_cast<Function*>(v)->name.heap);
-        mark(static_cast<Function*>(v)->env.heap);
+        mark(static_cast<Function*>(v)->parent_env.heap);
         mark(static_cast<Function*>(v)->arguments.heap);
         mark(static_cast<Function*>(v)->rest_arguments.heap);
         v = static_cast<Function*>(v)->body.heap;
@@ -788,7 +845,7 @@ struct State {
 
   #define AR_SYMBOLS(_) \
     _(quote), _(quasiquote), _(unquote),  \
-    _(define), _(lambda)
+    _(define), _(lambda), _(if)
 
   #define AR_SYMBOLS_AUX(name) S_##name
 
@@ -818,6 +875,7 @@ struct State {
 
     get_symbol(S_define).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_lambda).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_if).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_quote).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_quasiquote).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_unquote).as<Symbol>()->value = C_SYNTAX;
@@ -890,8 +948,7 @@ struct State {
 
   Value make_vector_storage(size_t capacity) {
     size_t size = (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity);
-    VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE,
-      (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity)));
+    VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE, size));
 
     storage->capacity = capacity;
     storage->length = 0;
@@ -1006,7 +1063,7 @@ struct State {
     AR_TYPE_ASSERT(name.type() == SYMBOL);
     // Toplevel set
     if(env == C_FALSE) {
-      std::cout << "SET VALUE " << name << " " << val << std::endl;
+      // std::cout << "SET VALUE " << name << " " << val << std::endl;
       name.as<Symbol>()->value = val;
       return;
     }
@@ -1060,6 +1117,48 @@ struct State {
     return make_exception("eval-error", os.str());
   }
   
+  Value eval_lambda(Value env, Value exp) {
+    Value fn_env, args;
+    AR_FRAME(*this, env, exp, fn_env, args);
+    Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
+    args = exp.cadr();
+    fn->name = C_FALSE;
+    fn->parent_env = fn_env;
+    if(args.type() == SYMBOL) {
+      fn->arguments = C_FALSE;
+      fn->rest_arguments = args;
+    } else {
+      // First case: (lambda rest ...)
+      if(args.type() == SYMBOL) {
+        fn->rest_arguments = args;
+        fn->arguments = C_NIL;
+      } else if(args == C_NIL) {
+        fn->arguments = C_FALSE;
+        fn->rest_arguments = C_FALSE;
+      } else {
+        // Second case
+        Value argi = args;
+        while(argi.type() == PAIR) {
+          if(argi.car().type() != SYMBOL) {
+            return eval_error("lambda argument list must be all symbols", exp);
+          }
+          if(argi.cdr() == C_NIL) {
+            break;
+          } else if(argi.cdr().type() != PAIR) {
+            if(argi.cdr().type() != SYMBOL) {
+              return eval_error("lambda argument list must be all symbols", exp);
+            }
+
+            fn->rest_arguments = argi.cdr();
+            argi.set_cdr(C_NIL);
+          }
+          argi = argi.cdr();
+        }
+        fn->arguments = argi;
+      }
+    }
+    return fn;
+  }
 
   Value eval_define(Value env, Value exp) {
     Value name, body, tmp;
@@ -1085,29 +1184,79 @@ struct State {
     return C_UNSPECIFIED;
   }
 
+  
+  Value apply(Value fn, Value args) {
+    // Value env;
+
+  }
+
+  Value eval_if(Value env, Value exp, bool has_else) {
+    Value cond = exp.list_ref(1);
+    Value then_branch = exp.list_ref(2);
+    Value else_branch = C_UNSPECIFIED;
+    Value res = C_FALSE;
+
+    AR_FRAME(this, cond, then_branch, else_branch, res);
+    // TODO: protect
+
+    if(has_else) {
+      else_branch = exp.list_ref(3);
+    }
+
+    cond = eval(env, cond);
+
+    if(cond.is_active_exception()) {
+      return cond;
+    } else if(cond != C_FALSE) {
+      res = eval(env, then_branch);
+    } else {
+
+      res = eval(env, else_branch);
+    }
+
+    return res;
+  }
+
   Value eval(Value env, Value exp) {
     Value res, car;
 
-    AR_FRAME(this, env, exp, res, car)
+    AR_FRAME(this, env, exp, res, car);
+
     if(exp.immediatep())
       return exp;
 
-    std::cout << "Eval " << exp << std::endl;
     switch(exp.type()) {
       case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING:
         return exp;
       case PAIR: {
-        car = exp.car();
-        if(car.type() != SYMBOL && car.type() != FUNCTION) {
-          return eval_error("attempt to apply non-procedure", exp);
+        size_t length = exp.list_length();
+        if(length == 0) {
+          return eval_error("non-list in source code", exp);
         }
+        car = exp.car();
+        // TODO should probably check if this is a list.
 
         if(car.type() == SYMBOL && car.symbol_value() == C_SYNTAX) {
           if(car == get_symbol(S_define)) {
             return eval_define(env, exp);
           } else if(car == get_symbol(S_lambda)) {
-            std::cout << "lambda" << std::endl;
+            return eval_lambda(env, exp);
+          } else if(car == get_symbol(S_if)) {
+            if(length != 3 && length != 4) {
+              return eval_error("if requires 2-3 arguments", exp);
+            }
+
+            return eval_if(env, exp, length == 4);
+          } else if(car == get_symbol(S_quote)) {
+            return exp.cadr();
           }
+          // form, let, set!, if, quote
+        } 
+
+        car = eval(env, exp.car());
+
+        if(car.type() != FUNCTION) {
+          return eval_error("attempt to apply non-function", exp);
         }
 
         return exp;
@@ -1116,6 +1265,11 @@ struct State {
         Value res = env_lookup(env, exp);
         if(res.bits == 0)
           return C_UNSPECIFIED;
+        if(res == C_SYNTAX) {
+          std::stringstream os;
+          os << "attempt to use syntax " << res << " as value";
+          return eval_error(os.str(), exp);
+        }
         return res;
       }
     }
@@ -1614,6 +1768,16 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         case ' ': return os << "space";
       }
       return os << v.character();
+    }
+    case FUNCTION: {
+      os << "#<function ";
+      Value name = v.function_name();
+      if(name == C_FALSE) {
+        os << (void*) v.bits;
+      } else {
+        os << name.string_data();
+      }
+      return os << '>';
     }
     case VECTOR:
       os << "#(";

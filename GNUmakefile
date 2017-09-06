@@ -1,5 +1,6 @@
 # Variables
 CXX := clang++
+CPPFLAGS := -Wall
 CFLAGS := $(CFLAGS) -g3 -O3
 CXXFLAGS := $(CPPFLAGS) -std=c++11 -fno-exceptions -fno-rtti $(CFLAGS)
 LDFLAGS := $(LDFLAGS) -g3  -O3
