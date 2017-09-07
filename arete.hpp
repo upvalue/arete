@@ -302,6 +302,7 @@ struct Value {
 
   Value function_name() const;
   Value function_arguments() const;
+  Value function_parent_env() const;
   Value function_rest_arguments() const;
   Value function_body() const;
   bool function_eval_args() const;
@@ -488,6 +489,10 @@ inline Value Value::function_name() const {
 
 inline Value Value::function_arguments() const {
   return as<Function>()->arguments;
+}
+
+inline Value Value::function_parent_env() const {
+  return as<Function>()->parent_env;
 }
 
 inline Value Value::function_rest_arguments() const {
@@ -684,13 +689,13 @@ struct GC {
         mark(static_cast<Symbol*>(v)->name.heap);
         v = static_cast<Symbol*>(v)->value.heap;
         goto again;
-
       case FUNCTION:
         mark(static_cast<Function*>(v)->name.heap);
         mark(static_cast<Function*>(v)->parent_env.heap);
         mark(static_cast<Function*>(v)->arguments.heap);
         mark(static_cast<Function*>(v)->rest_arguments.heap);
         v = static_cast<Function*>(v)->body.heap;
+        goto again;
       case PAIR:
         mark(static_cast<Pair*>(v)->data_car.heap);
         v = static_cast<Pair*>(v)->data_cdr.heap;
@@ -894,8 +899,9 @@ struct State {
 
   #define AR_SYMBOLS_AUX(name) S_##name
 
-  enum BuiltinSymbol { AR_SYMBOLS(AR_SYMBOLS_AUX),
-    S_unquote_splicing,
+  enum BuiltinSymbol {
+    AR_SYMBOLS(AR_SYMBOLS_AUX),
+    S_unquote_splicing, S_set,
     S_read_error, S_eval_error, S_type_error };
   
   std::vector<Handle> builtin_symbols;
@@ -910,7 +916,7 @@ struct State {
     static const char* symbols[] = { 
       #define AR_SYMBOLS_AUX2(x) #x
       AR_SYMBOLS(AR_SYMBOLS_AUX2),
-      "unquote-splicing",
+      "unquote-splicing", "set!",
       "read-error", "eval-error", "type-error"
     };
 
@@ -922,7 +928,8 @@ struct State {
     get_symbol(S_lambda).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_if).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_quote).as<Symbol>()->value = C_SYNTAX;
-    get_symbol(S_quasiquote).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_unquote_splicing).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_set).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_unquote).as<Symbol>()->value = C_SYNTAX;
 
     install_builtin_functions();
@@ -1135,34 +1142,16 @@ struct State {
     AR_FRAME(this, env, name, val);
     AR_TYPE_ASSERT(name.type() == SYMBOL);
     // Toplevel set
-    if(env == C_FALSE) {
-      // std::cout << "SET VALUE " << name << " " << val << std::endl;
-      name.as<Symbol>()->value = val;
-      return;
-    }
-    for(size_t i = 1; i != env.vector_length(); i += 2) {
-      if(env.vector_ref(i) == name) {
-        env.vector_set(i+1, val);
-        return;
+    while(env != C_FALSE) {
+      for(size_t i = 1; i != env.vector_length(); i += 2) {
+        if(env.vector_ref(i) == name) {
+          env.vector_set(i+1, val);
+          return;
+        }
       }
+      env = env.vector_ref(0);
     }
-  }
-
-  void env_set(Value env, const std::string& names, Value val) {
-    Value name;
-    AR_FRAME(this, env, name, val);
-    name = get_symbol(names);
-    // Toplevel set
-    if(env == C_FALSE) {
-      name.as<Symbol>()->value = val;
-      return;
-    }
-    for(size_t i = 1; i != env.vector_length(); i += 2) {
-      // TODO error handling
-      if(env.vector_ref(i) == name) {
-        env.vector_set(i+1, val);
-      }
-    }
+    name.as<Symbol>()->value = val;
   }
 
   Value env_lookup(Value env, Value name, bool one_level = false) {
@@ -1208,7 +1197,7 @@ struct State {
     Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
     args = exp.cadr();
     fn->name = C_FALSE;
-    fn->parent_env = fn_env;
+    fn->parent_env = env;
     if(args.type() == SYMBOL) {
       fn->arguments = C_NIL;
       fn->rest_arguments = args;
@@ -1253,7 +1242,7 @@ struct State {
 
   Value eval_define(Value env, Value exp) {
     Value name, body, tmp;
-    AR_FRAME(this, name, body, tmp);
+    AR_FRAME(this, env, exp, name, body, tmp);
 
     name = exp.cadr();
 
@@ -1275,14 +1264,35 @@ struct State {
     } else {
       env_define(env, name, tmp);
     }
-    std::cout << "env_set " << env << ' ' << name << std::endl;
+    // std::cout << "env_set " << env << ' ' << name << std::endl;
 
     return C_UNSPECIFIED;
   }
 
+  Value eval_set(Value env, Value exp) {
+    Value tmp, name, body;
+    AR_FRAME(this, name, tmp, body, exp, env);
+
+    name = exp.cadr();
+    body = exp.caddr();
+
+    tmp = env_lookup(env, name);
+    if(tmp == C_UNSPECIFIED) {
+      std::ostringstream os;
+      os << "attempt to set! undefined variable " << tmp;
+      return eval_error(os.str(), exp);
+    }
+
+    tmp = eval(env, body);
+    env_set(env, name, tmp);
+
+    return C_UNSPECIFIED;
+  }
+
+
   Value apply_c(Value env, Value fn, Value args, Value src_exp = C_FALSE) {
     Value fn_args, tmp;
-    AR_FRAME(this, env, fn, args, src_exp, tmp);
+    AR_FRAME(this, env, fn, args, fn_args, src_exp, tmp);
 
     size_t given_args = args.list_length();
     size_t min_arity = fn.as<CFunction>()->min_arity;
@@ -1317,8 +1327,8 @@ struct State {
     Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
     AR_FRAME(this, env, fn, args, new_env, fn_args, tmp, src_exp, rest_args_name, rest_args_head,
       rest_args_tail, body);
-    new_env = make_vector();
-    vector_append(new_env, env);
+    
+    new_env = make_env(fn.function_parent_env());
     // bool eval_args = fn.function_eval_args();
 
     fn_args = fn.function_arguments();
@@ -1332,7 +1342,6 @@ struct State {
     }
 
     rest_args_name = fn.function_rest_arguments();
-    std::cout << "REST_ARGS_NAME " << rest_args_name << std::endl;
 
     if(rest_args_name == C_FALSE && given_args > arity) {
       std::ostringstream os;
@@ -1436,6 +1445,8 @@ struct State {
             return eval_define(env, exp);
           } else if(car == get_symbol(S_lambda)) {
             return eval_lambda(env, exp);
+          } else if(car == get_symbol(S_set)) {
+            return eval_set(env, exp);
           } else if(car == get_symbol(S_if)) {
             if(length != 3 && length != 4) {
               return eval_error("if requires 2-3 arguments", exp);

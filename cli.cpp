@@ -1,5 +1,4 @@
 // cli.cpp - arete command line interface 
-// #define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
 
 #define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
 
@@ -40,7 +39,12 @@ int main(int argc, const char **argv) {
           std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
           break;
         } else {
-
+          // std::cout << x << std::endl;
+          x = state.eval_toplevel(x);
+          if(x.type() == EXCEPTION) {
+            std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
+            break;
+          }
         }
       }
     }

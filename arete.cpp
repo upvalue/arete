@@ -22,7 +22,7 @@ Value fn_print(State& state, size_t argc, Value* argv) {
 }
 
 void State::install_builtin_functions() {
-  defun("fx+", fn_fx_add, 2);
+  defun("fx+", fn_fx_add, 2, 2);
   defun("print", fn_print, 0, 0, true);
 }
 
