@@ -307,7 +307,10 @@ struct Value {
   bool function_eval_args() const;
 
   // C FUNCTIONS
+  static const unsigned CFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
+
   c_function_t c_function_addr() const;
+  bool c_function_variable_arity() const;
 
   // OPERATORS
 
@@ -513,6 +516,10 @@ inline c_function_t Value::c_function_addr() const {
   return as<CFunction>()->addr;
 }
 
+inline bool Value::c_function_variable_arity() const {
+  AR_TYPE_ASSERT(type() == CFUNCTION);
+  return heap->get_header_bit(CFUNCTION_VARIABLE_ARITY_BIT);
+}
 
 /// VECTORS
 
@@ -1093,7 +1100,7 @@ struct State {
 
   void install_builtin_functions();
 
-  void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0) {
+  void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
     Value sym;
     CFunction* cfn = 0;
     AR_FRAME(this, sym);
@@ -1102,6 +1109,9 @@ struct State {
     cfn->addr = addr;
     cfn->min_arity = min_arity;
     cfn->max_arity = max_arity;
+    if(variable_arity) {
+      cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
+    }
     sym.as<Symbol>()->value = cfn;
   }
 
@@ -1284,7 +1294,7 @@ struct State {
       return eval_error(os.str(), src_exp);
     }
 
-    if(max_arity != 0 && given_args > max_arity) {
+    if(!fn.c_function_variable_arity() && given_args > max_arity) {
       std::ostringstream os;
       os << " function " << fn << " expected at most " << max_arity << " arguments but got " << given_args;
       return eval_error(os.str(), src_exp);
