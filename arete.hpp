@@ -78,6 +78,8 @@ struct Value;
 struct SourceLocation;
 struct Pair;
 
+typedef Value (*c_function_t)(State&, size_t, Value*);
+
 std::ostream& operator<<(std::ostream& os,  Value);
 
 //= # Value representation
@@ -304,6 +306,8 @@ struct Value {
   Value function_body() const;
   bool function_eval_args() const;
 
+  // C FUNCTIONS
+  c_function_t c_function_addr() const;
 
   // OPERATORS
 
@@ -496,15 +500,33 @@ inline bool Value::function_eval_args() const {
   return heap->get_header_bit(FUNCTION_EVAL_ARGUMENTS_BIT);
 }
 
+
+struct CFunction : HeapValue {
+  c_function_t addr;
+  size_t min_arity, max_arity;
+
+  static const unsigned CLASS_TYPE = CFUNCTION;
+};
+
+inline c_function_t Value::c_function_addr() const {
+  AR_TYPE_ASSERT(type() == CFUNCTION);
+  return as<CFunction>()->addr;
+}
+
+
 /// VECTORS
 
 struct VectorStorage : HeapValue {
   size_t length, capacity;
   Value data[1];
+
+  static const unsigned CLASS_TYPE = VECTOR_STORAGE;
 };
 
 struct Vector : HeapValue {
   Value storage;
+
+  static const unsigned CLASS_TYPE = VECTOR;
 };
 
 inline Value Value::vector_storage() const {
@@ -649,11 +671,13 @@ struct GC {
 
     switch(v->get_type()) {
       case FLONUM: case STRING: case CHARACTER:
+      case CFUNCTION:
         return;
       case SYMBOL:
         mark(static_cast<Symbol*>(v)->name.heap);
         v = static_cast<Symbol*>(v)->value.heap;
         goto again;
+
       case FUNCTION:
         mark(static_cast<Function*>(v)->name.heap);
         mark(static_cast<Function*>(v)->parent_env.heap);
@@ -865,7 +889,7 @@ struct State {
 
   enum BuiltinSymbol { AR_SYMBOLS(AR_SYMBOLS_AUX),
     S_unquote_splicing,
-    S_read_error, S_eval_error };
+    S_read_error, S_eval_error, S_type_error };
   
   std::vector<Handle> builtin_symbols;
 
@@ -880,7 +904,7 @@ struct State {
       #define AR_SYMBOLS_AUX2(x) #x
       AR_SYMBOLS(AR_SYMBOLS_AUX2),
       "unquote-splicing",
-      "read-error", "eval_error"
+      "read-error", "eval-error", "type-error"
     };
 
     for(size_t i = 0; i != sizeof(symbols) / sizeof(const char*); i++) {
@@ -893,6 +917,8 @@ struct State {
     get_symbol(S_quote).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_quasiquote).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_unquote).as<Symbol>()->value = C_SYNTAX;
+
+    install_builtin_functions();
   }
 
 #undef AR_SYMBOLS
@@ -1056,6 +1082,27 @@ struct State {
 
   ///// (EVAL) Interpreter
 
+  // Functions for interacting with the Scheme environment
+
+#define AR_FN_EXPECT_TYPE(state, argv, i, expect) \
+  if((argv)[(i)].type() != (expect)) { \
+    return (state).type_error("function "##fn_name ); \
+  } 
+
+  void install_builtin_functions();
+
+  void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0) {
+    Value sym;
+    CFunction* cfn = 0;
+    AR_FRAME(this, sym);
+    sym = get_symbol(name);
+    cfn = static_cast<CFunction*>(gc.allocate(CFUNCTION, sizeof(CFunction)));
+    cfn->addr = addr;
+    cfn->min_arity = min_arity;
+    cfn->max_arity = max_arity;
+    sym.as<Symbol>()->value = cfn;
+  }
+
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
 
   // Environments are just vectors containing the parent environment in the first position
@@ -1117,6 +1164,10 @@ struct State {
     }
     // reached toplevel, check symbol.
     return name.as<Symbol>()->value;
+  }
+
+  Value type_error(const std::string& msg) {
+    return make_exception("type-error", msg);
   }
 
   /** Return an eval error with source code information */
@@ -1204,14 +1255,46 @@ struct State {
     return C_UNSPECIFIED;
   }
 
+  Value apply_c(Value env, Value fn, Value args, Value src_exp = C_FALSE) {
+    Value fn_args, tmp;
+    AR_FRAME(this, env, fn, args, src_exp, tmp);
+
+    size_t given_args = args.list_length();
+    size_t min_arity = fn.as<CFunction>()->min_arity;
+    size_t max_arity = fn.as<CFunction>()->max_arity;
+
+    if(given_args < min_arity) {
+      std::ostringstream os;
+      os << "function " << fn << " expected at least " << min_arity << " arguments but got " << given_args;
+      return eval_error(os.str(), src_exp);
+    }
+
+    if(max_arity != 0 && given_args > max_arity) {
+      std::ostringstream os;
+      os << " function " << fn << " expected at most " << max_arity << " arguments but got " << given_args;
+      return eval_error(os.str(), src_exp);
+    }
+
+    fn_args = make_vector();
+    size_t argc = 0;
+    while(args.type() == PAIR) {
+      tmp = eval(env, args.car());
+      vector_append(fn_args, tmp);
+      argc++;
+      args = args.cdr();
+    }
+    
+    return fn.c_function_addr()(*this, argc, fn_args.as<Vector>()->storage.as<VectorStorage>()->data);
+  }
   
-  Value apply(Value env, Value fn, Value args, Value src_exp = C_FALSE) {
+  /** Apply a scheme function */
+  Value apply_scheme(Value env, Value fn, Value args, Value src_exp = C_FALSE) {
     Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
     AR_FRAME(this, env, fn, args, new_env, fn_args, tmp, src_exp, rest_args_name, rest_args_head,
       rest_args_tail, body);
     new_env = make_vector();
     vector_append(new_env, env);
-    bool eval_args = fn.function_eval_args();
+    // bool eval_args = fn.function_eval_args();
 
     fn_args = fn.function_arguments();
     size_t arity = fn.function_arguments().list_length();
@@ -1224,6 +1307,7 @@ struct State {
     }
 
     rest_args_name = fn.function_rest_arguments();
+    std::cout << "REST_ARGS_NAME " << rest_args_name << std::endl;
 
     if(rest_args_name == C_FALSE && given_args > arity) {
       std::ostringstream os;
@@ -1343,10 +1427,14 @@ struct State {
 
         if(car.is_active_exception()) return car;
 
-        if(car.type() != FUNCTION) {
+        if(car.type() != FUNCTION && car.type() != CFUNCTION) {
           return eval_error("attempt to apply non-function", exp);
         } else {
-          return apply(env, car, exp.cdr(), exp);
+          if(car.type() == FUNCTION) {
+            return apply_scheme(env, car, exp.cdr(), exp);
+          } else {
+            return apply_c(env, car, exp.cdr(), exp);
+          }
         }
 
         return exp;
@@ -1860,6 +1948,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       return os << v.character();
     }
     case FUNCTION: {
+      // TODO this should include source information
       os << "#<function ";
       Value name = v.function_name();
       if(name == C_FALSE) {
@@ -1868,6 +1957,10 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         os << name.string_data();
       }
       return os << '>';
+    }
+    case CFUNCTION: {
+      os << "#<cfunction ";
+      return os << (void*) v.c_function_addr() << '>';
     }
     case VECTOR:
       os << "#(";

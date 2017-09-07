@@ -21,35 +21,31 @@ int main(int argc, const char **argv) {
 
   // vec = state.make_vector();
   if(argc > 1) {
-    // read a file
-    const char* file_path = argv[1];
+    // read files
+    for(size_t i = 1; i != argc; i++) {
+      const char* file_path = argv[1];
 
-    std::ifstream file_handle(file_path, std::ios::in);
-    std::stringstream ss;
-    ss << file_handle.rdbuf();
-    Reader reader(state, ss);
-    reader.file = state.register_file(argv[1]);
-    while(true) {
-      x = reader.read();
-      if(x == C_EOF) {
-        break;
-      }
+      std::ifstream file_handle(file_path, std::ios::in);
+      std::stringstream ss;
+      ss << file_handle.rdbuf();
+      Reader reader(state, ss);
+      reader.file = state.register_file(argv[1]);
+      while(true) {
+        x = reader.read();
+        if(x == C_EOF) {
+          break;
+        }
 
-      // state.vector_append(vec, x);
+        if(x.type() == EXCEPTION) {
+          std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
+          break;
+        } else {
 
-      if(x.type() == EXCEPTION) {
-        std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
-        break;
-      } else {
-        // std::cout << x << std::endl;
+        }
       }
     }
-    // state.gc.collect();
-    // std::cout << vec << std::endl;
   } else {
     size_t i = 1;
-
-    std::cout << "Arete 0.1" << std::endl;
 
     char* line = 0;
     linenoiseHistorySetMaxLen(1024);

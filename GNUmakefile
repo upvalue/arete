@@ -29,11 +29,11 @@ cli.o: cli.cpp arete.hpp
 test.o: test.cpp arete.hpp
 
 # Link 
-arete: cli.o linenoise.o
+arete: cli.o arete.o linenoise.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
-test: test.o linenoise.o
+test: test.o arete.o linenoise.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
