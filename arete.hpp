@@ -1086,7 +1086,9 @@ struct State {
 
 #define AR_FN_EXPECT_TYPE(state, argv, i, expect) \
   if((argv)[(i)].type() != (expect)) { \
-    return (state).type_error("function "##fn_name ); \
+    std::ostringstream __os; \
+    __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (expect); \
+    return (state).type_error(__os.str()); \
   } 
 
   void install_builtin_functions();
@@ -1166,6 +1168,14 @@ struct State {
     return name.as<Symbol>()->value;
   }
 
+  void env_define(Value env, Value name, Value val) {
+    // TODO possibly should check for shadowing
+    AR_FRAME(this, env, name, val);
+    vector_append(env, name);
+    vector_append(env, val);
+  }
+
+
   Value type_error(const std::string& msg) {
     return make_exception("type-error", msg);
   }
@@ -1223,8 +1233,8 @@ struct State {
         // TODO this should not modify the source list.
         fn->arguments = args;
 
-        std::cout << fn->arguments << std::endl;
-        std::cout << fn->rest_arguments << std::endl;
+        // std::cout << fn->arguments << std::endl;
+        // std::cout << fn->rest_arguments << std::endl;
       }
     }
     fn->body = exp.cddr();
@@ -1250,7 +1260,12 @@ struct State {
 
     tmp = eval(env, body);
 
-    env_set(env, name, tmp);
+    if(env == C_FALSE) {
+      name.as<Symbol>()->value = tmp;
+    } else {
+      env_define(env, name, tmp);
+    }
+    std::cout << "env_set " << env << ' ' << name << std::endl;
 
     return C_UNSPECIFIED;
   }
@@ -1351,6 +1366,7 @@ struct State {
       if(body.cdr() == C_NIL) {
         return tmp;
       }
+      body = body.cdr();
     }
 
 

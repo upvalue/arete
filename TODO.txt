@@ -1,0 +1,16 @@
+runtime
+- semispace garbage collection for extreme debugging
+- figure out how to get a stack trace with C++ after type errors
+- hash tables
+reader
+- expression comments #;
+- block comments #|
+- extended symbols |
+- utf8
+- hey hey hey, do the thing every day
+language
+- get some basic demos running. closures, fibonacci, that kind of stuff
+- macro expansion
+- r5rs support
+- r7rs support 
+- (within reason)
