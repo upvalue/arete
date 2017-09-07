@@ -1161,7 +1161,7 @@ struct State {
           return env.vector_ref(i+1);
       }
       env = env.vector_ref(0); // check parent environment
-      if(one_level) break;
+      if(one_level) break; // TODO should this return?
     }
     // reached toplevel, check symbol.
     return name.as<Symbol>()->value;
@@ -1254,7 +1254,7 @@ struct State {
 
     tmp = env_lookup(env, name, true);
     if(tmp != C_UNSPECIFIED) {
-      warn() << source_info(exp.pair_src()) << " shadows existing definition of " << name;
+      warn() << source_info(exp.pair_src()) << " shadows existing definition of " << name << std::endl;;
     }
 
     tmp = eval(env, body);
@@ -1563,7 +1563,7 @@ struct Reader {
   /** Return an error */
   Value read_error(const std::string& description, size_t begin_line = 0) {
     std::ostringstream os;
-    SourceLocation loc(file, begin_line || line);
+    SourceLocation loc(file, begin_line == 1 ? line : begin_line);
 
     os << state.source_info(&loc) << ' ';
     if(begin_line != 0) {
@@ -1737,7 +1737,7 @@ struct Reader {
 
           if(elt == C_EOF) {
             AR_ASSERT(is.eof());
-            return read_error("unexpected EOF in list", list_start.line);
+            return read_error("unexpected EOF", list_start.line);
           } else if(elt.is_active_exception()) {
             return elt;
           }
