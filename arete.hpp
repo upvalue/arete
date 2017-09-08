@@ -1363,6 +1363,7 @@ struct State {
     size_t argc = 0;
     while(args.type() == PAIR) {
       tmp = eval(env, args.car());
+      if(tmp.is_active_exception()) return tmp;
       vector_append(fn_args, tmp);
       argc++;
       args = args.cdr();
@@ -1404,6 +1405,7 @@ struct State {
       vector_append(new_env, fn_args.car());
       fn_args = fn_args.cdr();
       vector_append(new_env, tmp);
+      if(tmp.is_active_exception()) return tmp;
       args = args.cdr();
     }
 
@@ -1411,6 +1413,7 @@ struct State {
     if(fn.function_rest_arguments() != C_FALSE) {
       while(args.type() == PAIR) {
         tmp = eval(env, args.car());
+        if(tmp.is_active_exception()) return tmp;
         if(rest_args_head == C_NIL) {
           rest_args_head = rest_args_tail = make_pair(tmp, C_NIL);
         } else {
@@ -1431,6 +1434,7 @@ struct State {
     // std::cout << "eval body " << body << std::endl;
     while(body.type() == PAIR) {
       tmp = eval(new_env, body.car());
+      if(tmp.is_active_exception()) return tmp;
       if(body.cdr() == C_NIL) {
         return tmp;
       }
@@ -1536,7 +1540,6 @@ struct State {
           std::ostringstream os;
           os << "reference to undefined variable " << exp;
           return eval_error(os.str());
-          return C_UNSPECIFIED;
         }
         if(res == C_SYNTAX) {
           std::stringstream os;

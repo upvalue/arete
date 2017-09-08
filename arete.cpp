@@ -71,15 +71,20 @@ Value fn_nullp(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_procedurep(State& state, size_t argc, Value* argv) {
-  return argv[0].type() == FUNCTION || argv[0].type() == CFUNCTION;
+  return Value::make_boolean(argv[0].type() == FUNCTION || argv[0].type() == CFUNCTION);
 }
 
 Value fn_pairp(State& state, size_t argc, Value* argv) {
-  return argv[0].type() == PAIR;
+  return Value::make_boolean(argv[0].type() == PAIR);
 }
 
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
+  if(argv[0] == C_NIL) return C_FALSE;
+  while(argv[0].type() == PAIR) {
+    if(argv[0].cdr() == C_NIL) return C_TRUE;
+    argv[0] = argv[0].cdr();
+  }
   return C_FALSE;
 }
 
@@ -109,6 +114,7 @@ void State::install_builtin_functions() {
   defun("pair?", fn_pairp, 1, 1);
   
   // Lists
+  defun("list?", fn_listp, 1, 1);
 
   // Equality
   defun("eq?", fn_eq, 2, 2);
@@ -123,7 +129,6 @@ void State::install_builtin_functions() {
   // Pairs
   defun("car", fn_car, 1, 1);
   defun("cdr", fn_cdr, 1, 1);
-
 }
 
 }
