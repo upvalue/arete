@@ -1,13 +1,20 @@
 runtime
-- semispace garbage collection for extreme debugging
 - figure out how to get a stack trace with C++ after type errors
 - hash tables
+- ports
+garbage collection
+- better handling of large allocations
+- semispace garbage collection for extreme debugging and robustness
+interpreter
+- let
+x naming lambdas
+- stack traces
 reader
 - expression comments #;
 - block comments #|
 - extended symbols |
 - utf8
-- hey hey hey, do the thing every day
+- attach source code info to symbols by boxing them
 language
 - get some basic demos running. closures, fibonacci, that kind of stuff
 - macro expansion

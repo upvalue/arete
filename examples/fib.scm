@@ -17,7 +17,8 @@
          1
          (fx+ (fib (fx- n 1)) (fib (fx- n 2)))))))
 
-; (display (fib 10))
-; (newline)
-(print (fib 10))
+;(print (fib 10))
+(print (fib 30))
+
+
 

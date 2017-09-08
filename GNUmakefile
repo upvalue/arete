@@ -25,6 +25,7 @@ endef
 
 all: arete test
 
+arete.o: arete.cpp arete.hpp
 cli.o: cli.cpp arete.hpp
 test.o: test.cpp arete.hpp
 

@@ -35,7 +35,9 @@
   arete::FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
   arete::Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
 
-#define ARETE_BLOCK_SIZE 4096
+#ifndef ARETE_BLOCK_SIZE
+# define ARETE_BLOCK_SIZE 4096
+#endif
 
 //= ### ARETE_GC_LOAD_FACTOR = 80
 //= If more than ARETE_GC_LOAD_FACTOR percent memory is used after a collection, Arete will allocate
@@ -100,7 +102,7 @@ std::ostream& operator<<(std::ostream& os,  Value);
 //= - `..10` - Constant
 //= - `..00` - Pointer to heap value
 
-enum {
+enum Type {
   // Should never be encountered
   RESERVED = 0,
   // Immediate values
@@ -120,8 +122,27 @@ enum {
   EXCEPTION = 12,
   FUNCTION = 13,
   CFUNCTION = 14,
+  TABLE = 15,
 };
 
+inline std::ostream& operator<<(std::ostream& os, Type type) {
+  switch(type) {
+    case FIXNUM: return os << "fixnum";
+    case CONSTANT: return os << "constant";
+    case BLOCK: return os << "block";
+    case FLONUM: return os << "flonum";
+    case STRING: return os << "string";
+    case CHARACTER: return os << "character";
+    case SYMBOL: return os << "symbol";
+    case VECTOR: return os << "vector";
+    case PAIR: return os << "pair";
+    case EXCEPTION: return os << "exception";
+    case FUNCTION: return os << "function";
+    case CFUNCTION: return os << "cfunction";
+    case TABLE: return os << "table";
+    default: return os << "unknown";
+  }
+}
 
 // Constants:
 
@@ -216,6 +237,10 @@ struct Value {
   unsigned constant_value() const {
     AR_ASSERT(type() == CONSTANT);
     return bits;
+  }
+
+  static Value make_boolean(ptrdiff_t cmp) {
+    return cmp == 0 ? C_FALSE : C_TRUE;
   }
 
   // FLONUMS
@@ -567,6 +592,12 @@ inline size_t Value::vector_length() const {
   return store->length;
 }
 
+// HASH TABLES
+
+struct Table : HeapValue  {
+  static const Type CLASS_TYPE = TABLE;
+};
+
 ///// (GC) Garbage collector
 
 struct GC;
@@ -717,7 +748,6 @@ struct GC {
         v = static_cast<VectorStorage*>(v)->data[length - 1].heap;
         goto again;
       }
-      default:
       case BLOCK: case FIXNUM: case CONSTANT:
         std::cout << v->get_type() << std::endl;
         AR_ASSERT(!"arete:gc: bad value on heap; probably a GC bug"); break;
@@ -895,7 +925,7 @@ struct State {
 
   #define AR_SYMBOLS(_) \
     _(quote), _(quasiquote), _(unquote),  \
-    _(define), _(lambda), _(if)
+    _(define), _(lambda), _(if), _(let)
 
   #define AR_SYMBOLS_AUX(name) S_##name
 
@@ -926,6 +956,7 @@ struct State {
 
     get_symbol(S_define).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_lambda).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_let).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_if).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_quote).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_unquote_splicing).as<Symbol>()->value = C_SYNTAX;
@@ -1101,7 +1132,7 @@ struct State {
 #define AR_FN_EXPECT_TYPE(state, argv, i, expect) \
   if((argv)[(i)].type() != (expect)) { \
     std::ostringstream __os; \
-    __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (expect); \
+    __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (Type)(argv[i].type()); \
     return (state).type_error(__os.str()); \
   } 
 
@@ -1180,7 +1211,7 @@ struct State {
   }
 
   /** Return an eval error with source code information */
-  Value eval_error(const std::string& msg, Value exp) {
+  Value eval_error(const std::string& msg, Value exp = C_FALSE) {
     std::ostringstream os;
 
     if(exp.type() == PAIR && exp.pair_has_source()) {
@@ -1193,7 +1224,7 @@ struct State {
   
   Value eval_lambda(Value env, Value exp, bool eval_args = false) {
     Value fn_env, args, args_head, args_tail;
-    AR_FRAME(*this, env, exp, fn_env, args);
+    AR_FRAME(*this, env, exp, fn_env, args, args_head, args_tail);
     Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
     args = exp.cadr();
     fn->name = C_FALSE;
@@ -1240,6 +1271,20 @@ struct State {
     return fn;
   }
 
+  Value eval_let(Value env, Value exp) {
+    // most complex possible syntax
+    // (let loop (var #t))
+    //    (if var (loop #f)))
+
+    // ((lambda (var) var) #t)
+    // Extract arguments first.
+
+    // Value let_name, 
+
+    AR_FRAME(*this, env, exp);
+    return C_UNSPECIFIED;
+  }
+
   Value eval_define(Value env, Value exp) {
     Value name, body, tmp;
     AR_FRAME(this, env, exp, name, body, tmp);
@@ -1263,6 +1308,10 @@ struct State {
       name.as<Symbol>()->value = tmp;
     } else {
       env_define(env, name, tmp);
+    }
+
+    if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
+      tmp.as<Function>()->name = name;
     }
     // std::cout << "env_set " << env << ' ' << name << std::endl;
 
@@ -1447,6 +1496,8 @@ struct State {
             return eval_lambda(env, exp);
           } else if(car == get_symbol(S_set)) {
             return eval_set(env, exp);
+          } else if(car == get_symbol(S_let)) {
+            return eval_let(env, exp);
           } else if(car == get_symbol(S_if)) {
             if(length != 3 && length != 4) {
               return eval_error("if requires 2-3 arguments", exp);
@@ -1478,11 +1529,18 @@ struct State {
       }
       case SYMBOL: {
         Value res = env_lookup(env, exp);
-        if(res.bits == 0)
+        if(res.bits == 0) {
           return C_UNSPECIFIED;
+        } 
+        if(res == C_UNSPECIFIED) {
+          std::ostringstream os;
+          os << "reference to undefined variable " << exp;
+          return eval_error(os.str());
+          return C_UNSPECIFIED;
+        }
         if(res == C_SYNTAX) {
           std::stringstream os;
-          os << "attempt to use syntax " << res << " as value";
+          os << "attempt to use syntax " << exp << " as value";
           return eval_error(os.str(), exp);
         }
         return res;
@@ -1991,7 +2049,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       if(name == C_FALSE) {
         os << (void*) v.bits;
       } else {
-        os << name.string_data();
+        os << name;
       }
       return os << '>';
     }

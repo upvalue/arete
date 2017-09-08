@@ -1,6 +1,7 @@
 // cli.cpp - arete command line interface 
 
 #define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
+// #define ARETE_BLOCK_SIZE (4096 * 1024)
 
 #include <fstream>
 #include <iostream>
