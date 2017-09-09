@@ -6,6 +6,7 @@ garbage collection
 - better handling of large allocations
 x semispace garbage collection for extreme debugging and robustness
 - could semispace collector also be used to optionally compact the incremental collector?
+- how to reduce code duplication between copy & mark routines?
 interpreter
 - let
 x naming lambdas
@@ -20,5 +21,4 @@ language
 - get some basic demos running. closures, fibonacci, that kind of stuff
 - macro expansion
 - r5rs support
-- r7rs support 
-- (within reason)
+- r7rs support (within reason)

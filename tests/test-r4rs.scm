@@ -2,8 +2,9 @@
 
 ;; arete note
 
-;; This is an R4RS test suite, slightly modified, used mostly as
-;; a stress test for the GC, reader and interpreter
+;; This is an R4RS test suite, slightly modified, used as
+;; a stress test for the GC and reader. actual r4rs compliance
+;; is not desired
 
 
 ;;;; `test.scm' Test correctness of scheme implementations.

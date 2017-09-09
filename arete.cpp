@@ -80,6 +80,10 @@ Value fn_pairp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == PAIR);
 }
 
+Value fn_charp(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(argv[0].type() == CHARACTER);
+}
+
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
   if(argv[0] == C_NIL) return C_FALSE;
@@ -112,6 +116,7 @@ void State::install_builtin_functions() {
 
   // Predicates
   defun("null?", fn_nullp, 1, 1);
+  defun("char?", fn_charp, 1, 1);
   defun("procedure?", fn_procedurep, 1, 1);
   defun("pair?", fn_pairp, 1, 1);
   

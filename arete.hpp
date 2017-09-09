@@ -129,11 +129,11 @@ enum Type {
   CONSTANT = 2,
   // Should never be encountered except in GC code
   BLOCK = 3,
-  // No pointers
+  // Have no pointers
   FLONUM = 4,
   STRING = 5,
   CHARACTER = 6,
-  // Pointers
+  // Have pointers
   SYMBOL = 7,
   BOX = 8,
   VECTOR = 9,
@@ -1005,6 +1005,8 @@ struct GCIncremental : GCCommon {
     live_objects_after_collection = live_memory_after_collection = 0;
     block_i = block_cursor = 0;
 
+    // TODO if called early this should go through marking everything
+
     // Reverse meaning of mark bit
     mark_bit = !mark_bit;
 
@@ -1455,6 +1457,19 @@ struct State {
 
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
 
+  #define EVAL_TRACE(exp) \
+    if((exp).pair_has_source()) { \
+      std::ostringstream os; \
+      os << source_info((exp).pair_src()); \
+      stack_trace.push_back(os.str()); \
+    }
+    
+  #define EVAL_CHECK(exp, src) \
+    if((exp).is_active_exception()) { \
+      EVAL_TRACE((src)); \
+      return (exp); \
+    }
+
   // Environments are just vectors containing the parent environment in the first position
   // and variable names/values in the even/odd positions afterwards e.g.
 
@@ -1663,13 +1678,15 @@ struct State {
     size_t argc = 0;
     while(args.type() == PAIR) {
       tmp = eval(env, args.car());
-      if(tmp.is_active_exception()) return tmp;
+      EVAL_CHECK(tmp, src_exp);
       vector_append(fn_args, tmp);
       argc++;
       args = args.cdr();
     }
     
-    return fn.c_function_addr()(*this, argc, fn_args.as<Vector>()->storage.as<VectorStorage>()->data);
+    tmp = fn.c_function_addr()(*this, argc, fn_args.as<Vector>()->storage.as<VectorStorage>()->data);
+    EVAL_CHECK(tmp, src_exp);
+    return tmp;
   }
   
   /** Apply a scheme function */
@@ -1699,29 +1716,13 @@ struct State {
       return eval_error(os.str(), src_exp);
     }
 
-  #define EVAL_TRACE(exp) \
-    if((exp).pair_has_source()) { \
-      std::ostringstream os; \
-      os << source_info((exp).pair_src()); \
-      stack_trace.push_back(os.str()); \
-    }
-    
-  #define EVAL_CHECK(exp, src) \
-    if((exp).is_active_exception()) { \
-      EVAL_TRACE((src)); \
-      return (exp); \
-    }
-
     // Evaluate arguments left to right
     while(args.type() == PAIR && fn_args.type() == PAIR) {
       tmp = eval(env, args.car());
       vector_append(new_env, fn_args.car());
       fn_args = fn_args.cdr();
       vector_append(new_env, tmp);
-      if(tmp.is_active_exception()) {
-        EVAL_TRACE(src_exp);
-        return tmp;
-      }
+      EVAL_CHECK(tmp, src_exp);
       args = args.cdr();
     }
 
@@ -1729,7 +1730,7 @@ struct State {
     if(fn.function_rest_arguments() != C_FALSE) {
       while(args.type() == PAIR) {
         tmp = eval(env, args.car());
-        if(tmp.is_active_exception()) return tmp;
+        EVAL_CHECK(tmp, src_exp);
         if(rest_args_head == C_NIL) {
           rest_args_head = rest_args_tail = make_pair(tmp, C_NIL);
         } else {
@@ -1750,6 +1751,7 @@ struct State {
     // std::cout << "eval body " << body << std::endl;
     while(body.type() == PAIR) {
       tmp = eval(new_env, body.car());
+      EVAL_CHECK(tmp, src_exp);
       if(tmp.is_active_exception()) return tmp;
       if(body.cdr() == C_NIL) {
         return tmp;
@@ -1802,7 +1804,7 @@ struct State {
     // std::cout << "evaluating exp" << std::endl;
     // std::cout << exp << std::endl;
     switch(exp.type()) {
-      case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING:
+      case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING: case CHARACTER:
         return exp;
       case PAIR: {
         size_t length = exp.list_length();
@@ -1810,7 +1812,6 @@ struct State {
           return eval_error("non-list in source code", exp);
         }
         car = exp.car();
-        // TODO should probably check if this is a list.
 
         if(car.type() == SYMBOL && car.symbol_value() == C_SYNTAX) {
           if(car == get_symbol(S_define)) {
