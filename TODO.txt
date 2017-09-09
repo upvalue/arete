@@ -4,7 +4,8 @@ runtime
 - ports
 garbage collection
 - better handling of large allocations
-- semispace garbage collection for extreme debugging and robustness
+x semispace garbage collection for extreme debugging and robustness
+- could semispace collector also be used to optionally compact the incremental collector?
 interpreter
 - let
 x naming lambdas

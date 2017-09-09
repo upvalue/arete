@@ -231,6 +231,7 @@ struct Value {
 
   /** Returns true if this value is immediate */
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
+  static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
 
   /** Safely retrieve the type of an object */
   Type type() const;
@@ -759,11 +760,13 @@ struct GCSemispace : GCCommon {
   }
 
   void copy(HeapValue** ref) {
-    if(ref == 0 || Value(*ref).immediatep()) 
+    // If this is a null ptr or immediate value, nothing is necessary
+    if(ref == 0 || Value::immediatep(*ref))
       return;
     
     HeapValue* obj = *ref;
 
+    // This object has already been copied
     if(obj->header == RESERVED) {
       (*ref) = (HeapValue*) obj->size;
       return;
@@ -775,6 +778,7 @@ struct GCSemispace : GCCommon {
 
     memcpy(cpy, obj, size);
     
+    // We use the object's size field to store the forward pointer
     obj->size = (size_t) cpy;
     obj->header = RESERVED;
 
@@ -940,7 +944,7 @@ struct GCIncremental : GCCommon {
     // We use a GOTO here to avoid creating unnecessary stack frames
   again: 
     // If there is no object or object has already been marked
-    if(v == 0 || Value(v).immediatep() || marked(v))
+    if(v == 0 || Value::immediatep(v) || marked(v))
       return;
     
     live_objects_after_collection++;
@@ -1389,7 +1393,8 @@ struct State {
   }
 
   void print_gc_stats(std::ostream& os) {
-    os << gc.heap_size << "kb in use " << " after " << gc.collections << " collections " << std::endl;
+    os << (gc.heap_size / 1024) << "kb in use after " << gc.collections << " collections and "
+      << gc.allocations << " allocations " << std::endl;
   }
 
   /** Return a description of a source location */
@@ -1765,7 +1770,7 @@ struct State {
     Value else_branch = C_UNSPECIFIED;
     Value res = C_FALSE;
 
-    AR_FRAME(this, cond, then_branch, else_branch, res);
+    AR_FRAME(this, cond, then_branch, else_branch, res, exp, env);
     // TODO: protect
 
     if(has_else) {
@@ -1790,9 +1795,12 @@ struct State {
 
     AR_FRAME(this, env, exp, res, car);
 
+
     if(exp.immediatep())
       return exp;
 
+    // std::cout << "evaluating exp" << std::endl;
+    // std::cout << exp << std::endl;
     switch(exp.type()) {
       case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING:
         return exp;
@@ -1843,7 +1851,8 @@ struct State {
         return exp;
       }
       case SYMBOL: {
-        Value res = env_lookup(env, exp);
+        // std::cout << "let me do a thing with symbol" << std::endl;
+        res = env_lookup(env, exp);
         if(res.bits == 0) {
           return C_UNSPECIFIED;
         } 
@@ -1916,6 +1925,11 @@ struct Reader {
     expr = read();
     if(expr.is_active_exception())
       return expr;
+    else if(expr == C_EOF) {
+      std::ostringstream os;
+      os << "unexpected EOF after " << name;
+      return read_error(os.str());
+    }
     symbol = state.get_symbol(name);
     expr = state.make_pair(expr, C_NIL);
     expr = state.make_pair(symbol, expr);
@@ -2287,6 +2301,8 @@ inline void GCIncremental::mark_symbol_table() {
 inline void GCSemispace::copy_symbol_table() {
   ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
   // std::cout << state.symbol_table.size() << " live symbols" << std::endl;
+  // TODO: To make this a weak table, simply check for RESERVED in this. If forwarded, set it up
+  // otherwise delete reference
   for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
     HeapValue* v = x->second;
     copy(&v);
