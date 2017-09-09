@@ -1,4 +1,5 @@
-/test
+/tests/test-incremental
+/tests/test-semispace
 *.o
 vgcore*
 /site.mk

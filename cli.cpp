@@ -1,25 +1,30 @@
 // cli.cpp - arete command line interface 
 
-#define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
+//#define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
+#define ARETE_GC_STRATEGY ARETE_GC_SEMISPACE
+#define ARETE_GC_DEBUG 1
 // #define ARETE_BLOCK_SIZE (4096 * 1024)
 
 #include <fstream>
 #include <iostream>
 
-#include "linenoise.h"
+#include "vendor/linenoise.h"
 
-#include "arete.hpp"
+#include "arete.cpp"
 
 using namespace arete;
 
+State state;
+
 int main(int argc, const char **argv) {
-  State state;
   state.boot();
 
   Value x, vec;
   AR_FRAME(state, x, vec);
 
-  // vec = state.make_vector();
+  state.gc.collect_before_every_allocation = true;
+
+  vec = state.make_vector();
   if(argc > 1) {
     // read files
     for(size_t i = 1; i != argc; i++) {
@@ -36,16 +41,20 @@ int main(int argc, const char **argv) {
           break;
         }
 
-        if(x.type() == EXCEPTION) {
+        if(x.is_active_exception()) {
           std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
           break;
         } else {
+          // state.vector_append(vec, x);
+          std::cout << x << std::endl;
           // std::cout << x << std::endl;
+          /*
           x = state.eval_toplevel(x);
           if(x.type() == EXCEPTION) {
             std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
             break;
           }
+          */
         }
       }
     }
@@ -55,8 +64,13 @@ int main(int argc, const char **argv) {
     char* line = 0;
     linenoiseHistorySetMaxLen(1024);
 
+    std::ostringstream prompt;
+
     while(i++) {
-      line = linenoise("> ");
+      prompt << (i - 1) << "> ";
+      line = linenoise(prompt.str().c_str());
+      prompt.str("");
+      prompt.clear();
 
       if(!line) {
         break;
@@ -80,6 +94,7 @@ int main(int argc, const char **argv) {
           x = state.eval_toplevel(x);
           if(x.type() == EXCEPTION) {
             std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
+            state.print_stack_trace();
             break;
           } else {
             if(x != C_UNSPECIFIED)

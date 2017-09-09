@@ -1,5 +1,4 @@
 // arete.hpp - an embeddable scheme implementation
-
 #ifndef ARETE_HPP
 #define ARETE_HPP
 
@@ -31,6 +30,7 @@
 # define AR_TYPE_ASSERT assert
 #endif 
 
+
 #define AR_FRAME(state, ...)  \
   arete::FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
   arete::Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
@@ -50,8 +50,24 @@
 #define ARETE_GC_INCREMENTAL 1
 
 #ifndef ARETE_GC_STRATEGY
-# define ARETE_GC_STRATEGY ARETE_GC_SEMISPACE
+# define ARETE_GC_STRATEGY ARETE_GC_INCREMENTAL
 #endif 
+
+#ifndef ARETE_GC_DEBUG
+# define ARETE_GC_DEBUG 0
+#endif
+
+#if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE && ARETE_GC_DEBUG == 1
+# ifndef ARETE_ASSERT_LIVE
+#  define ARETE_ASSERT_LIVE(obj) \
+   AR_ASSERT("debug failure" && (arete::current_state != 0)); \
+   AR_ASSERT("attempt to invoke method on non-live object" && (arete::current_state->gc.live((obj)) == true));
+# endif
+#endif
+
+#ifndef ARETE_ASSERT_LIVE
+# define ARETE_ASSERT_LIVE(obj) 
+#endif
 
 #ifndef ARETE_LOG_TAGS
 # define ARETE_LOG_TAGS 0
@@ -79,6 +95,9 @@ struct Block;
 struct Value;
 struct SourceLocation;
 struct Pair;
+
+// For debugging purposes only: a global instance of the current state
+extern State* current_state;
 
 typedef Value (*c_function_t)(State&, size_t, Value*);
 
@@ -116,6 +135,7 @@ enum Type {
   CHARACTER = 6,
   // Pointers
   SYMBOL = 7,
+  BOX = 8,
   VECTOR = 9,
   VECTOR_STORAGE = 10,
   PAIR = 11, 
@@ -213,17 +233,18 @@ struct Value {
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
 
   /** Safely retrieve the type of an object */
-  unsigned int type() const {
+  Type type() const;
+  Type type_unsafe() const {
     if(bits & 1) return FIXNUM;
     else if(bits & 2 || bits == 0) return CONSTANT;    
-    else return heap->get_type();
+    else return (Type) heap->get_type();
   }
 
   // FIXNUMS
 
   /** Get the value of a fixnum */
   ptrdiff_t fixnum_value() const {
-    AR_ASSERT(type() == FIXNUM);
+    AR_ASSERT(type_unsafe() == FIXNUM);
     
     return bits >> 1;
   }
@@ -313,7 +334,20 @@ struct Value {
   }
 
   SourceLocation* pair_src() const;
-  void set_pair_src(SourceLocation&);
+  void set_pair_src(const SourceLocation&);
+
+  // BOX
+
+  Value unbox() const;
+
+  static const unsigned BOX_SOURCE_BIT = 1 << 9;
+  bool box_has_source() const {
+    AR_TYPE_ASSERT(type() == BOX);
+    return heap->get_header_bit(BOX_SOURCE_BIT);
+  }
+
+  SourceLocation* box_src() const;
+  void set_box_src(const SourceLocation&);
 
   // EXCEPTION
   static const unsigned EXCEPTION_ACTIVE_BIT = 1 << 9;
@@ -370,11 +404,14 @@ inline Value Value::symbol_name() const {
   return as<Symbol>()->name;
 }
 
-inline const char* Value::symbol_name_bytes() const { return as<Symbol>()->name.as<String>()->data; }
+inline const char* Value::symbol_name_bytes() const {
+  return as<Symbol>()->name.as<String>()->data;
+}
 
 inline Value Value::symbol_value() const {
   return as<Symbol>()->value;
 }
+
 
 /** 
  * Identifies a location in source code. File is an integer that corresponds to a string in
@@ -400,7 +437,7 @@ inline SourceLocation* Value::pair_src() const {
   return &(static_cast<Pair*>(heap)->src);
 }
 
-inline void Value::set_pair_src(SourceLocation& loc) {
+inline void Value::set_pair_src(const SourceLocation& loc) {
   AR_TYPE_ASSERT(type() == PAIR);
   AR_TYPE_ASSERT(pair_has_source());
   static_cast<Pair*>(heap)->src = loc;
@@ -474,6 +511,23 @@ inline void Value::set_cdr(Value v) {
   AR_TYPE_ASSERT(type() == PAIR);
   static_cast<Pair*>(heap)->data_cdr = v;
 }
+
+/// BOXES 
+
+struct Box : HeapValue {
+  Value value;
+  SourceLocation src;
+
+  static const unsigned CLASS_TYPE = BOX;
+};
+
+inline void Value::set_box_src(const SourceLocation& loc) {
+  AR_TYPE_ASSERT(type() == BOX);
+  AR_TYPE_ASSERT(box_has_source());
+  static_cast<Box*>(heap)->src = loc;
+}
+
+inline Value Value::unbox() const { return as<Box>()->value; }
 
 /// EXCEPTIONS
 
@@ -607,14 +661,15 @@ struct GC;
  * possibility of a compaction step in the future; it's not necessary otherwise.
  */
 struct FrameHack { FrameHack(Value& value_): value((HeapValue**) &value_.bits) {} ~FrameHack() {}
-
   HeapValue** value;
 };
 
-/** Frames are stack-allocated structures that save pointers to stack Values, allowing the garbage collector to move
- * objects and update pointers to them if necessary */
+/** 
+ * Frames are stack-allocated structures that save pointers to stack Values, allowing the garbage
+ * collector to move objects and update pointers to them if necessary 
+ */
 struct Frame {
-  GC& gc;
+  State& state;
   size_t size;
   HeapValue*** values;
 
@@ -625,7 +680,7 @@ struct Frame {
 
 /** An individual tracked pointer. Can be allocated on the heap. */
 struct Handle {
-  GC& gc;
+  State& state;
   Value ref;
   std::list<Handle*>::iterator it;
   // Handle *next, *previous;
@@ -659,27 +714,211 @@ struct Block {
   }
 };
 
-/** Garbage collector */
-struct GC {
+/** Common GC variables */
+struct GCCommon {
   State& state;
   std::vector<Frame*> frames;
   std::list<Handle*> handles;
-  // Handle* handle_list;
-  std::vector<Block*> blocks;
-  // Position in the *blocks* vector
-  size_t block_i;
-  // Position in *blocks_i* block
-  size_t block_cursor;
   // Number of total allocations
+  bool collect_before_every_allocation;
   size_t allocations;
-  // Number of total collections
-  size_t collections;
-  size_t live_objects_after_collection, live_memory_after_collection, heap_size;
-  unsigned char mark_bit;
+  size_t collections, live_objects_after_collection, live_memory_after_collection, heap_size;
   size_t block_size;
 
-  GC(State& state_): state(state_), handles(0), block_i(0), block_cursor(0), allocations(0), collections(0), live_objects_after_collection(0),
-      live_memory_after_collection(0), heap_size(ARETE_BLOCK_SIZE), mark_bit(1), block_size(ARETE_BLOCK_SIZE) {
+  GCCommon(State& state_, size_t heap_size_ = ARETE_BLOCK_SIZE): state(state_), 
+    collect_before_every_allocation(false),
+    allocations(0),
+    collections(0), live_objects_after_collection(0), live_memory_after_collection(0),
+    heap_size(heap_size_),
+    block_size(heap_size_) {
+
+  }
+
+  ~GCCommon() {}
+
+  // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) ==6
+  static size_t align(size_t boundary, size_t value) {
+    return (((((value) - 1) / (boundary)) + 1) * (boundary));
+  }
+};
+
+/** Semispace garbage collector */
+struct GCSemispace : GCCommon {
+  Block *active, *other;
+  size_t block_cursor;
+  char* other_cursor;
+  bool collect_before_every_allocation;
+
+  GCSemispace(State& state_): GCCommon(state_), active(0), other(0), block_cursor(0),
+    collect_before_every_allocation(false) {
+    active = new Block(heap_size, 0);
+  }
+
+  ~GCSemispace() {
+    delete active;
+  }
+
+  void copy(HeapValue** ref) {
+    if(ref == 0 || Value(*ref).immediatep()) 
+      return;
+    
+    HeapValue* obj = *ref;
+
+    if(obj->header == RESERVED) {
+      (*ref) = (HeapValue*) obj->size;
+      return;
+    }
+
+    size_t size = obj->size;
+    HeapValue* cpy = (HeapValue*) other_cursor;
+    other_cursor += size;
+
+    memcpy(cpy, obj, size);
+    
+    obj->size = (size_t) cpy;
+    obj->header = RESERVED;
+
+    (*ref) = cpy;
+  }
+
+  void copy_symbol_table();
+
+  void collect(size_t request = 0, bool force = false) {
+    collections++;
+
+    size_t new_heap_size = heap_size;
+    size_t pressure = (live_memory_after_collection * 100) / heap_size;
+
+    ARETE_LOG_GC("gc pressure " << pressure);
+    // If we need to grow
+    if((pressure >= ARETE_GC_LOAD_FACTOR) || force) {
+      new_heap_size *= 2;
+      if(new_heap_size <= request) {
+        new_heap_size = (heap_size * 2) + request;
+      }
+    }
+
+    heap_size = new_heap_size = align(ARETE_BLOCK_SIZE, new_heap_size);
+    ARETE_LOG_GC("allocating new space of " << new_heap_size << "b");
+
+    other = new Block(new_heap_size, 0);
+    other_cursor = other->data;
+
+    copy_symbol_table();
+
+    for(size_t i = 0; i != frames.size(); i++) {
+      Frame* f = frames[i];
+      for(size_t j = 0; j != f->size; j++) {
+        copy(f->values[j]);
+      }
+    }
+
+    for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
+      copy(&((*i)->ref.heap));
+    }
+
+
+    char* sweep = other->data;
+    while(sweep != other_cursor) {
+      HeapValue* obj = (HeapValue*) sweep;
+      size_t size = obj->size;
+
+      switch(obj->get_type()) {
+#define AR_COPY(type, field) copy((HeapValue**) &(((type*)obj)->field))
+        case BLOCK: case CONSTANT: case FIXNUM:
+          AR_ASSERT(!"arete:gc: encoutnered bad value on heap; probably a GC bug");
+        case FLONUM: case CHARACTER: case STRING: case CFUNCTION: break;
+        case SYMBOL:
+          AR_COPY(Symbol, name);
+          AR_COPY(Symbol, value);
+          break;
+        case PAIR:
+          AR_COPY(Pair, data_car);
+          AR_COPY(Pair, data_cdr);
+          break;
+        case FUNCTION:
+          AR_COPY(Function, name);
+          AR_COPY(Function, parent_env);
+          AR_COPY(Function, arguments);
+          AR_COPY(Function, rest_arguments);
+          AR_COPY(Function, body);
+          break;
+        case EXCEPTION:
+          AR_COPY(Exception, message);
+          AR_COPY(Exception, tag);
+          AR_COPY(Exception, irritants);
+          break;
+        case VECTOR:
+          AR_COPY(Vector, storage);
+          break;
+        case VECTOR_STORAGE:
+          size_t length = static_cast<VectorStorage*>(obj)->length;
+          for(size_t i = 0; i != length; i++) {
+            copy((HeapValue**)&static_cast<VectorStorage*>(obj)->data[i].bits);
+          }
+          break;
+#undef AR_COPY
+      }
+
+      sweep += size;
+    }
+
+    // All done
+    block_cursor = other_cursor - other->data;
+    live_memory_after_collection = block_cursor;
+
+    // std::cout <<  "live memory after collection " << block_cursor << ' ' << live_memory_after_collection <<  " out of " << heap_size << std::endl;
+
+    delete active;
+    active = other;
+  }
+
+  bool live(const Value v) const {
+    if(v.immediatep()) return true;
+    char* addr = (char*) v.heap;
+    return (addr >= active->data && (addr < (active->data + active->size)));
+  }
+
+  bool live(HeapValue* v) const {
+    char* addr = (char*) v;
+    return (addr >= active->data && (addr < (active->data + active->size)));
+  }
+
+  bool has_room(size_t size) const {
+    return active->has_room(block_cursor, size);
+  }
+
+  HeapValue* allocate(Type type, size_t size) {
+    size = align(8, size);
+
+    // Bump allocation possible
+    if(!has_room(size) || collect_before_every_allocation) {
+      collect(size);
+      if(!has_room(size)) {
+        collect(size, true);
+        if(!has_room(size)) {
+          AR_ASSERT(!"arete:gc: semispace allocation failed");
+          // TODO there should be some kind of error available here
+        }
+      }
+    }
+
+    allocations++;
+    HeapValue* v = (HeapValue*) (active->data + block_cursor);
+    v->initialize(type, 0, size);
+    block_cursor += size;
+    AR_ASSERT(v->size == size);
+    return v;
+  }
+};
+
+/** Incremental garbage collector */
+struct GCIncremental : GCCommon {
+  unsigned char mark_bit;
+  std::vector<Block*> blocks;
+  size_t block_i, block_cursor;
+
+  GCIncremental(State& state_): GCCommon(state_), mark_bit(1), block_i(0), block_cursor(0) {
     Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
     blocks.push_back(b);
 
@@ -687,7 +926,7 @@ struct GC {
     AR_ASSERT(!marked((HeapValue*) b->data));
   }
 
-  ~GC() {
+  ~GCIncremental() {
     for(size_t i = 0; i != blocks.size(); i++) {
       delete blocks[i];
     }
@@ -776,6 +1015,10 @@ struct GC {
       }
     }
 
+    for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
+      mark((*i)->ref.heap);
+    }
+
     // TODO: Symbol table should be weak
     mark_symbol_table();
 
@@ -799,7 +1042,7 @@ struct GC {
     }
   }
 
-  HeapValue* allocate(unsigned type, size_t size) {
+  HeapValue* allocate(Type type, size_t size) {
     size_t sz = align(8, size);
     bool collected = false;
 
@@ -895,26 +1138,44 @@ struct GC {
     }
   }
 
-  // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) ==6
-  static size_t align(size_t boundary, size_t value) {
-    return (((((value) - 1) / (boundary)) + 1) * (boundary));
-  }
+
 };
+
+#if 0
+
+  void collect() {
+
+  }
+  HeapValue* allocate(unsigned type, size_t size) {
+    size_t sz = align(8, size);
+    bool collected = false;
+
+    // Bump allocation
+    HeapValue* hv = (HeapValue*) calloc(1, size);
+    hv->initialize(type, 0, size);
+    AR_ASSERT(hv->get_type() == type);
+    return (HeapValue*) hv;
+  }
+#endif
 
 /** A re-entrant instance of the Arete runtime */
 struct State {
   typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
 
-  GC gc;
+#if ARETE_GC_STRATEGY == ARETE_GC_INCREMENTAL
+  GCIncremental gc;
+#elif ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE
+  GCSemispace gc;
+#endif 
+
   symbol_table_t symbol_table;
   std::vector<std::string> source_names;
 
-  State(): gc(*this) {}
+  State(): gc(*this) {
+    current_state = this;
+  }
   ~State() {
-    // Free symbol names
-    // for(symbol_table_t::const_iterator x = symbol_table.begin(); x != symbol_table.end(); ++x) {
-    //  free((void*) x->second->name);
-    // }
+    current_state = 0;
   }
 
   // Source code location tracking
@@ -977,25 +1238,35 @@ struct State {
   }
 
   Value get_symbol(BuiltinSymbol sym) {
-    return *builtin_symbols.at((size_t) sym);
+    return *(builtin_symbols.at((size_t) sym));
   }
 
   Value get_symbol(const std::string& name) {
     symbol_table_t::const_iterator x = symbol_table.find(name);
     if(x == symbol_table.end()) {
       Symbol* heap = static_cast<Symbol*>(gc.allocate(SYMBOL, sizeof(Symbol)));
+      AR_ASSERT(heap->get_type() == SYMBOL);
 
       Value sym = heap, string;
       AR_FRAME(this, sym, string);
 
       string = make_string(name);
 
-      heap->value = C_UNSPECIFIED;
-      heap->name = string;
+      sym.as<Symbol>()->value = C_UNSPECIFIED;
+      sym.as<Symbol>()->name = string;
 
-      symbol_table.insert(std::make_pair(name, heap));
-      return heap;
+      symbol_table.insert(std::make_pair(name, (Symbol*) sym.heap));
+
+      /*
+      AR_ASSERT(gc.live(string));
+      AR_ASSERT(sym.type() == SYMBOL);
+      AR_ASSERT(gc.live(sym));
+      AR_ASSERT(sym.bits == (size_t)((symbol_table[name])));
+      std::cout << "get_symbol: returning " << (size_t) sym.bits << std::endl;
+      */
+      return sym;
     } else {
+      AR_ASSERT(symbol_table.size() > 0);
       return x->second;
     }
   }
@@ -1009,6 +1280,15 @@ struct State {
     heap->data_car = car;
     heap->data_cdr = cdr;
     return heap;
+  }
+
+  Value make_src_box(Value v, SourceLocation& loc) {
+    Value box;
+    AR_FRAME(this, box, v);
+    box = gc.allocate(BOX, sizeof(Box));
+    box.set_box_src(loc);
+
+    return box;
   }
 
   /** Generate a pair with source code information */
@@ -1088,11 +1368,13 @@ struct State {
     Value message, exc;
     AR_FRAME(this, tag, message, irritants, exc);
     Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
+    exc.heap = heap;
     message = make_string(cmessage);
+    heap = (Exception*) exc.heap; // in case of GC moving
     heap->tag = tag;
     heap->message = message;
     heap->irritants = irritants;
-    return heap;
+    return exc;
   }
 
   Value make_exception(const std::string& ctag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) { 
@@ -1104,6 +1386,10 @@ struct State {
   
   Value make_exception(BuiltinSymbol s, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
     return make_exception(get_symbol(s), cmessage, irritants);
+  }
+
+  void print_gc_stats(std::ostream& os) {
+    os << gc.heap_size << "kb in use " << " after " << gc.collections << " collections " << std::endl;
   }
 
   /** Return a description of a source location */
@@ -1135,6 +1421,15 @@ struct State {
     __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (Type)(argv[i].type()); \
     return (state).type_error(__os.str()); \
   } 
+
+  std::vector<std::string> stack_trace;
+
+  void print_stack_trace() {
+    for(size_t i = 0; i != stack_trace.size(); i++) {
+      std::cout << stack_trace.at(i) << std::endl;
+    }
+    stack_trace.clear();
+  }
 
   void install_builtin_functions();
 
@@ -1399,13 +1694,29 @@ struct State {
       return eval_error(os.str(), src_exp);
     }
 
+  #define EVAL_TRACE(exp) \
+    if((exp).pair_has_source()) { \
+      std::ostringstream os; \
+      os << source_info((exp).pair_src()); \
+      stack_trace.push_back(os.str()); \
+    }
+    
+  #define EVAL_CHECK(exp, src) \
+    if((exp).is_active_exception()) { \
+      EVAL_TRACE((src)); \
+      return (exp); \
+    }
+
     // Evaluate arguments left to right
     while(args.type() == PAIR && fn_args.type() == PAIR) {
       tmp = eval(env, args.car());
       vector_append(new_env, fn_args.car());
       fn_args = fn_args.cdr();
       vector_append(new_env, tmp);
-      if(tmp.is_active_exception()) return tmp;
+      if(tmp.is_active_exception()) {
+        EVAL_TRACE(src_exp);
+        return tmp;
+      }
       args = args.cdr();
     }
 
@@ -1517,7 +1828,7 @@ struct State {
 
         car = eval(env, exp.car());
 
-        if(car.is_active_exception()) return car;
+        EVAL_CHECK(car, exp);
 
         if(car.type() != FUNCTION && car.type() != CFUNCTION) {
           return eval_error("attempt to apply non-function", exp);
@@ -1548,6 +1859,7 @@ struct State {
         }
         return res;
       }
+      default: AR_ASSERT(!":(");
     }
 
     return C_UNSPECIFIED;
@@ -1750,7 +2062,9 @@ struct Reader {
           // may be #\space or #\newline etc
           char c3 = is.peek();
           if(!is.eof() && ((c3 >= 'A' && c3 <= 'Z') || (c3 >= 'a' && c <= 'z'))) {
-            Value symbol = read_symbol(c2);
+            Value symbol;
+            AR_FRAME(state, symbol);
+            symbol = read_symbol(c2);
             // TODO: These should be saved off
             // and compared by identity
             if(symbol.symbol_equals("newline")) {
@@ -1961,40 +2275,57 @@ struct StringReader {
 #define AR_STRING_READER(name, state, string) \
   arete::StringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRINGIZE(__LINE__)));
 
-// Various inline garbage collector functions
+// Various inline functions relying on State and GC having been declared
 
-inline void GC::mark_symbol_table() {
+inline void GCIncremental::mark_symbol_table() {
   ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
   for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
     mark(x->second);
   }
 }
 
-inline Frame::Frame(State& state, size_t size_, HeapValue*** ptrs): gc(state.gc), size(size_), values(ptrs) {
-  gc.frames.push_back(this);
+inline void GCSemispace::copy_symbol_table() {
+  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
+  // std::cout << state.symbol_table.size() << " live symbols" << std::endl;
+  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
+    HeapValue* v = x->second;
+    copy(&v);
+    state.symbol_table[x->first] = (Symbol*) v;
+  }
 }
 
-inline Frame::Frame(State* state, size_t size_, HeapValue*** ptrs): gc(state->gc), size(size_), values(ptrs) {
-  gc.frames.push_back(this);
+inline Type Value::type() const {
+  if(!immediatep()) {
+    ARETE_ASSERT_LIVE(heap);
+  }
+  return type_unsafe();
+}
+
+inline Frame::Frame(State& state_, size_t size_, HeapValue*** ptrs): state(state_), size(size_), values(ptrs) {
+  state.gc.frames.push_back(this);
+}
+
+inline Frame::Frame(State* state_, size_t size_, HeapValue*** ptrs): state(*state_), size(size_), values(ptrs) {
+  state.gc.frames.push_back(this);
 }
 
 inline Frame::~Frame() {
-  AR_ASSERT(gc.frames.back() == this);
-  gc.frames.pop_back();
+  AR_ASSERT(state.gc.frames.back() == this);
+  state.gc.frames.pop_back();
 }
 
-inline Handle::Handle(State& state): gc(state.gc), ref() { initialize(); }
-inline Handle::Handle(State& state, Value ref_): gc(state.gc), ref(ref_) { initialize(); }
-inline Handle::Handle(const Handle& cpy): gc(cpy.gc), ref(cpy.ref) {
-  it = gc.handles.insert(gc.handles.end(), this);
+inline Handle::Handle(State& state_): state(state_) { initialize(); }
+inline Handle::Handle(State& state_, Value ref_): state(state_), ref(ref_) { initialize(); }
+inline Handle::Handle(const Handle& cpy): state(cpy.state), ref(cpy.ref) {
+  it = state.gc.handles.insert(state.gc.handles.end(), this);
 }
 
 inline void Handle::initialize() {
-  it = gc.handles.insert(gc.handles.end(), this);
+  it = state.gc.handles.insert(state.gc.handles.end(), this);
 }
 
 inline Handle::~Handle() {
-  gc.handles.erase(it);
+  state.gc.handles.erase(it);
 }
 
 /** Output Arete values */

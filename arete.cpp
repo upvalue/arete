@@ -4,6 +4,8 @@
 
 namespace arete {
 
+State* current_state = 0;
+
 Value fn_fx_sub(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx-";
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -31,7 +33,7 @@ Value fn_fx_equals(State& state, size_t argc, Value* argv) {
   }
 
 Value fn_eq(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "eq?";
+  // static const char* fn_name = "eq?";
   return Value::make_boolean(argv[0].bits == argv[1].bits);
 }
 

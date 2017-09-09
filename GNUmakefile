@@ -1,6 +1,6 @@
 # Variables
 CXX := clang++
-CPPFLAGS := -Wall
+CPPFLAGS := -Wall -I. -Ivendor
 CFLAGS := $(CFLAGS) -g3 -O3
 CXXFLAGS := $(CPPFLAGS) -std=c++11 -fno-exceptions -fno-rtti $(CFLAGS)
 LDFLAGS := $(LDFLAGS) -g3  -O3
@@ -23,18 +23,22 @@ endef
 	$(call colorecho, "CC $< ")
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-all: arete test
+all: arete
 
-arete.o: arete.cpp arete.hpp
 cli.o: cli.cpp arete.hpp
-test.o: test.cpp arete.hpp
+tests/test-semispace.o: tests/test-runtime.cpp arete.hpp
+tests/test-incremental.o: tests/test-runtime.cpp arete.hpp
 
 # Link 
-arete: cli.o arete.o linenoise.o
+arete: cli.o vendor/linenoise.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
-test: test.o arete.o linenoise.o
+tests/test-semispace: tests/test-semispace.o 
+	$(call colorecho, "LD $@ ")
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+tests/test-incremental: tests/test-incremental.o 
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
