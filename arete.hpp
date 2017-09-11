@@ -1147,23 +1147,6 @@ struct GCIncremental : GCCommon {
 
 };
 
-#if 0
-
-  void collect() {
-
-  }
-  HeapValue* allocate(unsigned type, size_t size) {
-    size_t sz = align(8, size);
-    bool collected = false;
-
-    // Bump allocation
-    HeapValue* hv = (HeapValue*) calloc(1, size);
-    hv->initialize(type, 0, size);
-    AR_ASSERT(hv->get_type() == type);
-    return (HeapValue*) hv;
-  }
-#endif
-
 /** A re-entrant instance of the Arete runtime */
 struct State {
   typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
@@ -1422,6 +1405,13 @@ struct State {
 
   // Functions for interacting with the Scheme environment
 
+#define AR_FN_EXPECT_POSITIVE(state, argv, i) \
+  if((argv[(i)]).fixnum_value() < 0) { \
+    std::ostringstream __os; \
+    __os << "function " << (fn_name) << " expected argument " << (i) << " to be a positive fixnum but got " << (argv)[(i)];  \
+    return (state).eval_error(__os.str()); \
+  }
+
 #define AR_FN_EXPECT_TYPE(state, argv, i, expect) \
   if((argv)[(i)].type() != (expect)) { \
     std::ostringstream __os; \
@@ -1441,6 +1431,8 @@ struct State {
   void install_builtin_functions();
 
   void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
+    if(max_arity == 0)
+      max_arity = min_arity;
     Value sym;
     CFunction* cfn = 0;
     AR_FRAME(this, sym);
@@ -1759,7 +1751,6 @@ struct State {
       body = body.cdr();
     }
 
-
     // std::cout << "created new environment " << new_env << std::endl;
 
     return C_UNSPECIFIED;
@@ -1876,6 +1867,12 @@ struct State {
   }
 
   Value eval_toplevel(Value exp) {
+    // Eval toplevel
+
+    // Macroexpand then eval
+
+    // Compile, macroexpand then enter VM
+
     return eval(C_FALSE, exp);
   }
 };

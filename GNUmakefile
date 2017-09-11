@@ -25,9 +25,9 @@ endef
 
 all: arete
 
-cli.o: cli.cpp arete.hpp
-tests/test-semispace.o: tests/test-runtime.cpp arete.hpp
-tests/test-incremental.o: tests/test-runtime.cpp arete.hpp
+cli.o: cli.cpp arete.cpp arete.hpp
+tests/test-semispace.o: tests/test-runtime.cpp arete.cpp arete.hpp
+tests/test-incremental.o: tests/test-runtime.cpp arete.cpp arete.hpp
 
 # Link 
 arete: cli.o vendor/linenoise.o
