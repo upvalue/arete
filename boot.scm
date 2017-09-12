@@ -17,7 +17,7 @@
   (lambda ()
     (do-a-bad-thing)))
 
-(define bad-function2 (lambda () (bad-function)))
+(define bad-function2 (lambda () bad-function3))
 
 (bad-function2)
 

@@ -1412,9 +1412,13 @@ struct State {
   }
 
   /** Return a description of a source location */
-  std::string source_info(const SourceLocation* loc) {
+  std::string source_info(const SourceLocation* loc, Value fn_name = C_FALSE) {
     std::ostringstream ss;
     ss << source_names[loc->file] << ':' << loc->line;
+    if(fn_name == C_FALSE) 
+      ss << " in toplevel";
+    else
+      ss << " in " << fn_name;
     return ss.str();
   }
 
@@ -1478,20 +1482,20 @@ struct State {
 
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
 
-  #define EVAL_TRACE(exp) \
+  #define EVAL_TRACE(exp, fn_name) \
     if((exp).type() == PAIR && (exp).pair_has_source()) { \
       std::ostringstream os; \
-      os << source_info((exp).pair_src()); \
+      os << source_info((exp).pair_src(), (fn_name)); \
       stack_trace.push_back(os.str()); \
     } else if((exp).type() == BOX && (exp).box_has_source()) { \
       std::ostringstream os; \
-      os << source_info((exp.box_src())); \
+      os << source_info((exp.box_src()), (fn_name)); \
       stack_trace.push_back(os.str()); \
     }
     
-  #define EVAL_CHECK(exp, src) \
+  #define EVAL_CHECK(exp, src, fn_name) \
     if((exp).is_active_exception()) { \
-      EVAL_TRACE((src)); \
+      EVAL_TRACE((src), (fn_name)); \
       return (exp); \
     }
 
@@ -1563,7 +1567,9 @@ struct State {
   }
   
   Value eval_lambda(Value env, Value exp, bool eval_args = false) {
-    Value fn_env, args, args_head, args_tail;
+    Value fn_env, args, args_head, args_tail, fn_name;
+    // Add a descriptor of anonymous function
+
     AR_FRAME(*this, env, exp, fn_env, args, args_head, args_tail);
     Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
     args = exp.cadr();
@@ -1625,9 +1631,9 @@ struct State {
     return C_UNSPECIFIED;
   }
 
-  Value eval_define(Value env, Value exp) {
+  Value eval_define(Value env, Value exp, Value fn_name) {
     Value name, body, tmp;
-    AR_FRAME(this, env, exp, name, body, tmp);
+    AR_FRAME(this, env, exp, name, body, tmp, fn_name);
 
     name = exp.cadr().maybe_unbox();
 
@@ -1642,7 +1648,7 @@ struct State {
       warn() << source_info(exp.pair_src()) << " shadows existing definition of " << name << std::endl;;
     }
 
-    tmp = eval(env, body);
+    tmp = eval(env, body, fn_name);
 
     if(env == C_FALSE) {
       name.as<Symbol>()->value = tmp;
@@ -1651,16 +1657,16 @@ struct State {
     }
 
     if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
-      tmp.as<Function>()->name = name;
+      tmp.as<Function>()->name = name.maybe_unbox();
     }
     // std::cout << "env_set " << env << ' ' << name << std::endl;
 
     return C_UNSPECIFIED;
   }
 
-  Value eval_set(Value env, Value exp) {
+  Value eval_set(Value env, Value exp, Value fn_name) {
     Value tmp, name, body;
-    AR_FRAME(this, name, tmp, body, exp, env);
+    AR_FRAME(this, name, tmp, body, exp, env, fn_name);
 
     name = exp.cadr();
     body = exp.caddr();
@@ -1672,16 +1678,16 @@ struct State {
       return eval_error(os.str(), exp);
     }
 
-    tmp = eval(env, body);
+    tmp = eval(env, body, fn_name);
     env_set(env, name, tmp);
 
     return C_UNSPECIFIED;
   }
 
 
-  Value apply_c(Value env, Value fn, Value args, Value src_exp = C_FALSE) {
+  Value apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name) {
     Value fn_args, tmp;
-    AR_FRAME(this, env, fn, args, fn_args, src_exp, tmp);
+    AR_FRAME(this, env, fn, args, fn_args, src_exp, tmp, fn_name);
 
     size_t given_args = args.list_length();
     size_t min_arity = fn.as<CFunction>()->min_arity;
@@ -1703,23 +1709,26 @@ struct State {
     size_t argc = 0;
     while(args.type() == PAIR) {
       tmp = eval(env, args.car());
-      EVAL_CHECK(tmp, src_exp);
+      EVAL_CHECK(tmp, src_exp, fn_name);
       vector_append(fn_args, tmp);
       argc++;
       args = args.cdr();
     }
     
     tmp = fn.c_function_addr()(*this, argc, fn_args.as<Vector>()->storage.as<VectorStorage>()->data);
-    EVAL_CHECK(tmp, src_exp);
+    EVAL_CHECK(tmp, src_exp, fn_name);
     return tmp;
   }
   
   /** Apply a scheme function */
-  Value apply_scheme(Value env, Value fn, Value args, Value src_exp = C_FALSE) {
+  Value apply_scheme(Value env, Value fn, Value args, Value src_exp, Value calling_fn_name) {
     Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
+    Value fn_name;
     AR_FRAME(this, env, fn, args, new_env, fn_args, tmp, src_exp, rest_args_name, rest_args_head,
-      rest_args_tail, body);
-    
+      rest_args_tail, body, fn_name, calling_fn_name);
+
+    fn_name = fn.function_name();
+
     new_env = make_env(fn.function_parent_env());
     // bool eval_args = fn.function_eval_args();
 
@@ -1743,19 +1752,19 @@ struct State {
 
     // Evaluate arguments left to right
     while(args.type() == PAIR && fn_args.type() == PAIR) {
-      tmp = eval(env, args.car());
+      tmp = eval(env, args.car(), calling_fn_name);
       vector_append(new_env, fn_args.car());
       fn_args = fn_args.cdr();
       vector_append(new_env, tmp);
-      EVAL_CHECK(tmp, src_exp);
+      EVAL_CHECK(tmp, src_exp, calling_fn_name);
       args = args.cdr();
     }
 
     // std::cout << "Args " << args << " " << args.type() << std::endl;
     if(fn.function_rest_arguments() != C_FALSE) {
       while(args.type() == PAIR) {
-        tmp = eval(env, args.car());
-        EVAL_CHECK(tmp, src_exp);
+        tmp = eval(env, args.car(), calling_fn_name);
+        EVAL_CHECK(tmp, src_exp, calling_fn_name);
         if(rest_args_head == C_NIL) {
           rest_args_head = rest_args_tail = make_pair(tmp, C_NIL);
         } else {
@@ -1773,10 +1782,9 @@ struct State {
     // Now eval body left to right
     body = fn.function_body();
 
-    // std::cout << "eval body " << body << std::endl;
     while(body.type() == PAIR) {
-      tmp = eval(new_env, body.car());
-      EVAL_CHECK(tmp, src_exp);
+      tmp = eval(new_env, body.car(), fn_name);
+      EVAL_CHECK(tmp, src_exp, calling_fn_name);
       if(tmp.is_active_exception()) return tmp;
       if(body.cdr() == C_NIL) {
         return tmp;
@@ -1790,7 +1798,7 @@ struct State {
 
   }
 
-  Value eval_if(Value env, Value exp, bool has_else) {
+  Value eval_if(Value env, Value exp, bool has_else, Value fn_name) {
     Value cond = exp.list_ref(1);
     Value then_branch = exp.list_ref(2);
     Value else_branch = C_UNSPECIFIED;
@@ -1803,24 +1811,23 @@ struct State {
       else_branch = exp.list_ref(3);
     }
 
-    cond = eval(env, cond);
+    cond = eval(env, cond, fn_name);
 
     if(cond.is_active_exception()) {
       return cond;
     } else if(cond != C_FALSE) {
-      res = eval(env, then_branch);
+      res = eval(env, then_branch, fn_name);
     } else {
-      res = eval(env, else_branch);
+      res = eval(env, else_branch, fn_name);
     }
 
     return res;
   }
 
-  Value eval(Value env, Value exp) {
+  Value eval(Value env, Value exp, Value fn_name = C_FALSE) {
     Value res, car, tmp;
 
-    AR_FRAME(this, env, exp, res, car);
-
+    AR_FRAME(this, env, exp, res, car, fn_name);
 
     if(exp.immediatep())
       return exp;
@@ -1837,22 +1844,25 @@ struct State {
         }
         car = exp.car();
 
-        if(car.boxed_type() == SYMBOL && car.maybe_unbox().symbol_value() == C_SYNTAX) {
-          car = car.maybe_unbox();
+        // Handle syntactic forms
+        car = car.maybe_unbox();
+        if(car.type() == SYMBOL && car.symbol_value() == C_SYNTAX) {
           if(car == get_symbol(S_define)) {
-            return eval_define(env, exp);
+            return eval_define(env, exp, fn_name);
           } else if(car == get_symbol(S_lambda)) {
             return eval_lambda(env, exp);
           } else if(car == get_symbol(S_set)) {
-            return eval_set(env, exp);
+            return eval_set(env, exp, fn_name);
           } else if(car == get_symbol(S_let)) {
-            return eval_let(env, exp);
+            // return eval_let(env, exp, fn_name);
+            return C_FALSE;
+            // add fn name
           } else if(car == get_symbol(S_if)) {
             if(length != 3 && length != 4) {
               return eval_error("if requires 2-3 arguments", exp);
             }
 
-            return eval_if(env, exp, length == 4);
+            return eval_if(env, exp, length == 4, fn_name);
           } else if(car == get_symbol(S_quote)) {
             if(length > 2) return eval_error("quote takes exactly 1 argument", exp);
             return exp.cadr();
@@ -1860,17 +1870,19 @@ struct State {
           // form, let, set!, if, quote
         } 
 
-        car = eval(env, exp.car());
+        // Normal function application
+        car = eval(env, exp.car(), fn_name);
 
-        EVAL_CHECK(car, exp);
+
+        EVAL_CHECK(car, exp, fn_name);
 
         if(car.type() != FUNCTION && car.type() != CFUNCTION) {
           return eval_error("attempt to apply non-function", exp);
         } else {
           if(car.type() == FUNCTION) {
-            return apply_scheme(env, car, exp.cdr(), exp);
+            return apply_scheme(env, car, exp.cdr(), exp, fn_name);
           } else {
-            return apply_c(env, car, exp.cdr(), exp);
+            return apply_c(env, car, exp.cdr(), exp, fn_name);
           }
         }
 
@@ -1891,13 +1903,13 @@ struct State {
         if(res == C_UNSPECIFIED) {
           std::ostringstream os;
           os << "reference to undefined variable " << exp;
-          EVAL_TRACE(car);
+          EVAL_TRACE(car, fn_name);
           return eval_error(os.str());
         }
         if(res == C_SYNTAX) {
           std::stringstream os;
           os << "attempt to use syntax " << exp << " as value";
-          EVAL_TRACE(car);
+          EVAL_TRACE(car, fn_name);
           return eval_error(os.str(), exp);
         }
         return res;
