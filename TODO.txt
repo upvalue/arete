@@ -13,14 +13,16 @@ x naming lambdas
 x stack traces
   stack traces should include:
   + source code display (how hard?)
-  + references to undefined symbols (reader should wrap with source info)
+  x references to undefined symbols (reader should wrap with source info)
+  + c-function names and source code locations
   
 reader
+- improve the mismatched bracket error message
 - expression comments #;
 - block comments #|
 - extended symbols |
 - utf8
-- attach source code info to symbols by boxing them
+x attach source code info to symbols by boxing them
 language
 - get some basic demos running. closures, fibonacci, that kind of stuff
 - macro expansion

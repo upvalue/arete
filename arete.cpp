@@ -57,7 +57,12 @@ Value fn_newline(State& state, size_t argc, Value* argv) {
 
 Value fn_print(State& state, size_t argc, Value* argv) {
   for(size_t i = 0; i != argc; i++) {
-    std::cout << argv[i];
+    if(argv[i].type() == STRING) {
+      std::cout << argv[i].string_data();
+    } else {
+      std::cout << argv[i];
+    }
+
     if(i != argc - 1)  {
       std::cout << ' ';
     }
@@ -92,6 +97,17 @@ Value fn_listp(State& state, size_t argc, Value* argv) {
     argv[0] = argv[0].cdr();
   }
   return C_FALSE;
+}
+
+Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
+  if(argv[0].immediatep()) return C_TRUE;
+
+  switch(argv[0].type()) {
+    case VECTOR: 
+      return C_TRUE;
+    default:
+      return C_FALSE;
+  }
 }
 
 
@@ -186,6 +202,7 @@ void State::install_builtin_functions() {
   defun("char?", fn_charp, 1);
   defun("procedure?", fn_procedurep, 1);
   defun("pair?", fn_pairp, 1);
+  defun("self-evaluating?", fn_self_evaluatingp, 1);
   
   // Lists
   defun("list?", fn_listp, 1);
@@ -202,7 +219,7 @@ void State::install_builtin_functions() {
 
   // I/O
   defun("display", fn_display, 1, 1, false);
-  defun("newline", fn_newline, 1, 1, false);
+  defun("newline", fn_newline, 0);
   defun("print", fn_print, 0, 0, true);
 
   // Pairs

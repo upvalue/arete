@@ -1,6 +1,6 @@
 ;; boot.scm - Arete boot file
 
-;; scheme is so great, you can't program in it!
+;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
 
 (define cadr (lambda (x) (car (cdr x))))
@@ -13,14 +13,15 @@
     (define vec (make-vector 1 parent))
     vec))
 
-(define bad-function
-  (lambda ()
-    (do-a-bad-thing)))
+(define env-lookup
+  (lambda (env name one-level?)
+    #f))
 
-(define bad-function2 (lambda () bad-function3))
-
-(bad-function2)
-
-(print (make-env #f))
+(set! macroexpand 
+  (lambda (x) ;; x, e = expression, environment
 
 
+    (print "macroexpanding this value " x)))
+
+(display "macroexpanded after this point")
+(newline)

@@ -1202,7 +1202,7 @@ struct State {
 
   #define AR_SYMBOLS(_) \
     _(quote), _(quasiquote), _(unquote),  \
-    _(define), _(lambda), _(if), _(let)
+    _(define), _(lambda), _(if), _(let), _(macroexpand)
 
   #define AR_SYMBOLS_AUX(name) S_##name
 
@@ -1232,6 +1232,7 @@ struct State {
     }
 
     get_symbol(S_define).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_macroexpand).as<Symbol>()->value = C_FALSE;
     get_symbol(S_lambda).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_let).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_if).as<Symbol>()->value = C_SYNTAX;
@@ -1591,9 +1592,10 @@ struct State {
         fn->rest_arguments = C_FALSE;
         Value argi = args;
         while(argi.type() == PAIR) {
-          if(argi.car().type() != SYMBOL) {
+          if(argi.car().boxed_type() != SYMBOL) {
             return eval_error("lambda argument list must be all symbols", exp);
           }
+          argi.set_car(argi.car().maybe_unbox());
           if(argi.cdr() == C_NIL) {
             break;
           } else if(argi.cdr().type() != PAIR) {
@@ -1668,7 +1670,7 @@ struct State {
     Value tmp, name, body;
     AR_FRAME(this, name, tmp, body, exp, env, fn_name);
 
-    name = exp.cadr();
+    name = exp.cadr().maybe_unbox();
     body = exp.caddr();
 
     tmp = env_lookup(env, name);
@@ -1873,7 +1875,6 @@ struct State {
         // Normal function application
         car = eval(env, exp.car(), fn_name);
 
-
         EVAL_CHECK(car, exp, fn_name);
 
         if(car.type() != FUNCTION && car.type() != CFUNCTION) {
@@ -1921,12 +1922,16 @@ struct State {
   }
 
   Value eval_toplevel(Value exp) {
+    Value expand = get_symbol(S_macroexpand);
+
+    if(expand.symbol_value() != C_FALSE) {
+      std::cout << " expanding! " << expand.symbol_value() << std::endl;
+    }
     // Eval toplevel
 
     // Macroexpand then eval
 
     // Compile, macroexpand then enter VM
-
     return eval(C_FALSE, exp);
   }
 };
@@ -2027,7 +2032,7 @@ struct Reader {
   }
 
   /** Read a symbol */
-  Value read_symbol(char c) {
+  Value read_symbol(char c, bool box = true) {
     SourceLocation loc = save();
     std::string buffer;
     buffer += c;
@@ -2042,8 +2047,10 @@ struct Reader {
     Value sym;
     AR_FRAME(state, sym);
     sym = state.get_symbol(buffer);
-    return state.make_src_box(sym, loc);
-    //return state.get_symbol(buffer);
+    if(box) {
+      sym = state.make_src_box(sym, loc);
+    }
+    return sym;
   }
 
   /** Consumes whitespace until the next token, if there is one */
@@ -2099,6 +2106,11 @@ struct Reader {
         if(c == 't' || c == 'f') {
           // Constants (#t, #f)
           return c == 't' ? C_TRUE : C_FALSE;
+        } else if(c == ';') {
+          // Expression comments eg #;#t #;(some things)
+          Token tk = TK_NONE;
+          read_expr(tk);
+          continue;
         } else if(c == '(') {
           // Vectors 
           Value vec, x;
@@ -2135,7 +2147,7 @@ struct Reader {
           if(!is.eof() && ((c3 >= 'A' && c3 <= 'Z') || (c3 >= 'a' && c <= 'z'))) {
             Value symbol;
             AR_FRAME(state, symbol);
-            symbol = read_symbol(c2);
+            symbol = read_symbol(c2, false);
             // TODO: These should be saved off
             // and compared by identity
             if(symbol.symbol_equals("newline")) {
@@ -2289,7 +2301,7 @@ struct Reader {
           return_token = TK_DOT;
           return C_FALSE;
         }
-        // Negative numvers
+        // Negative numbers
         if(c == '-'){
           c = is.peek();
           if(c >= '0' && c <= '9') {

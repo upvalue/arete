@@ -1,3 +1,7 @@
+#ifdef ARETE_GC_STRATEGY
+# undef ARETE_GC_STRATEGY
+#endif 
+
 #define ARETE_GC_STRATEGY ARETE_GC_INCREMENTAL
 
 #include "test-begin.cpp"

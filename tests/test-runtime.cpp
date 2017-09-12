@@ -117,6 +117,7 @@ TEST_CASE_FIXTURE(AS, "read boolean constants") {
   CHECK(f == C_FALSE);
 }
 
+
 TEST_CASE_FIXTURE(AS, "read a symbol") {
   AR_STRING_READER(reader, state, "hello");
 
@@ -125,7 +126,8 @@ TEST_CASE_FIXTURE(AS, "read a symbol") {
   sym = reader->read();
 
   std::string check("hello");
-  CHECK(check.compare(sym.symbol_name_bytes()) == 0);
+  CHECK(sym.type() == BOX);
+  CHECK(check.compare(sym.unbox().symbol_name_bytes()) == 0);
 }
 
 
@@ -163,6 +165,12 @@ TEST_CASE_FIXTURE(ASB, "StringReader & source code info") {
   AR_STRING_READER(reader, state, "(hello)");
   Value x = reader->read();
   CHECK(x.pair_has_source());
+}
+
+TEST_CASE_FIXTURE(ASB, "reader expression comments") {
+  AR_STRING_READER(reader, state, "#;(mary had a little lamb)");
+  Value x = reader->read();
+  CHECK(x == C_EOF);
 }
 
 TEST_CASE_FIXTURE(ASB, "EOF in dotted list") {

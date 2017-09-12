@@ -1,8 +1,8 @@
 // cli.cpp - arete command line interface 
 
 //#define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
-#define ARETE_GC_STRATEGY ARETE_GC_SEMISPACE
-#define ARETE_GC_DEBUG 1
+//#define ARETE_GC_STRATEGY ARETE_GC_SEMISPACE
+//#define ARETE_GC_DEBUG 1
 
 #include <fstream>
 #include <iostream>
