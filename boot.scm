@@ -13,6 +13,14 @@
     (define vec (make-vector 1 parent))
     vec))
 
+(define bad-function
+  (lambda ()
+    (do-a-bad-thing)))
+
+(define bad-function2 (lambda () (bad-function)))
+
+(bad-function2)
+
 (print (make-env #f))
 
 

@@ -10,7 +10,11 @@ x semispace garbage collection for extreme debugging and robustness
 interpreter
 - let
 x naming lambdas
-- stack traces
+x stack traces
+  stack traces should include:
+  + source code display (how hard?)
+  + references to undefined symbols (reader should wrap with source info)
+  
 reader
 - expression comments #;
 - block comments #|

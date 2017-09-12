@@ -39,6 +39,7 @@ void do_file(const char* file_path, bool eval ) {
         x = state.eval_toplevel(x);
         if(x.type() == EXCEPTION) {
           std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
+          state.print_stack_trace();
           break;
         }
       } else {
@@ -50,68 +51,78 @@ void do_file(const char* file_path, bool eval ) {
   // std::cout << vec << std::endl;
 }
 
+void do_repl() {
+  Value x, vec;
+  AR_FRAME(state, x, vec);
+  size_t i = 1;
+
+  char* line = 0;
+  linenoiseHistorySetMaxLen(1024);
+
+  std::ostringstream prompt;
+
+  while(i++) {
+    prompt << (i - 1) << "> ";
+    line = linenoise(prompt.str().c_str());
+    prompt.str("");
+    prompt.clear();
+
+    if(!line) {
+      break;
+    }
+
+    linenoiseHistoryAdd(line);
+
+    std::ostringstream os;
+    os << "repl-line-" << i - 1;
+    StringReader reader(state, line, os.str());
+    
+    while(x != C_EOF) { 
+      x = reader->read();
+      if(x == C_EOF) {
+        break;
+      }
+
+      if(x.type() == EXCEPTION) {
+        std::cout << "Reader error: " << x.exception_message().string_data() << std::endl;
+      } else {
+        x = state.eval_toplevel(x);
+        if(x.type() == EXCEPTION) {
+          std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
+          state.print_stack_trace();
+          break;
+        } else {
+          if(x != C_UNSPECIFIED)
+            std::cout << x << std::endl;
+        }
+      }
+    }
+    
+    x = C_UNSPECIFIED;
+    free(line); line = 0;
+  }
+
+  if(line) free(line);
+}
+
 int main(int argc, const char **argv) {
   state.gc.collect_before_every_allocation = true;
   state.boot();
 
+  std::string open_repl("--repl");
 
   if(argc > 1) {
     // read files
     for(size_t i = 1; i != argc; i++) {
+      if(open_repl.compare(argv[i]) == 0) {
+        do_repl();
+        continue;
+      }
       do_file(argv[i], true);
     }
   } else {
-    Value x, vec;
-    AR_FRAME(state, x, vec);
-    size_t i = 1;
-
-    char* line = 0;
-    linenoiseHistorySetMaxLen(1024);
-
-    std::ostringstream prompt;
-
-    while(i++) {
-      prompt << (i - 1) << "> ";
-      line = linenoise(prompt.str().c_str());
-      prompt.str("");
-      prompt.clear();
-
-      if(!line) {
-        break;
-      }
-
-      linenoiseHistoryAdd(line);
-
-      std::ostringstream os;
-      os << "repl-line-" << i - 1;
-      StringReader reader(state, line, os.str());
-      
-      while(x != C_EOF) { 
-        x = reader->read();
-        if(x == C_EOF) {
-          break;
-        }
-
-        if(x.type() == EXCEPTION) {
-          std::cout << "Reader error: " << x.exception_message().string_data() << std::endl;
-        } else {
-          x = state.eval_toplevel(x);
-          if(x.type() == EXCEPTION) {
-            std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
-            state.print_stack_trace();
-            break;
-          } else {
-            if(x != C_UNSPECIFIED)
-              std::cout << x << std::endl;
-          }
-        }
-      }
-      
-      x = C_UNSPECIFIED;
-      free(line); line = 0;
-    }
-
-    if(line) free(line);
+    do_repl();
+ 
   }
   state.gc.collect();
 

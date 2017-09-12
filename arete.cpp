@@ -121,6 +121,9 @@ Value fn_make_vector(State& state, size_t argc, Value* argv) {
     AR_FN_EXPECT_POSITIVE(state, argv, 0);
 
     size = argv[0].fixnum_value();
+    if(argc == 2) {
+      fill = argv[1];
+    }
   }
 
   vec = state.make_vector(size);

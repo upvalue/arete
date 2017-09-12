@@ -340,6 +340,8 @@ struct Value {
   // BOX
 
   Value unbox() const;
+  Type boxed_type() const;
+  Value maybe_unbox() const;
 
   static const unsigned BOX_SOURCE_BIT = 1 << 9;
   bool box_has_source() const {
@@ -522,6 +524,12 @@ struct Box : HeapValue {
   static const unsigned CLASS_TYPE = BOX;
 };
 
+inline SourceLocation* Value::box_src() const {
+  AR_TYPE_ASSERT(type() == BOX);
+  AR_TYPE_ASSERT(box_has_source());
+  return &(static_cast<Box*>(heap)->src);
+}
+
 inline void Value::set_box_src(const SourceLocation& loc) {
   AR_TYPE_ASSERT(type() == BOX);
   AR_TYPE_ASSERT(box_has_source());
@@ -529,6 +537,20 @@ inline void Value::set_box_src(const SourceLocation& loc) {
 }
 
 inline Value Value::unbox() const { return as<Box>()->value; }
+
+inline Type Value::boxed_type() const {
+  if(type() == BOX) {
+    return as<Box>()->value.type();
+  }
+  return type();
+}
+
+inline Value Value::maybe_unbox() const {
+  if(type() == BOX) {
+    return as<Box>()->value;
+  }
+  return heap;
+}
 
 /// EXCEPTIONS
 
@@ -829,9 +851,10 @@ struct GCSemispace : GCCommon {
 
       switch(obj->get_type()) {
 #define AR_COPY(type, field) copy((HeapValue**) &(((type*)obj)->field))
-        case BLOCK: case CONSTANT: case FIXNUM:
-          AR_ASSERT(!"arete:gc: encoutnered bad value on heap; probably a GC bug");
         case FLONUM: case CHARACTER: case STRING: case CFUNCTION: break;
+        case BOX:
+          AR_COPY(Box, value);
+          break;
         case SYMBOL:
           AR_COPY(Symbol, name);
           AR_COPY(Symbol, value);
@@ -855,11 +878,15 @@ struct GCSemispace : GCCommon {
         case VECTOR:
           AR_COPY(Vector, storage);
           break;
-        case VECTOR_STORAGE:
+        case VECTOR_STORAGE: {
           size_t length = static_cast<VectorStorage*>(obj)->length;
           for(size_t i = 0; i != length; i++) {
             copy((HeapValue**)&static_cast<VectorStorage*>(obj)->data[i].bits);
           }
+          break;
+        }
+        case BLOCK: case CONSTANT: case FIXNUM: default:
+          AR_ASSERT(!"arete:gc: encoutnered bad value on heap; probably a GC bug");
           break;
 #undef AR_COPY
       }
@@ -1275,6 +1302,8 @@ struct State {
     Value box;
     AR_FRAME(this, box, v);
     box = gc.allocate(BOX, sizeof(Box));
+    box.heap->header += Value::BOX_SOURCE_BIT;
+    static_cast<Box*>(box.heap)->value = v;
     box.set_box_src(loc);
 
     return box;
@@ -1421,11 +1450,11 @@ struct State {
 
   std::vector<std::string> stack_trace;
 
-  void print_stack_trace() {
-    for(size_t i = 0; i != stack_trace.size(); i++) {
-      std::cout << stack_trace.at(i) << std::endl;
-    }
-    stack_trace.clear();
+  void print_stack_trace(std::ostream& os = std::cerr, bool clear = true) {
+    for(size_t i = 0; i != stack_trace.size(); i++)
+      os << stack_trace.at(i) << std::endl;
+    if(clear)
+      stack_trace.clear();
   }
 
   void install_builtin_functions();
@@ -1450,9 +1479,13 @@ struct State {
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
 
   #define EVAL_TRACE(exp) \
-    if((exp).pair_has_source()) { \
+    if((exp).type() == PAIR && (exp).pair_has_source()) { \
       std::ostringstream os; \
       os << source_info((exp).pair_src()); \
+      stack_trace.push_back(os.str()); \
+    } else if((exp).type() == BOX && (exp).box_has_source()) { \
+      std::ostringstream os; \
+      os << source_info((exp.box_src())); \
       stack_trace.push_back(os.str()); \
     }
     
@@ -1596,7 +1629,7 @@ struct State {
     Value name, body, tmp;
     AR_FRAME(this, env, exp, name, body, tmp);
 
-    name = exp.cadr();
+    name = exp.cadr().maybe_unbox();
 
     body = exp.caddr();
 
@@ -1784,7 +1817,7 @@ struct State {
   }
 
   Value eval(Value env, Value exp) {
-    Value res, car;
+    Value res, car, tmp;
 
     AR_FRAME(this, env, exp, res, car);
 
@@ -1804,7 +1837,8 @@ struct State {
         }
         car = exp.car();
 
-        if(car.type() == SYMBOL && car.symbol_value() == C_SYNTAX) {
+        if(car.boxed_type() == SYMBOL && car.maybe_unbox().symbol_value() == C_SYNTAX) {
+          car = car.maybe_unbox();
           if(car == get_symbol(S_define)) {
             return eval_define(env, exp);
           } else if(car == get_symbol(S_lambda)) {
@@ -1842,8 +1876,14 @@ struct State {
 
         return exp;
       }
+      case BOX:
       case SYMBOL: {
-        // std::cout << "let me do a thing with symbol" << std::endl;
+        if(exp.type() == BOX) {
+          // spaghetti coding: just re-using car here to store box with source code
+          car = exp;
+          exp = exp.unbox();
+        }
+
         res = env_lookup(env, exp);
         if(res.bits == 0) {
           return C_UNSPECIFIED;
@@ -1851,11 +1891,13 @@ struct State {
         if(res == C_UNSPECIFIED) {
           std::ostringstream os;
           os << "reference to undefined variable " << exp;
+          EVAL_TRACE(car);
           return eval_error(os.str());
         }
         if(res == C_SYNTAX) {
           std::stringstream os;
           os << "attempt to use syntax " << exp << " as value";
+          EVAL_TRACE(car);
           return eval_error(os.str(), exp);
         }
         return res;
@@ -1974,6 +2016,7 @@ struct Reader {
 
   /** Read a symbol */
   Value read_symbol(char c) {
+    SourceLocation loc = save();
     std::string buffer;
     buffer += c;
     while(true) {
@@ -1984,7 +2027,11 @@ struct Reader {
       buffer += c;
       is >> c;
     }
-    return state.get_symbol(buffer);
+    Value sym;
+    AR_FRAME(state, sym);
+    sym = state.get_symbol(buffer);
+    return state.make_src_box(sym, loc);
+    //return state.get_symbol(buffer);
   }
 
   /** Consumes whitespace until the next token, if there is one */
@@ -2412,6 +2459,8 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         if(i != v.vector_length() - 1) os << ' ';
       }
       return os << ')';
+    case BOX:
+      return os << "#<box " << v.unbox() << '>';
     case EXCEPTION:
       os << "#<exception '" << v.exception_tag() << " " << v.exception_message();
       if(v.exception_irritants() != C_UNSPECIFIED) {
