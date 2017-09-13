@@ -110,7 +110,6 @@ Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
   }
 }
 
-
 ///// PAIRS
 
 Value fn_car(State& state, size_t argc, Value* argv) {

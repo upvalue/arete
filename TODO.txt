@@ -1,5 +1,5 @@
 runtime
-- figure out how to get a stack trace with C++ after type errors
+- figure out how to get a stack trace with C++ after assertion failures
 - hash tables
 - ports
 - are C++ exceptions okay to use? 
@@ -11,6 +11,7 @@ x semispace garbage collection for extreme debugging and robustness
 interpreter
 - let
 - quote must strip boxes, and should perhaps update lists in place to reflect this (?)
+- MAYBE: tail call optimization 
 x naming lambdas
 x stack traces
   stack traces should include:
@@ -22,7 +23,7 @@ reader
 x expression comments #;
 x block comments #|
 - extended symbols |
-- utf8
+- unicode
 x attach source code info to symbols by boxing them
 language
 - get some basic demos running. closures, fibonacci, that kind of stuff

@@ -320,6 +320,8 @@ struct Value {
 
   Value car() const;
   Value cadr() const;
+  Value caar() const;
+  Value cdar() const;
   Value cddr() const;
   Value caddr() const;
   Value cadddr() const;
@@ -478,6 +480,16 @@ inline Value Value::list_ref(size_t n) const {
     }
   }
   return check.car();
+}
+
+inline Value Value::caar() const {
+  AR_TYPE_ASSERT(type() == PAIR);
+  return car().car();
+}
+
+inline Value Value::cdar() const {
+  AR_TYPE_ASSERT(type() == PAIR);
+  return car().cdr();
 }
 
 inline Value Value::cadr() const {
@@ -1202,16 +1214,16 @@ struct State {
 
   #define AR_SYMBOLS(_) \
     _(quote), _(quasiquote), _(unquote),  \
-    _(define), _(lambda), _(if), _(let), _(macroexpand)
+    _(define), _(lambda), _(if), _(let), _(cond), _(macroexpand)
 
   #define AR_SYMBOLS_AUX(name) S_##name
 
+  std::vector<Handle> builtin_symbols;
+
   enum BuiltinSymbol {
     AR_SYMBOLS(AR_SYMBOLS_AUX),
-    S_unquote_splicing, S_set,
+    S_unquote_splicing, S_set, S_else,
     S_read_error, S_eval_error, S_type_error };
-  
-  std::vector<Handle> builtin_symbols;
 
   /** Performs various initializations required for an instance of Arete;
     * this is separate so the State itself can be used for lightweight testing */
@@ -1223,7 +1235,7 @@ struct State {
     static const char* symbols[] = { 
       #define AR_SYMBOLS_AUX2(x) #x
       AR_SYMBOLS(AR_SYMBOLS_AUX2),
-      "unquote-splicing", "set!",
+      "unquote-splicing", "set!", "else",
       "read-error", "eval-error", "type-error"
     };
 
@@ -1234,6 +1246,7 @@ struct State {
     get_symbol(S_define).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_macroexpand).as<Symbol>()->value = C_FALSE;
     get_symbol(S_lambda).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_cond).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_let).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_if).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_quote).as<Symbol>()->value = C_SYNTAX;
@@ -1566,12 +1579,44 @@ struct State {
     os << msg;
     return make_exception("eval-error", os.str());
   }
+
+  Value eval_cond(Value env, Value exp, Value fn_name) {
+    // (cond 
+    ///   ((clause?) then))
+    //    (else zog))
+    Value pred, body, lst = exp.cdr(), tmp;
+    AR_FRAME(this, env, exp, lst, pred, body, tmp);
+
+    while(lst.cdr() != C_NIL) {
+      pred = lst.caar();
+      body = lst.cdar();
+
+      tmp = eval(env, pred, fn_name);
+      EVAL_CHECK(tmp, exp, fn_name);
+
+      if(tmp != C_FALSE) {
+        tmp = eval_body(env, fn_name, fn_name, body, body);
+        return tmp;
+      }
+
+      lst = lst.cdr();
+    }
+
+    // Check for else clause
+    pred = lst.caar();
+    body = lst.cdar();
+    if(pred.maybe_unbox() == get_symbol(S_else)) {
+      return eval_body(env, fn_name, fn_name, body, body);
+    } 
+
+    return C_UNSPECIFIED;
+  }
   
   Value eval_lambda(Value env, Value exp, bool eval_args = false) {
     Value fn_env, args, args_head, args_tail, fn_name;
     // Add a descriptor of anonymous function
 
-    AR_FRAME(*this, env, exp, fn_env, args, args_head, args_tail);
+    AR_FRAME(this, env, exp, fn_env, args, args_head, args_tail);
     Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
     args = exp.cadr();
     fn->name = C_FALSE;
@@ -1784,6 +1829,7 @@ struct State {
     // Now eval body left to right
     body = fn.function_body();
 
+    /*
     while(body.type() == PAIR) {
       tmp = eval(new_env, body.car(), fn_name);
       EVAL_CHECK(tmp, src_exp, calling_fn_name);
@@ -1793,11 +1839,27 @@ struct State {
       }
       body = body.cdr();
     }
-
-    // std::cout << "created new environment " << new_env << std::endl;
+    */
+    return eval_body(new_env, fn_name, calling_fn_name, src_exp, body);
 
     return C_UNSPECIFIED;
+  }
 
+  Value eval_body(Value env, Value fn_name, Value calling_fn_name, Value src_exp, Value body) {
+    Value tmp;
+    AR_FRAME(this, env, fn_name, calling_fn_name, body, tmp, src_exp);
+
+    while(body.type() == PAIR) {
+      tmp = eval(env, body.car());
+      EVAL_CHECK(tmp, src_exp, calling_fn_name);
+      if(tmp.is_active_exception()) return tmp;
+      if(body.cdr() == C_NIL) {
+        return tmp;
+      }
+      body = body.cdr();
+    }
+
+    return C_UNSPECIFIED;
   }
 
   Value eval_if(Value env, Value exp, bool has_else, Value fn_name) {
@@ -1856,6 +1918,8 @@ struct State {
           } else if(car == get_symbol(S_let)) {
             // return eval_let(env, exp, fn_name);
             return C_FALSE;
+          } else if(car == get_symbol(S_cond)) {
+            return eval_cond(env, exp, fn_name);
             // add fn name
           } else if(car == get_symbol(S_if)) {
             if(length != 3 && length != 4) {
@@ -2033,9 +2097,11 @@ struct Reader {
         }
       }
     }
+
     if(comment_nesting > 0) {
       return read_error("unexpected EOF in multi-line comment", begin_line, false);
     }
+
     return C_FALSE;
   }
 
