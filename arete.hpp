@@ -1416,9 +1416,9 @@ struct State {
   std::string source_info(const SourceLocation* loc, Value fn_name = C_FALSE) {
     std::ostringstream ss;
     ss << source_names[loc->file] << ':' << loc->line;
-    if(fn_name == C_FALSE) 
+    if(fn_name == C_TRUE) 
       ss << " in toplevel";
-    else
+    else if(fn_name != C_FALSE)
       ss << " in " << fn_name;
     return ss.str();
   }
@@ -1721,7 +1721,7 @@ struct State {
     EVAL_CHECK(tmp, src_exp, fn_name);
     return tmp;
   }
-  
+
   /** Apply a scheme function */
   Value apply_scheme(Value env, Value fn, Value args, Value src_exp, Value calling_fn_name) {
     Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
@@ -1834,8 +1834,6 @@ struct State {
     if(exp.immediatep())
       return exp;
 
-    // std::cout << "evaluating exp" << std::endl;
-    // std::cout << exp << std::endl;
     switch(exp.type()) {
       case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING: case CHARACTER:
         return exp;
@@ -1867,7 +1865,7 @@ struct State {
             return eval_if(env, exp, length == 4, fn_name);
           } else if(car == get_symbol(S_quote)) {
             if(length > 2) return eval_error("quote takes exactly 1 argument", exp);
-            return exp.cadr();
+            return exp.cadr().maybe_unbox();
           }
           // form, let, set!, if, quote
         } 
@@ -1925,8 +1923,8 @@ struct State {
     Value expand = get_symbol(S_macroexpand);
 
     if(expand.symbol_value() != C_FALSE) {
-      std::cout << " expanding! " << expand.symbol_value() << std::endl;
-    }
+      AR_FRAME(this, expand, exp);
+    } 
     // Eval toplevel
 
     // Macroexpand then eval
@@ -1975,23 +1973,6 @@ struct Reader {
     return SourceLocation(file, line);
   }
 
-  /** cons quote/quasiquote and friends with an expression */
-  Value read_aux(const std::string& name) {
-    Value symbol, expr;
-    AR_FRAME(state, symbol, expr);
-    expr = read();
-    if(expr.is_active_exception())
-      return expr;
-    else if(expr == C_EOF) {
-      std::ostringstream os;
-      os << "unexpected EOF after " << name;
-      return read_error(os.str());
-    }
-    symbol = state.get_symbol(name);
-    expr = state.make_pair(expr, C_NIL);
-    expr = state.make_pair(symbol, expr);
-    return expr;
-  }
 
   /** Make a pair annotated with current source location */
   Value make_pair(Value car, Value cdr = C_NIL) {
@@ -2005,12 +1986,12 @@ struct Reader {
   }
 
   /** Return an error */
-  Value read_error(const std::string& description, size_t begin_line = 0) {
+  Value read_error(const std::string& description, size_t begin_line = 0, bool list = true) {
     std::ostringstream os;
     SourceLocation loc(file, begin_line == 1 ? line : begin_line);
 
     os << state.source_info(&loc) << ' ';
-    if(begin_line != 0) {
+    if(begin_line != 0 && list) {
       // If a beginning line has been provided
       os << "in list: ";
     } 
@@ -2030,6 +2011,52 @@ struct Reader {
     column++;
     return !is.eof();
   }
+
+  /** Handles #| |# comments, which can nest */
+  Value consume_multiline_comment() {
+    char c;
+    size_t comment_nesting = 1;
+    size_t begin_line = line;
+    while(!is.eof()) {
+      getc(c);
+      if(c == '#') {
+        c = is.peek();
+        if(c == '|') {
+          getc(c);
+          comment_nesting++;
+        }
+      } else if(c == '|') {
+        c = is.peek();
+        if(c == '#') {
+          getc(c);
+          if(--comment_nesting == 0) break;
+        }
+      }
+    }
+    if(comment_nesting > 0) {
+      return read_error("unexpected EOF in multi-line comment", begin_line, false);
+    }
+    return C_FALSE;
+  }
+
+  /** cons quote/quasiquote and friends with an expression */
+  Value read_aux(const std::string& name) {
+    Value symbol, expr;
+    AR_FRAME(state, symbol, expr);
+    expr = read(false);
+    if(expr.is_active_exception())
+      return expr;
+    else if(expr == C_EOF) {
+      std::ostringstream os;
+      os << "unexpected EOF after " << name;
+      return read_error(os.str());
+    }
+    symbol = state.get_symbol(name);
+    expr = state.make_pair(expr, C_NIL);
+    expr = state.make_pair(symbol, expr);
+    return expr;
+  }
+
 
   /** Read a symbol */
   Value read_symbol(char c, bool box = true) {
@@ -2095,7 +2122,7 @@ struct Reader {
   }
 
   /** Read a single expression */
-  Value read_expr(Token& return_token) {
+  Value read_expr(Token& return_token, bool box = true) {
     return_token = TK_NONE;
     char c;
     while(getc(c)) {
@@ -2106,6 +2133,11 @@ struct Reader {
         if(c == 't' || c == 'f') {
           // Constants (#t, #f)
           return c == 't' ? C_TRUE : C_FALSE;
+        } else if(c == '|') {
+          // Multi-line nested comments
+          Value exc = consume_multiline_comment();
+          if(exc.is_active_exception()) return exc;
+          continue;
         } else if(c == ';') {
           // Expression comments eg #;#t #;(some things)
           Token tk = TK_NONE;
@@ -2119,7 +2151,7 @@ struct Reader {
           vec = state.make_vector();
           Token tk = TK_NONE;
           while(true) {
-            x = read_expr(tk);
+            x = read_expr(tk).maybe_unbox();
             if(x == C_EOF) {
               return read_error("unexpected EOF in vector");
             }
@@ -2188,7 +2220,7 @@ struct Reader {
         // Attach source code information
         while(true) {
           Token tk;
-          elt = read_expr(tk);
+          elt = read_expr(tk, box);
           if(dotted) {
             return read_error("expected one expression after dot in list but got multiple", list_start.line);
           }
@@ -2208,7 +2240,7 @@ struct Reader {
           // TODO: NEED A WAY TO CHECK ) HERE
           if(tk == TK_DOT) {
             dotted = true;
-            elt = read_expr(tk);
+            elt = read_expr(tk, box);
             if(elt == C_EOF) {
               return read_error("unexpected EOF after dot", list_start.line);
             } else if(elt.is_active_exception()) {
@@ -2309,7 +2341,7 @@ struct Reader {
             return read_number(c - '0', true);
           }
         }
-        return read_symbol(c);
+        return read_symbol(c, box);
       }
     }
     // Should not be reached unless there is an actual EOF
@@ -2317,9 +2349,9 @@ struct Reader {
     return C_EOF;
   }
 
-  Value read() {
+  Value read(bool box = true) {
     Token tk;
-    Value exp = read_expr(tk);
+    Value exp = read_expr(tk, box);
     if(tk == TK_DOT) {
       return read_error("unexpected . at toplevel");
     } else if(tk == TK_RPAREN) {

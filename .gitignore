@@ -1,3 +1,4 @@
+/arete
 /tests/test-incremental
 /tests/test-semispace
 *.o

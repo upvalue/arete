@@ -2,6 +2,7 @@ runtime
 - figure out how to get a stack trace with C++ after type errors
 - hash tables
 - ports
+- are C++ exceptions okay to use? 
 garbage collection
 - better handling of large allocations
 x semispace garbage collection for extreme debugging and robustness
@@ -9,17 +10,17 @@ x semispace garbage collection for extreme debugging and robustness
 - how to reduce code duplication between copy & mark routines?
 interpreter
 - let
+- quote must strip boxes, and should perhaps update lists in place to reflect this (?)
 x naming lambdas
 x stack traces
   stack traces should include:
   + source code display (how hard?)
   x references to undefined symbols (reader should wrap with source info)
   + c-function names and source code locations
-  
 reader
 - improve the mismatched bracket error message
-- expression comments #;
-- block comments #|
+x expression comments #;
+x block comments #|
 - extended symbols |
 - utf8
 x attach source code info to symbols by boxing them
