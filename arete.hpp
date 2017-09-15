@@ -59,8 +59,8 @@
 
 #if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE && ARETE_GC_DEBUG == 1
 # ifndef ARETE_ASSERT_LIVE
+   // AR_ASSERT("debug failure" && (arete::current_state != 0));
 #  define ARETE_ASSERT_LIVE(obj) \
-   AR_ASSERT("debug failure" && (arete::current_state != 0)); \
    AR_ASSERT("attempt to invoke method on non-live object" && (arete::current_state->gc.live((obj)) == true));
 # endif
 #endif
@@ -1213,7 +1213,7 @@ struct State {
   }
 
   #define AR_SYMBOLS(_) \
-    _(quote), _(quasiquote), _(unquote),  \
+    _(quote), _(quasiquote), _(unquote), _(begin), \
     _(define), _(lambda), _(if), _(let), _(cond), _(macroexpand)
 
   #define AR_SYMBOLS_AUX(name) S_##name
@@ -1247,6 +1247,7 @@ struct State {
     get_symbol(S_macroexpand).as<Symbol>()->value = C_FALSE;
     get_symbol(S_lambda).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_cond).as<Symbol>()->value = C_SYNTAX;
+    get_symbol(S_begin).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_let).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_if).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_quote).as<Symbol>()->value = C_SYNTAX;
@@ -1396,17 +1397,22 @@ struct State {
     return heap;
   }
 
-  Value make_exception(Value tag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
-    Value message, exc;
+  Value make_exception(Value tag, Value message, Value irritants = C_UNSPECIFIED) {
+    Value exc;
     AR_FRAME(this, tag, message, irritants, exc);
     Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
     exc.heap = heap;
-    message = make_string(cmessage);
-    heap = (Exception*) exc.heap; // in case of GC moving
     heap->tag = tag;
     heap->message = message;
     heap->irritants = irritants;
-    return exc;
+    return heap;
+  }
+
+  Value make_exception(Value tag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
+    Value message;
+    AR_FRAME(this, tag, message, irritants);
+    message = make_string(cmessage);
+    return make_exception(tag, message, irritants);
   }
 
   Value make_exception(const std::string& ctag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) { 
@@ -1580,12 +1586,26 @@ struct State {
     return make_exception("eval-error", os.str());
   }
 
+  Value eval_body(Value env, Value fn_name, Value calling_fn_name, Value src_exp, Value body) {
+    Value tmp;
+    AR_FRAME(this, env, fn_name, calling_fn_name, src_exp, body, tmp);
+
+    while(body.type() == PAIR) {
+      tmp = eval(env, body.car(), fn_name);
+      EVAL_CHECK(tmp, src_exp, calling_fn_name);
+      if(tmp.is_active_exception()) return tmp;
+      if(body.cdr() == C_NIL) {
+        return tmp;
+      }
+      body = body.cdr();
+    }
+
+    return C_UNSPECIFIED;
+  }
+
   Value eval_cond(Value env, Value exp, Value fn_name) {
-    // (cond 
-    ///   ((clause?) then))
-    //    (else zog))
     Value pred, body, lst = exp.cdr(), tmp;
-    AR_FRAME(this, env, exp, lst, pred, body, tmp);
+    AR_FRAME(this, env, exp, fn_name, pred, body, lst);
 
     while(lst.cdr() != C_NIL) {
       pred = lst.caar();
@@ -1607,9 +1627,22 @@ struct State {
     body = lst.cdar();
     if(pred.maybe_unbox() == get_symbol(S_else)) {
       return eval_body(env, fn_name, fn_name, body, body);
-    } 
+    } else {
+      tmp = eval(env, pred, fn_name);
+      EVAL_CHECK(tmp, exp, fn_name);
+
+      if(tmp != C_FALSE) {
+        tmp = eval_body(env, fn_name, fn_name, body, body);
+        return tmp;
+      }
+    }
 
     return C_UNSPECIFIED;
+  }
+
+  Value eval_begin(Value env, Value exp, Value fn_name) {
+    AR_FRAME(this, env, exp, fn_name);
+    return eval_body(env, fn_name, fn_name, exp, exp.cdr());
   }
   
   Value eval_lambda(Value env, Value exp, bool eval_args = false) {
@@ -1618,6 +1651,7 @@ struct State {
 
     AR_FRAME(this, env, exp, fn_env, args, args_head, args_tail);
     Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
+    fn->header += Value::FUNCTION_EVAL_ARGUMENTS_BIT;
     args = exp.cadr();
     fn->name = C_FALSE;
     fn->parent_env = env;
@@ -1705,6 +1739,10 @@ struct State {
 
     if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
       tmp.as<Function>()->name = name.maybe_unbox();
+      // Macroexpand will not evaluate arguments
+      if(name.maybe_unbox() == get_symbol(S_macroexpand)) {
+        tmp.as<Function>()->header -= Value::FUNCTION_EVAL_ARGUMENTS_BIT;
+      }
     }
     // std::cout << "env_set " << env << ' ' << name << std::endl;
 
@@ -1774,7 +1812,10 @@ struct State {
     AR_FRAME(this, env, fn, args, new_env, fn_args, tmp, src_exp, rest_args_name, rest_args_head,
       rest_args_tail, body, fn_name, calling_fn_name);
 
+    bool eval_args = fn.function_eval_args();
+
     fn_name = fn.function_name();
+
 
     new_env = make_env(fn.function_parent_env());
     // bool eval_args = fn.function_eval_args();
@@ -1798,8 +1839,13 @@ struct State {
     }
 
     // Evaluate arguments left to right
+    // std::cout << "CALLIGN FN " << fn_name << " with eval_args " << eval_args << std::endl;
     while(args.type() == PAIR && fn_args.type() == PAIR) {
-      tmp = eval(env, args.car(), calling_fn_name);
+      if(eval_args) {
+        tmp = eval(env, args.car(), calling_fn_name);
+      } else {
+        tmp = args.car();
+      }
       vector_append(new_env, fn_args.car());
       fn_args = fn_args.cdr();
       vector_append(new_env, tmp);
@@ -1829,35 +1875,8 @@ struct State {
     // Now eval body left to right
     body = fn.function_body();
 
-    /*
-    while(body.type() == PAIR) {
-      tmp = eval(new_env, body.car(), fn_name);
-      EVAL_CHECK(tmp, src_exp, calling_fn_name);
-      if(tmp.is_active_exception()) return tmp;
-      if(body.cdr() == C_NIL) {
-        return tmp;
-      }
-      body = body.cdr();
-    }
-    */
+    // std::cout << "evaluating function " << fn_name << " in body " << new_env << std::endl;
     return eval_body(new_env, fn_name, calling_fn_name, src_exp, body);
-
-    return C_UNSPECIFIED;
-  }
-
-  Value eval_body(Value env, Value fn_name, Value calling_fn_name, Value src_exp, Value body) {
-    Value tmp;
-    AR_FRAME(this, env, fn_name, calling_fn_name, body, tmp, src_exp);
-
-    while(body.type() == PAIR) {
-      tmp = eval(env, body.car());
-      EVAL_CHECK(tmp, src_exp, calling_fn_name);
-      if(tmp.is_active_exception()) return tmp;
-      if(body.cdr() == C_NIL) {
-        return tmp;
-      }
-      body = body.cdr();
-    }
 
     return C_UNSPECIFIED;
   }
@@ -1868,7 +1887,7 @@ struct State {
     Value else_branch = C_UNSPECIFIED;
     Value res = C_FALSE;
 
-    AR_FRAME(this, cond, then_branch, else_branch, res, exp, env);
+    AR_FRAME(this, env, exp, fn_name, cond, then_branch, else_branch, res);
     // TODO: protect
 
     if(has_else) {
@@ -1891,7 +1910,7 @@ struct State {
   Value eval(Value env, Value exp, Value fn_name = C_FALSE) {
     Value res, car, tmp;
 
-    AR_FRAME(this, env, exp, res, car, fn_name);
+    AR_FRAME(this, env, exp, res, car, tmp, fn_name);
 
     if(exp.immediatep())
       return exp;
@@ -1915,6 +1934,8 @@ struct State {
             return eval_lambda(env, exp);
           } else if(car == get_symbol(S_set)) {
             return eval_set(env, exp, fn_name);
+          } else if(car == get_symbol(S_begin)) {
+            return eval_begin(env, exp, fn_name);
           } else if(car == get_symbol(S_let)) {
             // return eval_let(env, exp, fn_name);
             return C_FALSE;
@@ -1959,6 +1980,8 @@ struct State {
           exp = exp.unbox();
         }
 
+        // std::cout << env << ' ' << exp << std::endl;
+
         res = env_lookup(env, exp);
         if(res.bits == 0) {
           return C_UNSPECIFIED;
@@ -1977,23 +2000,27 @@ struct State {
         }
         return res;
       }
-      default: AR_ASSERT(!":(");
+      default: {
+        if(exp.is_active_exception()) return exp;
+        AR_ASSERT(!":(");
+      }
     }
 
     return C_UNSPECIFIED;
   }
 
   Value eval_toplevel(Value exp) {
+    /*
     Value expand = get_symbol(S_macroexpand);
 
     if(expand.symbol_value() != C_FALSE) {
-      AR_FRAME(this, expand, exp);
+      Value args, sym;
+      AR_FRAME(this, expand, exp, args, sym);
+      args = make_pair(exp, C_NIL);
+
+      exp = apply_scheme(C_FALSE, expand.symbol_value(), args, exp, C_FALSE);
     } 
-    // Eval toplevel
-
-    // Macroexpand then eval
-
-    // Compile, macroexpand then enter VM
+    */
     return eval(C_FALSE, exp);
   }
 };

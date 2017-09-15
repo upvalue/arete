@@ -21,11 +21,57 @@
   #(#f define syntax lambda syntax quote syntax set! syntax
     define-syntax syntax if syntax begin syntax))
 
-(set! macroexpand
-  (lambda (x)
+(define macroexpand
+  (lambda (x) 
     (if (self-evaluating? x)
         x
-        (error))))
+        (begin
+          (define kar (car x))
+          (cond 
+            ((eq? kar 'define-syntax)
+             ;; Under define-syntax, what we do is
+             ;; evaluate the lambda
+             ;; then put it in the environment (where does the environment come from)
+             ;; it could be called from toplevel, or recursively right...
+             ;; so 
+             ;; (macroexpand (cadr x) env) is a possibility...right?
+             (begin
+               (define name (cadr x))
+               ;; if not a symbol, throw a syntax error
+               (if (not (symbol? name))
+                   (raise 'expand "define-syntax first argument should be a symbol" x))
 
-(display "macroexpansion active!")
-(newline)
+               ;(if (not (symbol? name))
+               ;    (syntax-error 
+
+               ;; eval the lambda body, creating a function,
+               ;; then define it in the environment
+
+               ;; if eval-args is set, using it as a value is an error
+
+
+               ;; eval lambda
+               ;; env-define thing as macro...
+               (print "Found a define-syntax" name)))
+            ((eq? kar 'define)
+              (begin
+                (print "Found a define")))
+            (else
+              ;; go through function and args
+
+
+
+              (print "application" x)
+              x)))
+          )))
+
+#;(macroexpand
+  (define-syntax x
+    (lambda () #t)
+    )
+  )
+
+(macroexpand
+  (define-syntax hello))
+
+#;(macroexpand (x))

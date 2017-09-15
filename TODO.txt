@@ -11,7 +11,7 @@ x semispace garbage collection for extreme debugging and robustness
 interpreter
 - let
 - quote must strip boxes, and should perhaps update lists in place to reflect this (?)
-- MAYBE: tail call optimization 
+- MAYBE: tail call optimization. 
 x naming lambdas
 x stack traces
   stack traces should include:
@@ -25,6 +25,8 @@ x block comments #|
 - extended symbols |
 - unicode
 x attach source code info to symbols by boxing them
+macroexpander
+- expose environment handling to macro-expander
 language
 - get some basic demos running. closures, fibonacci, that kind of stuff
 - macro expansion

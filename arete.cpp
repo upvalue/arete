@@ -85,6 +85,10 @@ Value fn_pairp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == PAIR);
 }
 
+Value fn_symbolp(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(argv[0].type() == SYMBOL);
+}
+
 Value fn_charp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == CHARACTER);
 }
@@ -115,13 +119,13 @@ Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
 Value fn_car(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "car";
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
-  return argv[0].car();
+  return argv[0].car().maybe_unbox();
 }
 
 Value fn_cdr(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "cdr";
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
-  return argv[0].cdr();
+  return argv[0].cdr().maybe_unbox();
 }
 
 ///// VECTORS
@@ -186,6 +190,16 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
 
 ///// MISC
 
+Value fn_raise(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "raise";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+  AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
+  Value tag = argv[0], message = argv[1], irritants = argv[2], exc;
+  AR_FRAME(state, tag, message, irritants, exc);
+  exc = state.make_exception(tag, message, irritants);
+  return exc;
+}
+
 Value fn_not(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0] == C_FALSE);
 }
@@ -201,7 +215,14 @@ void State::install_builtin_functions() {
   defun("char?", fn_charp, 1);
   defun("procedure?", fn_procedurep, 1);
   defun("pair?", fn_pairp, 1);
+  defun("symbol?", fn_symbolp, 1);
   defun("self-evaluating?", fn_self_evaluatingp, 1);
+
+
+  // Environment
+  // defun("env-lookup", fn_env_lookup, 2);
+  // defun("env-make", fn_env_make, 1);
+  // defun("env-define", fn_env_define, 3)
   
   // Lists
   defun("list?", fn_listp, 1);
@@ -225,7 +246,9 @@ void State::install_builtin_functions() {
   defun("car", fn_car, 1, 1);
   defun("cdr", fn_cdr, 1, 1);
 
-  // Misc
+  defun("raise", fn_raise, 3);
+
+  // Booleans
   defun("not", fn_not, 1, 1);
 }
 
