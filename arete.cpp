@@ -188,6 +188,31 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
   return argv[0].vector_ref(argv[1].fixnum_value());
 }
 
+///// MACROEXPANSION SUPPORT
+
+Value fn_env_define(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "env-define";
+  AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
+  Type first_arg_type = argv[0].type();
+
+  if(first_arg_type != VECTOR && argv[0] != C_FALSE) {
+    std::ostringstream os;
+    os << "env-define expected vector or #f as first argument, but got " << argv[0];
+    return state.type_error(os.str());
+  }
+
+  state.env_define(argv[0], argv[1], argv[2]);
+
+  return C_FALSE;
+}
+
+Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
+  std::cout << argv[0] << std::endl;
+  std::cout << argv[1] << std::endl;
+  // TODO Check arguments better
+  return state.eval_lambda(argv[1], argv[0]);
+}
+
 ///// MISC
 
 Value fn_raise(State& state, size_t argc, Value* argv) {
@@ -218,7 +243,6 @@ void State::install_builtin_functions() {
   defun("symbol?", fn_symbolp, 1);
   defun("self-evaluating?", fn_self_evaluatingp, 1);
 
-
   // Environment
   // defun("env-lookup", fn_env_lookup, 2);
   // defun("env-make", fn_env_make, 1);
@@ -246,7 +270,12 @@ void State::install_builtin_functions() {
   defun("car", fn_car, 1, 1);
   defun("cdr", fn_cdr, 1, 1);
 
+  // Exceptions
   defun("raise", fn_raise, 3);
+
+  // Macroexpansion support
+  defun("env-define", fn_env_define, 3);
+  defun("eval-lambda", fn_eval_lambda, 2, 2, false, false);
 
   // Booleans
   defun("not", fn_not, 1, 1);

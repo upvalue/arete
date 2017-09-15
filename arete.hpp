@@ -373,8 +373,10 @@ struct Value {
 
   // C FUNCTIONS
   static const unsigned CFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
+  static const unsigned CFUNCTION_NO_EVAL_ARGS_BIT = 1 << 10;
 
   c_function_t c_function_addr() const;
+  bool c_function_no_eval_args() const;
   bool c_function_variable_arity() const;
 
   // OPERATORS
@@ -633,6 +635,11 @@ struct CFunction : HeapValue {
 inline c_function_t Value::c_function_addr() const {
   AR_TYPE_ASSERT(type() == CFUNCTION);
   return as<CFunction>()->addr;
+}
+
+inline bool Value::c_function_no_eval_args() const {
+  AR_TYPE_ASSERT(type() == CFUNCTION);
+  return heap->get_header_bit(CFUNCTION_NO_EVAL_ARGS_BIT);
 }
 
 inline bool Value::c_function_variable_arity() const {
@@ -1483,7 +1490,7 @@ struct State {
 
   void install_builtin_functions();
 
-  void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
+  void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false, bool eval_args = true) {
     if(max_arity == 0)
       max_arity = min_arity;
     Value sym;
@@ -1494,10 +1501,17 @@ struct State {
     cfn->addr = addr;
     cfn->min_arity = min_arity;
     cfn->max_arity = max_arity;
+    if(!eval_args) {
+      cfn->set_header_bit(Value::CFUNCTION_NO_EVAL_ARGS_BIT);
+    }
     if(variable_arity) {
       cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
     }
     sym.as<Symbol>()->value = cfn;
+  }
+
+  void defform(const std::string& name, c_function_t addr, size_t arity) {
+    defun(name, addr, arity, 0, false, false);
   }
 
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
@@ -1563,7 +1577,6 @@ struct State {
   }
 
   void env_define(Value env, Value name, Value val) {
-    // TODO possibly should check for shadowing
     AR_FRAME(this, env, name, val);
     vector_append(env, name);
     vector_append(env, val);
@@ -1730,6 +1743,7 @@ struct State {
     }
 
     tmp = eval(env, body, fn_name);
+    EVAL_CHECK(tmp, exp, fn_name);
 
     if(env == C_FALSE) {
       name.as<Symbol>()->value = tmp;
@@ -1777,6 +1791,7 @@ struct State {
     size_t given_args = args.list_length();
     size_t min_arity = fn.as<CFunction>()->min_arity;
     size_t max_arity = fn.as<CFunction>()->max_arity;
+    bool eval_args = !fn.c_function_no_eval_args();
 
     if(given_args < min_arity) {
       std::ostringstream os;
@@ -1793,8 +1808,12 @@ struct State {
     fn_args = make_vector();
     size_t argc = 0;
     while(args.type() == PAIR) {
-      tmp = eval(env, args.car());
-      EVAL_CHECK(tmp, src_exp, fn_name);
+      if(eval_args) {
+        tmp = eval(env, args.car());
+        EVAL_CHECK(tmp, src_exp, fn_name);
+      } else {
+        tmp = args.car();
+      }
       vector_append(fn_args, tmp);
       argc++;
       args = args.cdr();
@@ -2017,6 +2036,8 @@ struct State {
       Value args, sym;
       AR_FRAME(this, expand, exp, args, sym);
       args = make_pair(exp, C_NIL);
+
+      TODO Second argument.
 
       exp = apply_scheme(C_FALSE, expand.symbol_value(), args, exp, C_FALSE);
     } 
@@ -2609,7 +2630,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os << ')';
     case BOX:
-      return os << "#<box " << v.unbox() << '>';
+      return os << "&" << v.unbox();
     case EXCEPTION:
       os << "#<exception '" << v.exception_tag() << " " << v.exception_message();
       if(v.exception_irritants() != C_UNSPECIFIED) {

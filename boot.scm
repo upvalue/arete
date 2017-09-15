@@ -5,24 +5,10 @@
 
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
-
-(define toplevel-env #(#f define syntax let syntax))
-
-(define make-env
-  (lambda (parent)
-    (define vec (make-vector 1 parent))
-    vec))
-
-(define env-lookup
-  (lambda (env name one-level?)
-    #f))
-
-(define *expansion-env*
-  #(#f define syntax lambda syntax quote syntax set! syntax
-    define-syntax syntax if syntax begin syntax))
+(define caddr (lambda (x) (car (cdr (cdr x)))))
 
 (define macroexpand
-  (lambda (x) 
+  (lambda (x e) 
     (if (self-evaluating? x)
         x
         (begin
@@ -40,6 +26,23 @@
                ;; if not a symbol, throw a syntax error
                (if (not (symbol? name))
                    (raise 'expand "define-syntax first argument should be a symbol" x))
+
+               ;(print x)
+               (define body (caddr x))
+               (define fn (eval-lambda body env))
+
+
+               ;; 
+               ;; (define macro (eval-lambda body env))
+
+               ;; (print body)
+               
+               ;; check for existing definition of thing
+
+               ;; (define fn (eval-lambda body))
+               ;; (env-define env name fn)
+
+
 
                ;(if (not (symbol? name))
                ;    (syntax-error 
@@ -59,6 +62,11 @@
             (else
               ;; go through function and args
 
+              ;; if (car x) refers to macro
+              ;; env-lookup env name
+              ;; if macro? 
+              ;; apply macro and replace with result of macroexpansion.
+
 
 
               (print "application" x)
@@ -72,6 +80,9 @@
   )
 
 (macroexpand
-  (define-syntax hello))
+  (define-syntax hello
+    (lambda () 
+      #t))
+  #f)
 
 #;(macroexpand (x))
