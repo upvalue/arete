@@ -118,9 +118,9 @@ Value fn_listp(State& state, size_t argc, Value* argv) {
 
 Value fn_map(State& state, size_t argc, Value* argv) {
   const char* fn_name = "map"; (void) fn_name;
-  //AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
-  AR_FN_ASSERT_ARG(state, 1, "to be a list", argv[1] == C_NIL || argv[1].list_length() > 0);
+  AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
 
   Value nlst_head, nlst_current = C_NIL, tmp, lst = argv[1], fn = argv[0], arg;
   AR_FRAME(state, nlst_head, nlst_current, lst, fn, arg);
@@ -144,7 +144,16 @@ Value fn_map(State& state, size_t argc, Value* argv) {
 Value fn_apply(State& state, size_t argc, Value* argv) {
   const char* fn_name = "apply";
 
-  return C_FALSE;
+  AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
+  AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
+
+  Value fn = argv[0], args = argv[1], tmp;
+  AR_FRAME(state, fn, args, tmp);
+
+  tmp = state.apply_generic(fn, args, false);
+
+  return tmp;
 }
 
 ///// PAIRS
@@ -294,7 +303,7 @@ void State::install_builtin_functions() {
   // Lists
   defun("list?", fn_listp, 1);
   defun("map", fn_map, 2);
-  defun("apply", fn_apply, 3);
+  defun("apply", fn_apply, 2);
 
   // Vectors
   defun("make-vector", fn_make_vector, 0, 2);

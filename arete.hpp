@@ -1831,6 +1831,7 @@ struct State {
     return tmp;
   }
 
+  /** Apply a C or a Scheme function */
   Value apply_generic(Value fn, Value args, bool eval_args) {
     AR_ASSERT(fn.procedurep());
     if(fn.type() == FUNCTION) {
