@@ -173,6 +173,7 @@ enum {
   C_UNSPECIFIED = 14 ,    // 0000 1110 #<unspecified> 
   C_EOF = 18,             // 0001 0010 #<eof>
   C_SYNTAX = 34,          // 0100 0010 #<syntax>
+  C_UNDEFINED = 66,
 };
 
 // A heap-allocated, garbage-collected value.
@@ -232,6 +233,7 @@ struct Value {
   /** Returns true if this value is immediate */
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
   static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
+  bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION; }
 
   /** Safely retrieve the type of an object */
   Type type() const;
@@ -1251,7 +1253,7 @@ struct State {
     }
 
     get_symbol(S_define).as<Symbol>()->value = C_SYNTAX;
-    get_symbol(S_macroexpand).as<Symbol>()->value = C_FALSE;
+    get_symbol(S_macroexpand).as<Symbol>()->value = C_UNDEFINED;
     get_symbol(S_lambda).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_cond).as<Symbol>()->value = C_SYNTAX;
     get_symbol(S_begin).as<Symbol>()->value = C_SYNTAX;
@@ -1290,7 +1292,7 @@ struct State {
 
       string = make_string(name);
 
-      sym.as<Symbol>()->value = C_UNSPECIFIED;
+      sym.as<Symbol>()->value = C_UNDEFINED;
       sym.as<Symbol>()->name = string;
 
       symbol_table.insert(std::make_pair(name, (Symbol*) sym.heap));
@@ -1479,6 +1481,13 @@ struct State {
     return (state).type_error(__os.str()); \
   } 
 
+#define AR_FN_ASSERT_ARG(state, i, msg, expr) \
+  if(!(expr)) { \
+    std::ostringstream __os; \
+    __os << "function " << (fn_name) << " expected argument " << (i) << ' ' << msg ; \
+    return (state).type_error(__os.str()); \
+  }
+
   std::vector<std::string> stack_trace;
 
   void print_stack_trace(std::ostream& os = std::cerr, bool clear = true) {
@@ -1575,13 +1584,6 @@ struct State {
     // reached toplevel, check symbol.
     return name.as<Symbol>()->value;
   }
-
-  void env_define(Value env, Value name, Value val) {
-    AR_FRAME(this, env, name, val);
-    vector_append(env, name);
-    vector_append(env, val);
-  }
-
 
   Value type_error(const std::string& msg) {
     return make_exception("type-error", msg);
@@ -1738,7 +1740,7 @@ struct State {
     }
 
     tmp = env_lookup(env, name, true);
-    if(tmp != C_UNSPECIFIED) {
+    if(tmp != C_UNDEFINED) {
       warn() << source_info(exp.pair_src()) << " shadows existing definition of " << name << std::endl;;
     }
 
@@ -1748,7 +1750,8 @@ struct State {
     if(env == C_FALSE) {
       name.as<Symbol>()->value = tmp;
     } else {
-      env_define(env, name, tmp);
+      vector_append(env, name);
+      vector_append(env, tmp);
     }
 
     if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
@@ -1784,14 +1787,18 @@ struct State {
   }
 
 
-  Value apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name) {
+  Value apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true) {
     Value fn_args, tmp;
     AR_FRAME(this, env, fn, args, fn_args, src_exp, tmp, fn_name);
 
     size_t given_args = args.list_length();
     size_t min_arity = fn.as<CFunction>()->min_arity;
     size_t max_arity = fn.as<CFunction>()->max_arity;
-    bool eval_args = !fn.c_function_no_eval_args();
+
+    if(fn.c_function_no_eval_args()) {
+      eval_args = false;
+    }
+    //bool eval_args = !fn.c_function_no_eval_args();
 
     if(given_args < min_arity) {
       std::ostringstream os;
@@ -1824,17 +1831,28 @@ struct State {
     return tmp;
   }
 
+  Value apply_generic(Value fn, Value args, bool eval_args) {
+    AR_ASSERT(fn.procedurep());
+    if(fn.type() == FUNCTION) {
+      return apply_scheme(C_FALSE, fn, args, C_FALSE, C_FALSE, eval_args);
+    } else {
+      return apply_c(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
+    }
+  }
+
   /** Apply a scheme function */
-  Value apply_scheme(Value env, Value fn, Value args, Value src_exp, Value calling_fn_name) {
+  Value apply_scheme(Value env, Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true) {
     Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
     Value fn_name;
     AR_FRAME(this, env, fn, args, new_env, fn_args, tmp, src_exp, rest_args_name, rest_args_head,
       rest_args_tail, body, fn_name, calling_fn_name);
 
-    bool eval_args = fn.function_eval_args();
+    if(!fn.function_eval_args()) {
+      eval_args = false;
+    }
+    // bool eval_args = fn.function_eval_args();
 
     fn_name = fn.function_name();
-
 
     new_env = make_env(fn.function_parent_env());
     // bool eval_args = fn.function_eval_args();
@@ -1896,8 +1914,6 @@ struct State {
 
     // std::cout << "evaluating function " << fn_name << " in body " << new_env << std::endl;
     return eval_body(new_env, fn_name, calling_fn_name, src_exp, body);
-
-    return C_UNSPECIFIED;
   }
 
   Value eval_if(Value env, Value exp, bool has_else, Value fn_name) {
@@ -2005,7 +2021,7 @@ struct State {
         if(res.bits == 0) {
           return C_UNSPECIFIED;
         } 
-        if(res == C_UNSPECIFIED) {
+        if(res == C_UNDEFINED) {
           std::ostringstream os;
           os << "reference to undefined variable " << exp;
           EVAL_TRACE(car, fn_name);

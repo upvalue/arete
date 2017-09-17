@@ -7,8 +7,10 @@
 (define cdar (lambda (x) (cdr (car x))))
 (define caddr (lambda (x) (car (cdr (cdr x)))))
 
+(define unspecified (if #f #f))
+
 (define macroexpand
-  (lambda (x e) 
+  (lambda (x mac-env use-env) 
     (if (self-evaluating? x)
         x
         (begin
@@ -29,48 +31,32 @@
 
                ;(print x)
                (define body (caddr x))
-               (define fn (eval-lambda body env))
+               ;; TODO: Check for existing definition
+               (define fn (eval-lambda body mac-env))
+               (env-define mac-env name fn)
 
+               ;; macro now exists in environment
+               unspecified))
 
-               ;; 
-               ;; (define macro (eval-lambda body env))
-
-               ;; (print body)
-               
-               ;; check for existing definition of thing
-
-               ;; (define fn (eval-lambda body))
-               ;; (env-define env name fn)
-
-
-
-               ;(if (not (symbol? name))
-               ;    (syntax-error 
-
-               ;; eval the lambda body, creating a function,
-               ;; then define it in the environment
-
-               ;; if eval-args is set, using it as a value is an error
-
-
-               ;; eval lambda
-               ;; env-define thing as macro...
-               (print "Found a define-syntax" name)))
             ((eq? kar 'define)
               (begin
                 (print "Found a define")))
             (else
               ;; go through function and args
+              (begin
+                (if (symbol? (car x))
+                    ;; if (macro? x) 
+                    ;;   (apply (car x) (cdr x) env)
+                    ;; also, the arguments themselves must be expanded. obviously. map should exist.
+                    ;; Right? 
+                    (begin
+                      (print "got a potential macro application" x))
+                    x)))
 
-              ;; if (car x) refers to macro
-              ;; env-lookup env name
-              ;; if macro? 
-              ;; apply macro and replace with result of macroexpansion.
-
-
-
-              (print "application" x)
-              x)))
+                ;; if (car x) is a symbol
+                ;; env-lookup env name
+                ;; if (macro? x) (apply x args)
+            ))
           )))
 
 #;(macroexpand
@@ -82,7 +68,11 @@
 (macroexpand
   (define-syntax hello
     (lambda () 
-      #t))
-  #f)
+      "expansion successful"))
+  #f #f)
+
+(print "macroexpansion result" (macroexpand
+  (hello)
+  #f #f))
 
 #;(macroexpand (x))

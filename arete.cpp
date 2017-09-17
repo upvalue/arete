@@ -78,7 +78,7 @@ Value fn_nullp(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_procedurep(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == FUNCTION || argv[0].type() == CFUNCTION);
+  return Value::make_boolean(argv[0].procedurep());
 }
 
 Value fn_pairp(State& state, size_t argc, Value* argv) {
@@ -93,6 +93,19 @@ Value fn_charp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == CHARACTER);
 }
 
+Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
+  if(argv[0].immediatep()) return C_TRUE;
+
+  switch(argv[0].type()) {
+    case VECTOR: 
+      return C_TRUE;
+    default:
+      return C_FALSE;
+  }
+}
+
+///// LISTS
+
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
   if(argv[0] == C_NIL) return C_FALSE;
@@ -103,15 +116,35 @@ Value fn_listp(State& state, size_t argc, Value* argv) {
   return C_FALSE;
 }
 
-Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
-  if(argv[0].immediatep()) return C_TRUE;
+Value fn_map(State& state, size_t argc, Value* argv) {
+  const char* fn_name = "map"; (void) fn_name;
+  //AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+  AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", argv[1] == C_NIL || argv[1].list_length() > 0);
 
-  switch(argv[0].type()) {
-    case VECTOR: 
-      return C_TRUE;
-    default:
-      return C_FALSE;
+  Value nlst_head, nlst_current = C_NIL, tmp, lst = argv[1], fn = argv[0], arg;
+  AR_FRAME(state, nlst_head, nlst_current, lst, fn, arg);
+
+  while(lst.type() == PAIR) {
+    arg = state.make_pair(lst.car(), C_NIL);
+    tmp = state.apply_generic(fn, arg, false);
+    if(nlst_current == C_NIL) {
+      nlst_head = nlst_current = state.make_pair(tmp, C_NIL);
+    } else {
+      tmp = state.make_pair(tmp, C_NIL);
+      nlst_current.set_cdr(tmp);
+      nlst_current = tmp;
+    }
+    lst = lst.cdr();
   }
+
+  return nlst_head;
+}
+
+Value fn_apply(State& state, size_t argc, Value* argv) {
+  const char* fn_name = "apply";
+
+  return C_FALSE;
 }
 
 ///// PAIRS
@@ -201,9 +234,24 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
     return state.type_error(os.str());
   }
 
-  state.env_define(argv[0], argv[1], argv[2]);
+  state.env_set(argv[0], argv[1], argv[2]);
 
-  return C_FALSE;
+  return C_UNSPECIFIED;
+}
+
+Value fn_env_lookup(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "env-lookup";
+  AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
+  
+  Type first_arg_type = argv[0].type();
+
+  if(first_arg_type != VECTOR && argv[0] != C_FALSE) {
+    std::ostringstream os;
+    os << "env-define expected vector or #f as first argument, but got " << argv[0];
+    return state.type_error(os.str());
+  }
+
+  return state.env_lookup(argv[0], argv[1]);
 }
 
 Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
@@ -243,13 +291,10 @@ void State::install_builtin_functions() {
   defun("symbol?", fn_symbolp, 1);
   defun("self-evaluating?", fn_self_evaluatingp, 1);
 
-  // Environment
-  // defun("env-lookup", fn_env_lookup, 2);
-  // defun("env-make", fn_env_make, 1);
-  // defun("env-define", fn_env_define, 3)
-  
   // Lists
   defun("list?", fn_listp, 1);
+  defun("map", fn_map, 2);
+  defun("apply", fn_apply, 3);
 
   // Vectors
   defun("make-vector", fn_make_vector, 0, 2);
@@ -275,7 +320,9 @@ void State::install_builtin_functions() {
 
   // Macroexpansion support
   defun("env-define", fn_env_define, 3);
-  defun("eval-lambda", fn_eval_lambda, 2, 2, false, false);
+  defun("env-lookup", fn_env_lookup, 2);
+  // TODO: Full eval/apply necessary? Probably...
+  defun("eval-lambda", fn_eval_lambda, 2, 2, false, true);
 
   // Booleans
   defun("not", fn_not, 1, 1);
