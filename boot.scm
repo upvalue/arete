@@ -33,11 +33,11 @@
                (define body (caddr x))
                ;; TODO: Check for existing definition
                (define fn (eval-lambda body mac-env))
+
                (set-function-name! fn name)
                (set-function-macro-bit! fn)
+
                (env-define mac-env name fn)
-               ;(print (fx+ 5 5))
-               ;(print (env-lookup #f 'hello))
 
                ;; macro now exists in environment
                unspecified))
@@ -55,9 +55,10 @@
                     ;; Right? 
                     (begin
                       (define lookup (env-lookup use-env kar))
-                      (print (env-lookup #f kar))
-                      (print "got a potential macro application" lookup))
-                    x)))
+                      (if (macro? lookup)
+                          (apply lookup '())
+                          x)))))
+
 
                 ;; if (car x) is a symbol
                 ;; env-lookup env name

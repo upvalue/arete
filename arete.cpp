@@ -93,6 +93,10 @@ Value fn_charp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == CHARACTER);
 }
 
+Value fn_macrop(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(argv[0].type() == FUNCTION && argv[0].function_is_macro());
+}
+
 Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
   if(argv[0].immediatep()) return C_TRUE;
 
@@ -322,6 +326,7 @@ void State::install_builtin_functions() {
   defun("procedure?", fn_procedurep, 1);
   defun("pair?", fn_pairp, 1);
   defun("symbol?", fn_symbolp, 1);
+  defun("macro?", fn_macrop, 1);
   defun("self-evaluating?", fn_self_evaluatingp, 1);
 
   // Lists
