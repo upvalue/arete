@@ -118,9 +118,12 @@ Value fn_listp(State& state, size_t argc, Value* argv) {
 
 Value fn_map(State& state, size_t argc, Value* argv) {
   const char* fn_name = "map"; (void) fn_name;
+
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
+
+  if(argv[1] == C_NIL) return C_NIL;
   AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
-  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1].list_length() > 0));
 
   Value nlst_head, nlst_current = C_NIL, tmp, lst = argv[1], fn = argv[0], arg;
   AR_FRAME(state, nlst_head, nlst_current, lst, fn, arg);
@@ -145,7 +148,6 @@ Value fn_apply(State& state, size_t argc, Value* argv) {
   const char* fn_name = "apply";
 
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
-  AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
 
   Value fn = argv[0], args = argv[1], tmp;
@@ -264,10 +266,32 @@ Value fn_env_lookup(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
-  std::cout << argv[0] << std::endl;
-  std::cout << argv[1] << std::endl;
+  // std::cout << argv[0] << std::endl;
+  // std::cout << argv[1] << std::endl;
   // TODO Check arguments better
   return state.eval_lambda(argv[1], argv[0]);
+}
+
+Value fn_set_function_name(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-function-name!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+  AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
+
+  Function* fn = argv[0].as<Function>();
+  fn->name = argv[1];
+
+  return C_UNSPECIFIED;
+}
+
+Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-function-macro-bit!";
+
+  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+
+  Function* fn = argv[0].as<Function>();
+  fn->set_header_bit(Value::FUNCTION_MACRO_BIT);
+
+  return fn;
 }
 
 ///// MISC
@@ -330,8 +354,11 @@ void State::install_builtin_functions() {
   // Macroexpansion support
   defun("env-define", fn_env_define, 3);
   defun("env-lookup", fn_env_lookup, 2);
+
   // TODO: Full eval/apply necessary? Probably...
   defun("eval-lambda", fn_eval_lambda, 2, 2, false, true);
+  defun("set-function-name!", fn_set_function_name, 2);
+  defun("set-function-macro-bit!", fn_set_function_macro_bit, 1);
 
   // Booleans
   defun("not", fn_not, 1, 1);

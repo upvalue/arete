@@ -365,6 +365,7 @@ struct Value {
   
   // FUNCTIONS
   static const unsigned FUNCTION_EVAL_ARGUMENTS_BIT = 1 << 9;
+  static const unsigned FUNCTION_MACRO_BIT = 1 << 10;
 
   Value function_name() const;
   Value function_arguments() const;
@@ -372,6 +373,7 @@ struct Value {
   Value function_rest_arguments() const;
   Value function_body() const;
   bool function_eval_args() const;
+  bool function_is_macro() const;
 
   // C FUNCTIONS
   static const unsigned CFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
@@ -626,6 +628,10 @@ inline bool Value::function_eval_args() const {
   return heap->get_header_bit(FUNCTION_EVAL_ARGUMENTS_BIT);
 }
 
+inline bool Value::function_is_macro() const {
+  AR_TYPE_ASSERT(type() == FUNCTION);
+  return heap->get_header_bit(FUNCTION_MACRO_BIT);
+}
 
 struct CFunction : HeapValue {
   c_function_t addr;
@@ -2626,7 +2632,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
     }
     case FUNCTION: {
       // TODO this should include source information
-      os << "#<function ";
+      os << "#<" << (v.function_is_macro() ? "macro" : "function") << ' ';
       Value name = v.function_name();
       if(name == C_FALSE) {
         os << (void*) v.bits;

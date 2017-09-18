@@ -33,7 +33,11 @@
                (define body (caddr x))
                ;; TODO: Check for existing definition
                (define fn (eval-lambda body mac-env))
+               (set-function-name! fn name)
+               (set-function-macro-bit! fn)
                (env-define mac-env name fn)
+               ;(print (fx+ 5 5))
+               ;(print (env-lookup #f 'hello))
 
                ;; macro now exists in environment
                unspecified))
@@ -44,13 +48,15 @@
             (else
               ;; go through function and args
               (begin
-                (if (symbol? (car x))
+                (if (symbol? kar)
                     ;; if (macro? x) 
                     ;;   (apply (car x) (cdr x) env)
                     ;; also, the arguments themselves must be expanded. obviously. map should exist.
                     ;; Right? 
                     (begin
-                      (print "got a potential macro application" x))
+                      (define lookup (env-lookup use-env kar))
+                      (print (env-lookup #f kar))
+                      (print "got a potential macro application" lookup))
                     x)))
 
                 ;; if (car x) is a symbol
