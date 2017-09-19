@@ -146,17 +146,29 @@ Value fn_cons_source(State& state, size_t argc, Value* argv) {
   return pare;
 }
 
-Value fn_list(State& state, size_t argc, Value* _argv) {
+Value fn_list_impl(State& state, size_t argc, Value* _argv, bool copy_source) {
+  static const char* fn_name = "list";
   AR_FRAME_ARRAY(state, argc, _argv, argv);
 
   Value head = C_NIL, current, tmp;
+  SourceLocation loc;
 
   AR_FRAME(state, head, current, tmp);
 
-  for(size_t i = 0; i != argc; i++) {
+  if(copy_source) {
+    if(_argv[0].type() == PAIR && _argv[0].pair_has_source()) {
+      loc = *_argv[0].pair_src();
+    }
+  }
+
+  for(size_t i = copy_source ? 1 : 0; i < argc; i++) {
     Value v = argv[i];
     if(head == C_NIL) {
-      head = current = state.make_pair(v, C_NIL);
+      if(copy_source) {
+        head = current = state.make_src_pair(v, C_NIL, loc);
+      } else {
+        head = current = state.make_pair(v, C_NIL);
+      }
     } else {
       tmp = state.make_pair(v, C_NIL);
       current.set_cdr(tmp);
@@ -167,6 +179,14 @@ Value fn_list(State& state, size_t argc, Value* _argv) {
   delete[] argv;
   delete[] __ar_roots;
   return head;
+}
+
+Value fn_list(State& state, size_t argc, Value* argv) {
+  return fn_list_impl(state, argc, argv, false);
+}
+
+Value fn_list_source(State& state, size_t argc, Value* argv) {
+  return fn_list_impl(state, argc, argv, true);
 }
 
 /** Returns the length of a list */
@@ -218,7 +238,7 @@ Value fn_list_ref(State& state, size_t argc, Value* argv) {
     h = h.cdr();
   }
 
-  return h.car();
+  return h.car().maybe_unbox();
 }
 
 Value fn_map(State& state, size_t argc, Value* argv) {
@@ -364,6 +384,11 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
   return sym;  
 }
 
+Value fn_env_make(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "env-make";
+  return state.make_env(argv[0]);
+}
+
 Value fn_env_define(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-define";
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
@@ -375,7 +400,12 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
     return state.type_error(os.str());
   }
 
-  state.env_set(argv[0], argv[1], argv[2]);
+  Value env = argv[0], name = argv[1], value = argv[2];
+  AR_FRAME(state, env, name, value);
+
+  state.vector_append(env, name);
+  state.vector_append(env, value);
+  // state.env_set(argv[0], argv[1], argv[2]);
 
   return C_UNSPECIFIED;
 }
@@ -393,6 +423,10 @@ Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   }
 
   return state.env_lookup(argv[0], argv[1]);
+}
+
+Value fn_eval(State& state, size_t argc, Value* argv) {
+  return state.eval(C_FALSE, argv[0]);
 }
 
 Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
@@ -460,6 +494,7 @@ void State::install_builtin_functions() {
   defun("cons", fn_cons, 2);
   defun("cons-source", fn_cons_source, 3);
   defun("list", fn_list, 0, 0, true);
+  defun("list-source", fn_list_source, 0, 0, true);
   defun("list?", fn_listp, 1);
   defun("list-ref", fn_list_ref, 2);
   defun("length", fn_length, 1);
@@ -489,12 +524,14 @@ void State::install_builtin_functions() {
   defun("raise", fn_raise, 3);
 
   // Macroexpansion support
+  defun("env-make", fn_env_make, 1);
   defun("env-define", fn_env_define, 3);
   defun("env-lookup", fn_env_lookup, 2);
 
   defun("gensym", fn_gensym, 0, 1);
 
   // TODO: Full eval/apply necessary? Probably...
+  defun("eval", fn_eval, 1);
   defun("eval-lambda", fn_eval_lambda, 2, 2, false, true);
   defun("set-function-name!", fn_set_function_name, 2);
   defun("set-function-macro-bit!", fn_set_function_macro_bit, 1);

@@ -387,6 +387,7 @@ struct Value {
   static const unsigned CFUNCTION_NO_EVAL_ARGS_BIT = 1 << 10;
 
   c_function_t c_function_addr() const;
+  Value c_function_name() const;
   bool c_function_no_eval_args() const;
   bool c_function_variable_arity() const;
 
@@ -641,11 +642,17 @@ inline bool Value::function_is_macro() const {
 }
 
 struct CFunction : HeapValue {
+  Value name;
   c_function_t addr;
   size_t min_arity, max_arity;
 
   static const unsigned CLASS_TYPE = CFUNCTION;
 };
+
+inline Value Value::c_function_name() const {
+  AR_TYPE_ASSERT(type() == CFUNCTION);
+  return as<CFunction>()->name;
+}
 
 inline c_function_t Value::c_function_addr() const {
   AR_TYPE_ASSERT(type() == CFUNCTION);
@@ -886,7 +893,7 @@ struct GCSemispace : GCCommon {
 
       switch(obj->get_type()) {
 #define AR_COPY(type, field) copy((HeapValue**) &(((type*)obj)->field))
-        case FLONUM: case CHARACTER: case STRING: case CFUNCTION: break;
+        case FLONUM: case CHARACTER: case STRING: break;
         case BOX:
           AR_COPY(Box, value);
           break;
@@ -897,6 +904,9 @@ struct GCSemispace : GCCommon {
         case PAIR:
           AR_COPY(Pair, data_car);
           AR_COPY(Pair, data_cdr);
+          break;
+        case CFUNCTION:
+          AR_COPY(CFunction, name);
           break;
         case FUNCTION:
           AR_COPY(Function, name);
@@ -1019,11 +1029,12 @@ struct GCIncremental : GCCommon {
 
     switch(v->get_type()) {
       case FLONUM: case STRING: case CHARACTER:
-      case CFUNCTION:
-        return;
       case SYMBOL:
         mark(static_cast<Symbol*>(v)->name.heap);
         v = static_cast<Symbol*>(v)->value.heap;
+        goto again;
+      case CFUNCTION:
+        v = static_cast<CFunction*>(v)->name.heap;
         goto again;
       case FUNCTION:
         mark(static_cast<Function*>(v)->name.heap);
@@ -1517,11 +1528,13 @@ struct State {
   void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false, bool eval_args = true) {
     if(max_arity == 0)
       max_arity = min_arity;
-    Value sym;
+    Value sym, str;
     CFunction* cfn = 0;
-    AR_FRAME(this, sym);
+    AR_FRAME(this, sym,str);
     sym = get_symbol(name);
+    str = make_string(name);
     cfn = static_cast<CFunction*>(gc.allocate(CFUNCTION, sizeof(CFunction)));
+    cfn->name = str;
     cfn->addr = addr;
     cfn->min_arity = min_arity;
     cfn->max_arity = max_arity;
@@ -1557,6 +1570,7 @@ struct State {
       return (exp); \
     }
 
+
   // Environments are just vectors containing the parent environment in the first position
   // and variable names/values in the even/odd positions afterwards e.g.
 
@@ -1570,6 +1584,14 @@ struct State {
     vector_append(vec, parent);
     return vec;
   }
+
+  /*
+  void env_define(Value env, Value name, Value val) {
+    AR_FRAME(this, env, name, val);
+    state.vector_append(env, name);
+    state.vector_append(env, val);
+  }
+  */
 
   void env_set(Value env, Value name, Value val) {
     AR_FRAME(this, env, name, val);
@@ -1622,7 +1644,6 @@ struct State {
 
     while(body.type() == PAIR) {
       tmp = eval(env, body.car(), fn_name);
-      EVAL_CHECK(tmp, src_exp, calling_fn_name);
       if(tmp.is_active_exception()) return tmp;
       if(body.cdr() == C_NIL) {
         return tmp;
@@ -1892,7 +1913,7 @@ struct State {
     }
 
     // Evaluate arguments left to right
-    // std::cout << "CALLIGN FN " << fn_name << " with eval_args " << eval_args << std::endl;
+    // std::cout << "CALLING FN " << fn_name << " with eval_args " << eval_args << std::endl;
     while(args.type() == PAIR && fn_args.type() == PAIR) {
       if(eval_args) {
         tmp = eval(env, args.car(), calling_fn_name);
@@ -2652,7 +2673,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
     }
     case CFUNCTION: {
       os << "#<cfunction ";
-      return os << (void*) v.c_function_addr() << '>';
+      return os << v.c_function_name().string_data() << '>';
     }
     case VECTOR:
       os << "#(";

@@ -19,48 +19,67 @@
           (cond 
             ;; LET
             ((eq? kar 'let)
-             (if (fx< (length x) 3)
-                 (raise 'expand "let has no body" x))
-             (define let-fn-name #f)
-             (define bindings #f)
-             (define body #f)
+              (if (fx< (length x) 3)
+                (raise 'expand "let has no body" x))
+              (define let-fn-name #f)
+              (define bindings #f)
+              (define body #f)
+ 
+              (if (symbol? (list-ref x 1))
+                (begin
+                  (set! let-fn-name (list-ref x 1))
+                  (set! bindings (list-ref x 2))
+                  (set! body (list-ref x 3)))
+                (begin
+                  (set! bindings (list-ref x 1))
+                  (set! body (list-ref x 2))))
+ 
+              (define names #f)
+              (define vals #f)
+              (define new-env (env-make use-env))
 
-             (if (symbol? (list-ref x 1))
-                 (begin
-                   (set! let-fn-name (list-ref x 1))
-                   (set! bindings (list-ref x 2))
-                   (set! body (list-ref x 3)))
-                 (begin
-                   (set! bindings (list-ref x 1))
-                   (set! body (list-ref x 2))))
-                 
-             (define names #f)
-             (define vals #f)
+              (if let-fn-name
+                (env-define new-env let-fn-name 'variable))
 
-             (set! names
-               (map (lambda (binding)
-                  (print binding)
-                  (define name (car binding))
-                  (if (not (fx= (length binding) 2))
-                      (raise 'expand "let binding should have a name and a value" x))
-                  (if (not (symbol? name))
-                      (raise 'expand "let binding name should be a symbol" x))
-                  name)
-                    bindings))
+              (set! names
+                (map (lambda (binding)
+                       (print binding)
+                       (if (not (list? binding))
+                           (raise 'expand "let binding should be a list with a name and a value" x))
+                       (define name (car binding))
+                       (if (not (fx= (length binding) 2))
+                           (raise 'expand "let binding should have a name and a value" x))
+                       (if (not (symbol? name))
+                           (raise 'expand "let binding name should be a symbol" x))
+                       (env-define new-env name 'variable)
+                       name)
+                     bindings))
+ 
+              (set! vals 
+                (map (lambda (binding)
+                       ;; TODO macroexpand.
+                       (cadr binding)
+                       ) bindings))
+ 
+              ;(print "names and bindings" names vals)
+              ;(print "parsed let" let-fn-name bindings body)
+              ;(print "let introduces env" new-env)
+ 
+              (define result 
+                 (cons-source x 'lambda
+                   (list-source x names body)) vals)
 
-             (set! vals 
-               (map (lambda (binding)
-                    ;; TODO macroexpand.
-                    (cadr binding)
-                    ) bindings))
+              (set! result
+                (if let-fn-name
+                  (cons-source x (list-source x 'lambda '()
+                    (list-source x 'define let-fn-name result)
+                    (cons-source x let-fn-name vals)) '())
+                  (cons-source x result vals)))
 
-             (print "names and bindings" names vals)
-
-                    
-             (print "parsed let" let-fn-name bindings body)
+              (print "let:result:" result)
 
              ;; let return
-             unspecified)
+             result)
             ((eq? kar 'define-syntax)
              ;; Under define-syntax, what we do is
              ;; evaluate the lambda
@@ -110,29 +129,14 @@
                 ;; if (macro? x) (apply x args)
             ))
           )))
+;(print (eval (macroexpand (let ((zug #t)) zug) #f #f)))
 
-#;(macroexpand
-  (define-syntax x
-    (lambda () #t)
-    )
-  )
+#;(print (eval (macroexpand (let ((zug #t)) zug) #f #f)))
 
-#;(macroexpand
-  (define-syntax hello
-    (lambda () 
-      "expansion successful"))
-  #f #f)
-#;(print "macroexpansion result" (macroexpand (hello) #f #f))
+(print (eval (macroexpand
+  (let loop ((i 0))
+    (if (fx= i 5)
+        i
+        (loop (fx+ i 1)))) #f #f)))
 
-(print (macroexpand
-    (let ((zug #t)) #t)
-    #f #f))
-
-#;(begin
-  (define-syntax x
-    (lambda () "expansion successful"))
-
-  (define y (x))
-
-  (print y))
 
