@@ -27,6 +27,13 @@ Value fn_fx_equals(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].fixnum_value() == argv[1].fixnum_value());
 }
 
+Value fn_fx_lt(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "fx<";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  return Value::make_boolean(argv[0].fixnum_value() < argv[1].fixnum_value());
+}
+
 #define AR_ARITHMETIC(name, op) \
   Value fn_##name (State& state, size_t argc, Value* argv) { \
     const char* fn_name = #name; \
@@ -110,6 +117,81 @@ Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
 
 ///// LISTS
 
+Value fn_cons(State& state, size_t argc, Value* argv) {
+  Value kar, kdr;
+  AR_FRAME(state, kar, kdr);
+  kar = argv[0];
+  kdr = argv[1];
+  return state.make_pair(kar, kdr);
+}
+
+/** cons that copies source information from a given expression */
+Value fn_cons_source(State& state, size_t argc, Value* argv) {
+  const char* fn_name = "cons-source";
+  Value pare, src, kar, kdr;
+  AR_FRAME(state, pare, kar, kdr);
+  src = argv[0];
+  Type type = src.type();
+  AR_FN_ASSERT_ARG(state, 0, "to be a box or pair with source information",
+    (type == PAIR && src.pair_has_source() || type == BOX && src.box_has_source()));
+  kar = argv[1];
+  kdr = argv[2];
+  SourceLocation loc;
+  if(type == PAIR) {
+    loc = *(src.pair_src());
+  } else {
+    loc = *(src.box_src());
+  }
+  pare = state.make_src_pair(kar, kdr, loc);
+  return pare;
+}
+
+Value fn_list(State& state, size_t argc, Value* _argv) {
+  AR_FRAME_ARRAY(state, argc, _argv, argv);
+
+  Value head = C_NIL, current, tmp;
+
+  AR_FRAME(state, head, current, tmp);
+
+  for(size_t i = 0; i != argc; i++) {
+    Value v = argv[i];
+    if(head == C_NIL) {
+      head = current = state.make_pair(v, C_NIL);
+    } else {
+      tmp = state.make_pair(v, C_NIL);
+      current.set_cdr(tmp);
+      current = tmp;
+    }
+  }
+
+  delete[] argv;
+  delete[] __ar_roots;
+  return head;
+}
+
+/** Returns the length of a list */
+Value fn_length(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "length";
+  if(argv[0] == C_NIL)
+    return Value::make_fixnum(0);
+
+  AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
+
+  size_t length = 0;
+
+  Value head = argv[0], next;
+  while(head != C_NIL) {
+    next = head.cdr();
+    if(next != C_NIL && next.type() != PAIR) {
+      return state.type_error("length got a dotted list as its argument");
+    }
+    length++;
+    head = next;
+  }
+
+  return Value::make_fixnum(length);
+}
+
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
   if(argv[0] == C_NIL) return C_FALSE;
@@ -118,6 +200,25 @@ Value fn_listp(State& state, size_t argc, Value* argv) {
     argv[0] = argv[0].cdr();
   }
   return C_FALSE;
+}
+
+Value fn_list_ref(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "list-ref";
+  AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  AR_FN_ASSERT_ARG(state, 1, "to be a positive number", argv[1].fixnum_value() >= 0);
+
+  Value h = argv[0];
+  size_t idx = argv[1].fixnum_value();
+  
+  while(idx--) {
+    if(h.cdr().type() != PAIR) {
+      return state.type_error("list-ref ran into a dotted list");
+    }
+    h = h.cdr();
+  }
+
+  return h.car();
 }
 
 Value fn_map(State& state, size_t argc, Value* argv) {
@@ -135,6 +236,7 @@ Value fn_map(State& state, size_t argc, Value* argv) {
   while(lst.type() == PAIR) {
     arg = state.make_pair(lst.car(), C_NIL);
     tmp = state.apply_generic(fn, arg, false);
+    if(tmp.is_active_exception()) return tmp;
     if(nlst_current == C_NIL) {
       nlst_head = nlst_current = state.make_pair(tmp, C_NIL);
     } else {
@@ -238,6 +340,30 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
 
 ///// MACROEXPANSION SUPPORT
 
+/** Generate a unique, unused symbol */
+Value fn_gensym(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "gensym";
+
+  Value name = C_FALSE, sym;
+
+  std::ostringstream os;
+
+  os << "#:";
+
+  if(argc == 1) {
+    AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+    os << argv[0].symbol_name_bytes();
+  } else {
+    os << "g";
+  }
+
+  os << state.gensym_counter;
+
+  sym = state.get_symbol(os.str());
+  state.gensym_counter++;
+  return sym;  
+}
+
 Value fn_env_define(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-define";
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
@@ -319,6 +445,7 @@ void State::install_builtin_functions() {
   defun("fx+", fn_fx_add, 2);
   defun("fx=", fn_fx_equals, 2);
   defun("fx-", fn_fx_sub, 2);
+  defun("fx<", fn_fx_lt, 2);
 
   // Predicates
   defun("null?", fn_nullp, 1);
@@ -330,7 +457,12 @@ void State::install_builtin_functions() {
   defun("self-evaluating?", fn_self_evaluatingp, 1);
 
   // Lists
+  defun("cons", fn_cons, 2);
+  defun("cons-source", fn_cons_source, 3);
+  defun("list", fn_list, 0, 0, true);
   defun("list?", fn_listp, 1);
+  defun("list-ref", fn_list_ref, 2);
+  defun("length", fn_length, 1);
   defun("map", fn_map, 2);
   defun("apply", fn_apply, 2);
 
@@ -359,6 +491,8 @@ void State::install_builtin_functions() {
   // Macroexpansion support
   defun("env-define", fn_env_define, 3);
   defun("env-lookup", fn_env_lookup, 2);
+
+  defun("gensym", fn_gensym, 0, 1);
 
   // TODO: Full eval/apply necessary? Probably...
   defun("eval-lambda", fn_eval_lambda, 2, 2, false, true);

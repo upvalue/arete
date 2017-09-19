@@ -15,7 +15,52 @@
         x
         (begin
           (define kar (car x))
+          (define len (length x))
           (cond 
+            ;; LET
+            ((eq? kar 'let)
+             (if (fx< (length x) 3)
+                 (raise 'expand "let has no body" x))
+             (define let-fn-name #f)
+             (define bindings #f)
+             (define body #f)
+
+             (if (symbol? (list-ref x 1))
+                 (begin
+                   (set! let-fn-name (list-ref x 1))
+                   (set! bindings (list-ref x 2))
+                   (set! body (list-ref x 3)))
+                 (begin
+                   (set! bindings (list-ref x 1))
+                   (set! body (list-ref x 2))))
+                 
+             (define names #f)
+             (define vals #f)
+
+             (set! names
+               (map (lambda (binding)
+                  (print binding)
+                  (define name (car binding))
+                  (if (not (fx= (length binding) 2))
+                      (raise 'expand "let binding should have a name and a value" x))
+                  (if (not (symbol? name))
+                      (raise 'expand "let binding name should be a symbol" x))
+                  name)
+                    bindings))
+
+             (set! vals 
+               (map (lambda (binding)
+                    ;; TODO macroexpand.
+                    (cadr binding)
+                    ) bindings))
+
+             (print "names and bindings" names vals)
+
+                    
+             (print "parsed let" let-fn-name bindings body)
+
+             ;; let return
+             unspecified)
             ((eq? kar 'define-syntax)
              ;; Under define-syntax, what we do is
              ;; evaluate the lambda
@@ -42,6 +87,7 @@
                ;; macro now exists in environment
                unspecified))
 
+            ;; define, lambda, cond, begin, let
             ((eq? kar 'define)
               (begin
                 (print "Found a define")))
@@ -59,7 +105,6 @@
                           (apply lookup '())
                           x)))))
 
-
                 ;; if (car x) is a symbol
                 ;; env-lookup env name
                 ;; if (macro? x) (apply x args)
@@ -72,14 +117,22 @@
     )
   )
 
-(macroexpand
+#;(macroexpand
   (define-syntax hello
     (lambda () 
       "expansion successful"))
   #f #f)
+#;(print "macroexpansion result" (macroexpand (hello) #f #f))
 
-(print "macroexpansion result" (macroexpand
-  (hello)
-  #f #f))
+(print (macroexpand
+    (let ((zug #t)) #t)
+    #f #f))
 
-#;(macroexpand (x))
+#;(begin
+  (define-syntax x
+    (lambda () "expansion successful"))
+
+  (define y (x))
+
+  (print y))
+

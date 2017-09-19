@@ -30,10 +30,17 @@
 # define AR_TYPE_ASSERT assert
 #endif 
 
-
 #define AR_FRAME(state, ...)  \
   arete::FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
   arete::Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
+
+// TODO Fix this to support whatever is necessary
+// This is horrific
+#define AR_FRAME_ARRAY(state, size, array, var) \
+  HeapValue** var = new HeapValue*[(size)]; \
+  HeapValue*** __ar_roots = new HeapValue**[(size)]; \
+  for(size_t i = 0; i != (size); i++) { var[i] = (HeapValue*) array[i].heap; __ar_roots[i] = & var [i]; } \
+  arete::Frame __arete_array_frame((state), (size), (HeapValue***) __ar_roots );
 
 #ifndef ARETE_BLOCK_SIZE
 # define ARETE_BLOCK_SIZE 4096
@@ -707,10 +714,11 @@ struct Table : HeapValue  {
 struct GC;
 
 /** 
- * FrameHack turns a Value& into a pointer to a stack-allocated Value. This is done to allow for the
- * possibility of a compaction step in the future; it's not necessary otherwise.
+ * FrameHack turns a Value& into a pointer to a stack-allocated Value. 
  */
-struct FrameHack { FrameHack(Value& value_): value((HeapValue**) &value_.bits) {} ~FrameHack() {}
+struct FrameHack {
+  FrameHack(Value& value_): value((HeapValue**) &value_.bits) {}
+  ~FrameHack() {}
   HeapValue** value;
 };
 
@@ -1204,6 +1212,7 @@ struct GCIncremental : GCCommon {
 /** A re-entrant instance of the Arete runtime */
 struct State {
   typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
+  size_t gensym_counter;
 
 #if ARETE_GC_STRATEGY == ARETE_GC_INCREMENTAL
   GCIncremental gc;
@@ -1214,7 +1223,7 @@ struct State {
   symbol_table_t symbol_table;
   std::vector<std::string> source_names;
 
-  State(): gc(*this) {
+  State(): gensym_counter(0), gc(*this) {
     current_state = this;
   }
   ~State() {
