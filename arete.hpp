@@ -150,6 +150,7 @@ enum Type {
   FUNCTION = 13,
   CFUNCTION = 14,
   TABLE = 15,
+  SYNCLO = 16,
 };
 
 inline std::ostream& operator<<(std::ostream& os, Type type) {
@@ -161,12 +162,14 @@ inline std::ostream& operator<<(std::ostream& os, Type type) {
     case STRING: return os << "string";
     case CHARACTER: return os << "character";
     case SYMBOL: return os << "symbol";
+    case SYNCLO: return os << "synclo";
     case VECTOR: return os << "vector";
     case PAIR: return os << "pair";
     case EXCEPTION: return os << "exception";
     case FUNCTION: return os << "function";
     case CFUNCTION: return os << "cfunction";
     case TABLE: return os << "table";
+    case BOX: return os << "box";
     default: return os << "unknown";
   }
 }
@@ -323,6 +326,11 @@ struct Value {
     return cmp.compare(symbol_name_bytes()) == 0;
   }
 
+  // Syntactic closures
+  Value synclo_expr() const;
+  Value synclo_env() const;
+  Value synclo_renames() const;
+
   // PAIRS
   size_t list_length() const;
   Value list_ref(size_t) const;
@@ -431,6 +439,15 @@ inline Value Value::symbol_value() const {
   return as<Symbol>()->value;
 }
 
+struct Synclo : HeapValue {
+  Value expr, env, renames;
+
+  static const unsigned CLASS_TYPE = SYNCLO;
+};
+
+inline Value Value::synclo_expr() const { return as<Synclo>()->expr; }
+inline Value Value::synclo_env() const { return as<Synclo>()->env; }
+inline Value Value::synclo_renames() const { return as<Synclo>()->renames; }
 
 /** 
  * Identifies a location in source code. File is an integer that corresponds to a string in
@@ -893,21 +910,28 @@ struct GCSemispace : GCCommon {
 
       switch(obj->get_type()) {
 #define AR_COPY(type, field) copy((HeapValue**) &(((type*)obj)->field))
+        // No pointers
         case FLONUM: case CHARACTER: case STRING: break;
+        // One pointer
+        case VECTOR:
         case BOX:
-          AR_COPY(Box, value);
+        case CFUNCTION:
+          AR_COPY(Vector, storage);
           break;
+        // Two pointers 
         case SYMBOL:
+        case PAIR:
           AR_COPY(Symbol, name);
           AR_COPY(Symbol, value);
           break;
-        case PAIR:
-          AR_COPY(Pair, data_car);
-          AR_COPY(Pair, data_cdr);
+        // Three pointers
+        case SYNCLO:
+        case EXCEPTION:
+          AR_COPY(Exception, message);
+          AR_COPY(Exception, tag);
+          AR_COPY(Exception, irritants);
           break;
-        case CFUNCTION:
-          AR_COPY(CFunction, name);
-          break;
+        // Five pointers
         case FUNCTION:
           AR_COPY(Function, name);
           AR_COPY(Function, parent_env);
@@ -915,14 +939,7 @@ struct GCSemispace : GCCommon {
           AR_COPY(Function, rest_arguments);
           AR_COPY(Function, body);
           break;
-        case EXCEPTION:
-          AR_COPY(Exception, message);
-          AR_COPY(Exception, tag);
-          AR_COPY(Exception, irritants);
-          break;
-        case VECTOR:
-          AR_COPY(Vector, storage);
-          break;
+        // Variable ptrs
         case VECTOR_STORAGE: {
           size_t length = static_cast<VectorStorage*>(obj)->length;
           for(size_t i = 0; i != length; i++) {
@@ -930,8 +947,9 @@ struct GCSemispace : GCCommon {
           }
           break;
         }
+        // Should never be encountered on heap
         case BLOCK: case CONSTANT: case FIXNUM: default:
-          AR_ASSERT(!"arete:gc: encoutnered bad value on heap; probably a GC bug");
+          AR_ASSERT(!"arete:gc: encountered bad value on heap; probably a GC bug");
           break;
 #undef AR_COPY
       }
@@ -1029,13 +1047,38 @@ struct GCIncremental : GCCommon {
 
     switch(v->get_type()) {
       case FLONUM: case STRING: case CHARACTER:
-      case SYMBOL:
-        mark(static_cast<Symbol*>(v)->name.heap);
-        v = static_cast<Symbol*>(v)->value.heap;
+        break;
+      // One pointer
+      case VECTOR:
+        v = static_cast<Vector*>(v)->storage.heap;
+        goto again;
+      case BOX:
+        v = static_cast<Box*>(v)->value.heap;
         goto again;
       case CFUNCTION:
         v = static_cast<CFunction*>(v)->name.heap;
         goto again;
+      // Two pointers
+      case SYMBOL:
+        mark(static_cast<Symbol*>(v)->name.heap);
+        v = static_cast<Symbol*>(v)->value.heap;
+        goto again;
+      case PAIR:
+        mark(static_cast<Pair*>(v)->data_car.heap);
+        v = static_cast<Pair*>(v)->data_cdr.heap;
+        goto again;
+      // Three pointers
+      case SYNCLO:
+        mark(static_cast<Synclo*>(v)->renames.heap);
+        mark(static_cast<Synclo*>(v)->env.heap);
+        v = static_cast<Synclo*>(v)->expr.heap;
+        goto again;
+      case EXCEPTION:
+        mark(static_cast<Exception*>(v)->message.heap);
+        mark(static_cast<Exception*>(v)->tag.heap);
+        v = static_cast<Exception*>(v)->irritants.heap;
+        goto again;
+      // Five pointers
       case FUNCTION:
         mark(static_cast<Function*>(v)->name.heap);
         mark(static_cast<Function*>(v)->parent_env.heap);
@@ -1043,18 +1086,7 @@ struct GCIncremental : GCCommon {
         mark(static_cast<Function*>(v)->rest_arguments.heap);
         v = static_cast<Function*>(v)->body.heap;
         goto again;
-      case PAIR:
-        mark(static_cast<Pair*>(v)->data_car.heap);
-        v = static_cast<Pair*>(v)->data_cdr.heap;
-        goto again;
-      case EXCEPTION:
-        mark(static_cast<Exception*>(v)->message.heap);
-        mark(static_cast<Exception*>(v)->tag.heap);
-        v = static_cast<Exception*>(v)->irritants.heap;
-        goto again;
-      case VECTOR:
-        v = static_cast<Vector*>(v)->storage.heap;
-        goto again;
+      // Variable pointers
       case VECTOR_STORAGE: {
         size_t length = static_cast<VectorStorage*>(v)->length;
         if(length == 0) return;
@@ -1335,6 +1367,15 @@ struct State {
       AR_ASSERT(symbol_table.size() > 0);
       return x->second;
     }
+  }
+
+  Value make_synclo(Value expr, Value env, Value renames) {
+    AR_FRAME(this, expr, env, renames);
+    Synclo* heap = static_cast<Synclo*>(gc.allocate(SYNCLO, sizeof(Synclo)));
+    heap->expr = expr;
+    heap->env = env;
+    heap->renames = renames;
+    return heap;
   }
 
   /** cons */
@@ -2682,6 +2723,8 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         if(i != v.vector_length() - 1) os << ' ';
       }
       return os << ')';
+    case SYNCLO:
+      return os << "*" << v.synclo_expr();
     case BOX:
       return os << "&" << v.unbox();
     case EXCEPTION:

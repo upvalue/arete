@@ -44,6 +44,15 @@ TEST_CASE_FIXTURE(AS, "symbol interning") {
   CHECK(x.bits != z.bits);
 }
 
+TEST_CASE_FIXTURE(AS, "synclo creation") {
+  Value x, y, z;
+  AR_FRAME(state, x, y, z);
+  x = state.get_symbol("renamable");
+  y = state.make_synclo(x, C_FALSE, C_NIL);
+  CHECK(y.type() == SYNCLO);
+  state.gc.collect();
+}
+
 TEST_CASE_FIXTURE(AS, "vectors") {
   Value v;
   {

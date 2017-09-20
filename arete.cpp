@@ -147,7 +147,7 @@ Value fn_cons_source(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_list_impl(State& state, size_t argc, Value* _argv, bool copy_source) {
-  static const char* fn_name = "list";
+  // static const char* fn_name = "list";
   AR_FRAME_ARRAY(state, argc, _argv, argv);
 
   Value head = C_NIL, current, tmp;
@@ -364,7 +364,7 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
 Value fn_gensym(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "gensym";
 
-  Value name = C_FALSE, sym;
+  Value sym;
 
   std::ostringstream os;
 
@@ -385,7 +385,7 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_env_make(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "env-make";
+  // static const char* fn_name = "env-make";
   return state.make_env(argv[0]);
 }
 

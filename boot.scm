@@ -1,22 +1,27 @@
-;; boot.scm - Arete boot file
+;; boot.scm - arete boot file
 
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
 
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
+(define cddr (lambda (x) (cdr (cdr x))))
 (define caddr (lambda (x) (car (cdr (cdr x)))))
+(define cdddr (lambda (x) (cdr (cdr (cdr x)))))
 
 (define unspecified (if #f #f))
 
-(define macroexpand
+(define _macroexpand
   (lambda (x mac-env use-env) 
+    (print "macroexpand" x)
     (if (self-evaluating? x)
         x
         (begin
           (define kar (car x))
           (define len (length x))
           (cond 
+            ((eq? kar 'if)
+              x)
             ;; LET
             ((eq? kar 'let)
               (if (fx< (length x) 3)
@@ -29,10 +34,10 @@
                 (begin
                   (set! let-fn-name (list-ref x 1))
                   (set! bindings (list-ref x 2))
-                  (set! body (list-ref x 3)))
+                  (set! body (cdddr x)))
                 (begin
                   (set! bindings (list-ref x 1))
-                  (set! body (list-ref x 2))))
+                  (set! body (cddr x))))
  
               (define names #f)
               (define vals #f)
@@ -48,7 +53,7 @@
                            (raise 'expand "let binding should be a list with a name and a value" x))
                        (define name (car binding))
                        (if (not (fx= (length binding) 2))
-                           (raise 'expand "let binding should have a name and a value" x))
+                           (raise 'expand "let binding should have only 2 elements (name and value)" x))
                        (if (not (symbol? name))
                            (raise 'expand "let binding name should be a symbol" x))
                        (env-define new-env name 'variable)
@@ -58,16 +63,22 @@
               (set! vals 
                 (map (lambda (binding)
                        ;; TODO macroexpand.
-                       (cadr binding)
+                       (_macroexpand (cadr binding) mac-env new-env)
                        ) bindings))
  
-              ;(print "names and bindings" names vals)
+              ;(print "names and values" names vals)
               ;(print "parsed let" let-fn-name bindings body)
               ;(print "let introduces env" new-env)
- 
+
+              (set! body 
+                (map (lambda (x)
+                        ; (print "sub-macroexpand" x)
+                        (_macroexpand x mac-env new-env))
+                  body))
+
               (define result 
                  (cons-source x 'lambda
-                   (list-source x names body)) vals)
+                   (cons-source x names body)) vals)
 
               (set! result
                 (if let-fn-name
@@ -76,10 +87,8 @@
                     (cons-source x let-fn-name vals)) '())
                   (cons-source x result vals)))
 
-              (print "let:result:" result)
-
              ;; let return
-             result)
+              result)
             ((eq? kar 'define-syntax)
              ;; Under define-syntax, what we do is
              ;; evaluate the lambda
@@ -93,8 +102,8 @@
                (if (not (symbol? name))
                    (raise 'expand "define-syntax first argument should be a symbol" x))
 
-               ;(print x)
                (define body (caddr x))
+
                ;; TODO: Check for existing definition
                (define fn (eval-lambda body mac-env))
 
@@ -123,20 +132,10 @@
                       (if (macro? lookup)
                           (apply lookup '())
                           x)))))
-
-                ;; if (car x) is a symbol
-                ;; env-lookup env name
-                ;; if (macro? x) (apply x args)
             ))
           )))
-;(print (eval (macroexpand (let ((zug #t)) zug) #f #f)))
 
-#;(print (eval (macroexpand (let ((zug #t)) zug) #f #f)))
-
-(print (eval (macroexpand
-  (let loop ((i 0))
-    (if (fx= i 5)
-        i
-        (loop (fx+ i 1)))) #f #f)))
-
-
+;; This function is special-cased; its arguments will not be evaluated before it is applied.
+(define macroexpand
+  (lambda (x)
+    (_macroexpand x mac-env use-env)))
