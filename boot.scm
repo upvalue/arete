@@ -11,6 +11,7 @@
 
 (define unspecified (if #f #f))
 
+
 (define _macroexpand
   (lambda (x mac-env use-env) 
     (print "macroexpand" x)
@@ -26,6 +27,7 @@
             ((eq? kar 'let)
               (if (fx< (length x) 3)
                 (raise 'expand "let has no body" x))
+              (print "expanding let expr")
               (define let-fn-name #f)
               (define bindings #f)
               (define body #f)
@@ -138,4 +140,8 @@
 ;; This function is special-cased; its arguments will not be evaluated before it is applied.
 (define macroexpand
   (lambda (x)
-    (_macroexpand x mac-env use-env)))
+    (_macroexpand x #f #f)))
+
+(print (_macroexpand '(let () #t) #f #f))
+
+;(print (macroexpand (let () #t)))

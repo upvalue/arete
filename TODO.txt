@@ -1,5 +1,6 @@
 runtime
-- figure out how to get a stack trace with C++ after assertion failures
+x figure out how to get a stack trace with C++ after assertion failures
+  just use valgrind
 - hash tables
 - ports
 - are C++ exceptions okay to use? 
@@ -8,6 +9,7 @@ garbage collection
 x semispace garbage collection for extreme debugging and robustness
 - could semispace collector also be used to optionally compact the incremental collector?
 - how to reduce code duplication between copy & mark routines?
+- finalizers
 interpreter
 - let
 - quote must strip boxes, and should perhaps update lists in place to reflect this (?)

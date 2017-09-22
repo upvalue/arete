@@ -425,17 +425,6 @@ Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   return state.env_lookup(argv[0], argv[1]);
 }
 
-Value fn_eval(State& state, size_t argc, Value* argv) {
-  return state.eval(C_FALSE, argv[0]);
-}
-
-Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
-  // std::cout << argv[0] << std::endl;
-  // std::cout << argv[1] << std::endl;
-  // TODO Check arguments better
-  return state.eval_lambda(argv[1], argv[0]);
-}
-
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-function-name!";
   AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
@@ -458,6 +447,10 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   return fn;
 }
 
+Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
+  return state.eval_lambda(argv[1], C_FALSE, argv[0]);
+}
+
 ///// MISC
 
 Value fn_raise(State& state, size_t argc, Value* argv) {
@@ -473,7 +466,7 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
 Value fn_not(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0] == C_FALSE);
 }
-
+  
 void State::install_builtin_functions() {
   // Numbers
   defun("fx+", fn_fx_add, 2);
@@ -531,7 +524,6 @@ void State::install_builtin_functions() {
   defun("gensym", fn_gensym, 0, 1);
 
   // TODO: Full eval/apply necessary? Probably...
-  defun("eval", fn_eval, 1);
   defun("eval-lambda", fn_eval_lambda, 2, 2, false, true);
   defun("set-function-name!", fn_set_function_name, 2);
   defun("set-function-macro-bit!", fn_set_function_macro_bit, 1);
