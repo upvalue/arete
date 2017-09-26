@@ -150,7 +150,7 @@ enum Type {
   FUNCTION = 13,
   CFUNCTION = 14,
   TABLE = 15,
-  SYNCLO = 16,
+  RENAME = 16,
 };
 
 inline std::ostream& operator<<(std::ostream& os, Type type) {
@@ -162,7 +162,7 @@ inline std::ostream& operator<<(std::ostream& os, Type type) {
     case STRING: return os << "string";
     case CHARACTER: return os << "character";
     case SYMBOL: return os << "symbol";
-    case SYNCLO: return os << "synclo";
+    case RENAME: return os << "rename";
     case VECTOR: return os << "vector";
     case PAIR: return os << "pair";
     case EXCEPTION: return os << "exception";
@@ -327,9 +327,8 @@ struct Value {
   }
 
   // Syntactic closures
-  Value synclo_expr() const;
-  Value synclo_env() const;
-  Value synclo_renames() const;
+  Value rename_expr() const;
+  Value rename_env() const;
 
   // PAIRS
   size_t list_length() const;
@@ -439,15 +438,14 @@ inline Value Value::symbol_value() const {
   return as<Symbol>()->value;
 }
 
-struct Synclo : HeapValue {
-  Value expr, env, renames;
+struct Rename : HeapValue {
+  Value expr, env;
 
-  static const unsigned CLASS_TYPE = SYNCLO;
+  static const unsigned CLASS_TYPE = RENAME;
 };
 
-inline Value Value::synclo_expr() const { return as<Synclo>()->expr; }
-inline Value Value::synclo_env() const { return as<Synclo>()->env; }
-inline Value Value::synclo_renames() const { return as<Synclo>()->renames; }
+inline Value Value::rename_expr() const { return as<Rename>()->expr; }
+inline Value Value::rename_env() const { return as<Rename>()->env; }
 
 /** 
  * Identifies a location in source code. File is an integer that corresponds to a string in
@@ -921,11 +919,11 @@ struct GCSemispace : GCCommon {
         // Two pointers 
         case SYMBOL:
         case PAIR:
+        case RENAME:
           AR_COPY(Symbol, name);
           AR_COPY(Symbol, value);
           break;
         // Three pointers
-        case SYNCLO:
         case EXCEPTION:
           AR_COPY(Exception, message);
           AR_COPY(Exception, tag);
@@ -1063,15 +1061,10 @@ struct GCIncremental : GCCommon {
         mark(static_cast<Symbol*>(v)->name.heap);
         v = static_cast<Symbol*>(v)->value.heap;
         goto again;
+      case RENAME:
       case PAIR:
         mark(static_cast<Pair*>(v)->data_car.heap);
         v = static_cast<Pair*>(v)->data_cdr.heap;
-        goto again;
-      // Three pointers
-      case SYNCLO:
-        mark(static_cast<Synclo*>(v)->renames.heap);
-        mark(static_cast<Synclo*>(v)->env.heap);
-        v = static_cast<Synclo*>(v)->expr.heap;
         goto again;
       case EXCEPTION:
         mark(static_cast<Exception*>(v)->message.heap);
@@ -1369,12 +1362,11 @@ struct State {
     }
   }
 
-  Value make_synclo(Value expr, Value env, Value renames) {
-    AR_FRAME(this, expr, env, renames);
-    Synclo* heap = static_cast<Synclo*>(gc.allocate(SYNCLO, sizeof(Synclo)));
+  Value make_rename(Value expr, Value env) {
+    AR_FRAME(this, expr, env);
+    Rename* heap = static_cast<Rename*>(gc.allocate(RENAME, sizeof(Rename)));
     heap->expr = expr;
     heap->env = env;
-    heap->renames = renames;
     return heap;
   }
 
@@ -2071,9 +2063,15 @@ struct State {
 
         return exp;
       }
+      case RENAME: {
+        car = exp.rename_expr();
+        tmp = exp.rename_env();
+
+        return eval(tmp, C_FALSE, car, fn_name);
+      }
       case BOX:
       case SYMBOL: {
-        if(exp.type() == BOX) {
+        if(exp.type_unsafe() == BOX) {
           // spaghetti coding: just re-using car here to store box with source code
           car = exp;
           exp = exp.unbox();
@@ -2709,8 +2707,8 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         if(i != v.vector_length() - 1) os << ' ';
       }
       return os << ')';
-    case SYNCLO:
-      return os << "*" << v.synclo_expr();
+    case RENAME:
+      return os << "*" << v.rename_expr();
     case BOX:
       return os << "&" << v.unbox();
     case EXCEPTION:

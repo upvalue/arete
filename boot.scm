@@ -11,9 +11,8 @@
 
 (define unspecified (if #f #f))
 
-
 (define _macroexpand
-  (lambda (x mac-env use-env) 
+  (lambda (x env) 
     (print "macroexpand" x)
     (if (self-evaluating? x)
         x
@@ -43,7 +42,7 @@
  
               (define names #f)
               (define vals #f)
-              (define new-env (env-make use-env))
+              (define new-env (env-make env))
 
               (if let-fn-name
                 (env-define new-env let-fn-name 'variable))
@@ -65,7 +64,7 @@
               (set! vals 
                 (map (lambda (binding)
                        ;; TODO macroexpand.
-                       (_macroexpand (cadr binding) mac-env new-env)
+                       (_macroexpand (cadr binding) env)
                        ) bindings))
  
               ;(print "names and values" names vals)
@@ -75,7 +74,7 @@
               (set! body 
                 (map (lambda (x)
                         ; (print "sub-macroexpand" x)
-                        (_macroexpand x mac-env new-env))
+                        (_macroexpand x env))
                   body))
 
               (define result 
@@ -107,12 +106,12 @@
                (define body (caddr x))
 
                ;; TODO: Check for existing definition
-               (define fn (eval-lambda body mac-env))
+               (define fn (eval-lambda body env))
 
                (set-function-name! fn name)
                (set-function-macro-bit! fn)
 
-               (env-define mac-env name fn)
+               (env-define env name fn)
 
                ;; macro now exists in environment
                unspecified))
@@ -125,23 +124,29 @@
               ;; go through function and args
               (begin
                 (if (symbol? kar)
-                    ;; if (macro? x) 
-                    ;;   (apply (car x) (cdr x) env)
-                    ;; also, the arguments themselves must be expanded. obviously. map should exist.
-                    ;; Right? 
                     (begin
-                      (define lookup (env-lookup use-env kar))
+                      (define lookup (env-lookup env kar))
                       (if (macro? lookup)
-                          (apply lookup '())
+                          (lookup x (lambda (name) (make-rename name (function-env lookup))))
                           x)))))
             ))
           )))
 
-;; This function is special-cased; its arguments will not be evaluated before it is applied.
+;; This function is special-cased; its arguments will not be evaluated before it is applied in the interpreter
 (define macroexpand
   (lambda (x)
-    (_macroexpand x #f #f)))
+    (_macroexpand x #f)))
 
-(print (_macroexpand '(let () #t) #f #f))
+;(print (_macroexpand '(let () #t) #f))
 
-;(print (macroexpand (let () #t)))
+#;(print
+  (macroexpand
+    (define-syntax x
+      (lambda (form rename)
+        (print "macro invocation successful!:)" form rename)
+        (rename 'gub)))))
+
+#;(print
+  (eval
+    (macroexpand
+      (x))))

@@ -270,6 +270,12 @@ Value fn_map(State& state, size_t argc, Value* argv) {
   return nlst_head;
 }
 
+Value fn_eval(State& state, size_t argc, Value* argv) {
+  const char* fn_name = "eval";
+
+  return state.eval_toplevel(argv[0]);
+}
+
 Value fn_apply(State& state, size_t argc, Value* argv) {
   const char* fn_name = "apply";
 
@@ -403,9 +409,12 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
   Value env = argv[0], name = argv[1], value = argv[2];
   AR_FRAME(state, env, name, value);
 
-  state.vector_append(env, name);
-  state.vector_append(env, value);
-  // state.env_set(argv[0], argv[1], argv[2]);
+  if(argv[0] == C_FALSE) {
+    name.as<Symbol>()->value = value;
+  } else {
+    state.vector_append(env, name);
+    state.vector_append(env, value);
+  }
 
   return C_UNSPECIFIED;
 }
@@ -436,6 +445,13 @@ Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+Value fn_function_env(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "function-env";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+
+  return argv[0].function_parent_env();
+}
+
 Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-function-macro-bit!";
 
@@ -445,6 +461,13 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   fn->set_header_bit(Value::FUNCTION_MACRO_BIT);
 
   return fn;
+}
+
+Value fn_make_rename(State& state, size_t argc, Value* argv) {
+  const char *fn_name = "make-rename";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+
+  return state.make_rename(argv[0], argv[1]);
 }
 
 Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
@@ -493,6 +516,7 @@ void State::install_builtin_functions() {
   defun("length", fn_length, 1);
   defun("map", fn_map, 2);
   defun("apply", fn_apply, 2);
+  defun("eval", fn_eval, 1);
 
   // Vectors
   defun("make-vector", fn_make_vector, 0, 2);
@@ -524,9 +548,11 @@ void State::install_builtin_functions() {
   defun("gensym", fn_gensym, 0, 1);
 
   // TODO: Full eval/apply necessary? Probably...
+  defun("make-rename", fn_make_rename, 2);
   defun("eval-lambda", fn_eval_lambda, 2, 2, false, true);
   defun("set-function-name!", fn_set_function_name, 2);
   defun("set-function-macro-bit!", fn_set_function_macro_bit, 1);
+  defun("function-env", fn_function_env, 1);
 
   // Booleans
   defun("not", fn_not, 1, 1);
