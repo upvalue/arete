@@ -1552,6 +1552,7 @@ struct State {
   void print_stack_trace(std::ostream& os = std::cerr, bool clear = true) {
     for(size_t i = 0; i != stack_trace.size(); i++)
       os << stack_trace.at(i) << std::endl;
+
     if(clear)
       stack_trace.clear();
   }
@@ -2018,7 +2019,21 @@ struct State {
 
         // Handle syntactic forms
         car = car.maybe_unbox();
-        if(car.type() == SYMBOL && car.symbol_value() == C_SYNTAX) {
+        
+        // Check for rename in application
+        if(car.type() == RENAME) {
+          tmp = car.rename_expr();
+          res = car.rename_env();
+
+          tmp = env_lookup(car.rename_env(), car.rename_expr());
+        }
+
+        if((car.type() == SYMBOL && car.symbol_value() == C_SYNTAX) ||
+          (car.type() == RENAME && tmp == C_SYNTAX)) {
+          // Renamed syntax is special-cased
+          if(car.type() == RENAME && tmp == C_SYNTAX) {
+            car = car.rename_expr();
+          }
           if(car == get_symbol(S_define)) {
             return eval_define(env, synclo, exp, fn_name);
           } else if(car == get_symbol(S_lambda)) {
@@ -2107,19 +2122,22 @@ struct State {
   }
 
   Value eval_toplevel(Value exp) {
-    /*
     Value expand = get_symbol(S_macroexpand);
 
-    if(expand.symbol_value() != C_FALSE) {
+    // Comment out to disable macroexpansion
+    if(expand.symbol_value() != C_UNDEFINED) {
       Value args, sym;
       AR_FRAME(this, expand, exp, args, sym);
-      args = make_pair(exp, C_NIL);
+      args = make_pair(C_FALSE, C_NIL);
+      args = make_pair(exp, args);
 
-      TODO Second argument.
-
-      exp = apply_scheme(C_FALSE, expand.symbol_value(), args, exp, C_FALSE);
+      exp = apply_scheme(C_FALSE, C_FALSE, expand.symbol_value(), args, exp, C_FALSE);
+      if(exp.is_active_exception()) {
+        stack_trace.push_back("Error during macro expansion");
+        return exp;
+      }
     } 
-    */
+
     return eval(C_FALSE, C_FALSE, exp);
   }
 };

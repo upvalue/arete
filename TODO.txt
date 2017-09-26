@@ -10,6 +10,7 @@ x semispace garbage collection for extreme debugging and robustness
 - could semispace collector also be used to optionally compact the incremental collector?
 - how to reduce code duplication between copy & mark routines?
 - finalizers
+- benchmarking
 interpreter
 - let
 - quote must strip boxes, and should perhaps update lists in place to reflect this (?)
@@ -28,7 +29,8 @@ x block comments #|
 - unicode
 x attach source code info to symbols by boxing them
 macroexpander
-- expose environment handling to macro-expander
+- explicit renaming
+- syntax-rules
 language
 - get some basic demos running. closures, fibonacci, that kind of stuff
 - macro expansion

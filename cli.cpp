@@ -1,9 +1,5 @@
 // cli.cpp - arete command line interface 
 
-//#define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
-//#define ARETE_GC_STRATEGY ARETE_GC_SEMISPACE
-//#define ARETE_GC_DEBUG 1
-
 #include <fstream>
 #include <iostream>
 
@@ -106,19 +102,22 @@ void do_repl() {
 }
 
 int main(int argc, const char **argv) {
-  state.gc.collect_before_every_allocation = true;
+  // state.gc.collect_before_every_allocation = true;
   state.boot();
 
   std::string open_repl("--repl");
+  std::string gcdebug("--gcdebug");
 
   if(argc > 1) {
     // read files
     for(size_t i = 1; i != argc; i++) {
       if(open_repl.compare(argv[i]) == 0) {
         do_repl();
-        continue;
+      } else if(gcdebug.compare(argv[i]) == 0) {
+        state.gc.collect_before_every_allocation = true;
+      } else {
+        do_file(argv[i], true);
       }
-      do_file(argv[i], true);
     }
   } else {
     do_repl();

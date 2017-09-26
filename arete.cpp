@@ -115,6 +115,11 @@ Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
   }
 }
 
+Value fn_identifierp(State& state, size_t argc, Value* argv) {
+  Type tipe = argv[0].type();
+  return Value::make_boolean(tipe == RENAME || tipe == SYMBOL);
+}
+
 ///// LISTS
 
 Value fn_cons(State& state, size_t argc, Value* argv) {
@@ -486,10 +491,6 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   return exc;
 }
 
-Value fn_not(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0] == C_FALSE);
-}
-  
 void State::install_builtin_functions() {
   // Numbers
   defun("fx+", fn_fx_add, 2);
@@ -505,6 +506,7 @@ void State::install_builtin_functions() {
   defun("symbol?", fn_symbolp, 1);
   defun("macro?", fn_macrop, 1);
   defun("self-evaluating?", fn_self_evaluatingp, 1);
+  defun("identifier?", fn_identifierp, 1);
 
   // Lists
   defun("cons", fn_cons, 2);
@@ -554,8 +556,6 @@ void State::install_builtin_functions() {
   defun("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun("function-env", fn_function_env, 1);
 
-  // Booleans
-  defun("not", fn_not, 1, 1);
 }
 
 }

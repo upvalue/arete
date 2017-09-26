@@ -9,11 +9,12 @@
 (define caddr (lambda (x) (car (cdr (cdr x)))))
 (define cdddr (lambda (x) (cdr (cdr (cdr x)))))
 
+(define not (lambda (x) (eq? x #f)))
+
 (define unspecified (if #f #f))
 
 (define _macroexpand
   (lambda (x env) 
-    (print "macroexpand" x)
     (if (self-evaluating? x)
         x
         (begin
@@ -22,81 +23,15 @@
           (cond 
             ((eq? kar 'if)
               x)
-            ;; LET
-            ((eq? kar 'let)
-              (if (fx< (length x) 3)
-                (raise 'expand "let has no body" x))
-              (print "expanding let expr")
-              (define let-fn-name #f)
-              (define bindings #f)
-              (define body #f)
- 
-              (if (symbol? (list-ref x 1))
-                (begin
-                  (set! let-fn-name (list-ref x 1))
-                  (set! bindings (list-ref x 2))
-                  (set! body (cdddr x)))
-                (begin
-                  (set! bindings (list-ref x 1))
-                  (set! body (cddr x))))
- 
-              (define names #f)
-              (define vals #f)
-              (define new-env (env-make env))
-
-              (if let-fn-name
-                (env-define new-env let-fn-name 'variable))
-
-              (set! names
-                (map (lambda (binding)
-                       (print binding)
-                       (if (not (list? binding))
-                           (raise 'expand "let binding should be a list with a name and a value" x))
-                       (define name (car binding))
-                       (if (not (fx= (length binding) 2))
-                           (raise 'expand "let binding should have only 2 elements (name and value)" x))
-                       (if (not (symbol? name))
-                           (raise 'expand "let binding name should be a symbol" x))
-                       (env-define new-env name 'variable)
-                       name)
-                     bindings))
- 
-              (set! vals 
-                (map (lambda (binding)
-                       ;; TODO macroexpand.
-                       (_macroexpand (cadr binding) env)
-                       ) bindings))
- 
-              ;(print "names and values" names vals)
-              ;(print "parsed let" let-fn-name bindings body)
-              ;(print "let introduces env" new-env)
-
-              (set! body 
-                (map (lambda (x)
-                        ; (print "sub-macroexpand" x)
-                        (_macroexpand x env))
-                  body))
-
-              (define result 
-                 (cons-source x 'lambda
-                   (cons-source x names body)) vals)
-
-              (set! result
-                (if let-fn-name
-                  (cons-source x (list-source x 'lambda '()
-                    (list-source x 'define let-fn-name result)
-                    (cons-source x let-fn-name vals)) '())
-                  (cons-source x result vals)))
-
-             ;; let return
-              result)
+            ;; LAMBDA
+            ((eq? kar 'lambda)
+             (if (fx< (length x) 3)
+                 (raise 'expand "lambda has no body" x))
+             ;; (lambda (a b c) #t)
+             (define bindings #f)
+             #t)
+            ;; DEFINE-SYNTAX
             ((eq? kar 'define-syntax)
-             ;; Under define-syntax, what we do is
-             ;; evaluate the lambda
-             ;; then put it in the environment (where does the environment come from)
-             ;; it could be called from toplevel, or recursively right...
-             ;; so 
-             ;; (macroexpand (cadr x) env) is a possibility...right?
              (begin
                (define name (cadr x))
                ;; if not a symbol, throw a syntax error
@@ -127,26 +62,80 @@
                     (begin
                       (define lookup (env-lookup env kar))
                       (if (macro? lookup)
-                          (lookup x (lambda (name) (make-rename name (function-env lookup))))
+                          (lookup x
+                            ;; renaming procedure
+                            (lambda (name) (make-rename name (function-env lookup)))
+                            ;; comparison procedure
+                            (lambda (a b) #f))
+                          ;; arguments must be expanded
                           x)))))
             ))
           )))
 
 ;; This function is special-cased; its arguments will not be evaluated before it is applied in the interpreter
 (define macroexpand
-  (lambda (x)
-    (_macroexpand x #f)))
+  (lambda (x env)
+    (_macroexpand x env)))
 
-;(print (_macroexpand '(let () #t) #f))
+(define-syntax let
+  (lambda (x r c)
+    (if (fx< (length x) 3)
+      (raise 'expand "let has no body" x))
+    (define let-fn-name #f)
+    (define bindings #f)
+    (define body #f)
 
-#;(print
-  (macroexpand
-    (define-syntax x
-      (lambda (form rename)
-        (print "macro invocation successful!:)" form rename)
-        (rename 'gub)))))
+    (if (symbol? (list-ref x 1))
+      (begin
+        (set! let-fn-name (list-ref x 1))
+        (set! bindings (list-ref x 2))
+        (set! body (cdddr x)))
+      (begin
+        (set! bindings (list-ref x 1))
+        (set! body (cddr x))))
 
-#;(print
-  (eval
-    (macroexpand
-      (x))))
+    (define names #f)
+    (define vals #f)
+
+    (set! names
+      (map (lambda (binding)
+             (print binding)
+             (if (not (list? binding))
+                 (raise 'expand "let binding should be a list with a name and a value" x))
+             (define name (car binding))
+             (if (not (fx= (length binding) 2))
+                 (raise 'expand "let binding should have only 2 elements (name and value)" x))
+             (if (not (symbol? name))
+                 (raise 'expand "let binding name should be a symbol" x))
+             name)
+           bindings))
+
+    (set! vals 
+      (map (lambda (binding)
+             ;; TODO macroexpand.
+             (cadr binding)
+             ) bindings))
+
+    (define result 
+       (cons-source x (r 'lambda)
+         (cons-source x names body)) vals)
+
+    (set! result
+      (if let-fn-name
+        ;; named function application
+        (cons-source x (list-source x (r 'lambda) '()
+          (list-source x (r 'define) let-fn-name result)
+          (cons-source x let-fn-name vals)) '())
+        ;; anonymous function application
+        (cons-source x result vals)))
+
+   ;; let return
+    result))
+
+
+(let loop ((x 0))
+  (if (fx= x 5)
+      (print x)
+      (loop (fx+ x 1))))
+
+
