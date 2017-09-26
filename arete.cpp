@@ -96,6 +96,10 @@ Value fn_symbolp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == SYMBOL);
 }
 
+Value fn_boxp(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(argv[0].type() == BOX);
+}
+
 Value fn_charp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == CHARACTER);
 }
@@ -476,7 +480,7 @@ Value fn_make_rename(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
-  return state.eval_lambda(argv[1], C_FALSE, argv[0]);
+  return state.eval_lambda(argv[1], argv[0]);
 }
 
 ///// MISC
@@ -507,6 +511,7 @@ void State::install_builtin_functions() {
   defun("macro?", fn_macrop, 1);
   defun("self-evaluating?", fn_self_evaluatingp, 1);
   defun("identifier?", fn_identifierp, 1);
+  defun("box?", fn_boxp, 1);
 
   // Lists
   defun("cons", fn_cons, 2);
@@ -555,7 +560,6 @@ void State::install_builtin_functions() {
   defun("set-function-name!", fn_set_function_name, 2);
   defun("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun("function-env", fn_function_env, 1);
-
 }
 
 }

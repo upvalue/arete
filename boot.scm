@@ -17,60 +17,67 @@
   (lambda (x env) 
     (if (self-evaluating? x)
         x
-        (begin
-          (define kar (car x))
-          (define len (length x))
-          (cond 
-            ((eq? kar 'if)
-              x)
-            ;; LAMBDA
-            ((eq? kar 'lambda)
-             (if (fx< (length x) 3)
-                 (raise 'expand "lambda has no body" x))
-             ;; (lambda (a b c) #t)
-             (define bindings #f)
-             #t)
-            ;; DEFINE-SYNTAX
-            ((eq? kar 'define-syntax)
-             (begin
-               (define name (cadr x))
-               ;; if not a symbol, throw a syntax error
-               (if (not (symbol? name))
-                   (raise 'expand "define-syntax first argument should be a symbol" x))
+        (if (or (symbol? x) (box? x))
+          ;; check syntax as value usage
+          x
+          (begin
+            (define kar (car x))
+            (define len (length x))
+            (cond 
+              ((eq? kar 'if)
+                x)
+              ;; LAMBDA
+              ((eq? kar 'lambda)
+               (if (fx< (length x) 3)
+                   (raise 'expand "lambda has no body" x))
+               ;; (lambda (a b c) #t)
+               (define bindings #f)
+               #t)
+              ;; DEFINE-SYNTAX
+              ((eq? kar 'define-syntax)
+               (begin
+                 (define name (cadr x))
+                 ;; if not a symbol, throw a syntax error
+                 (if (not (symbol? name))
+                     (raise 'expand "define-syntax first argument should be a symbol" x))
 
-               (define body (caddr x))
+                 (define body (caddr x))
 
-               ;; TODO: Check for existing definition
-               (define fn (eval-lambda body env))
+                 ;; TODO: Check for existing definition
+                 (define fn (eval-lambda body env))
 
-               (set-function-name! fn name)
-               (set-function-macro-bit! fn)
+                 (set-function-name! fn name)
+                 (set-function-macro-bit! fn)
 
-               (env-define env name fn)
+                 (env-define env name fn)
 
-               ;; macro now exists in environment
-               unspecified))
+                 ;; macro now exists in environment
+                 unspecified))
 
-            ;; define, lambda, cond, begin, let
-            ((eq? kar 'define)
-              (begin
-                (print "Found a define")))
-            (else
-              ;; go through function and args
-              (begin
-                (if (symbol? kar)
-                    (begin
-                      (define lookup (env-lookup env kar))
-                      (if (macro? lookup)
-                          (lookup x
-                            ;; renaming procedure
-                            (lambda (name) (make-rename name (function-env lookup)))
-                            ;; comparison procedure
-                            (lambda (a b) #f))
-                          ;; arguments must be expanded
-                          x)))))
-            ))
-          )))
+              ;; define, lambda, cond, begin, let
+              ((eq? kar 'define)
+                (begin
+                  (print "Found a define")
+                  (print x)
+                  ))
+              (else
+                ;; go through function and args
+                (begin
+                  (if (symbol? kar)
+                      (begin
+                        (define lookup (env-lookup env kar))
+                        (if (macro? lookup)
+                            (lookup x
+                              ;; renaming procedure
+                              (lambda (name) (make-rename name (function-env lookup)))
+                              ;; comparison procedure
+                              (lambda (a b) #f))
+                            ;; not a macro application, members must be expanded
+                            (map (lambda (sub-x) (_macroexpand sub-x env)) x)))))))
+                            ;; arguments must be expanded
+                            ;x))))))
+              )) ;; (if (symbol? x)
+            ))) ;; end _macroexpand
 
 ;; This function is special-cased; its arguments will not be evaluated before it is applied in the interpreter
 (define macroexpand
@@ -132,10 +139,10 @@
    ;; let return
     result))
 
-
-(let loop ((x 0))
-  (if (fx= x 5)
-      (print x)
-      (loop (fx+ x 1))))
+(print
+  (let loop ((x 0))
+    (if (fx= x 5)
+        (print x)
+        (loop (fx+ x 1)))))
 
 

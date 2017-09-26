@@ -12,10 +12,14 @@ x semispace garbage collection for extreme debugging and robustness
 - finalizers
 - benchmarking
 interpreter
-- let
+x let
+  (implemented as macro)
 - quote must strip boxes, and should perhaps update lists in place to reflect this (?)
+- and/or
+- the passing of fn_name is pretty ugly and could be achieved with an RAII-stack
 - MAYBE: tail call optimization. 
 x naming lambdas
+  - possibly a name-lambda function allowing the generation of named lambda for better tracebacks
 x stack traces
   stack traces should include:
   + source code display (how hard?)
