@@ -251,7 +251,7 @@ Value fn_list_ref(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_map(State& state, size_t argc, Value* argv) {
-  const char* fn_name = "map"; (void) fn_name;
+  static const char* fn_name = "map"; 
 
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
 
@@ -264,7 +264,7 @@ Value fn_map(State& state, size_t argc, Value* argv) {
 
   while(lst.type() == PAIR) {
     arg = state.make_pair(lst.car(), C_NIL);
-    tmp = state.apply_generic(fn, arg, false);
+    tmp = state.apply_generic(fn, arg.maybe_unbox(), false);
     if(tmp.is_active_exception()) return tmp;
     if(nlst_current == C_NIL) {
       nlst_head = nlst_current = state.make_pair(tmp, C_NIL);
@@ -278,6 +278,7 @@ Value fn_map(State& state, size_t argc, Value* argv) {
 
   return nlst_head;
 }
+
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
   const char* fn_name = "eval";
@@ -407,13 +408,7 @@ Value fn_env_make(State& state, size_t argc, Value* argv) {
 Value fn_env_define(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-define";
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
-  Type first_arg_type = argv[0].type();
-
-  if(first_arg_type != VECTOR && argv[0] != C_FALSE) {
-    std::ostringstream os;
-    os << "env-define expected vector or #f as first argument, but got " << argv[0];
-    return state.type_error(os.str());
-  }
+  AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
 
   Value env = argv[0], name = argv[1], value = argv[2];
   AR_FRAME(state, env, name, value);
@@ -431,16 +426,17 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-lookup";
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
+  AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
   
-  Type first_arg_type = argv[0].type();
-
-  if(first_arg_type != VECTOR && argv[0] != C_FALSE) {
-    std::ostringstream os;
-    os << "env-define expected vector or #f as first argument, but got " << argv[0];
-    return state.type_error(os.str());
-  }
-
   return state.env_lookup(argv[0], argv[1]);
+}
+
+Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
+  Value result = fn_env_lookup(state, argc, argv);
+
+  if(result.is_active_exception()) return result;
+
+  return Value::make_boolean(result == C_SYNTAX);
 }
 
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
@@ -512,12 +508,11 @@ void State::install_builtin_functions() {
   defun("self-evaluating?", fn_self_evaluatingp, 1);
   defun("identifier?", fn_identifierp, 1);
   defun("box?", fn_boxp, 1);
+  //defun("constant=?", fn_constantp, 1);
 
   // Lists
   defun("cons", fn_cons, 2);
-  defun("cons-source", fn_cons_source, 3);
   defun("list", fn_list, 0, 0, true);
-  defun("list-source", fn_list_source, 0, 0, true);
   defun("list?", fn_listp, 1);
   defun("list-ref", fn_list_ref, 2);
   defun("length", fn_length, 1);
@@ -547,10 +542,14 @@ void State::install_builtin_functions() {
   // Exceptions
   defun("raise", fn_raise, 3);
 
-  // Macroexpansion support
+  // Macroexpansion support functionality
+  defun("cons-source", fn_cons_source, 3);
+  defun("list-source", fn_list_source, 0, 0, true);
+
   defun("env-make", fn_env_make, 1);
   defun("env-define", fn_env_define, 3);
   defun("env-lookup", fn_env_lookup, 2);
+  defun("env-syntax?", fn_env_syntaxp, 2);
 
   defun("gensym", fn_gensym, 0, 1);
 

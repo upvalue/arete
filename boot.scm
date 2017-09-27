@@ -17,69 +17,75 @@
   (lambda (x env) 
     (if (self-evaluating? x)
         x
-        (if (or (symbol? x) (box? x))
-          ;; check syntax as value usage
-          x
+        (if (symbol? x)
+          (if (env-syntax? env x)
+              (raise 'expand "used syntax as value" x)
+              x)
           (begin
             (define kar (car x))
             (define len (length x))
-            (cond 
-              ((eq? kar 'if)
-                x)
-              ;; LAMBDA
-              ((eq? kar 'lambda)
-               (if (fx< (length x) 3)
-                   (raise 'expand "lambda has no body" x))
-               ;; (lambda (a b c) #t)
-               (define bindings #f)
-               #t)
-              ;; DEFINE-SYNTAX
-              ((eq? kar 'define-syntax)
-               (begin
-                 (define name (cadr x))
-                 ;; if not a symbol, throw a syntax error
-                 (if (not (symbol? name))
-                     (raise 'expand "define-syntax first argument should be a symbol" x))
+            (define syntax? (and (symbol? kar) (env-syntax? env kar)))
+            (if syntax?
+              (cond 
+                ((eq? kar 'if)
+                  x)
+                ;; LAMBDA
+                ((eq? kar 'lambda)
+                 (if (fx< (length x) 3)
+                     (raise 'expand "lambda has no body" x))
 
-                 (define body (caddr x))
+                 ;; (lambda (a b c) #t)
+                 (define bindings #f)
+                 x)
+                ;; DEFINE-SYNTAX
+                ((eq? kar 'define-syntax)
+                 (begin
+                   (define name (cadr x))
+                   ;; if not a symbol, throw a syntax error
+                   (if (not (symbol? name))
+                       (raise 'expand "define-syntax first argument should be a symbol" x))
 
-                 ;; TODO: Check for existing definition
-                 (define fn (eval-lambda body env))
+                   (define body (caddr x))
 
-                 (set-function-name! fn name)
-                 (set-function-macro-bit! fn)
+                   ;; TODO: Check for existing definition
+                   (define fn (eval-lambda body env))
 
-                 (env-define env name fn)
+                   (set-function-name! fn name)
+                   (set-function-macro-bit! fn)
 
-                 ;; macro now exists in environment
-                 unspecified))
+                   (env-define env name fn)
 
-              ;; define, lambda, cond, begin, let
-              ((eq? kar 'define)
-                (begin
-                  (print "Found a define")
-                  (print x)
-                  ))
-              (else
+                   ;; macro now exists in environment
+                   unspecified))
+                ;; DEFINE
+                ((eq? kar 'define)
+                  (begin
+                    x
+                    )))
                 ;; go through function and args
-                (begin
-                  (if (symbol? kar)
-                      (begin
-                        (define lookup (env-lookup env kar))
-                        (if (macro? lookup)
-                            (lookup x
-                              ;; renaming procedure
-                              (lambda (name) (make-rename name (function-env lookup)))
-                              ;; comparison procedure
-                              (lambda (a b) #f))
-                            ;; not a macro application, members must be expanded
-                            (map (lambda (sub-x) (_macroexpand sub-x env)) x)))))))
-                            ;; arguments must be expanded
-                            ;x))))))
-              )) ;; (if (symbol? x)
+              (begin
+                (if (symbol? kar)
+                    (begin
+                      (define lookup (env-lookup env kar))
+                      (if (macro? lookup)
+                          (lookup x
+                            ;; renaming procedure
+                            (lambda (name) (make-rename name (function-env lookup)))
+                            ;; comparison procedure
+                            (lambda (a b) #f))
+                          ;; not a macro application, members must be expanded
+                          (map (lambda (sub-x) (_macroexpand sub-x env)) x)))
+                    (begin 
+                      (define result
+                        (cons-source x (_macroexpand (car x) env) (map (lambda (sub-x) (_macroexpand sub-x env)) (cdr x)))
+                        )
+                      result
+                      ))))
+              )) ;; (if (symbol? x))
             ))) ;; end _macroexpand
 
-;; This function is special-cased; its arguments will not be evaluated before it is applied in the interpreter
+;; The function named macroexpand is special-cased; its arguments will not be evaluated before it is applied in the
+;; interpreter.
 (define macroexpand
   (lambda (x env)
     (_macroexpand x env)))
@@ -139,10 +145,17 @@
    ;; let return
     result))
 
-(print
-  (let loop ((x 0))
-    (if (fx= x 5)
-        (print x)
-        (loop (fx+ x 1)))))
+;; List of things to do
 
-
+;; Macroexpansion of basic forms: define, set, lambda, if, etc
+;; (how to check that syntax is still syntax?)
+;; (env-syntax? env 'define) checks for C_SYNTAX
+;; let-syntax and letrec-syntax
+;; As well as support for shorthand like (define (x) #t)
+;; Macroexpand recursion (i.e. macros that use other macros)
+;; Handling of renames within argument lists and lookups
+;; Quasiquote
+;; let*, letrec
+;; define* and type stuff
+;; syntax-rules
+;; compiler

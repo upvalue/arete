@@ -1286,7 +1286,7 @@ struct State {
 
   enum BuiltinSymbol {
     AR_SYMBOLS(AR_SYMBOLS_AUX),
-    S_set,
+    S_set, S_define_syntax,
     // END BUILTIN SYNTAX
     // Various other symbols
     S_else, S_unquote_splicing,
@@ -1302,7 +1302,7 @@ struct State {
     static const char* symbols[] = { 
       #define AR_SYMBOLS_AUX2(x) #x
       AR_SYMBOLS(AR_SYMBOLS_AUX2),
-      "set!", "else", "unquote-splicing",
+      "set!", "define-syntax", "else", "unquote-splicing",
       "read-error", "eval-error", "type-error"
     };
 
@@ -1349,13 +1349,6 @@ struct State {
 
       symbol_table.insert(std::make_pair(name, (Symbol*) sym.heap));
 
-      /*
-      AR_ASSERT(gc.live(string));
-      AR_ASSERT(sym.type() == SYMBOL);
-      AR_ASSERT(gc.live(sym));
-      AR_ASSERT(sym.bits == (size_t)((symbol_table[name])));
-      std::cout << "get_symbol: returning " << (size_t) sym.bits << std::endl;
-      */
       return sym;
     } else {
       AR_ASSERT(symbol_table.size() > 0);
@@ -1829,6 +1822,7 @@ struct State {
     if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
       tmp.as<Function>()->name = name.maybe_unbox();
       // Macroexpand will not evaluate arguments
+      // TODO this should probably just be removed.
       if(name.maybe_unbox() == get_symbol(S_macroexpand)) {
         tmp.as<Function>()->header -= Value::FUNCTION_EVAL_ARGUMENTS_BIT;
       }
@@ -2143,10 +2137,12 @@ struct State {
       Value args, sym;
       AR_FRAME(this, expand, exp, args, sym);
       args = make_pair(C_FALSE, C_NIL);
-      args = make_pair(exp, args);
+      args = make_pair(exp.maybe_unbox(), args);
 
       exp = apply_scheme(C_FALSE, expand.symbol_value(), args, exp, C_FALSE);
       if(exp.is_active_exception()) {
+        //std::string d("Error during macro expansion");
+        //stack_trace.insert(stack_trace.front(), d);
         stack_trace.push_back("Error during macro expansion");
         return exp;
       }

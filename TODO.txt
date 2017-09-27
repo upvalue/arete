@@ -34,6 +34,7 @@ x block comments #|
 x attach source code info to symbols by boxing them
 macroexpander
 - explicit renaming
+- check validity of lambda
 - syntax-rules
 language
 - get some basic demos running. closures, fibonacci, that kind of stuff
