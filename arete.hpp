@@ -247,6 +247,7 @@ struct Value {
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
   static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
   bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION; }
+  bool identifierp() const { return type() == RENAME || type() == SYMBOL; }
 
   /** Safely retrieve the type of an object */
   Type type() const;
@@ -1793,15 +1794,15 @@ struct State {
         fn->rest_arguments = C_FALSE;
         Value argi = args;
         while(argi.type() == PAIR) {
-          if(argi.car().boxed_type() != SYMBOL) {
-            return eval_error("lambda argument list must be all symbols", exp);
+          if(!argi.car().maybe_unbox().identifierp()) {
+            return eval_error("lambda argument list all be identifiers", exp);
           }
           argi.set_car(argi.car().maybe_unbox());
           if(argi.cdr() == C_NIL) {
             break;
           } else if(argi.cdr().type() != PAIR) {
-            if(argi.cdr().type() != SYMBOL) {
-              return eval_error("lambda argument list must be all symbols", exp);
+            if(!argi.cdr().maybe_unbox().identifierp()) {
+              return eval_error("lambda argument list must all be identifiers", exp);
             }
 
             fn->rest_arguments = argi.cdr();
@@ -2110,6 +2111,17 @@ struct State {
         return exp;
       }
       case RENAME: {
+        // First we look it up in the env 
+        // In case a renamed variable has been introduced as a binding
+        // e.g (lambda ((rename 'var )) (rename 'var))
+        Value chk = env_lookup(env, exp);
+
+        if(chk != C_UNDEFINED) {
+          return chk;
+        }
+
+        // Then we look it up in the rename env
+        // e.g. ((r 'lambda) () #t)
         return eval(exp.rename_env(), exp.rename_expr(), fn_name);
       }
       case BOX:

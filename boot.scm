@@ -165,7 +165,7 @@
              (define name (car binding))
              (if (not (fx= (length binding) 2))
                  (raise 'expand "let binding should have only 2 elements (name and value)" x))
-             (if (not (symbol? name))
+             (if (not (identifier? name))
                  (raise 'expand "let binding name should be a symbol" x))
              name)
            bindings))

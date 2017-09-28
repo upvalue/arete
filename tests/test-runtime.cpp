@@ -42,6 +42,9 @@ TEST_CASE_FIXTURE(AS, "symbol interning") {
   CHECK_MESSAGE(x.bits == y.bits, "symbols intern");
   CHECK(x.type_unsafe() == SYMBOL);
   CHECK(x.bits != z.bits);
+
+  CHECK(x.identifierp());
+  CHECK(y.identifierp());
 }
 
 TEST_CASE_FIXTURE(AS, "rename creation") {
@@ -49,7 +52,10 @@ TEST_CASE_FIXTURE(AS, "rename creation") {
   AR_FRAME(state, x, y, z);
   x = state.get_symbol("renamable");
   y = state.make_rename(x, C_FALSE);
+
+  CHECK(y.identifierp());
   CHECK(y.type() == RENAME);
+  CHECK(state.identifier_equal(x, y));
   state.gc.collect();
 }
 
