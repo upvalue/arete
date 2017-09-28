@@ -120,7 +120,7 @@
 
 (install-macroexpander _macroexpand)
 
-(define macroexpand
+#;(define macroexpand
   (lambda (x env)
     (_macroexpand x env)))
 
@@ -218,14 +218,10 @@
 
 ;; List of things to do
 
-;; Macroexpansion of basic forms: define, set, lambda, if, etc
-;; (how to check that syntax is still syntax?)
-;; (env-syntax? env 'define) checks for C_SYNTAX
 ;; let-syntax and letrec-syntax
 ;; As well as support for shorthand like (define (x) #t)
 ;; Macroexpand recursion (i.e. macros that use other macros)
 ;; Handling of renames within argument lists and lookups
-;; Quasiquote
 ;; let*, letrec
 ;; define* and type stuff
 ;; syntax-rules

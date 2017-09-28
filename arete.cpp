@@ -4,6 +4,7 @@
 
 namespace arete {
 
+size_t gc_collect_timer = 0;
 State* current_state = 0;
 
 Value fn_fx_sub(State& state, size_t argc, Value* argv) {

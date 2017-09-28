@@ -11,6 +11,7 @@
 #include <sstream>
 #include <vector>
 #include <unordered_map>
+#include <chrono>
 
 //= ## Configuration macros
 //= As Arete is contained in a single header, it is configured in part through the use of #defines.
@@ -102,6 +103,8 @@ struct Block;
 struct Value;
 struct SourceLocation;
 struct Pair;
+
+extern size_t gc_collect_timer;
 
 // For debugging purposes only: a global instance of the current state
 extern State* current_state;
@@ -856,6 +859,10 @@ struct GCSemispace : GCCommon {
   void collect(size_t request = 0, bool force = false) {
     collections++;
 
+#ifdef ARETE_BENCH_GC
+    auto t1 = std::chrono::high_resolution_clock::now();
+#endif
+
     size_t new_heap_size = heap_size;
     size_t pressure = (live_memory_after_collection * 100) / heap_size;
 
@@ -950,6 +957,11 @@ struct GCSemispace : GCCommon {
 
     delete active;
     active = other;
+
+#ifdef ARETE_BENCH_GC
+    auto t2 = std::chrono::high_resolution_clock::now();
+    gc_collect_timer += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+#endif 
   }
 
   bool live(const Value v) const {
@@ -1085,6 +1097,9 @@ struct GCIncremental : GCCommon {
   void mark_symbol_table();
 
   void collect() {
+#ifdef ARETE_BENCH_GC
+    auto t1 = std::chrono::high_resolution_clock::now();
+#endif 
     // ARETE_LOG_GC("collecting");
     collections++;
     live_objects_after_collection = live_memory_after_collection = 0;
@@ -1131,11 +1146,16 @@ struct GCIncremental : GCCommon {
       heap_size += block_size;
       blocks.push_back(b);
     }
+#ifdef ARETE_BENCH_GC
+    auto t2 = std::chrono::high_resolution_clock::now();
+    gc_collect_timer += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+#endif 
   }
 
   HeapValue* allocate(Type type, size_t size) {
     size_t sz = align(8, size);
     bool collected = false;
+    ++allocations;
 
     // Searches through live memory in a first-fit fashion for somewhere to allocate the value; if it fails,
     // a collection will be triggered.
@@ -1478,6 +1498,10 @@ struct State {
   void print_gc_stats(std::ostream& os) {
     os << (gc.heap_size / 1024) << "kb in use after " << gc.collections << " collections and "
       << gc.allocations << " allocations " << std::endl;
+
+#ifdef ARETE_BENCH_GC
+    std::cout << (gc_collect_timer / 1000) << "ms in collection" << std::endl;
+#endif
   }
 
   /** Return a description of a source location */
