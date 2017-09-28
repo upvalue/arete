@@ -1648,9 +1648,9 @@ struct State {
   Value env_lookup_impl(Value& env, Value name, bool one_level = false) {
 
     while(env != C_FALSE) {
-      for(size_t i = 1; i != env.vector_length(); i += 2) {
-        if(identifier_equal(env.vector_ref(i), name))
-          return env.vector_ref(i+1);
+      for(size_t i = env.vector_length() - 1; i >= 1; i -= 2) {
+        if(identifier_equal(env.vector_ref(i-1), name))
+          return env.vector_ref(i);
       }
       env = env.vector_ref(0); // check parent environment
       if(one_level) break; // TODO should this return?
@@ -2135,6 +2135,7 @@ struct State {
         // std::cout << env << ' ' << exp << std::endl;
 
         res = env_lookup(env, exp);
+
         if(res.bits == 0) {
           return C_UNSPECIFIED;
         } 

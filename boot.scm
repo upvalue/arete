@@ -31,8 +31,10 @@
               x)
           (begin
             (define kar (car x))
+            (define kar-renamed kar)
             (define len (length x))
             (define syntax? (and (or (symbol? kar) (rename? kar)) (env-syntax? env kar)))
+            ;; TODO is it OK to strip renames here?
             (if (and syntax? (rename? kar) )
               (begin
                 (set! kar (rename-expr kar))))
@@ -94,7 +96,7 @@
                    ;; macro now exists in environment
                    unspecified))
                 ((eq? kar 'begin)
-                 (cons-source x 'begin (map-expand (cdr x) env)))
+                 (cons-source x (car x) (map-expand (cdr x) env)))
                 ;; DEFINE
                 ((eq? kar 'set!)
                  (list-source x 'set! (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
@@ -247,7 +249,7 @@
 (define-syntax unless
   (lambda (x r c)
     (if (fx< (length x) 3)
-      (raise 'syntax "when expects a condition and a body" x))
+      (raise 'syntax "unless expects a condition and a body" x))
 
     `(,(r 'if) (,(r 'not) ,(list-ref x 1))
        (,(r 'begin) ,@(cddr x)))))
