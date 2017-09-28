@@ -1655,6 +1655,14 @@ struct State {
       if(one_level) break; // TODO should this return?
     }
     // reached toplevel, check symbol.
+    if(name.type() == RENAME) {
+      if(name.rename_env() == C_FALSE) {
+        name = name.rename_expr();
+      } else {
+        std::cout << "rename in non-toplevel env" << name.rename_env() << std::endl;
+      }
+
+    }
     return name.as<Symbol>()->value;
   }
 

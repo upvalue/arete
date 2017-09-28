@@ -20,11 +20,10 @@ def run_tests(path, args = []):
         cmd_out, cmd_err = cmd.communicate()
 
         if cmd.returncode != 0:
-            print(cmd_err)
             print('\n-- %s errored with text:\n%s\n' % (test_path, cmd_err.decode('utf-8').strip()))
+            print('!')
             continue
 
-        sys.stdout.write('+')
 
         result = cmd_out.decode('utf-8').strip()
         expected = ''
@@ -34,7 +33,10 @@ def run_tests(path, args = []):
 
         if expected != result:
             print('\n-- %s failed, expected\n%s\n-- but got\n%s' % (test_path, expected, result))
+            print('!')
             continue
+
+        sys.stdout.write('+')
 
         successful_tests += 1
 

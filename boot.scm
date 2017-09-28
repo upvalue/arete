@@ -17,22 +17,31 @@
   (lambda (x env)
     (map (lambda (sub-x) (macroexpand sub-x env)) x)))
 
+(define LOG-MACROEXPAND #f)
+
 (define macroexpand
   (lambda (x env) 
+    #;(if LOG-MACROEXPAND 
+      (print "macroexpand called with " x))
     (if (self-evaluating? x)
         x
-        (if (symbol? x)
+        (if (or (rename? x) (symbol? x))
           (if (env-syntax? env x)
               (raise 'expand (interpolate "used syntax" x "as value") x)
               x)
           (begin
             (define kar (car x))
             (define len (length x))
-            (define syntax? (and (symbol? kar) (env-syntax? env kar)))
+            (define syntax? (and (or (symbol? kar) (rename? kar)) (env-syntax? env kar)))
+            (if (and syntax? (rename? kar) )
+              (begin
+                (set! kar (rename-expr kar))))
             (if syntax?
               (cond 
                 ;; TODO this should strip renames I think
                 ((eq? kar 'quote) x)
+                ((eq? kar 'and)
+                 (cons-source x 'and (map-expand (cdr x) env)))
                 ((eq? kar 'if)
                  (define if-length (length x))
 
@@ -98,12 +107,20 @@
                   ;; This is a macro application and not a builtin syntax call
                   (define lookup (env-lookup env kar))
                   (if (macro? lookup)
-                      (lookup x
-                        ;; renaming procedure
-                        (lambda (name) (make-rename name (function-env lookup)))
-                        ;; comparison procedure
-                        (lambda (a b)
-                          (env-compare env a b)))
+                    (begin
+                      (define result
+                        (lookup x
+                          ;; renaming procedure
+                          (lambda (name) (make-rename (function-env lookup) name))
+                          ;; comparison procedure
+                          (lambda (a b)
+                            (env-compare env a b))))
+
+                      ;(print "macroexpanding" result)
+                      (set! result (macroexpand result env))
+                      
+                      result
+                      )
                       ;; not a macro application, members must be expanded
                       (map-expand x env))))
                   ;; else: handle something like ((lambda () #t))
@@ -119,6 +136,7 @@
 (install-macroexpander macroexpand)
 
 ;;;;; LET
+;(set! LOG-MACROEXPAND #t)
 
 (define-syntax let
   (lambda (x r c)
@@ -217,19 +235,6 @@
     (if (not (eq? (length x) 2))
         (raise 'syntax "er-macro-transformer expects one three-argument lambda as its argument" x))
     (cadr x)))
-
-#;(define-syntax aif
-  (lambda (x r c)
-    `(let ((it ,(list-ref x 1)))
-       (if it
-         ,(list-ref x 2)
-         ,(list-ref x 3)))))
-
-
-
-
-;; the result of this function needs to be macroexpanded,
-;; but doing it causes an error
 
 ;; List of things to do
 

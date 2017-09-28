@@ -63,6 +63,7 @@ Value fn_newline(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+
 void fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os) {
   for(size_t i = 0; i != argc; i++) {
     if(argv[i].type() == STRING) {
@@ -93,6 +94,10 @@ Value fn_interpolate(State& state, size_t argc, Value* argv) {
 
 Value fn_nullp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0] == C_NIL);
+}
+
+Value fn_renamep(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(argv[0].type() == RENAME);
 }
 
 Value fn_procedurep(State& state, size_t argc, Value* argv) {
@@ -153,6 +158,11 @@ Value fn_cons_source(State& state, size_t argc, Value* argv) {
   AR_FRAME(state, pare, kar, kdr);
   src = argv[0];
   Type type = src.type();
+
+  if(type == PAIR && !src.pair_has_source()) {
+    return state.make_pair(argv[1], argv[2]);
+  }
+
   AR_FN_ASSERT_ARG(state, 0, "to be a box or pair with source information",
     (type == PAIR && src.pair_has_source() || type == BOX && src.box_has_source()));
   kar = argv[1];
@@ -412,15 +422,19 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
   return sym;  
 }
 
+/** Macro that asserts an argument is a valid environment */
+#define AR_FN_EXPECT_ENV(state, n) \
+  AR_FN_ASSERT_ARG((state), (n), "to be a valid environment (vector or #f)", argv[(n)].type() == VECTOR || argv[(n)] == C_FALSE);
+
 Value fn_env_make(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-make";
-  AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
+  AR_FN_EXPECT_ENV(state, 0);
   return state.make_env(argv[0]);
 }
 
 Value fn_env_define(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-define";
-  AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
+  AR_FN_EXPECT_ENV(state, 0);
   AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
 
   Value env = argv[0], name = argv[1], value = argv[2];
@@ -445,7 +459,8 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
     return Value::make_boolean(argv[1].bits == argv[2].bits);
   }
 
-  AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
+  //std::cout << argv[0] << std::endl;
+  AR_FN_EXPECT_ENV(state, 0);
   AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
   AR_FN_ASSERT_ARG(state, 2, "to be a valid identifier (symbol or rename)", argv[2].type() == RENAME || argv[2].type() == SYMBOL);
 
@@ -531,9 +546,22 @@ Value fn_install_macroexpander(State& state, size_t argc, Value* argv) {
 
 Value fn_make_rename(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "make-rename";
-  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+  AR_FN_EXPECT_ENV(state, 0);
+  AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
 
-  return state.make_rename(argv[0], argv[1]);
+  return state.make_rename(argv[1], argv[0]);
+}
+
+Value fn_rename_env(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "rename-env";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
+  return argv[0].rename_env();
+}
+
+Value fn_rename_expr(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "rename-env";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
+  return argv[0].rename_expr();
 }
 
 Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
@@ -565,6 +593,7 @@ void State::install_builtin_functions() {
   defun("procedure?", fn_procedurep, 1);
   defun("pair?", fn_pairp, 1);
   defun("symbol?", fn_symbolp, 1);
+  defun("rename?", fn_renamep, 1);
   defun("macro?", fn_macrop, 1);
   defun("self-evaluating?", fn_self_evaluatingp, 1);
   defun("identifier?", fn_identifierp, 1);
@@ -619,6 +648,8 @@ void State::install_builtin_functions() {
   // TODO: Full eval/apply necessary? Probably...
   defun("install-macroexpander", fn_install_macroexpander, 1);
   defun("make-rename", fn_make_rename, 2);
+  defun("rename-env", fn_rename_env, 1);
+  defun("rename-expr", fn_rename_expr, 1);
   defun("eval-lambda", fn_eval_lambda, 2);
   defun("set-function-name!", fn_set_function_name, 2);
   defun("set-function-macro-bit!", fn_set_function_macro_bit, 1);
