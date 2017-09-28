@@ -435,6 +435,42 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+Value fn_env_compare(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "env-compare";
+
+  AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
+  AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
+  AR_FN_ASSERT_ARG(state, 2, "to be a valid identifier (symbol or rename)", argv[2].type() == RENAME || argv[2].type() == SYMBOL);
+
+  Value env = argv[0];
+  Value id1 = argv[1];
+  Value id2 = argv[2];
+
+  // I'm not sure how likely any of these cases are in practice but
+
+  // Two symbols and one environment are equal
+  if(id1 == id2) {
+    return C_TRUE;
+  }
+
+  // Two renames 
+  if(id1.type() == RENAME && id2.type() == RENAME) {
+    return id1.rename_env() == id2.rename_env() && id1.rename_expr() == id2.rename_expr();
+  }
+
+  // Ensure that id1 holds the rename
+  if(id2.type() == RENAME) {
+    std::swap(id1, id2);
+  }
+
+  Value rename_env = id1.rename_env();
+
+  state.env_lookup_impl(rename_env, id1.rename_expr(), false);
+  state.env_lookup_impl(env, id2, false);
+
+  return Value::make_boolean(rename_env == env && id1.rename_expr() == id2);
+}
+
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-lookup";
   AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
@@ -565,6 +601,7 @@ void State::install_builtin_functions() {
 
   defun("env-make", fn_env_make, 1);
   defun("env-define", fn_env_define, 3);
+  defun("env-compare", fn_env_compare, 3);
   defun("env-lookup", fn_env_lookup, 2);
   defun("env-syntax?", fn_env_syntaxp, 2);
 

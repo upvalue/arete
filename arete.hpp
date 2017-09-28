@@ -1628,10 +1628,20 @@ struct State {
     name.as<Symbol>()->value = val;
   }
 
-  Value env_lookup(Value env, Value name, bool one_level = false) {
+  bool identifier_equal(Value id1, Value id2) {
+    if(id1 == id2) return true;
+
+    if(id1.type() == RENAME && id2.type() == RENAME) {
+      return (id1.rename_env() == id1.rename_env()) && (id1.rename_expr() == id2.rename_expr());
+    }
+
+    return false;
+  }
+
+  Value env_lookup_impl(Value& env, Value name, bool one_level = false) {
     while(env != C_FALSE) {
       for(size_t i = 1; i != env.vector_length(); i += 2) {
-        if(env.vector_ref(i) == name)
+        if(identifier_equal(env.vector_ref(i), name))
           return env.vector_ref(i+1);
       }
       env = env.vector_ref(0); // check parent environment
@@ -1639,6 +1649,10 @@ struct State {
     }
     // reached toplevel, check symbol.
     return name.as<Symbol>()->value;
+  }
+
+  Value env_lookup(Value env, Value name, bool one_level = false) {
+    return env_lookup_impl(env, name, one_level);
   }
 
   Value type_error(const std::string& msg) {

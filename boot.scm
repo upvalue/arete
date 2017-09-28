@@ -31,6 +31,7 @@
             (define syntax? (and (symbol? kar) (env-syntax? env kar)))
             (if syntax?
               (cond 
+                ;; TODO this should strip renames I think
                 ((eq? kar 'quote) x)
                 ;; LAMBDA
                 ((eq? kar 'lambda)
@@ -46,7 +47,7 @@
                       (raise 'expand "non-identifier in lambda argument list" (list x arg)))
                     (env-define new-env arg 'variable)) bindings)
 
-                 (cons-source x 'lambda (cons-source x bindings (map-expand (cddr x) env)))
+                 (cons-source x 'lambda (cons-source x bindings (map-expand (cddr x) new-env)))
 
                  ;; TODO: Should this just create a lambda object as it expands it?
                  )
@@ -83,7 +84,8 @@
                         ;; renaming procedure
                         (lambda (name) (make-rename name (function-env lookup)))
                         ;; comparison procedure
-                        (lambda (a b) #f))
+                        (lambda (a b)
+                          (env-compare env a b)))
                       ;; not a macro application, members must be expanded
                       (map-expand x env))))
                   ;; else: handle something like ((lambda () #t))
@@ -156,6 +158,15 @@
    ;; let return
     result))
 
+
+(define-syntax test-compare
+  (lambda (x r c)
+    (print "test-compare running")
+    (display (c (r 'else) 'else))
+    (newline)
+    #t))
+
+
 ;; List of things to do
 
 ;; Macroexpansion of basic forms: define, set, lambda, if, etc
@@ -169,4 +180,6 @@
 ;; let*, letrec
 ;; define* and type stuff
 ;; syntax-rules
+;; structures
 ;; compiler
+

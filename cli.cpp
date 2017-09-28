@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <stdlib.h>
 
 #include "vendor/linenoise.h"
 
@@ -13,7 +14,7 @@ State state = State();
 
 static bool QUIET = false;
 
-void do_file(const char* file_path, bool eval ) {
+bool do_file(const char* file_path, bool eval ) {
   Value x, vec;
   AR_FRAME(state, x, vec);
 
@@ -32,14 +33,14 @@ void do_file(const char* file_path, bool eval ) {
 
     if(x.is_active_exception()) {
       std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
-      break;
+      return false;
     } else {
       if(eval) {
         x = state.eval_toplevel(x);
         if(x.type() == EXCEPTION) {
           std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
           state.print_stack_trace();
-          break;
+          return false;
         }
       } else {
         // state.vector_append(vec, x);
@@ -48,9 +49,10 @@ void do_file(const char* file_path, bool eval ) {
     }
   }
   // std::cout << vec << std::endl;
+  return true;
 }
 
-void do_repl() {
+bool do_repl() {
   Value x, vec;
   AR_FRAME(state, x, vec);
   size_t i = 1;
@@ -85,7 +87,8 @@ void do_repl() {
       }
 
       if(x.type() == EXCEPTION) {
-        std::cout << "Reader error: " << x.exception_message().string_data() << std::endl;
+        std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
+        break;
       } else {
         x = state.eval_toplevel(x);
         if(x.type() == EXCEPTION) {
@@ -104,6 +107,7 @@ void do_repl() {
   }
 
   if(line) free(line);
+  return true;
 }
 
 int main(int argc, const char **argv) {
@@ -124,7 +128,9 @@ int main(int argc, const char **argv) {
       } else if(gcdebug.compare(argv[i]) == 0) {
         state.gc.collect_before_every_allocation = true;
       } else {
-        do_file(argv[i], true);
+        if(!do_file(argv[i], true)) {
+          return EXIT_FAILURE;
+        }
       }
     }
   } else {
