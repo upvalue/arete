@@ -57,8 +57,13 @@ bool do_repl() {
   AR_FRAME(state, x, vec);
   size_t i = 1;
 
-  char* line = 0;
+  std::ostringstream hist_file;
+  hist_file << getenv("HOME") << "/.arete_history";
+
   linenoiseHistorySetMaxLen(1024);
+  linenoiseHistoryLoad(hist_file.str().c_str());
+
+  char* line = 0;
 
   std::ostringstream prompt;
 
@@ -107,6 +112,8 @@ bool do_repl() {
   }
 
   if(line) free(line);
+
+  linenoiseHistorySave(hist_file.str().c_str());
   return true;
 }
 
@@ -118,6 +125,7 @@ int main(int argc, const char **argv) {
   std::string gcdebug("--gcdebug");
   std::string quiet("--quiet");
   std::string showexpand("--showexpand");
+
 
   if(argc > 1) {
     // read files
@@ -138,12 +146,13 @@ int main(int argc, const char **argv) {
     }
   } else {
     do_repl();
- 
   }
-  state.gc.collect();
 
   if(!QUIET) {
     state.print_gc_stats(std::cout);
   }
+
+  state.gc.collect();
+
   return 0;
 }

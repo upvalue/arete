@@ -18,6 +18,7 @@ x let
 - and/or
 - the passing of fn_name is pretty ugly and could be achieved with an RAII-stack
 - MAYBE: tail call optimization. 
+- stack traces sometimes have duplicate entries
 x naming lambdas
   - possibly a name-lambda function allowing the generation of named lambda for better tracebacks
 x stack traces
@@ -33,13 +34,14 @@ x block comments #|
 - unicode
 x attach source code info to symbols by boxing them
 macroexpander
-- explicit renaming
-- check validity of lambda
+x explicit renaming
+x check validity of lambda
 - syntax-rules
 language
+- keywords
 - get some basic demos running. closures, fibonacci, that kind of stuff
 - macro expansion
 - r5rs support
 - r7rs support (within reason)
 cleanup
-- use State::macroexpand and remove all other eval_args functionality
+x use State::macroexpand and remove all other eval_args functionality

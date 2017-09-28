@@ -1,4 +1,4 @@
-;; boot.scm - arete boot file
+;; boot.scm - Macroexpansion, various key functions
 
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
@@ -15,9 +15,9 @@
 
 (define map-expand
   (lambda (x env)
-    (map (lambda (sub-x) (_macroexpand sub-x env)) x)))
+    (map (lambda (sub-x) (macroexpand sub-x env)) x)))
 
-(define _macroexpand
+(define macroexpand
   (lambda (x env) 
     (if (self-evaluating? x)
         x
@@ -46,7 +46,7 @@
                  (if (fx= if-length 4)
                      (set! else-clause (list-ref x 3)))
 
-                 (list-source x 'if (_macroexpand condition env) (_macroexpand then env) (_macroexpand else-clause env)))
+                 (list-source x 'if (macroexpand condition env) (macroexpand then env) (macroexpand else-clause env)))
                 ;; LAMBDA
                 ((eq? kar 'lambda)
                  (if (fx< (length x) 3)
@@ -62,8 +62,6 @@
                     (env-define new-env arg 'variable)) bindings)
 
                  (cons-source x 'lambda (cons-source x bindings (map-expand (cddr x) new-env)))
-
-                 ;; TODO: Should this just create a lambda object as it expands it?
                  )
                 ;; DEFINE-SYNTAX
                 ((eq? kar 'define-syntax)
@@ -76,8 +74,8 @@
                    (define body (caddr x))
 
                    ;; TODO: Check for existing definition
-                   (define fn (eval-lambda (_macroexpand body env) env))
-                   ;(print "macroexpanded body" (_macroexpand body env))
+                   (define fn (eval-lambda (macroexpand body env) env))
+                   ;(print "macroexpanded body" (macroexpand body env))
 
                    (set-function-name! fn name)
                    (set-function-macro-bit! fn)
@@ -90,11 +88,11 @@
                  (cons-source x 'begin (map-expand (cdr x) env)))
                 ;; DEFINE
                 ((eq? kar 'set!)
-                 (list-source x 'set! (_macroexpand (list-ref x 1) env) (_macroexpand (list-ref x 2) env))
+                 (list-source x 'set! (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
                  )
                 ((eq? kar 'define)
                   (begin
-                    (list-source x 'define (_macroexpand (list-ref x 1) env) (_macroexpand (list-ref x 2) env))
+                    (list-source x 'define (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
                     ))
                 (else
                   ;; This is a macro application and not a builtin syntax call
@@ -111,18 +109,14 @@
                   ;; else: handle something like ((lambda () #t))
                   (begin 
                     (define result
-                      (cons-source x (_macroexpand (car x) env) (map (lambda (sub-x) (_macroexpand sub-x env)) (cdr x)))
+                      (cons-source x (macroexpand (car x) env) (map (lambda (sub-x) (macroexpand sub-x env)) (cdr x)))
                       )
                     result
                   ))
               )) ;; (if (symbol? x))
-            ))) ;; end _macroexpand
+            ))) ;; end macroexpand
 
-(install-macroexpander _macroexpand)
-
-#;(define macroexpand
-  (lambda (x env)
-    (_macroexpand x env)))
+(install-macroexpander macroexpand)
 
 ;;;;; LET
 
@@ -216,16 +210,38 @@
     (qq-object r c (cadr x))
     ))
 
+;; er-macro-transformer. Not necessary, but here for compatibility with other Schemes which use this prefix for
+;; ER-macros
+(define-syntax er-macro-transformer
+  (lambda (x r c)
+    (if (not (eq? (length x) 2))
+        (raise 'syntax "er-macro-transformer expects one three-argument lambda as its argument" x))
+    (cadr x)))
+
+#;(define-syntax aif
+  (lambda (x r c)
+    `(let ((it ,(list-ref x 1)))
+       (if it
+         ,(list-ref x 2)
+         ,(list-ref x 3)))))
+
+
+
+
+;; the result of this function needs to be macroexpanded,
+;; but doing it causes an error
+
 ;; List of things to do
+
 
 ;; let-syntax and letrec-syntax
 ;; As well as support for shorthand like (define (x) #t)
 ;; Macroexpand recursion (i.e. macros that use other macros)
-;; Handling of renames within argument lists and lookups
 ;; let*, letrec
 ;; define* and type stuff
 ;; syntax-rules
-;; structures
+;; structures/records
+;; types, type assertions, type dispatching, methods
+;; constant definitions
 ;; modules
 ;; compiler
-

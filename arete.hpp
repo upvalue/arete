@@ -1283,7 +1283,7 @@ struct State {
 
   #define AR_SYMBOLS(_) \
     _(quasiquote), _(unquote), _(quote), _(begin), \
-    _(define), _(lambda), _(if), _(cond), _(macroexpand), \
+    _(define), _(lambda), _(if), _(cond),  \
     _(and), _(or)
 
   #define AR_SYMBOLS_AUX(name) S_##name
@@ -1320,8 +1320,6 @@ struct State {
     for(size_t i = S_quote; i != S_else + 1; i++) {
       get_symbol((BuiltinSymbol) i ).as<Symbol>()->value = C_SYNTAX;
     }
-
-    get_symbol(S_macroexpand).as<Symbol>()->value = C_UNDEFINED;
 
     install_builtin_functions();
   }
@@ -1843,11 +1841,6 @@ struct State {
 
     if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
       tmp.as<Function>()->name = name.maybe_unbox();
-      // Macroexpand will not evaluate arguments
-      // TODO this should probably just be removed.
-      if(name.maybe_unbox() == get_symbol(S_macroexpand)) {
-        tmp.as<Function>()->header -= Value::FUNCTION_EVAL_ARGUMENTS_BIT;
-      }
     }
     // std::cout << "env_set " << env << ' ' << name << std::endl;
 
@@ -2090,7 +2083,9 @@ struct State {
         // Normal function application
         car = eval(env, exp.car(), fn_name);
 
-        EVAL_CHECK(car, exp, fn_name);
+        if(car.is_active_exception()) return car;
+
+        //EVAL_CHECK(car, exp, fn_name);
 
         if(car.type() != FUNCTION && car.type() != CFUNCTION) {
           std::ostringstream os;
@@ -2147,7 +2142,7 @@ struct State {
   }
 
   Value eval_toplevel(Value exp) {
-    Value expand = *macroexpander; // get_symbol(S_macroexpand);
+    Value expand = *macroexpander;
 
     // Comment out to disable macroexpansion
     if(expand != C_FALSE) {

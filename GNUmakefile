@@ -1,9 +1,9 @@
 # Variables
 CXX := clang++
 CPPFLAGS := -Wall -I. -Ivendor
-CFLAGS := $(CFLAGS) -g3 -O0
+CFLAGS := $(CFLAGS) -g3 -O3
 CXXFLAGS := $(CPPFLAGS) -std=c++11 -fno-exceptions -fno-rtti $(CFLAGS)
-LDFLAGS := $(LDFLAGS) -g3  -O0
+LDFLAGS := $(LDFLAGS) -g3  -O3
 
 -include site.mk
 
@@ -51,7 +51,7 @@ test-all: tests/test-incremental tests/test-semispace
 .PHONY: count clean
 
 count:
-	cloc arete.hpp
+	cloc arete.hpp arete.cpp boot.scm
 
 clean:
 	rm -f arete test *.o
