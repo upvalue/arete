@@ -245,7 +245,7 @@ Value fn_length(State& state, size_t argc, Value* argv) {
 
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
-  if(argv[0] == C_NIL) return C_FALSE;
+  if(argv[0] == C_NIL) return C_TRUE;
   while(argv[0].type() == PAIR) {
     if(argv[0].cdr() == C_NIL) return C_TRUE;
     argv[0] = argv[0].cdr();

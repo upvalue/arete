@@ -13,11 +13,53 @@
 
 (define unspecified (if #f #f))
 
-(define map-expand
+;;;;; MACROEXPANSION
+
+(define LOG-MACROEXPAND #f)
+
+(define expand-map
   (lambda (x env)
     (map (lambda (sub-x) (macroexpand sub-x env)) x)))
 
-(define LOG-MACROEXPAND #f)
+
+(define expand-define-syntax
+  (lambda (x env name body)
+    (if (not (symbol? name))
+        (raise 'expand "macro name must be a symbol" x))
+
+    (define fn (eval-lambda (macroexpand body env) env))
+
+    (set-function-name! fn name)
+    (set-function-macro-bit! fn)
+
+    (env-define env name fn)
+
+    unspecified))
+
+(define expand-let-syntax
+  (lambda (x env)
+     (begin
+       (if (fx< (length x) 3)
+           (raise 'expand "let-syntax expects at least three arguments" x))
+
+       (define new-env (env-make env))
+       (define bindings (cadr x))
+       (define body (cddr x))
+
+       (if (not (list? bindings))
+           (raise 'expand "let-syntax bindings list must be a valid list" x))
+
+       (map 
+          (lambda (x)
+            (if (not (fx= (length x) 2))
+                (raise 'expand "let-syntax bindings should have two values: a name and a macro" x)) 
+            (define name (car x))
+            (define body (cadr x))
+
+            (expand-define-syntax x new-env name body))
+          bindings)
+
+       (cons-source x (make-rename #f 'begin) (macroexpand body new-env)))))
 
 (define macroexpand
   (lambda (x env) 
@@ -31,10 +73,9 @@
               x)
           (begin
             (define kar (car x))
-            (define kar-renamed kar)
             (define len (length x))
             (define syntax? (and (or (symbol? kar) (rename? kar)) (env-syntax? env kar)))
-            ;; TODO is it OK to strip renames here?
+            ;; Check renamed syntax
             (if (and syntax? (rename? kar) )
               (begin
                 (set! kar (rename-expr kar))))
@@ -43,7 +84,7 @@
                 ;; TODO this should strip renames I think
                 ((eq? kar 'quote) x)
                 ((eq? kar 'and)
-                 (cons-source x 'and (map-expand (cdr x) env)))
+                 (cons-source x (car x) (expand-map (cdr x) env)))
                 ((eq? kar 'if)
                  (define if-length (length x))
 
@@ -57,7 +98,7 @@
                  (if (fx= if-length 4)
                      (set! else-clause (list-ref x 3)))
 
-                 (list-source x 'if (macroexpand condition env) (macroexpand then env) (macroexpand else-clause env)))
+                 (list-source x (car x) (macroexpand condition env) (macroexpand then env) (macroexpand else-clause env)))
                 ;; LAMBDA
                 ((eq? kar 'lambda)
                  (if (fx< (length x) 3)
@@ -72,38 +113,29 @@
                       (raise 'expand "non-identifier in lambda argument list" (list x arg)))
                     (env-define new-env arg 'variable)) bindings)
 
-                 (cons-source x 'lambda (cons-source x bindings (map-expand (cddr x) new-env)))
+                 (cons-source x (car x) (cons-source x bindings (expand-map (cddr x) new-env)))
                  )
+                ;; LET-SYNTAX
+                ((eq? kar 'let-syntax) (expand-let-syntax x env))
+                ((eq? kar 'letrec-syntax) (expand-let-syntax x env))
                 ;; DEFINE-SYNTAX
                 ((eq? kar 'define-syntax)
                  (begin
                    (define name (cadr x))
-                   ;; if not a symbol, throw a syntax error
-                   (if (not (symbol? name))
-                       (raise 'expand "define-syntax first argument should be a symbol" x))
-
                    (define body (caddr x))
 
-                   ;; TODO: Check for existing definition
-                   (define fn (eval-lambda (macroexpand body env) env))
-                   ;(print "macroexpanded body" (macroexpand body env))
+                   (expand-define-syntax x env name body)
 
-                   (set-function-name! fn name)
-                   (set-function-macro-bit! fn)
-
-                   (env-define env name fn)
-
-                   ;; macro now exists in environment
-                   unspecified))
+                   ))
                 ((eq? kar 'begin)
-                 (cons-source x (car x) (map-expand (cdr x) env)))
+                 (cons-source x (car x) (expand-map (cdr x) env)))
                 ;; DEFINE
                 ((eq? kar 'set!)
-                 (list-source x 'set! (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
+                 (list-source x (car x) (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
                  )
                 ((eq? kar 'define)
                   (begin
-                    (list-source x 'define (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
+                    (list-source x (car x) (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
                     ))
                 (else
                   ;; This is a macro application and not a builtin syntax call
@@ -124,7 +156,7 @@
                       result
                       )
                       ;; not a macro application, members must be expanded
-                      (map-expand x env))))
+                      (expand-map x env))))
                   ;; else: handle something like ((lambda () #t))
                   (begin 
                     (define result
@@ -137,8 +169,8 @@
 
 (install-macroexpander macroexpand)
 
-;;;;; LET
-;(set! LOG-MACROEXPAND #t)
+;;;;; BASIC SYNTACTIC FORMS
+;; eg let & friends, when/unless etc
 
 (define-syntax let
   (lambda (x r c)

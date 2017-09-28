@@ -1294,7 +1294,7 @@ struct State {
 
   enum BuiltinSymbol {
     AR_SYMBOLS(AR_SYMBOLS_AUX),
-    S_set, S_define_syntax,
+    S_set, S_define_syntax, S_let_syntax, S_letrec_syntax,
     // END BUILTIN SYNTAX
     // Various other symbols
     S_else, S_unquote_splicing, S_rename,
@@ -1310,7 +1310,7 @@ struct State {
     static const char* symbols[] = { 
       #define AR_SYMBOLS_AUX2(x) #x
       AR_SYMBOLS(AR_SYMBOLS_AUX2),
-      "set!", "define-syntax", "else", "unquote-splicing", "rename",
+      "set!", "define-syntax", "let-syntax", "letrec-syntax", "else", "unquote-splicing", "rename",
       "read-error", "eval-error", "type-error"
     };
 
