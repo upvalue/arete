@@ -2388,17 +2388,22 @@ struct Reader {
         if(c == 't' || c == 'f') {
           // Constants (#t, #f)
           return c == 't' ? C_TRUE : C_FALSE;
-        } else if(c == '\'') {
+        } else if(c == '\'' || c == ',') {
           // Rename shortcut
-          // #'lambda => (unquote (rename (quote lambda)))
-          Value exp = read_aux(State::S_rename);
+          // #'lambda => (rename (quote lambda))
+          // #,lambda => (unquote (rename (quote lambda)))
+          Value exp, exp2;
+          AR_FRAME(state, exp, exp2);
+          exp = read_aux(State::S_rename);
           if(exp.is_active_exception()) return exp;
-          Value exp2 = exp.cdr();
+          exp2 = exp.cdr();
           exp2 = state.make_pair(state.get_symbol(State::S_quote), exp2);
           exp2 = state.make_pair(exp2, C_NIL);
           exp.set_cdr(exp2);
-          exp = state.make_pair(exp, C_NIL);
-          exp = state.make_pair(state.get_symbol(State::S_unquote), exp);
+          if(c == ',') {
+            exp = state.make_pair(exp, C_NIL);
+            exp = state.make_pair(state.get_symbol(State::S_unquote), exp);
+          }
           return exp;
 
         } else if(c == '|') {
@@ -2744,6 +2749,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       return os << '"';;
     }
     case PAIR: {
+      if(v.pair_has_source()) os << '&';
       os << '(' << v.car();
       for(v = v.cdr(); v.type() == PAIR; v = v.cdr())  {
         os << ' ' << v.car();

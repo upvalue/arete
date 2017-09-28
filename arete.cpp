@@ -426,6 +426,13 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
 #define AR_FN_EXPECT_ENV(state, n) \
   AR_FN_ASSERT_ARG((state), (n), "to be a valid environment (vector or #f)", argv[(n)].type() == VECTOR || argv[(n)] == C_FALSE);
 
+Value fn_source_location(State& state, size_t argc, Value* argv) {
+  if(argv[0].type() != BOX && argv[0].type() != PAIR)
+    return C_FALSE;
+
+  return C_FALSE;
+}
+
 Value fn_env_make(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-make";
   AR_FN_EXPECT_ENV(state, 0);
@@ -636,6 +643,7 @@ void State::install_builtin_functions() {
   // Macroexpansion support functionality
   defun("cons-source", fn_cons_source, 3);
   defun("list-source", fn_list_source, 0, 0, true);
+  defun("source-location", fn_source_location, 1);
 
   defun("env-make", fn_env_make, 1);
   defun("env-define", fn_env_define, 3);

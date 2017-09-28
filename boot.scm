@@ -61,6 +61,36 @@
 
        (cons-source x (make-rename #f 'begin) (macroexpand body new-env)))))
 
+(define expand-define
+  (lambda (x env)
+    (if (fx< (length x) 2)
+        (raise 'expand "define is missing name" x))
+    (if (fx< (length x) 3)
+        (raise 'expand "define is missing value" x))
+
+    (define name #f)
+    (define value #f)
+    (define kar (cadr x))
+
+    (if (identifier? kar)
+      (begin
+        (if (not (fx= (length x) 3))
+            (raise 'expand "define must have exactly two arguments (name and value)" x))
+
+        (set! name kar)
+        (set! value (caddr x)))
+      (if (not (pair? kar))
+          (raise 'expand "define first argument must be a name or a list" x)
+          (begin
+            (set! name (car kar))
+            (set! value (list-source x (make-rename #f 'lambda) (cdr kar)
+              (cons-source x (make-rename #f 'begin) (cddr x))))
+            )))
+    
+    (define result (list-source x (car x) name (macroexpand value env)))
+    ;(print result)
+    result))
+
 (define macroexpand
   (lambda (x env) 
     #;(if LOG-MACROEXPAND 
@@ -133,10 +163,7 @@
                 ((eq? kar 'set!)
                  (list-source x (car x) (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
                  )
-                ((eq? kar 'define)
-                  (begin
-                    (list-source x (car x) (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
-                    ))
+                ((eq? kar 'define) (expand-define x env))
                 (else
                   ;; This is a macro application and not a builtin syntax call
                   (define lookup (env-lookup env kar))
@@ -212,7 +239,7 @@
 
     (define result 
        (cons-source x (r 'lambda)
-         (cons-source x names body)) vals)
+         (cons-source x names body)))
 
     (set! result
       (if let-fn-name
@@ -228,42 +255,38 @@
 
 ;;;;; QUASIQUOTE
 
-(define concat-list
-  (lambda (x y)
-    (if (pair? x)
-        (cons (car x) (concat-list (cdr x) y))
-        y)))
+(define (concat-list x y)
+  (if (pair? x)
+      (cons (car x) (concat-list (cdr x) y))
+      y))
 
-(define qq-list
-  (lambda (r c lst)
-    (if (pair? lst)
-      (let ((obj (car lst)))
-        (if (and (pair? obj) (c (r 'unquote-splicing) (car obj)))
-          (if (cdr lst)
-            (list (r 'concat-list) (cadr obj) (qq-list r c (cdr lst)))
-            (cadr obj))
-          (list (r 'cons) (qq-object r c obj) (qq-list r c (cdr lst)))))
-      (list (r 'quote) lst))))
+(define (qq-list rename c lst)
+  (if (pair? lst)
+    (let ((obj (car lst)))
+      (if (and (pair? obj) (c #'unquote-splicing (car obj)))
+        (if (cdr lst)
+          (list #'concat-list (cadr obj) (qq-list rename c (cdr lst)))
+          (cadr obj))
+        (list #'cons (qq-object rename c obj) (qq-list rename c (cdr lst)))))
+    (list #'quote lst)))
 
-(define qq-element
-  (lambda (r c lst)
-    (if (c (r 'unquote) (car lst))
-        (cadr lst)
-        (qq-list r c lst))))
-           
-(define qq-object
-  (lambda (r c object)
-    (if (pair? object)
-        (qq-element r c object)
-        (list 'quote object))))
+(define (qq-element rename c lst)
+  (if (c #'unquote (car lst))
+      (cadr lst)
+      (qq-list rename c lst)))
+         
+(define (qq-object rename c object)
+  (if (pair? object)
+      (qq-element rename c object)
+      (list #'quote object)))
 
 (define-syntax quasiquote
-  (lambda (x r c)
-    (qq-object r c (cadr x))
+  (lambda (x rename c)
+    (qq-object rename c (cadr x))
     ))
 
-;; er-macro-transformer. Not necessary, but here for compatibility with other Schemes which use this prefix for
-;; ER-macros
+;; er-macro-transformer. Not necessary in Arete, but here for compatibility with other Schemes which use this prefix 
+;; for explicit renaming macros.
 (define-syntax er-macro-transformer
   (lambda (x r c)
     (if (not (eq? (length x) 2))
@@ -275,10 +298,7 @@
     (if (fx< (length x) 3)
       (raise 'syntax "when expects a condition and a body" x))
 
-;    `(,#'if (list-ref x 1)
-;        ,#'begin ,@(cddr x))))
-
-    `(#'if ,(list-ref x 1)
+    `(#,if ,(list-ref x 1)
        ((unquote (rename 'begin))  ,@(cddr x)))))
 
 (define-syntax unless
