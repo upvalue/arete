@@ -1297,7 +1297,7 @@ struct State {
     S_set, S_define_syntax,
     // END BUILTIN SYNTAX
     // Various other symbols
-    S_else, S_unquote_splicing,
+    S_else, S_unquote_splicing, S_rename,
     S_read_error, S_eval_error, S_type_error };
 
   /** Performs various initializations required for an instance of Arete;
@@ -1310,7 +1310,7 @@ struct State {
     static const char* symbols[] = { 
       #define AR_SYMBOLS_AUX2(x) #x
       AR_SYMBOLS(AR_SYMBOLS_AUX2),
-      "set!", "define-syntax", "else", "unquote-splicing",
+      "set!", "define-syntax", "else", "unquote-splicing", "rename",
       "read-error", "eval-error", "type-error"
     };
 
@@ -2295,7 +2295,7 @@ struct Reader {
   }
 
   /** cons quote/quasiquote and friends with an expression */
-  Value read_aux(const std::string& name) {
+  Value read_aux(State::BuiltinSymbol name) {
     Value symbol, expr;
     AR_FRAME(state, symbol, expr);
     expr = read(false);
@@ -2388,6 +2388,19 @@ struct Reader {
         if(c == 't' || c == 'f') {
           // Constants (#t, #f)
           return c == 't' ? C_TRUE : C_FALSE;
+        } else if(c == '\'') {
+          // Rename shortcut
+          // #'lambda => (unquote (rename (quote lambda)))
+          Value exp = read_aux(State::S_rename);
+          if(exp.is_active_exception()) return exp;
+          Value exp2 = exp.cdr();
+          exp2 = state.make_pair(state.get_symbol(State::S_quote), exp2);
+          exp2 = state.make_pair(exp2, C_NIL);
+          exp.set_cdr(exp2);
+          exp = state.make_pair(exp, C_NIL);
+          exp = state.make_pair(state.get_symbol(State::S_unquote), exp);
+          return exp;
+
         } else if(c == '|') {
           // Multi-line nested comments
           Value exc = consume_multiline_comment();
@@ -2540,9 +2553,9 @@ struct Reader {
         return_token = TK_RBRACKET;
         return C_FALSE;
       } else if(c == '\'') {
-        return read_aux("quote");
+        return read_aux(State::S_quote);
       } else if(c == '`') {
-        return read_aux("quasiquote");
+        return read_aux(State::S_quasiquote);
       } else if(c == '"') {
         // Strings
         std::string buffer;
@@ -2578,9 +2591,9 @@ struct Reader {
         c = is.peek();
         if(c == '@') {
           is >> c;
-          return read_aux("unquote-splicing");
+          return read_aux(State::S_unquote_splicing);
         } 
-        return read_aux("unquote");
+        return read_aux(State::S_unquote);
       } else {
         // Symbols
         // Special case: .. is also a valid symbol (really?)

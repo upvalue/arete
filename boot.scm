@@ -210,8 +210,8 @@
           (if (cdr lst)
             (list (r 'concat-list) (cadr obj) (qq-list r c (cdr lst)))
             (cadr obj))
-          (list 'cons (qq-object r c obj) (qq-list r c (cdr lst)))))
-      (list 'quote lst))))
+          (list (r 'cons) (qq-object r c obj) (qq-list r c (cdr lst)))))
+      (list (r 'quote) lst))))
 
 (define qq-element
   (lambda (r c lst)
@@ -239,12 +239,15 @@
     (cadr x)))
 
 (define-syntax when
-  (lambda (x r c)
+  (lambda (x rename c)
     (if (fx< (length x) 3)
       (raise 'syntax "when expects a condition and a body" x))
 
-    `(,(r 'if) ,(list-ref x 1)
-       (,(r 'begin) ,@(cddr x)))))
+;    `(,#'if (list-ref x 1)
+;        ,#'begin ,@(cddr x))))
+
+    `(#'if ,(list-ref x 1)
+       ((unquote (rename 'begin))  ,@(cddr x)))))
 
 (define-syntax unless
   (lambda (x r c)

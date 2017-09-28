@@ -3,7 +3,8 @@ x figure out how to get a stack trace with C++ after assertion failures
   just use valgrind
 - hash tables
 - ports
-- are C++ exceptions okay to use? 
+x are C++ exceptions okay to use? 
+  nah
 garbage collection
 - better handling of large allocations
 x semispace garbage collection for extreme debugging and robustness
