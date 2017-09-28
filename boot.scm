@@ -236,8 +236,21 @@
         (raise 'syntax "er-macro-transformer expects one three-argument lambda as its argument" x))
     (cadr x)))
 
-;; List of things to do
+(define-syntax when
+  (lambda (x r c)
+    (if (fx< (length x) 3)
+      (raise 'syntax "when expects a condition and a body" x))
 
+    `(,(r 'if) ,(list-ref x 1)
+       (,(r 'begin) ,@(cddr x)))))
+
+(define-syntax unless
+  (lambda (x r c)
+    (if (fx< (length x) 3)
+      (raise 'syntax "when expects a condition and a body" x))
+
+    `(,(r 'if) (,(r 'not) ,(list-ref x 1))
+       (,(r 'begin) ,@(cddr x)))))
 
 ;; let-syntax and letrec-syntax
 ;; As well as support for shorthand like (define (x) #t)

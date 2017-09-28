@@ -43,5 +43,6 @@ language
 - macro expansion
 - r5rs support
 - r7rs support (within reason)
+- consider immutable pairs like Racket
 cleanup
 x use State::macroexpand and remove all other eval_args functionality
