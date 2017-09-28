@@ -386,16 +386,13 @@ struct Value {
   Value function_parent_env() const;
   Value function_rest_arguments() const;
   Value function_body() const;
-  bool function_eval_args() const;
   bool function_is_macro() const;
 
   // C FUNCTIONS
   static const unsigned CFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
-  static const unsigned CFUNCTION_NO_EVAL_ARGS_BIT = 1 << 10;
 
   c_function_t c_function_addr() const;
   Value c_function_name() const;
-  bool c_function_no_eval_args() const;
   bool c_function_variable_arity() const;
 
   // OPERATORS
@@ -646,11 +643,6 @@ inline Value Value::function_body() const {
   return as<Function>()->body;
 }
 
-inline bool Value::function_eval_args() const {
-  AR_TYPE_ASSERT(type() == FUNCTION);
-  return heap->get_header_bit(FUNCTION_EVAL_ARGUMENTS_BIT);
-}
-
 inline bool Value::function_is_macro() const {
   AR_TYPE_ASSERT(type() == FUNCTION);
   return heap->get_header_bit(FUNCTION_MACRO_BIT);
@@ -672,11 +664,6 @@ inline Value Value::c_function_name() const {
 inline c_function_t Value::c_function_addr() const {
   AR_TYPE_ASSERT(type() == CFUNCTION);
   return as<CFunction>()->addr;
-}
-
-inline bool Value::c_function_no_eval_args() const {
-  AR_TYPE_ASSERT(type() == CFUNCTION);
-  return heap->get_header_bit(CFUNCTION_NO_EVAL_ARGS_BIT);
 }
 
 inline bool Value::c_function_variable_arity() const {
@@ -1245,8 +1232,6 @@ struct GCIncremental : GCCommon {
 
 /** A re-entrant instance of the Arete runtime */
 struct State {
-  typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
-  size_t gensym_counter;
 
 #if ARETE_GC_STRATEGY == ARETE_GC_INCREMENTAL
   GCIncremental gc;
@@ -1254,10 +1239,13 @@ struct State {
   GCSemispace gc;
 #endif 
 
+  typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
+  size_t gensym_counter;
+  bool print_expansions;
   symbol_table_t symbol_table;
   std::vector<std::string> source_names;
 
-  State(): gensym_counter(0), gc(*this), macroexpander(*this) {
+  State():  gc(*this), gensym_counter(0), print_expansions(0), macroexpander(*this) {
     current_state = this;
   }
   ~State() {
@@ -1552,7 +1540,7 @@ struct State {
 
   void install_builtin_functions();
 
-  void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false, bool eval_args = true) {
+  void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
     if(max_arity == 0)
       max_arity = min_arity;
     Value sym, str;
@@ -1565,17 +1553,10 @@ struct State {
     cfn->addr = addr;
     cfn->min_arity = min_arity;
     cfn->max_arity = max_arity;
-    if(!eval_args) {
-      cfn->set_header_bit(Value::CFUNCTION_NO_EVAL_ARGS_BIT);
-    }
     if(variable_arity) {
       cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
     }
     sym.as<Symbol>()->value = cfn;
-  }
-
-  void defform(const std::string& name, c_function_t addr, size_t arity) {
-    defun(name, addr, arity, 0, false, false);
   }
 
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
@@ -1638,7 +1619,11 @@ struct State {
     return false;
   }
 
+  /** This is the env_lookup backend, which takes env as a reference and modifies it
+   to the env the symbol is located in (if there is one). It's done like this
+   because this more complex logic is necessary for hygienic macros (see fn_env_compare) */
   Value env_lookup_impl(Value& env, Value name, bool one_level = false) {
+
     while(env != C_FALSE) {
       for(size_t i = 1; i != env.vector_length(); i += 2) {
         if(identifier_equal(env.vector_ref(i), name))
@@ -1752,7 +1737,7 @@ struct State {
     return eval_body(env,  fn_name, fn_name, exp, exp.cdr());
   }
   
-  Value eval_lambda(Value env,  Value exp, bool eval_args = false) {
+  Value eval_lambda(Value env,  Value exp) {
     Value fn_env, args, args_head, args_tail, fn_name;
     // Add a descriptor of anonymous function
 
@@ -1853,7 +1838,7 @@ struct State {
     body = exp.caddr();
 
     tmp = env_lookup(env, name);
-    if(tmp == C_UNSPECIFIED) {
+    if(tmp == C_UNDEFINED) {
       std::ostringstream os;
       os << "attempt to set! undefined variable " << tmp;
       return eval_error(os.str(), exp);
@@ -1874,10 +1859,6 @@ struct State {
     size_t min_arity = fn.as<CFunction>()->min_arity;
     size_t max_arity = fn.as<CFunction>()->max_arity;
 
-    if(fn.c_function_no_eval_args()) {
-      eval_args = false;
-    }
-    //bool eval_args = !fn.c_function_no_eval_args();
 
     if(given_args < min_arity) {
       std::ostringstream os;
@@ -1926,11 +1907,6 @@ struct State {
     Value fn_name;
     AR_FRAME(this, env, fn, args, new_env, fn_args, tmp, src_exp, rest_args_name, rest_args_head,
       rest_args_tail, body, fn_name, calling_fn_name);
-
-    if(!fn.function_eval_args()) {
-      eval_args = false;
-    }
-    // bool eval_args = fn.function_eval_args();
 
     fn_name = fn.function_name();
 
@@ -2147,19 +2123,23 @@ struct State {
   }
 
   Value eval_toplevel(Value exp) {
-    Value expand = get_symbol(S_macroexpand);
+    Value expand = *macroexpander; // get_symbol(S_macroexpand);
 
     // Comment out to disable macroexpansion
-    if(expand.symbol_value() != C_UNDEFINED) {
+    if(expand != C_FALSE) {
       Value args, sym;
       AR_FRAME(this, expand, exp, args, sym);
       args = make_pair(C_FALSE, C_NIL);
       args = make_pair(exp.maybe_unbox(), args);
 
-      exp = apply_scheme(C_FALSE, expand.symbol_value(), args, exp, C_FALSE);
+      exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
       if(exp.is_active_exception()) {
         stack_trace.insert(stack_trace.begin(), "Error during macro expansion");
         return exp;
+      }
+
+      if(print_expansions) {
+        std::cout << "Expanded: " << exp << std::endl;
       }
     } 
 
@@ -2666,7 +2646,7 @@ inline Frame::~Frame() {
   state.gc.frames.pop_back();
 }
 
-inline Handle::Handle(State& state_): state(state_) { initialize(); }
+inline Handle::Handle(State& state_): state(state_), ref(C_FALSE) { initialize(); }
 inline Handle::Handle(State& state_, Value ref_): state(state_), ref(ref_) { initialize(); }
 inline Handle::Handle(const Handle& cpy): state(cpy.state), ref(cpy.ref) {
   it = state.gc.handles.insert(state.gc.handles.end(), this);

@@ -42,6 +42,12 @@ tests/test-incremental: tests/test-incremental.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
+test-all: tests/test-incremental tests/test-semispace
+	tests/test-incremental
+	tests/test-semispace
+	python utils/run-tests.py
+
+
 .PHONY: count clean
 
 count:

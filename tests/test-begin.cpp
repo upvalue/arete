@@ -89,14 +89,14 @@ TEST_CASE("frames successfully save pointers to stack values") {
 
 TEST_CASE("handles work") {
   State state;
+  size_t begin_size = state.gc.handles.size();
   {
     Handle h1(state, Value::make_fixnum(1));
     Handle h2(state, Value::make_fixnum(2));
     Handle h3(state, Value::make_fixnum(3));
 
     CHECK(state.gc.handles.back() == &h3);
-    CHECK(state.gc.handles.front() == &h1);
-    CHECK(state.gc.handles.size() == 3);
+    CHECK(state.gc.handles.size() - begin_size == 3);
   }
 }
 

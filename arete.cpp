@@ -292,7 +292,7 @@ Value fn_map(State& state, size_t argc, Value* argv) {
 
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "eval";
+  static const char* fn_name = "eval"; (void) fn_name;
 
   return state.eval_toplevel(argv[0]);
 }
@@ -438,6 +438,12 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
 Value fn_env_compare(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-compare";
 
+  Type type1 = argv[1].type(), type2 = argv[2].type();
+
+  if((type1 != SYMBOL && type1 != RENAME) || (type2 != SYMBOL && type2 != RENAME)) {
+    return Value::make_boolean(argv[1].bits == argv[2].bits);
+  }
+
   AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
   AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
   AR_FN_ASSERT_ARG(state, 2, "to be a valid identifier (symbol or rename)", argv[2].type() == RENAME || argv[2].type() == SYMBOL);
@@ -446,16 +452,8 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
   Value id1 = argv[1];
   Value id2 = argv[2];
 
-  // I'm not sure how likely any of these cases are in practice but
-
-  // Two symbols and one environment are equal
-  if(id1 == id2) {
+  if(state.identifier_equal(id1, id2)) {
     return C_TRUE;
-  }
-
-  // Two renames 
-  if(id1.type() == RENAME && id2.type() == RENAME) {
-    return id1.rename_env() == id2.rename_env() && id1.rename_expr() == id2.rename_expr();
   }
 
   // Ensure that id1 holds the rename
@@ -520,8 +518,18 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   return fn;
 }
 
+Value fn_install_macroexpander(State& state, size_t argc, Value* argv) {
+  static const char *fn_name = "install-macroexpander";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+
+  state.macroexpander = argv[0];
+
+  return C_UNSPECIFIED;
+
+}
+
 Value fn_make_rename(State& state, size_t argc, Value* argv) {
-  const char *fn_name = "make-rename";
+  static const char *fn_name = "make-rename";
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
 
   return state.make_rename(argv[0], argv[1]);
@@ -608,9 +616,9 @@ void State::install_builtin_functions() {
   defun("gensym", fn_gensym, 0, 1);
 
   // TODO: Full eval/apply necessary? Probably...
-  // defun("install-macroexpander!", fn_install_macroexpander, 1)
+  defun("install-macroexpander", fn_install_macroexpander, 1);
   defun("make-rename", fn_make_rename, 2);
-  defun("eval-lambda", fn_eval_lambda, 2, 2, false, true);
+  defun("eval-lambda", fn_eval_lambda, 2);
   defun("set-function-name!", fn_set_function_name, 2);
   defun("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun("function-env", fn_function_env, 1);

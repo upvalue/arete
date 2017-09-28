@@ -33,6 +33,20 @@
               (cond 
                 ;; TODO this should strip renames I think
                 ((eq? kar 'quote) x)
+                ((eq? kar 'if)
+                 (define if-length (length x))
+
+                 (if (not (or (fx= if-length 3) (fx= if-length 4)))
+                     (raise 'expand "if must have two or three arguments (condition, then, else)" x))
+
+                 (define condition (list-ref x 1))
+                 (define then (list-ref x 2))
+                 (define else-clause unspecified)
+
+                 (if (fx= if-length 4)
+                     (set! else-clause (list-ref x 3)))
+
+                 (list-source x 'if (_macroexpand condition env) (_macroexpand then env) (_macroexpand else-clause env)))
                 ;; LAMBDA
                 ((eq? kar 'lambda)
                  (if (fx< (length x) 3)
@@ -62,7 +76,8 @@
                    (define body (caddr x))
 
                    ;; TODO: Check for existing definition
-                   (define fn (eval-lambda body env))
+                   (define fn (eval-lambda (_macroexpand body env) env))
+                   ;(print "macroexpanded body" (_macroexpand body env))
 
                    (set-function-name! fn name)
                    (set-function-macro-bit! fn)
@@ -71,10 +86,15 @@
 
                    ;; macro now exists in environment
                    unspecified))
+                ((eq? kar 'begin)
+                 (cons-source x 'begin (map-expand (cdr x) env)))
                 ;; DEFINE
+                ((eq? kar 'set!)
+                 (list-source x 'set! (_macroexpand (list-ref x 1) env) (_macroexpand (list-ref x 2) env))
+                 )
                 ((eq? kar 'define)
                   (begin
-                    x
+                    (list-source x 'define (_macroexpand (list-ref x 1) env) (_macroexpand (list-ref x 2) env))
                     ))
                 (else
                   ;; This is a macro application and not a builtin syntax call
@@ -98,11 +118,13 @@
               )) ;; (if (symbol? x))
             ))) ;; end _macroexpand
 
-;; The function named macroexpand is special-cased; its arguments will not be evaluated before it is applied in the
-;; interpreter.
+(install-macroexpander _macroexpand)
+
 (define macroexpand
   (lambda (x env)
     (_macroexpand x env)))
+
+;;;;; LET
 
 (define-syntax let
   (lambda (x r c)
@@ -158,14 +180,41 @@
    ;; let return
     result))
 
+;;;;; QUASIQUOTE
 
-(define-syntax test-compare
+(define concat-list
+  (lambda (x y)
+    (if (pair? x)
+        (cons (car x) (concat-list (cdr x) y))
+        y)))
+
+(define qq-list
+  (lambda (r c lst)
+    (if (pair? lst)
+      (let ((obj (car lst)))
+        (if (and (pair? obj) (c (r 'unquote-splicing) (car obj)))
+          (if (cdr lst)
+            (list (r 'concat-list) (cadr obj) (qq-list r c (cdr lst)))
+            (cadr obj))
+          (list 'cons (qq-object r c obj) (qq-list r c (cdr lst)))))
+      (list 'quote lst))))
+
+(define qq-element
+  (lambda (r c lst)
+    (if (c (r 'unquote) (car lst))
+        (cadr lst)
+        (qq-list r c lst))))
+           
+(define qq-object
+  (lambda (r c object)
+    (if (pair? object)
+        (qq-element r c object)
+        (list 'quote object))))
+
+(define-syntax quasiquote
   (lambda (x r c)
-    (print "test-compare running")
-    (display (c (r 'else) 'else))
-    (newline)
-    #t))
-
+    (qq-object r c (cadr x))
+    ))
 
 ;; List of things to do
 
@@ -181,5 +230,6 @@
 ;; define* and type stuff
 ;; syntax-rules
 ;; structures
+;; modules
 ;; compiler
 

@@ -15,12 +15,14 @@ def run_tests(path, args = []):
         result_path = test_path[:-3] + 'exp'
 
         kmd = ['./arete', '--quiet'] + args + [test_path]
-        cmd = subprocess.Popen(kmd, stdout=subprocess.PIPE)
+        cmd = subprocess.Popen(kmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         cmd_out, cmd_err = cmd.communicate()
 
         if cmd.returncode != 0:
+            print(cmd_err)
             print('\n-- %s errored with text:\n%s\n' % (test_path, cmd_err.decode('utf-8').strip()))
+            continue
 
         sys.stdout.write('+')
 

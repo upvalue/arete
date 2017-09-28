@@ -117,6 +117,7 @@ int main(int argc, const char **argv) {
   std::string open_repl("--repl");
   std::string gcdebug("--gcdebug");
   std::string quiet("--quiet");
+  std::string showexpand("--showexpand");
 
   if(argc > 1) {
     // read files
@@ -127,6 +128,8 @@ int main(int argc, const char **argv) {
         QUIET = true;
       } else if(gcdebug.compare(argv[i]) == 0) {
         state.gc.collect_before_every_allocation = true;
+      } else if(showexpand.compare(argv[i]) == 0) {
+        state.print_expansions = true;
       } else {
         if(!do_file(argv[i], true)) {
           return EXIT_FAILURE;
