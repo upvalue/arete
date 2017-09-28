@@ -11,6 +11,8 @@ using namespace arete;
 
 State state = State();
 
+static bool QUIET = false;
+
 void do_file(const char* file_path, bool eval ) {
   Value x, vec;
   AR_FRAME(state, x, vec);
@@ -18,6 +20,7 @@ void do_file(const char* file_path, bool eval ) {
   vec = state.make_vector();
   std::ifstream file_handle(file_path, std::ios::in);
   std::stringstream ss;
+  // CHECK IF FILE EXISTS
   ss << file_handle.rdbuf();
   Reader reader(state, ss);
   reader.file = state.register_file(file_path);
@@ -57,8 +60,10 @@ void do_repl() {
 
   std::ostringstream prompt;
 
+  std::cout << "Arete 0.1" << std::endl;
+
   while(i++) {
-    prompt << (i - 1) << "> ";
+    prompt << "> ";
     line = linenoise(prompt.str().c_str());
     prompt.str("");
     prompt.clear();
@@ -107,12 +112,15 @@ int main(int argc, const char **argv) {
 
   std::string open_repl("--repl");
   std::string gcdebug("--gcdebug");
+  std::string quiet("--quiet");
 
   if(argc > 1) {
     // read files
     for(size_t i = 1; i != argc; i++) {
       if(open_repl.compare(argv[i]) == 0) {
         do_repl();
+      } else if(quiet.compare(argv[i]) == 0) {
+        QUIET = true;
       } else if(gcdebug.compare(argv[i]) == 0) {
         state.gc.collect_before_every_allocation = true;
       } else {
@@ -125,6 +133,8 @@ int main(int argc, const char **argv) {
   }
   state.gc.collect();
 
-  state.print_gc_stats(std::cout);
+  if(!QUIET) {
+    state.print_gc_stats(std::cout);
+  }
   return 0;
 }

@@ -13,13 +13,17 @@
 
 (define unspecified (if #f #f))
 
+(define map-expand
+  (lambda (x env)
+    (map (lambda (sub-x) (_macroexpand sub-x env)) x)))
+
 (define _macroexpand
   (lambda (x env) 
     (if (self-evaluating? x)
         x
         (if (symbol? x)
           (if (env-syntax? env x)
-              (raise 'expand "used syntax as value" x)
+              (raise 'expand (interpolate "used syntax" x "as value") x)
               x)
           (begin
             (define kar (car x))
@@ -27,16 +31,25 @@
             (define syntax? (and (symbol? kar) (env-syntax? env kar)))
             (if syntax?
               (cond 
-                ((eq? kar 'if)
-                  x)
+                ((eq? kar 'quote) x)
                 ;; LAMBDA
                 ((eq? kar 'lambda)
                  (if (fx< (length x) 3)
                      (raise 'expand "lambda has no body" x))
 
                  ;; (lambda (a b c) #t)
-                 (define bindings #f)
-                 x)
+                 (define new-env (env-make env))
+                 (define bindings (cadr x))
+
+                 (map (lambda (arg)
+                    (if (not (identifier? arg))
+                      (raise 'expand "non-identifier in lambda argument list" (list x arg)))
+                    (env-define new-env arg 'variable)) bindings)
+
+                 (cons-source x 'lambda (cons-source x bindings (map-expand (cddr x) env)))
+
+                 ;; TODO: Should this just create a lambda object as it expands it?
+                 )
                 ;; DEFINE-SYNTAX
                 ((eq? kar 'define-syntax)
                  (begin
@@ -61,26 +74,25 @@
                 ((eq? kar 'define)
                   (begin
                     x
-                    )))
-                ;; go through function and args
-              (begin
-                (if (symbol? kar)
-                    (begin
-                      (define lookup (env-lookup env kar))
-                      (if (macro? lookup)
-                          (lookup x
-                            ;; renaming procedure
-                            (lambda (name) (make-rename name (function-env lookup)))
-                            ;; comparison procedure
-                            (lambda (a b) #f))
-                          ;; not a macro application, members must be expanded
-                          (map (lambda (sub-x) (_macroexpand sub-x env)) x)))
-                    (begin 
-                      (define result
-                        (cons-source x (_macroexpand (car x) env) (map (lambda (sub-x) (_macroexpand sub-x env)) (cdr x)))
-                        )
-                      result
-                      ))))
+                    ))
+                (else
+                  ;; This is a macro application and not a builtin syntax call
+                  (define lookup (env-lookup env kar))
+                  (if (macro? lookup)
+                      (lookup x
+                        ;; renaming procedure
+                        (lambda (name) (make-rename name (function-env lookup)))
+                        ;; comparison procedure
+                        (lambda (a b) #f))
+                      ;; not a macro application, members must be expanded
+                      (map-expand x env))))
+                  ;; else: handle something like ((lambda () #t))
+                  (begin 
+                    (define result
+                      (cons-source x (_macroexpand (car x) env) (map (lambda (sub-x) (_macroexpand sub-x env)) (cdr x)))
+                      )
+                    result
+                  ))
               )) ;; (if (symbol? x))
             ))) ;; end _macroexpand
 
@@ -112,7 +124,6 @@
 
     (set! names
       (map (lambda (binding)
-             (print binding)
              (if (not (list? binding))
                  (raise 'expand "let binding should be a list with a name and a value" x))
              (define name (car binding))

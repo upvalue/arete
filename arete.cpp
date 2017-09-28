@@ -62,20 +62,30 @@ Value fn_newline(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-Value fn_print(State& state, size_t argc, Value* argv) {
+void fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os) {
   for(size_t i = 0; i != argc; i++) {
     if(argv[i].type() == STRING) {
-      std::cout << argv[i].string_data();
+      os << argv[i].string_data();
     } else {
-      std::cout << argv[i];
+      os << argv[i];
     }
 
     if(i != argc - 1)  {
-      std::cout << ' ';
+      os << ' ';
     }
   }
+}
+
+Value fn_print(State& state, size_t argc, Value* argv) {
+  fn_print_impl(state, argc, argv, std::cout);
   std::cout << std::endl;
   return C_UNSPECIFIED;
+}
+
+Value fn_interpolate(State& state, size_t argc, Value* argv) {
+  std::ostringstream os;
+  fn_print_impl(state, argc, argv, os);
+  return state.make_string(os.str());
 }
 
 ///// PREDICATES
@@ -112,6 +122,7 @@ Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
   if(argv[0].immediatep()) return C_TRUE;
 
   switch(argv[0].type()) {
+    case STRING:
     case VECTOR: 
       return C_TRUE;
     default:
@@ -263,8 +274,8 @@ Value fn_map(State& state, size_t argc, Value* argv) {
   AR_FRAME(state, nlst_head, nlst_current, lst, fn, arg);
 
   while(lst.type() == PAIR) {
-    arg = state.make_pair(lst.car(), C_NIL);
-    tmp = state.apply_generic(fn, arg.maybe_unbox(), false);
+    arg = state.make_pair(lst.car().maybe_unbox(), C_NIL);
+    tmp = state.apply_generic(fn, arg, false);
     if(tmp.is_active_exception()) return tmp;
     if(nlst_current == C_NIL) {
       nlst_head = nlst_current = state.make_pair(tmp, C_NIL);
@@ -281,7 +292,7 @@ Value fn_map(State& state, size_t argc, Value* argv) {
 
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
-  const char* fn_name = "eval";
+  static const char* fn_name = "eval";
 
   return state.eval_toplevel(argv[0]);
 }
@@ -401,14 +412,15 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_env_make(State& state, size_t argc, Value* argv) {
-  // static const char* fn_name = "env-make";
+  static const char* fn_name = "env-make";
+  AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
   return state.make_env(argv[0]);
 }
 
 Value fn_env_define(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-define";
-  AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
   AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
+  AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
 
   Value env = argv[0], name = argv[1], value = argv[2];
   AR_FRAME(state, env, name, value);
@@ -425,8 +437,8 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
 
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-lookup";
-  AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
   AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
+  AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
   
   return state.env_lookup(argv[0], argv[1]);
 }
@@ -435,8 +447,12 @@ Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
   Value result = fn_env_lookup(state, argc, argv);
 
   if(result.is_active_exception()) return result;
+  
+  if(result == C_SYNTAX) return C_TRUE;
 
-  return Value::make_boolean(result == C_SYNTAX);
+  if(result.type() == FUNCTION && result.function_is_macro()) return C_TRUE;
+
+  return C_FALSE;
 }
 
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
@@ -534,6 +550,7 @@ void State::install_builtin_functions() {
   defun("display", fn_display, 1, 1, false);
   defun("newline", fn_newline, 0);
   defun("print", fn_print, 0, 0, true);
+  defun("interpolate", fn_interpolate, 0, 0, true);
 
   // Pairs
   defun("car", fn_car, 1, 1);
@@ -554,6 +571,7 @@ void State::install_builtin_functions() {
   defun("gensym", fn_gensym, 0, 1);
 
   // TODO: Full eval/apply necessary? Probably...
+  // defun("install-macroexpander!", fn_install_macroexpander, 1)
   defun("make-rename", fn_make_rename, 2);
   defun("eval-lambda", fn_eval_lambda, 2, 2, false, true);
   defun("set-function-name!", fn_set_function_name, 2);

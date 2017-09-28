@@ -41,3 +41,5 @@ language
 - macro expansion
 - r5rs support
 - r7rs support (within reason)
+cleanup
+- use State::macroexpand and remove all other eval_args functionality

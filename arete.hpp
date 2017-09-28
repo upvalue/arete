@@ -1241,8 +1241,6 @@ struct GCIncremental : GCCommon {
       return 0;
     }
   }
-
-
 };
 
 /** A re-entrant instance of the Arete runtime */
@@ -1259,7 +1257,7 @@ struct State {
   symbol_table_t symbol_table;
   std::vector<std::string> source_names;
 
-  State(): gensym_counter(0), gc(*this) {
+  State(): gensym_counter(0), gc(*this), macroexpander(*this) {
     current_state = this;
   }
   ~State() {
@@ -1283,6 +1281,7 @@ struct State {
   #define AR_SYMBOLS_AUX(name) S_##name
 
   std::vector<Handle> builtin_symbols;
+  Handle macroexpander;
 
   enum BuiltinSymbol {
     AR_SYMBOLS(AR_SYMBOLS_AUX),
@@ -1980,7 +1979,9 @@ struct State {
     body = fn.function_body();
 
     // std::cout << "evaluating function " << fn_name << " in body " << new_env << std::endl;
-    return eval_body(new_env,  fn_name, calling_fn_name, src_exp, body);
+    tmp =  eval_body(new_env,  fn_name, calling_fn_name, src_exp, body);
+    EVAL_CHECK(tmp, src_exp, calling_fn_name);
+    return tmp;
   }
 
   Value eval_if(Value env, Value exp, bool has_else, Value fn_name) {
@@ -2078,7 +2079,9 @@ struct State {
         EVAL_CHECK(car, exp, fn_name);
 
         if(car.type() != FUNCTION && car.type() != CFUNCTION) {
-          return eval_error("attempt to apply non-function", exp);
+          std::ostringstream os;
+          os << "attempt to apply non-procedure value " << car << std::endl;
+          return eval_error(os.str(), exp);
         } else {
           if(car.type() == FUNCTION) {
             return apply_scheme(env,  car, exp.cdr(), exp, fn_name);
@@ -2141,9 +2144,7 @@ struct State {
 
       exp = apply_scheme(C_FALSE, expand.symbol_value(), args, exp, C_FALSE);
       if(exp.is_active_exception()) {
-        //std::string d("Error during macro expansion");
-        //stack_trace.insert(stack_trace.front(), d);
-        stack_trace.push_back("Error during macro expansion");
+        stack_trace.insert(stack_trace.begin(), "Error during macro expansion");
         return exp;
       }
     } 
