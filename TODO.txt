@@ -1,7 +1,10 @@
 runtime
+- value representation: should 0 be false?
+- also, being able to initialize Values with ints is convenient for returning constants, but seems error-prone in other
+  ways (e.g. occasionally trying to write off a C++ boolean as a Scheme boolean and it not being rejected by the compiler)
 x figure out how to get a stack trace with C++ after assertion failures
   just use valgrind
-- hash tables
+x hash tables
 - ports
 - flonum 4 is printed as 4 and not 4.0
 x are C++ exceptions okay to use? 
@@ -17,7 +20,7 @@ interpreter
 x let
   (implemented as macro)
 - quote must strip boxes, and should perhaps update lists in place to reflect this (?)
-- and/or
+x and/or
 - the passing of fn_name is pretty ugly and could be achieved with an RAII-stack
 - MAYBE: tail call optimization. 
 - stack traces sometimes have duplicate entries
@@ -37,6 +40,18 @@ x block comments #|
 - unicode
 x attach source code info to symbols by boxing them
 macroexpander
+- nested renames and identifier_equal
+- error messages should be super descriptive
+  e.g.
+  (let ((5 #t)) #t)
+  should give you an error like
+
+    Error while expanding expression (let ((5 #t)) #t)
+                                           ^^^^^^
+    From file.scm:34
+  
+    Let bindings must be names
+
 - can crash by defining macros to bad stuff e.g.
   (define-syntax hello #t)
 x explicit renaming
@@ -49,6 +64,9 @@ language
 - r5rs support
 - r7rs support (within reason)
 - consider immutable pairs like Racket
+benchmarks
+- GC
+- tables
 cleanup
 x use State::macroexpand and remove all other eval_args functionality
 

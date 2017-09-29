@@ -225,7 +225,7 @@ struct String : HeapValue {
   size_t bytes;
   char data[1];
 
-  static const unsigned CLASS_TYPE = STRING;
+  static const Type CLASS_TYPE = STRING;
 };
 
 // TODO: These should not be heap-allocated if possible.
@@ -248,6 +248,10 @@ struct Value {
   static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
   bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION; }
   bool identifierp() const { return type() == RENAME || type() == SYMBOL; }
+  bool hashable() const {
+    Type tipe = type();
+    return tipe == STRING || tipe == SYMBOL || tipe == FIXNUM || tipe == CONSTANT;
+  }
 
   /** Safely retrieve the type of an object */
   Type type() const;
@@ -321,13 +325,13 @@ struct Value {
 
   // SYMBOLS
   Value symbol_name() const;
-  const char* symbol_name_bytes() const;
+  const char* symbol_name_data() const;
   Value symbol_value() const;
 
   /** Quickly compare symbol to string */
   bool symbol_equals(const char* s) const {
     std::string cmp(s);
-    return cmp.compare(symbol_name_bytes()) == 0;
+    return cmp.compare(symbol_name_data()) == 0;
   }
 
   // Syntactic closures
@@ -430,7 +434,7 @@ inline Value Value::symbol_name() const {
   return as<Symbol>()->name;
 }
 
-inline const char* Value::symbol_name_bytes() const {
+inline const char* Value::symbol_name_data() const {
   return as<Symbol>()->name.as<String>()->data;
 }
 
@@ -718,8 +722,48 @@ inline size_t Value::vector_length() const {
 // HASH TABLES
 
 struct Table : HeapValue  {
+  static const size_t LOAD_FACTOR = 90;
+
+  VectorStorage* chains;
+  unsigned char size_log2;
+  size_t entries, max_entries;
+
   static const Type CLASS_TYPE = TABLE;
 };
+
+inline ptrdiff_t wang_integer_hash(ptrdiff_t key) {
+  key = (~key) + (key << 21);
+  key = key ^ (key >> 24);
+  key = (key + (key << 3)) + (key << 8); 
+  key = key ^ (key >> 14);
+  key = (key + (key << 2)) + (key << 4); 
+  key = key ^ (key >> 28);
+  key = key + (key << 31);
+  return key;
+}
+
+inline ptrdiff_t x31_string_hash(const char* s) {
+  ptrdiff_t h = *s;
+  if(h) for(++s; *s; ++s) h = (h << 5) - h + *s;
+  return h;
+}
+
+inline ptrdiff_t hash_value(Value x, bool& unhashable) {
+  unhashable = false;
+  switch(x.type()) {
+    case STRING:
+      return x31_string_hash(x.string_data());
+    case SYMBOL:
+      // TODO If the collector doesn't move, we can simply hash the pointer
+      return x31_string_hash(x.symbol_name_data());
+    case FIXNUM:
+    case CONSTANT:
+      return wang_integer_hash(x.bits);
+    default:
+      unhashable = true;
+      return 0;
+  }
+}
 
 ///// (GC) Garbage collector
 
@@ -908,6 +952,7 @@ struct GCSemispace : GCCommon {
         case VECTOR:
         case BOX:
         case CFUNCTION:
+        case TABLE:
           AR_COPY(Vector, storage);
           break;
         // Two pointers 
@@ -964,6 +1009,10 @@ struct GCSemispace : GCCommon {
 #endif 
   }
 
+  // live is a special debug method available with the Semispace collector.
+  // Since checking whether a variable is live is simple pointer arithmetic,
+  // we can then insert liveness checks throughout the code to see if we've
+  // forgotten to track any particular variables.
   bool live(const Value v) const {
     if(v.immediatep()) return true;
     char* addr = (char*) v.heap;
@@ -1047,11 +1096,7 @@ struct GCIncremental : GCCommon {
         break;
       // One pointer
       case VECTOR:
-        v = static_cast<Vector*>(v)->storage.heap;
-        goto again;
       case BOX:
-        v = static_cast<Box*>(v)->value.heap;
-        goto again;
       case CFUNCTION:
         v = static_cast<CFunction*>(v)->name.heap;
         goto again;
@@ -1454,13 +1499,190 @@ struct State {
     }
   }
 
+  void table_setup(Value table, size_t size_log2) {
+    VectorStorage* chains = 0;
+
+    AR_FRAME(this, table);
+
+    size_t size = 1 << size_log2;
+    chains = static_cast<VectorStorage*>(make_vector_storage(size).heap);
+    // In case of GC move
+    Table *heap = table.as<Table>();
+    heap->entries = 0;
+    heap->size_log2 = size_log2;
+    // Fill entries with #f
+    chains->length = size;
+    for(size_t i = 0; i != chains->length; i++) {
+      chains->data[i] = C_FALSE;
+    } 
+    heap->chains = chains;
+    // Pre-calculate max entries
+    heap->max_entries = (Table::LOAD_FACTOR * size) / 100;
+  }
+
+  ptrdiff_t hash_index(Value table, Value key, bool& unhashable) {
+    ptrdiff_t hash = hash_value(key, unhashable);
+    return hash & table.as<Table>()->chains->length - 1;
+  }
+
+  void table_grow(Value table) {
+    Value old_chains_ref, chain;
+    AR_FRAME(this, table, old_chains_ref, chain);
+    old_chains_ref = table.as<Table>()->chains;
+    table_setup(table, table.as<Table>()->size_log2 + 1);
+    // Insert all old values
+    VectorStorage* old_chains = old_chains_ref.as<VectorStorage>();
+    for(size_t i = 0; i != old_chains->length; i++) {
+      chain = old_chains->data[i];
+      while(chain.type() == PAIR) {
+        table_insert(table, chain.caar(), chain.cdar());
+        old_chains = old_chains_ref.as<VectorStorage>();
+        chain = chain.cdr();
+      }
+    }
+  }
+
+  Value unhashable_error(Value irritant) {
+    std::ostringstream os;
+    os << " value " << irritant << " is unhashable";
+    return type_error(os.str());
+  }
+
+  bool equals(Value a, Value b) {
+    if(a.bits == b.bits) return true;
+
+    if(a.type() == VECTOR && b.type() == VECTOR) {
+      for(size_t i = 0; i < a.vector_length() && i < b.vector_length(); i++) {
+        if(!equals(a.vector_ref(i), b.vector_ref(i))) {
+          return false;
+        }
+      }
+      return true;
+    } else if(a.type() == PAIR && b.type() == PAIR) {
+      while(a.type() == PAIR && b.type() == PAIR) {
+        if(!equals(a.car(), b.car())) {
+          return false;
+        }
+        a = a.cdr();
+        b = b.cdr();
+      }
+
+      if(a != C_NIL || b != C_NIL) {
+        return equals(a, b);
+      }
+
+      return C_TRUE;
+    } else if(a.type() == STRING && b.type() == STRING) {
+      if(a.string_bytes() != b.string_bytes()) return false;
+      return strncmp(a.string_data(), b.string_data(), a.string_bytes()) == 0;
+    }
+
+    return a.bits == b.bits;
+  }
+
+  Value table_get_cell(Value table, Value key) {
+    bool unhashable;
+    ptrdiff_t index = hash_index(table, key, unhashable);
+    if(unhashable) return unhashable_error(key);
+    Value chain = C_FALSE;
+    chain = table.as<Table>()->chains->data[index];
+    while(chain.type() == PAIR) {
+      if(equals(chain.caar(), key)) {
+        return chain.car();
+      }
+      chain = chain.cdr();
+    }
+    return C_FALSE;
+  }
+
+  Value table_set(Value table, Value key, Value value) {
+    Value cell = table_get_cell(table, key);
+    if(cell.is_active_exception()) return cell;
+    if(cell != C_FALSE) {
+      cell.set_cdr(value);
+      return C_TRUE;
+    } else {
+      return table_insert(table, key, value);
+    }
+    return C_FALSE;
+  }
+
+  Value table_get(Value table, Value key, bool& found) {
+    Value cell = table_get_cell(table, key);
+    if(cell != C_FALSE) {
+      found = true;
+      return cell.cdr();
+    } else {
+      found = false;
+      return C_FALSE;
+    }
+  }
+
+  Value table_insert(Value table, Value key, Value value) {
+    AR_TYPE_ASSERT(table.type() == TABLE);
+    Value chain;
+    AR_FRAME(this, table, key, value, chain);
+
+    Table* htable = table.as<Table>();
+
+    if(htable->entries >= htable->max_entries) {
+      table_grow(table);
+    }
+
+    bool unhashable;
+    ptrdiff_t index = hash_index(table, key, unhashable);
+    if(unhashable) return unhashable_error(value);
+
+    // Build chain
+    chain = make_pair(key, value);
+
+    if(key.type() == STRING) {
+      key = string_copy(key);
+    }
+
+    htable = table.as<Table>();
+
+
+    // Handle collision
+    if(htable->chains->data[index] != C_FALSE) {
+      chain = make_pair(chain, htable->chains->data[index]);
+    } else {
+      chain = make_pair(chain, C_NIL);
+    }
+
+    // Insert chain
+    htable = table.as<Table>();
+    htable->chains->data[index] = chain;
+    htable->entries++;
+
+    return C_UNSPECIFIED;
+  }
+
+  Value make_table(size_t size_log2 = 4) {
+    Value table = static_cast<Table*>(gc.allocate(TABLE, sizeof(Table)));
+    AR_FRAME(this, table);
+
+    table_setup(table, size_log2);
+
+    return table;
+  }
+
   Value make_string(const std::string& body) {
     String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + body.size()));
     heap->bytes = body.size();
     strncpy(heap->data, body.c_str(), body.size());
     AR_ASSERT(heap->data[heap->bytes] == '\0');
-    heap->data[heap->bytes] = '\0';
+    // heap->data[heap->bytes] = '\0';
 
+    return heap;
+  }
+
+  Value string_copy(Value x) {
+    AR_FRAME(this, x);
+    String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + x.string_bytes()));
+    strncpy(heap->data, x.string_data(), x.string_bytes());
+    heap->bytes = x.string_bytes();
+    heap->data[x.string_bytes()] = '\0';
     return heap;
   }
 
@@ -1491,6 +1713,28 @@ struct State {
   
   Value make_exception(BuiltinSymbol s, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
     return make_exception(get_symbol(s), cmessage, irritants);
+  }
+
+  // Print out a table's internal structure for debugging purposes
+  void print_table_verbose(Value tbl) {
+    Table* table = tbl.as<Table>();
+    std::cout << "#<table size_log2: " << (size_t) table->size_log2 << " entries: " << table->entries << 
+      " max_entries: " << table->max_entries << std::endl;
+
+    for(size_t i = 0; i != table->chains->length; i++) {
+      Value chain = table->chains->data[i];
+      if(chain != C_FALSE) {
+        std::cout << "  chain " << i << ": ";
+        while(chain.type() == PAIR) {
+          std::cout << chain << " ";
+          chain = chain.cdr();
+        }
+        std::cout << std::endl;
+      }
+    }
+
+    std::cout << '>' << std::endl;
+
   }
 
   void print_gc_stats(std::ostream& os) {
@@ -2741,7 +2985,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
     case FLONUM:
       return os << v.flonum_value(); 
     case SYMBOL:
-      return os << v.symbol_name_bytes();
+      return os << v.symbol_name_data();
     case STRING: {
       const char* data = v.string_data();
       os << '"';
@@ -2799,6 +3043,8 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       return os << "*" << v.rename_expr();
     case BOX:
       return os << "&" << v.unbox();
+    case TABLE:
+      return os << "#<table size: " << v.as<Table>()->entries << '>';
     case EXCEPTION:
       os << "#<exception '" << v.exception_tag() << " " << v.exception_message();
       if(v.exception_irritants() != C_UNSPECIFIED) {

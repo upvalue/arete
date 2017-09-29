@@ -42,7 +42,23 @@ def run_tests(path, args = []):
 
     print('')
 
-run_tests('preboot', [])
-run_tests('expander', ['boot.scm'])
+suites = {
+    'preboot': [],
+    'expander': ['boot.scm']
+}
 
-print('%s out of %s tests successful' % (successful_tests, total_tests))
+if __name__ == '__main__':
+
+    import sys
+
+    for arg in sys.argv[1:]:
+        if arg not in suites:
+            print('no such test suite %s' % arg)
+            continue
+        run_tests(arg, suites[arg])
+
+    if len(sys.argv[1:]) == 0:
+        for suite in suites:
+            run_tests(suite, suites[suite])
+
+    print('%s out of %s tests successful' % (successful_tests, total_tests))

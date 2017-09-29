@@ -98,37 +98,9 @@ Value fn_eqv(State& state, size_t argc, Value* argv) {
   return fn_eq(state, argc, argv);
 }
 
-static bool fn_equal_impl(Value a, Value b) {
-  if(a.bits == b.bits) return true;
-
-  if(a.type() == VECTOR && b.type() == VECTOR) {
-    for(size_t i = 0; i < a.vector_length() && i < b.vector_length(); i++) {
-      if(!fn_equal_impl(a.vector_ref(i), b.vector_ref(i))) {
-        return false;
-      }
-    }
-    return true;
-  } else if(a.type() == PAIR && b.type() == PAIR) {
-    while(a.type() == PAIR && b.type() == PAIR) {
-      if(!fn_equal_impl(a.car(), b.car())) {
-        return false;
-      }
-      a = a.cdr();
-      b = b.cdr();
-    }
-
-    if(a != C_NIL || b != C_NIL) {
-      return fn_equal_impl(a, b);
-    }
-
-    return C_TRUE;
-  }
-
-  return a.bits == b.bits;
-}
 
 Value fn_equal(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(fn_equal_impl(argv[0], argv[1]));
+  return Value::make_boolean(state.equals(argv[0], argv[1]));
 }
 
 Value fn_display(State& state, size_t argc, Value* argv) {
@@ -140,7 +112,6 @@ Value fn_newline(State& state, size_t argc, Value* argv) {
   std::cout << std::endl;
   return C_UNSPECIFIED;
 }
-
 
 void fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os) {
   for(size_t i = 0; i != argc; i++) {
@@ -510,6 +481,43 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
   return argv[0].vector_ref(argv[1].fixnum_value());
 }
 
+Value fn_make_table(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "make-table";
+
+  return state.make_table();
+}
+
+Value fn_table_ref(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "table-ref";
+
+  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
+  AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
+
+  bool found;
+  Value result = state.table_get(argv[0], argv[1], found);
+  if(!found) return C_FALSE;
+  return result;
+}
+
+Value fn_table_set(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "table-set!";
+
+  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
+  AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
+
+  return state.table_set(argv[0], argv[1], argv[2]);
+
+}
+
+///// STRINGS
+
+Value fn_string_copy(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "string-copy";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+
+  return state.string_copy(argv[0]);
+}
+
 ///// MACROEXPANSION SUPPORT
 
 /** Generate a unique, unused symbol */
@@ -524,7 +532,7 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
 
   if(argc == 1) {
     AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
-    os << argv[0].symbol_name_bytes();
+    os << argv[0].symbol_name_data();
   } else {
     os << "g";
   }
@@ -701,7 +709,6 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   return exc;
 }
 
-
 void State::install_builtin_functions() {
   // Numbers
   defun("fx+", fn_fx_add, 1, 1, true);
@@ -711,8 +718,6 @@ void State::install_builtin_functions() {
   defun("fx>", fn_fx_gt, 2);
 
   // TODO Variadic arguments
-  
-
   defun("+", fn_add, 2);
   defun("-", fn_sub, 2);
   defun("/", fn_div, 2);
@@ -734,6 +739,9 @@ void State::install_builtin_functions() {
   defun("flonum?", fn_flonump, 1);
   //defun("constant=?", fn_constantp, 1);
 
+  // Strings
+  defun("string-copy", fn_string_copy, 1);
+
   // Lists
   defun("cons", fn_cons, 2);
   defun("list", fn_list, 0, 0, true);
@@ -749,6 +757,11 @@ void State::install_builtin_functions() {
   defun("make-vector", fn_make_vector, 0, 2);
   defun("vector-ref", fn_vector_ref, 2);
   defun("vector-set!", fn_vector_set, 3);
+
+  // Tables
+  defun("make-table", fn_make_table, 0);
+  defun("table-ref", fn_table_ref, 2);
+  defun("table-set!", fn_table_set, 3);
 
   // Equality
   defun("eq?", fn_eq, 2);

@@ -55,7 +55,7 @@ TEST_CASE_FIXTURE(AS, "rename creation") {
 
   CHECK(y.identifierp());
   CHECK(y.type() == RENAME);
-  CHECK(state.identifier_equal(x, y));
+  // CHECK(state.identifier_equal(x, y));
   state.gc.collect();
 }
 
@@ -93,6 +93,30 @@ TEST_CASE_FIXTURE(AS, "exceptions") {
   CHECK(msg.type() == STRING);
 
   CHECK(msg.string_equals("my message"));
+}
+
+TEST_CASE_FIXTURE(AS, "tables") {
+  Value table, key, tmp;
+  AR_FRAME(state, table, key, tmp);
+  table = state.make_table();
+  for(size_t i = 0; i != 100; i++) {
+    std::ostringstream os;
+    os << i;
+    key = state.make_string(os.str());
+    state.table_insert(table, key, Value::make_fixnum(i));
+    bool found;
+    tmp = state.table_get(table, key, found);
+    CHECK_MESSAGE(found, "table insert successful");
+    CHECK(tmp == Value::make_fixnum(i));
+    //CHECK(state.table_get(table, key, found))
+  }
+
+  for(ptrdiff_t i = 0; i != 100; i++) {
+    state.table_set(table, key, Value::make_fixnum(0 - i));
+    bool found;
+    CHECK(state.table_get(table, key, found) == Value::make_fixnum(0 - i));
+    //CHECK(state.table_get(table, key) == Value::make_Fixnum(i));
+  }
 }
 
 ///// (READ) READER
@@ -142,7 +166,7 @@ TEST_CASE_FIXTURE(AS, "read a symbol") {
 
   std::string check("hello");
   CHECK(sym.type() == BOX);
-  CHECK(check.compare(sym.unbox().symbol_name_bytes()) == 0);
+  CHECK(check.compare(sym.unbox().symbol_name_data()) == 0);
 }
 
 
