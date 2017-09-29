@@ -92,13 +92,12 @@
 
 (define macroexpand
   (lambda (x env) 
-    #;(if LOG-MACROEXPAND 
-      (print "macroexpand called with " x))
     (if (self-evaluating? x)
         x
         (if (or (rename? x) (symbol? x))
           (if (env-syntax? env x)
               (raise 'expand (print-string "used syntax" x "as value") x)
+              ;; TODO... could this annotate with module info?
               x)
           (begin
             (define kar (car x))

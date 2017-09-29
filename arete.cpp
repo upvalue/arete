@@ -98,28 +98,37 @@ Value fn_eqv(State& state, size_t argc, Value* argv) {
   return fn_eq(state, argc, argv);
 }
 
-Value fn_equal(State& state, size_t argc, Value* argv) {
-  if(argv[0].type() == VECTOR && argv[1].type() == VECTOR) {
-    return C_FALSE;
-  } else if(argv[0].type() == PAIR && argv[1].type() == PAIR) {
-    Value lst = argv[0], lst2 = argv[1];
+static bool fn_equal_impl(Value a, Value b) {
+  if(a.bits == b.bits) return true;
 
-    while(lst.type() == PAIR && lst2.type() == PAIR) {
-      if(lst.car().bits != lst2.car().bits) {
-        return C_FALSE;
+  if(a.type() == VECTOR && b.type() == VECTOR) {
+    for(size_t i = 0; i < a.vector_length() && i < b.vector_length(); i++) {
+      if(!fn_equal_impl(a.vector_ref(i), b.vector_ref(i))) {
+        return false;
       }
-      lst = lst.cdr();
-      lst2 = lst2.cdr();
+    }
+    return true;
+  } else if(a.type() == PAIR && b.type() == PAIR) {
+    while(a.type() == PAIR && b.type() == PAIR) {
+      if(!fn_equal_impl(a.car(), b.car())) {
+        return false;
+      }
+      a = a.cdr();
+      b = b.cdr();
     }
 
-    if(lst != C_NIL || lst2 != C_NIL) {
-      return Value::make_boolean(lst.bits == lst2.bits);
+    if(a != C_NIL || b != C_NIL) {
+      return fn_equal_impl(a, b);
     }
 
     return C_TRUE;
-  } else {
-    return fn_eq(state, argc, argv);
   }
+
+  return a.bits == b.bits;
+}
+
+Value fn_equal(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(fn_equal_impl(argv[0], argv[1]));
 }
 
 Value fn_display(State& state, size_t argc, Value* argv) {
@@ -379,6 +388,8 @@ Value fn_map(State& state, size_t argc, Value* argv) {
   return nlst_head;
 }
 
+/** This is a for-each that also applies the function to the end of a dotted list; it's used to
+ * process lambda argument lists e.g. (lambda (first . rest) ...) */
 Value fn_for_each_dot(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "for-each.";
 
