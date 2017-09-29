@@ -3,6 +3,7 @@ x figure out how to get a stack trace with C++ after assertion failures
   just use valgrind
 - hash tables
 - ports
+- flonum 4 is printed as 4 and not 4.0
 x are C++ exceptions okay to use? 
   nah
 garbage collection

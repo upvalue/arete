@@ -1617,16 +1617,20 @@ struct State {
 
   void env_set(Value env, Value name, Value val) {
     AR_FRAME(this, env, name, val);
-    AR_TYPE_ASSERT(name.type() == SYMBOL);
+    AR_TYPE_ASSERT(name.identifierp());
+    // AR_TYPE_ASSERT(name.type() == SYMBOL);
     // Toplevel set
     while(env != C_FALSE) {
-      for(size_t i = 1; i != env.vector_length(); i += 2) {
-        if(env.vector_ref(i) == name) {
-          env.vector_set(i+1, val);
+      for(size_t i = env.vector_length() - 1; i >= 1; i -= 2) {
+        if(identifier_equal(env.vector_ref(i-1), name)) {
+          env.vector_set(i, val);
           return;
         }
       }
       env = env.vector_ref(0);
+    }
+    if(name.type() == RENAME) {
+      name = name.rename_expr();
     }
     name.as<Symbol>()->value = val;
   }
@@ -2610,10 +2614,10 @@ struct Reader {
         }
         // Negative numbers
         if(c == '-'){
-          c = is.peek();
-          if(c >= '0' && c <= '9') {
+          char c2 = is.peek();
+          if(c2 >= '0' && c2 <= '9') {
             getc(c);
-            return read_number(c - '0', true);
+            return read_number(c2 - '0', true);
           }
         }
         return read_symbol(c, box);

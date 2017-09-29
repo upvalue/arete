@@ -7,18 +7,60 @@ namespace arete {
 size_t gc_collect_timer = 0;
 State* current_state = 0;
 
+// Casting arithmetic
+#define OP(name, cname, boolean, operator) \
+  Value name (State& state, size_t argc, Value* argv) { \
+    static const char* fn_name = cname; \
+    AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].type() == FIXNUM || argv[0].type() == FLONUM); \
+    AR_FN_ASSERT_ARG(state, 1, "to be a number", argv[1].type() == FIXNUM || argv[1].type() == FLONUM); \
+    if(argv[0].type() == FLONUM || argv[1].type() == FLONUM) { \
+      double n1 = argv[0].type() == FLONUM ? argv[0].flonum_value() : argv[0].fixnum_value(); \
+      double n2 = argv[1].type() == FLONUM ? argv[1].flonum_value() : argv[1].fixnum_value(); \
+      return (boolean) ? Value::make_boolean(n1 operator n2) : state.make_flonum(n1 operator n2); \
+    } \
+    return (boolean) ? Value::make_boolean(argv[0].fixnum_value() operator argv[1].fixnum_value()) : \
+        Value::make_fixnum(argv[0].fixnum_value() operator argv[1].fixnum_value()); \
+  }
+
+OP(fn_add, "+", false, +)
+OP(fn_sub, "-", false, -)
+OP(fn_mul, "*", false, *)
+OP(fn_div, "/", false, /)
+OP(fn_num_equal, "=", false, ==)
+
+#undef OP
+
+// Fixnum arithmetic
+
 Value fn_fx_sub(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx-";
+
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  return Value::make_fixnum(argv[0].fixnum_value() - argv[1].fixnum_value());
+
+  if(argc == 1) {
+    return Value::make_fixnum(0 - argv[0].fixnum_value());
+  }
+
+  ptrdiff_t result = argv[0].fixnum_value();
+
+  for(size_t i = 1; i != argc; i++) {
+    AR_FN_EXPECT_TYPE(state, argv, i, FIXNUM);
+    result -= argv[i].fixnum_value();
+  }
+
+  return Value::make_fixnum(result);
 }
 
 Value fn_fx_add(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx+";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  return Value::make_fixnum(argv[0].fixnum_value() + argv[1].fixnum_value());
+  ptrdiff_t result = 0;
+
+  for(size_t i = 0; i != argc; i++) {
+    AR_FN_EXPECT_TYPE(state, argv, i, FIXNUM);
+    result += argv[i].fixnum_value();
+  }
+
+  return Value::make_fixnum(result);
 }
 
 Value fn_fx_equals(State& state, size_t argc, Value* argv) {
@@ -57,7 +99,27 @@ Value fn_eqv(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_equal(State& state, size_t argc, Value* argv) {
-  return fn_eq(state, argc, argv);
+  if(argv[0].type() == VECTOR && argv[1].type() == VECTOR) {
+    return C_FALSE;
+  } else if(argv[0].type() == PAIR && argv[1].type() == PAIR) {
+    Value lst = argv[0], lst2 = argv[1];
+
+    while(lst.type() == PAIR && lst2.type() == PAIR) {
+      if(lst.car().bits != lst2.car().bits) {
+        return C_FALSE;
+      }
+      lst = lst.cdr();
+      lst2 = lst2.cdr();
+    }
+
+    if(lst != C_NIL || lst2 != C_NIL) {
+      return Value::make_boolean(lst.bits == lst2.bits);
+    }
+
+    return C_TRUE;
+  } else {
+    return fn_eq(state, argc, argv);
+  }
 }
 
 Value fn_display(State& state, size_t argc, Value* argv) {
@@ -123,6 +185,14 @@ Value fn_boxp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == BOX);
 }
 
+Value fn_flonump(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(argv[0].type() == FLONUM);
+}
+
+Value fn_fixnump(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(argv[0].type() == FIXNUM);
+}
+
 Value fn_charp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == CHARACTER);
 }
@@ -137,6 +207,7 @@ Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
   switch(argv[0].type()) {
     case STRING:
     case VECTOR: 
+    case FLONUM:
       return C_TRUE;
     default:
       return C_FALSE;
@@ -619,13 +690,23 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   return exc;
 }
 
+
 void State::install_builtin_functions() {
   // Numbers
-  defun("fx+", fn_fx_add, 2);
-  defun("fx=", fn_fx_equals, 2);
-  defun("fx-", fn_fx_sub, 2);
+  defun("fx+", fn_fx_add, 1, 1, true);
+  defun("fx=", fn_fx_equals, 2, 2, true);
+  defun("fx-", fn_fx_sub, 1, 1, true);
   defun("fx<", fn_fx_lt, 2);
   defun("fx>", fn_fx_gt, 2);
+
+  // TODO Variadic arguments
+  
+
+  defun("+", fn_add, 2);
+  defun("-", fn_sub, 2);
+  defun("/", fn_div, 2);
+  defun("*", fn_mul, 2);
+  defun("=", fn_num_equal, 2);
 
   // Predicates
   defun("null?", fn_nullp, 1);
@@ -638,6 +719,8 @@ void State::install_builtin_functions() {
   defun("self-evaluating?", fn_self_evaluatingp, 1);
   defun("identifier?", fn_identifierp, 1);
   defun("box?", fn_boxp, 1);
+  defun("fixnum?", fn_fixnump, 1);
+  defun("flonum?", fn_flonump, 1);
   //defun("constant=?", fn_constantp, 1);
 
   // Lists
