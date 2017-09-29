@@ -486,7 +486,7 @@ inline Value Value::car() const {
 inline size_t Value::list_length() const {
   Value check(bits);
   if(check == C_NIL) return 0;
-  AR_TYPE_ASSERT(type() == PAIR);
+  //AR_TYPE_ASSERT(type() == PAIR);
   size_t len = 0;
   while(check.type() == PAIR) {
     ++len;
@@ -1769,12 +1769,16 @@ struct State {
   
   Value eval_lambda(Value env,  Value exp) {
     Value fn_env, args, args_head, args_tail, fn_name;
-    // Add a descriptor of anonymous function
 
     AR_FRAME(this, env,  exp, fn_env, args, args_head, args_tail);
     Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
     fn->name = C_FALSE;
     fn->parent_env = env;
+
+    // Some verification is needed here because eval_lambda may be called by the macroexpander
+    if(exp.list_length() < 3) 
+      return eval_error("lambda must be a list with at least three elements",  exp);
+
     args = exp.cadr();
     if(args.maybe_unbox().identifierp()) {
       fn->arguments = C_NIL;
@@ -2507,6 +2511,9 @@ struct Reader {
 
           // TODO: NEED A WAY TO CHECK ) HERE
           if(tk == TK_DOT) {
+            if(tail.bits == 0) {
+              return read_error("unexpected dot at beginning of list", list_start.line);
+            }
             dotted = true;
             elt = read_expr(tk, box);
             if(elt == C_EOF) {

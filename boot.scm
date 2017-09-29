@@ -98,7 +98,7 @@
         x
         (if (or (rename? x) (symbol? x))
           (if (env-syntax? env x)
-              (raise 'expand (interpolate "used syntax" x "as value") x)
+              (raise 'expand (print-string "used syntax" x "as value") x)
               x)
           (begin
             (define kar (car x))
@@ -140,7 +140,7 @@
                  (define bindings (cadr x))
 
                  (if (or (null? bindings) (pair? bindings))
-                   (map (lambda (arg)
+                   (for-each. (lambda (arg)
                       (if (not (identifier? arg))
                         (raise 'expand "non-identifier in lambda argument list" (list x arg)))
                       (env-define new-env arg 'variable)) bindings)

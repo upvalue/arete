@@ -91,7 +91,7 @@ Value fn_print(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-Value fn_interpolate(State& state, size_t argc, Value* argv) {
+Value fn_print_string(State& state, size_t argc, Value* argv) {
   std::ostringstream os;
   fn_print_impl(state, argc, argv, os);
   return state.make_string(os.str());
@@ -308,6 +308,31 @@ Value fn_map(State& state, size_t argc, Value* argv) {
   return nlst_head;
 }
 
+Value fn_for_each_dot(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "for-each.";
+
+  AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
+
+  if(argv[1] == C_NIL) return C_NIL;
+  AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
+
+  Value lst = argv[1], fn = argv[0], arg, tmp;
+  AR_FRAME(state, lst, fn, arg, tmp);
+
+  while(lst.type() == PAIR) {
+    arg = state.make_pair(lst.car().maybe_unbox(), C_NIL);
+    tmp = state.apply_generic(fn, arg, false);
+    if(tmp.is_active_exception()) return tmp;
+    lst = lst.cdr();
+  }
+
+  if(lst != C_NIL) {
+    arg = state.make_pair(lst.maybe_unbox(), C_NIL);
+    return state.apply_generic(fn, arg, false);
+  }
+
+  return C_UNSPECIFIED;
+}
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "eval"; (void) fn_name;
@@ -622,6 +647,7 @@ void State::install_builtin_functions() {
   defun("list-ref", fn_list_ref, 2);
   defun("length", fn_length, 1);
   defun("map", fn_map, 2);
+  defun("for-each.", fn_for_each_dot, 2);
   defun("apply", fn_apply, 2);
   defun("eval", fn_eval, 1);
 
@@ -639,7 +665,7 @@ void State::install_builtin_functions() {
   defun("display", fn_display, 1, 1, false);
   defun("newline", fn_newline, 0);
   defun("print", fn_print, 0, 0, true);
-  defun("interpolate", fn_interpolate, 0, 0, true);
+  defun("print-string", fn_print_string, 0, 0, true);
 
   // Pairs
   defun("car", fn_car, 1, 1);

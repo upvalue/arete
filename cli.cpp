@@ -67,7 +67,7 @@ bool do_repl() {
 
   std::ostringstream prompt;
 
-  std::cout << "Arete 0.1" << std::endl;
+  std::cout << "; Arete 0.1" << std::endl;
 
   while(i++) {
     prompt << "> ";

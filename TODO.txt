@@ -36,6 +36,8 @@ x block comments #|
 - unicode
 x attach source code info to symbols by boxing them
 macroexpander
+- can crash by defining macros to bad stuff e.g.
+  (define-syntax hello #t)
 x explicit renaming
 x check validity of lambda
 - syntax-rules
