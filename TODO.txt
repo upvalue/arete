@@ -28,6 +28,7 @@ x stack traces
   x references to undefined symbols (reader should wrap with source info)
   + c-function names and source code locations
 reader
+- EOF in string should show where string *starts*
 - improve the mismatched bracket error message
 x expression comments #;
 x block comments #|
@@ -47,3 +48,5 @@ language
 - consider immutable pairs like Racket
 cleanup
 x use State::macroexpand and remove all other eval_args functionality
+
+major projects: types, modules, structs, tables, compiler.

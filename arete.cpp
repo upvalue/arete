@@ -35,6 +35,13 @@ Value fn_fx_lt(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].fixnum_value() < argv[1].fixnum_value());
 }
 
+Value fn_fx_gt(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "fx>";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  return Value::make_boolean(argv[0].fixnum_value() > argv[1].fixnum_value());
+}
+
 #define AR_ARITHMETIC(name, op) \
   Value fn_##name (State& state, size_t argc, Value* argv) { \
     const char* fn_name = #name; \
@@ -593,6 +600,7 @@ void State::install_builtin_functions() {
   defun("fx=", fn_fx_equals, 2);
   defun("fx-", fn_fx_sub, 2);
   defun("fx<", fn_fx_lt, 2);
+  defun("fx>", fn_fx_gt, 2);
 
   // Predicates
   defun("null?", fn_nullp, 1);

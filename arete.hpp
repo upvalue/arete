@@ -382,7 +382,6 @@ struct Value {
   Value exception_irritants() const;
   
   // FUNCTIONS
-  static const unsigned FUNCTION_EVAL_ARGUMENTS_BIT = 1 << 9;
   static const unsigned FUNCTION_MACRO_BIT = 1 << 10;
 
   Value function_name() const;
@@ -1746,8 +1745,8 @@ struct State {
 
     exp = exp.cdr();
 
-    // (and)
-    if(exp == C_NIL) return C_FALSE;
+    // (and) => #t, (or) => #f
+    if(exp == C_NIL) return Value::make_boolean(!is_or);
 
     while(exp.type() == PAIR) {
       tmp = eval(env, exp.car(), fn_name);
@@ -1774,19 +1773,15 @@ struct State {
 
     AR_FRAME(this, env,  exp, fn_env, args, args_head, args_tail);
     Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
-    fn->header += Value::FUNCTION_EVAL_ARGUMENTS_BIT;
-    args = exp.cadr();
     fn->name = C_FALSE;
     fn->parent_env = env;
-    if(args.type() == SYMBOL) {
+    args = exp.cadr();
+    if(args.maybe_unbox().identifierp()) {
       fn->arguments = C_NIL;
-      fn->rest_arguments = args;
+      fn->rest_arguments = args.maybe_unbox();
     } else {
       // First case: (lambda rest ...)
-      if(args.type() == SYMBOL) {
-        fn->rest_arguments = args;
-        fn->arguments = C_NIL;
-      } else if(args == C_NIL) {
+      if(args == C_NIL) {
         fn->arguments = C_NIL;
         fn->rest_arguments = C_FALSE;
       } else {
@@ -1805,7 +1800,7 @@ struct State {
               return eval_error("lambda argument list must all be identifiers", exp);
             }
 
-            fn->rest_arguments = argi.cdr();
+            fn->rest_arguments = argi.cdr().maybe_unbox();
             argi.set_cdr(C_NIL);
           }
           argi = argi.cdr();
@@ -1940,7 +1935,7 @@ struct State {
     // bool eval_args = fn.function_eval_args();
 
     fn_args = fn.function_arguments();
-    size_t arity = fn.function_arguments().list_length();
+    size_t arity = fn_args.list_length();
     size_t given_args = args.list_length();
 
     if(given_args < arity) {
@@ -2064,7 +2059,7 @@ struct State {
           if(car == get_symbol(S_define)) {
             return eval_define(env, exp, fn_name);
           } else if(car == get_symbol(S_lambda)) {
-            return eval_lambda(env,  exp);
+            return eval_lambda(env, exp);
           } else if(car == get_symbol(S_set)) {
             return eval_set(env,  exp, fn_name);
           } else if(car == get_symbol(S_begin)) {
@@ -2567,7 +2562,7 @@ struct Reader {
         while(true) {
           getc(c);
           if(is.eof()) {
-            return read_error("unexpected EOF in string");
+            return read_error("unexpected EOF in string", 1);
           } else if(c == '"') {
             break;
           } else if(c == '\\') {

@@ -21,7 +21,6 @@
   (lambda (x env)
     (map (lambda (sub-x) (macroexpand sub-x env)) x)))
 
-
 (define expand-define-syntax
   (lambda (x env name body)
     (if (not (symbol? name))
@@ -113,6 +112,8 @@
               (cond 
                 ;; TODO this should strip renames I think
                 ((eq? kar 'quote) x)
+                ((eq? kar 'or)
+                 (cons-source x (car x) (expand-map (cdr x) env)))
                 ((eq? kar 'and)
                  (cons-source x (car x) (expand-map (cdr x) env)))
                 ((eq? kar 'if)
@@ -138,10 +139,13 @@
                  (define new-env (env-make env))
                  (define bindings (cadr x))
 
-                 (map (lambda (arg)
-                    (if (not (identifier? arg))
-                      (raise 'expand "non-identifier in lambda argument list" (list x arg)))
-                    (env-define new-env arg 'variable)) bindings)
+                 (if (or (null? bindings) (pair? bindings))
+                   (map (lambda (arg)
+                      (if (not (identifier? arg))
+                        (raise 'expand "non-identifier in lambda argument list" (list x arg)))
+                      (env-define new-env arg 'variable)) bindings)
+                   (if (not (identifier? bindings))
+                        (raise 'expand "non-identifier as lambda rest argument" (list x bindings))))
 
                  (cons-source x (car x) (cons-source x bindings (expand-map (cddr x) new-env)))
                  )
@@ -299,24 +303,21 @@
       (raise 'syntax "when expects a condition and a body" x))
 
     `(#,if ,(list-ref x 1)
-       ((unquote (rename 'begin))  ,@(cddr x)))))
+       (#,begin  ,@(cddr x)))))
 
 (define-syntax unless
-  (lambda (x r c)
+  (lambda (x rename c)
     (if (fx< (length x) 3)
       (raise 'syntax "unless expects a condition and a body" x))
 
-    `(,(r 'if) (,(r 'not) ,(list-ref x 1))
-       (,(r 'begin) ,@(cddr x)))))
+    `(#,if (#,not ,(list-ref x 1))
+      (#,begin ,@(cddr x)))))
 
-;; let-syntax and letrec-syntax
-;; As well as support for shorthand like (define (x) #t)
-;; Macroexpand recursion (i.e. macros that use other macros)
 ;; let*, letrec
 ;; define* and type stuff
-;; syntax-rules
+;; syntax-rules (?)
 ;; structures/records
 ;; types, type assertions, type dispatching, methods
 ;; constant definitions
 ;; modules
-;; compiler
+;; compiler (?)

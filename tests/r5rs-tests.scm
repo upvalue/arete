@@ -421,11 +421,11 @@
 
 (test #f (procedure? '(lambda (x) (* x x))))
 
-(test #t (call-with-current-continuation procedure?))
+; (test #t (call-with-current-continuation procedure?))
 
-(test 7 (call-with-current-continuation (lambda (k) (+ 2 5))))
+; (test 7 (call-with-current-continuation (lambda (k) (+ 2 5))))
 
-(test 3 (call-with-current-continuation (lambda (k) (+ 2 5 (k 3)))))
+; (test 3 (call-with-current-continuation (lambda (k) (+ 2 5 (k 3)))))
 
 (test 7 (apply + (list 3 4)))
 
@@ -483,6 +483,7 @@
 (test '(2 3)
     ((lambda () (let ((x 1)) (let ((y x)) (set! x 2) (set! y 3) (list x y))))))
 
+#|
 (test '(a b c)
     (let* ((path '())
            (add (lambda (s) (set! path (cons s path)))))
@@ -505,6 +506,7 @@
         (if (< (length path) 4)
             (c 'talk2)
             (reverse path)))))
+|#
 
 (test 2 (let-syntax
             ((foo (syntax-rules ::: ()

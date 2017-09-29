@@ -126,7 +126,6 @@ int main(int argc, const char **argv) {
   std::string quiet("--quiet");
   std::string showexpand("--showexpand");
 
-
   if(argc > 1) {
     // read files
     for(size_t i = 1; i != argc; i++) {
