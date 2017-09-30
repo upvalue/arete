@@ -15,19 +15,19 @@
 
 ;;;;; MACROEXPANSION
 
-(define LOG-MACROEXPAND #f)
+(define LOG-expand #f)
 
-;; Shortcut for applying macroexpand with an environment, since this is used pretty often
+;; Shortcut for applying expand with an environment, since this is used pretty often
 (define expand-map
   (lambda (x env)
-    (map (lambda (sub-x) (macroexpand sub-x env)) x)))
+    (map (lambda (sub-x) (expand sub-x env)) x)))
 
 (define expand-define-syntax
   (lambda (x env name body)
     (if (not (symbol? name))
         (raise 'expand "macro name must be a symbol" x))
 
-    (define fn (eval-lambda (macroexpand body env) env))
+    (define fn (eval-lambda (expand body env) env))
 
     (set-function-name! fn name)
     (set-function-macro-bit! fn)
@@ -59,8 +59,10 @@
             (expand-define-syntax x new-env name body))
           bindings)
 
-       (cons-source x (make-rename #f 'begin) (macroexpand body new-env)))))
+       (cons-source x (make-rename #f 'begin) (expand body new-env)))))
 
+;; define expander; handles creating a note in the env as well as 
+;; extended syntax: (define (fn) #t) becomes (define fn (lambda () #t))
 (define expand-define
   (lambda (x env)
     (if (fx< (length x) 2)
@@ -87,11 +89,11 @@
               (cons-source x (make-rename #f 'begin) (cddr x))))
             )))
     
-    (define result (list-source x (car x) name (macroexpand value env)))
+    (define result (list-source x (car x) name (expand value env)))
     ;(print result)
     result))
 
-(define macroexpand
+(define expand
   (lambda (x env) 
     (if (self-evaluating? x)
         x
@@ -100,7 +102,7 @@
               (raise 'expand (print-string "used syntax" x "as value") x)
               ;; TODO... could this annotate with module info?
               (begin
-                ;(print "macroexpander encountered variable" x)
+                ;(print "expander encountered variable" x)
                 x))
           (begin
             (define kar (car x))
@@ -131,7 +133,7 @@
                  (if (fx= if-length 4)
                      (set! else-clause (list-ref x 3)))
 
-                 (list-source x (car x) (macroexpand condition env) (macroexpand then env) (macroexpand else-clause env)))
+                 (list-source x (car x) (expand condition env) (expand then env) (expand else-clause env)))
                 ;; COND
                 ((eq? kar 'cond)
                  ;; (if clause-condition clause-body else rest-of-clauses...right?
@@ -171,7 +173,7 @@
                  (cons-source x (car x) (expand-map (cdr x) env)))
                 ;; DEFINE
                 ((eq? kar 'set!)
-                 (list-source x (car x) (macroexpand (list-ref x 1) env) (macroexpand (list-ref x 2) env))
+                 (list-source x (car x) (expand (list-ref x 1) env) (expand (list-ref x 2) env))
                  )
                 ((eq? kar 'define) (expand-define x env))
                 (else
@@ -187,8 +189,8 @@
                           (lambda (a b)
                             (env-compare env a b))))
 
-                      ;(print "macroexpanding" result)
-                      (set! result (macroexpand result env))
+                      ;(print "expanding" result)
+                      (set! result (expand result env))
                       
                       result
                       )
@@ -197,14 +199,14 @@
                   ;; else: handle something like ((lambda () #t))
                   (begin 
                     (define result
-                      (cons-source x (macroexpand (car x) env) (map (lambda (sub-x) (macroexpand sub-x env)) (cdr x)))
+                      (cons-source x (expand (car x) env) (map (lambda (sub-x) (expand sub-x env)) (cdr x)))
                       )
                     result
                   ))
               )) ;; (if (symbol? x))
-            ))) ;; end macroexpand
+            ))) ;; end expand
 
-(install-macroexpander macroexpand)
+(install-expander expand)
 
 ;;;;; BASIC SYNTACTIC FORMS
 ;; eg let & friends, quasiquote, when/unless
@@ -237,7 +239,7 @@
 ;; (print something)
 ;; and if "something" is modified in any way, it doesn't matter because the macro-writer can't reasonably expect it to 
 ;; refer to anything useful right?
-;; when macroexpanding the result, we'll make it ##module#something right?
+;; when expanding the result, we'll make it ##module#something right?
 
 ;; (module test)
 ;; (export one two three four five)
@@ -253,7 +255,7 @@
 ;; (a module table?)
 ;; a module table.
 
-;; after install-macroexpand is called, it will do everything in the "core" module.
+;; after install-expand is called, it will do everything in the "core" module.
 
 (define-syntax let
   (lambda (x r c)
@@ -289,7 +291,7 @@
 
     (set! vals 
       (map (lambda (binding)
-             ;; TODO macroexpand.
+             ;; TODO expand.
              (cadr binding)
              ) bindings))
 
@@ -403,6 +405,7 @@
 
     `(#,let ((#,result ,key))
       ,code)))
+
 
 ;; let*, letrec
 ;; define* and type stuff

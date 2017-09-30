@@ -58,4 +58,4 @@ count:
 	cloc arete.hpp arete.cpp boot.scm
 
 clean:
-	rm -f arete test *.o
+	rm -f arete test *.o tests/test-semispace tests/test-incremental

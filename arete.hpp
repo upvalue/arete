@@ -254,6 +254,14 @@ struct Value {
     Type tipe = type();
     return tipe == FLONUM || tipe == FIXNUM;
   }
+  inline bool eqv(const Value &rhs) const {
+    if (bits == rhs.bits)
+      return true;
+    if (type() == FLONUM && rhs.type() == FLONUM) {
+      return flonum_value() == rhs.flonum_value();
+    }
+    return false;
+  }
 
   bool hashable() const {
     Type tipe = type();
@@ -414,14 +422,6 @@ struct Value {
   // Identity comparison
   inline bool operator==(const Value& other) const {
     return bits == other.bits;
-  }
-
-  inline bool eqv(const Value& rhs) const {
-    if(bits == rhs.bits) return true;
-    if(type() == FLONUM && rhs.type() == FLONUM) {
-      return flonum_value() == rhs.flonum_value();
-    }
-    return false;
   }
 
   inline bool operator!=(const Value& other) const { return bits != other.bits; }
@@ -913,7 +913,7 @@ struct GCSemispace : GCCommon {
     (*ref) = cpy;
   }
 
-  void copy_symbol_table();
+  void copy_roots();
 
   void collect(size_t request = 0, bool force = false) {
     collections++;
@@ -940,18 +940,7 @@ struct GCSemispace : GCCommon {
     other = new Block(new_heap_size, 0);
     other_cursor = other->data;
 
-    copy_symbol_table();
-
-    for(size_t i = 0; i != frames.size(); i++) {
-      Frame* f = frames[i];
-      for(size_t j = 0; j != f->size; j++) {
-        copy(f->values[j]);
-      }
-    }
-
-    for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
-      copy(&((*i)->ref.heap));
-    }
+    copy_roots();
 
 
     char* sweep = other->data;
@@ -1325,7 +1314,7 @@ struct State {
   symbol_table_t symbol_table;
   std::vector<std::string> source_names;
 
-  State():  gc(*this), gensym_counter(0), print_expansions(0), macroexpander(*this) {
+  State():  gc(*this), gensym_counter(0), print_expansions(0) {
     current_state = this;
   }
   ~State() {
@@ -1338,26 +1327,47 @@ struct State {
     return source_names.size() - 1;
   }
 
-  // Note: Order is important here. Everything between quote and S_set will be 
-  // defined as builtin syntax
-
-  #define AR_SYMBOLS(_) \
-    _(quasiquote), _(unquote), _(quote), _(begin), \
-    _(define), _(lambda), _(if), _(cond),  \
-    _(and), _(or)
-
   #define AR_SYMBOLS_AUX(name) S_##name
 
-  std::vector<Handle> builtin_symbols;
-  Handle macroexpander;
+  std::vector<Value> globals;
 
-  enum BuiltinSymbol {
-    AR_SYMBOLS(AR_SYMBOLS_AUX),
-    S_set, S_define_syntax, S_let_syntax, S_letrec_syntax,
-    // END BUILTIN SYNTAX
-    // Various other symbols
-    S_else, S_unquote_splicing, S_rename,
-    S_read_error, S_eval_error, S_type_error };
+  // Global variables
+  
+  // Note that order is important here. Everything from S_QUOTE to S_LETREC_SYNTAX
+  // will be set to C_SYNTAX meaning that its values can't be handled directly
+  // by Scheme code. 
+
+  // All the symbols here will be allocated on boot so that using them doesn't cause an allocation
+  // e..g in the reader. And are defined in the State::boot procedure.
+  enum Global {
+    // C_SYNTAX values
+    S_QUOTE,
+    S_BEGIN,
+    S_DEFINE,
+    S_LAMBDA,
+    S_IF,
+    S_COND,
+    S_AND,
+    S_OR,
+    S_SET,
+    S_DEFINE_SYNTAX,
+    S_LET_SYNTAX,
+    S_LETREC_SYNTAX,
+    // Used by interpreter
+    S_ELSE,
+    // Used by reader
+    S_QUASIQUOTE,
+    S_UNQUOTE,
+    S_UNQUOTE_SPLICING,
+    S_RENAME,
+    // Errors that may be thrown by the runtime
+    S_READ_ERROR,
+    S_EVAL_ERROR,
+    S_TYPE_ERROR,
+    // Global variables
+    G_EXPANDER,
+    G_END
+  };
 
   /** Performs various initializations required for an instance of Arete;
     * this is separate so the State itself can be used for lightweight testing */
@@ -1365,20 +1375,28 @@ struct State {
     source_names.push_back("unknown");
     source_names.push_back("c-string");
 
-    // Initialize built-in symbols
-    static const char* symbols[] = { 
-      #define AR_SYMBOLS_AUX2(x) #x
-      AR_SYMBOLS(AR_SYMBOLS_AUX2),
-      "set!", "define-syntax", "let-syntax", "letrec-syntax", "else", "unquote-splicing", "rename",
-      "read-error", "eval-error", "type-error"
+    static const char* _symbols[] = {
+      // C_SYNTAX values
+      "quote", "begin", "define", "lambda", "if", "cond", "and", "or", "set!",
+      "define-syntax", "let-syntax", "letrec-syntax",
+      // Used by interpreter
+      "else",
+      // Used by reader      
+      "quasiquote", "unquote", "unquote-splicing", "rename",
+      // Errors that may be thrown by the runtime
+      "read", "eval", "type",
+      // Various variables
+      "expander",
     };
 
-    for(size_t i = 0; i != sizeof(symbols) / sizeof(const char*); i++) {
-      builtin_symbols.push_back(Handle(*this, get_symbol(symbols[i])));
-    }
-
-    for(size_t i = S_quote; i != S_else + 1; i++) {
-      get_symbol((BuiltinSymbol) i ).as<Symbol>()->value = C_SYNTAX;
+    for(size_t i = 0; i != G_END; i++) {
+      Value s = get_symbol(_symbols[i]);
+      if(i <= S_LETREC_SYNTAX) {
+        s.as<Symbol>()->value = C_SYNTAX;
+      } else {
+        s.as<Symbol>()->value = C_UNDEFINED;
+      }
+      globals.push_back(s);
     }
 
     install_builtin_functions();
@@ -1394,8 +1412,17 @@ struct State {
     return v;
   }
 
-  Value get_symbol(BuiltinSymbol sym) {
-    return *(builtin_symbols.at((size_t) sym));
+  Value get_symbol(Global sym) {
+    return (globals.at((size_t) sym));
+  }
+
+  Value get_global_value(Global sym) {
+    Value s = globals.at((size_t) sym);
+    return s.as<Symbol>()->value;
+  }
+
+  void set_global_value(Global sym, Value v) {
+    globals.at((size_t) sym).as<Symbol>()->value = v;
   }
 
   Value get_symbol(const std::string& name) {
@@ -1726,7 +1753,7 @@ struct State {
     return make_exception(tag, cmessage, irritants);
   }
   
-  Value make_exception(BuiltinSymbol s, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
+  Value make_exception(Global s, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
     return make_exception(get_symbol(s), cmessage, irritants);
   }
 
@@ -1987,7 +2014,7 @@ struct State {
     // Check for else clause
     pred = lst.caar();
     body = lst.cdar();
-    if(pred.maybe_unbox() == get_symbol(S_else)) {
+    if(pred.maybe_unbox() == get_symbol(S_ELSE)) {
       return eval_body(env,  fn_name, fn_name, body, body);
     } else {
       tmp = eval(env,  pred, fn_name);
@@ -2086,6 +2113,10 @@ struct State {
   Value eval_define(Value env,  Value exp, Value fn_name) {
     Value name, body, tmp;
     AR_FRAME(this, env,  exp, name, body, tmp, fn_name);
+
+    if(exp.list_length() != 3) {
+      return eval_error("define expects exactly three arguments", exp);
+    }
 
     name = exp.cadr().maybe_unbox();
 
@@ -2323,28 +2354,28 @@ struct State {
           if(car.type() == RENAME && tmp == C_SYNTAX) {
             car = car.rename_expr();
           }
-          if(car == get_symbol(S_define)) {
+          if(car == get_symbol(S_DEFINE)) {
             return eval_define(env, exp, fn_name);
-          } else if(car == get_symbol(S_lambda)) {
+          } else if(car == get_symbol(S_LAMBDA)) {
             return eval_lambda(env, exp);
-          } else if(car == get_symbol(S_set)) {
+          } else if(car == get_symbol(S_SET)) {
             return eval_set(env,  exp, fn_name);
-          } else if(car == get_symbol(S_begin)) {
+          } else if(car == get_symbol(S_BEGIN)) {
             return eval_begin(env,  exp, fn_name);
-          } else if(car == get_symbol(S_cond)) {
+          } else if(car == get_symbol(S_COND)) {
             return eval_cond(env,  exp, fn_name);
             // add fn name
-          } else if(car == get_symbol(S_and)) {
+          } else if(car == get_symbol(S_AND)) {
             return eval_boolean_op(env, exp, fn_name, false);
-          } else if(car == get_symbol(S_or)) {
+          } else if(car == get_symbol(S_OR)) {
             return eval_boolean_op(env, exp, fn_name, true);
-          } else if(car == get_symbol(S_if)) {
+          } else if(car == get_symbol(S_IF)) {
             if(length != 3 && length != 4) {
               return eval_error("if requires 2-3 arguments", exp);
             }
 
             return eval_if(env,  exp, length == 4, fn_name);
-          } else if(car == get_symbol(S_quote)) {
+          } else if(car == get_symbol(S_QUOTE)) {
             if(length > 2) return eval_error("quote takes exactly 1 argument", exp);
             return exp.cadr().maybe_unbox();
           }
@@ -2384,7 +2415,7 @@ struct State {
 
         // Then we look it up in the rename env
         // e.g. ((r 'lambda) () #t)
-        return eval(exp.rename_env(), exp.rename_expr(), fn_name);
+        return env_lookup(exp.rename_env(), exp.rename_expr(), false);
       }
       case BOX:
       case SYMBOL: {
@@ -2410,7 +2441,7 @@ struct State {
         if(res == C_SYNTAX) {
           std::stringstream os;
           os << "attempt to use syntax " << exp << " as value";
-          if(exp == get_symbol(S_define_syntax)) {
+          if(exp == get_symbol(S_DEFINE_SYNTAX)) {
             // if this happened, it's probably because the macroexpander has not been loaded
             os << " (did you load boot.scm?)";
           }
@@ -2429,10 +2460,10 @@ struct State {
   }
 
   Value eval_toplevel(Value exp) {
-    Value expand = *macroexpander;
+    Value expand = get_global_value(G_EXPANDER);
 
     // Comment out to disable macroexpansion
-    if(expand != C_FALSE) {
+    if(expand != C_UNDEFINED) {
       Value args, sym;
       AR_FRAME(this, expand, exp, args, sym);
       args = make_pair(C_FALSE, C_NIL);
@@ -2561,7 +2592,7 @@ struct Reader {
   }
 
   /** cons quote/quasiquote and friends with an expression */
-  Value read_aux(State::BuiltinSymbol name) {
+  Value read_aux(State::Global name) {
     Value symbol, expr;
     AR_FRAME(state, symbol, expr);
     expr = read(false);
@@ -2660,15 +2691,15 @@ struct Reader {
           // #,lambda => (unquote (rename (quote lambda)))
           Value exp, exp2;
           AR_FRAME(state, exp, exp2);
-          exp = read_aux(State::S_rename);
+          exp = read_aux(State::S_RENAME);
           if(exp.is_active_exception()) return exp;
           exp2 = exp.cdr();
-          exp2 = state.make_pair(state.get_symbol(State::S_quote), exp2);
+          exp2 = state.make_pair(state.get_symbol(State::S_QUOTE), exp2);
           exp2 = state.make_pair(exp2, C_NIL);
           exp.set_cdr(exp2);
           if(c == ',') {
             exp = state.make_pair(exp, C_NIL);
-            exp = state.make_pair(state.get_symbol(State::S_unquote), exp);
+            exp = state.make_pair(state.get_symbol(State::S_UNQUOTE), exp);
           }
           return exp;
 
@@ -2827,9 +2858,9 @@ struct Reader {
         return_token = TK_RBRACKET;
         return C_FALSE;
       } else if(c == '\'') {
-        return read_aux(State::S_quote);
+        return read_aux(State::S_QUOTE);
       } else if(c == '`') {
-        return read_aux(State::S_quasiquote);
+        return read_aux(State::S_QUASIQUOTE);
       } else if(c == '"') {
         // Strings
         std::string buffer;
@@ -2865,9 +2896,9 @@ struct Reader {
         c = is.peek();
         if(c == '@') {
           is >> c;
-          return read_aux(State::S_unquote_splicing);
+          return read_aux(State::S_UNQUOTE_SPLICING);
         } 
-        return read_aux(State::S_unquote);
+        return read_aux(State::S_UNQUOTE);
       } else {
         // Symbols
         // Special case: .. is also a valid symbol (really?)
@@ -2941,9 +2972,24 @@ inline void GCIncremental::mark_symbol_table() {
   }
 }
 
-inline void GCSemispace::copy_symbol_table() {
-  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
+inline void GCSemispace::copy_roots() {
   // std::cout << state.symbol_table.size() << " live symbols" << std::endl;
+  for(size_t i = 0; i != frames.size(); i++) {
+    Frame* f = frames[i];
+    for(size_t j = 0; j != f->size; j++) {
+      copy(f->values[j]);
+    }
+  }
+
+  for(size_t i = 0; i != state.globals.size(); i++) {
+    copy(&state.globals[i].heap);
+  }
+
+  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
+    copy(&((*i)->ref.heap));
+  }
+
+  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
   // TODO: To make this a weak table, simply check for RESERVED in this. If forwarded, set it up
   // otherwise delete reference
   for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
@@ -3018,7 +3064,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       return os << '"';;
     }
     case PAIR: {
-      if(v.pair_has_source()) os << '&';
+      // if(v.pair_has_source()) os << '&';
       os << '(' << v.car();
       for(v = v.cdr(); v.type() == PAIR; v = v.cdr())  {
         os << ' ' << v.car();
@@ -3061,7 +3107,8 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
     case RENAME:
       return os << "*" << v.rename_expr();
     case BOX:
-      return os << "&" << v.unbox();
+      //return os << "&" << v.unbox();
+      return os << v.unbox();
     case TABLE:
       return os << "#<table size: " << v.as<Table>()->entries << '>';
     case EXCEPTION:

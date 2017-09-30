@@ -72,6 +72,8 @@ language
 - r5rs support
 - r7rs support (within reason)
 - consider immutable pairs like Racket
+testing
+- doctests makes compile times obscene, maybe utest or something?
 benchmarks
 - GC
 - tables

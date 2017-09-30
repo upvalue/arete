@@ -13,6 +13,7 @@ using namespace arete;
 State state = State();
 
 static bool QUIET = false;
+static bool SHOW_READ = false;
 
 bool do_file(const char* file_path, bool eval ) {
   Value x, vec;
@@ -35,6 +36,9 @@ bool do_file(const char* file_path, bool eval ) {
       std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
       return false;
     } else {
+      if(SHOW_READ) {
+        std::cout << x << std::endl;
+      }
       if(eval) {
         x = state.eval_toplevel(x);
         if(x.type() == EXCEPTION) {
@@ -91,10 +95,13 @@ bool do_repl() {
         break;
       }
 
-      if(x.type() == EXCEPTION) {
+      if(x.is_active_exception()) {
         std::cerr << "Reader error: " << x.exception_message().string_data() << std::endl;
         break;
       } else {
+        if(SHOW_READ) {
+          std::cout << x << std::endl;
+        }
         x = state.eval_toplevel(x);
         if(x.type() == EXCEPTION) {
           std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
@@ -124,7 +131,8 @@ int main(int argc, const char **argv) {
   std::string open_repl("--repl");
   std::string gcdebug("--gcdebug");
   std::string quiet("--quiet");
-  std::string showexpand("--showexpand");
+  std::string showread("--show-read");
+  std::string showexpand("--show-expand");
 
   if(argc > 1) {
     // read files
@@ -133,6 +141,8 @@ int main(int argc, const char **argv) {
         do_repl();
       } else if(quiet.compare(argv[i]) == 0) {
         QUIET = true;
+      } else if(showread.compare(argv[i]) == 0) {
+        SHOW_READ = true;
       } else if(gcdebug.compare(argv[i]) == 0) {
         state.gc.collect_before_every_allocation = true;
       } else if(showexpand.compare(argv[i]) == 0) {

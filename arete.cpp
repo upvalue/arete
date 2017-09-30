@@ -157,6 +157,14 @@ Value fn_equal(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_display(State& state, size_t argc, Value* argv) {
+  if(argv[0].type() == STRING)
+    std::cout << argv[0].string_data();
+  else
+    std::cout << argv[0];
+  return C_UNSPECIFIED;
+}
+
+Value fn_write(State& state, size_t argc, Value* argv) {
   std::cout << argv[0];
   return C_UNSPECIFIED;
 }
@@ -228,6 +236,10 @@ Value fn_fixnump(State& state, size_t argc, Value* argv) {
 
 Value fn_charp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == CHARACTER);
+}
+
+Value fn_stringp(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(argv[0].type() == STRING);
 }
 
 Value fn_macrop(State& state, size_t argc, Value* argv) {
@@ -440,8 +452,9 @@ Value fn_for_each_dot(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-Value fn_memv(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "memv";
+enum Mem { MEMQ, MEMV, MEMBER };
+
+Value fn_mem_impl(const char* fn_name, Mem method, State& state, size_t argc, Value* argv) {
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
 
   if(argv[1] == C_NIL) {
@@ -450,13 +463,33 @@ Value fn_memv(State& state, size_t argc, Value* argv) {
 
   Value lst = argv[1], obj = argv[0];
   while(lst.type() == PAIR) {
-    if(lst.car().eqv(obj)) {
-      return lst;
+    switch(method) {
+      case MEMQ:
+        if(lst.car() == obj) return lst;
+        break;
+      case MEMV:
+        if(lst.car().eqv(obj)) return lst;
+        break;
+      case MEMBER:
+        if(state.equals(lst.car(), obj)) return lst;
+        break;
     }
     lst = lst.cdr();
   }
 
   return C_FALSE;
+}
+
+Value fn_memq(State& state, size_t argc, Value* argv) {
+  return fn_mem_impl("memq", MEMQ, state, argc, argv);
+}
+
+Value fn_memv(State& state, size_t argc, Value* argv) {
+  return fn_mem_impl("memv", MEMV, state, argc, argv);
+}
+
+Value fn_member(State& state, size_t argc, Value* argv) {
+  return fn_mem_impl("member", MEMBER, state, argc, argv);
 }
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
@@ -554,8 +587,7 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_make_table(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "make-table";
-
+  //static const char* fn_name = "make-table";
   return state.make_table();
 }
 
@@ -694,6 +726,8 @@ Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   return state.env_lookup(argv[0], argv[1]);
 }
 
+/** Check if a name is syntax (a builtin such as define, or a macro) in a particular environment.
+  * Necessary because C_SYNTAX values cannot be handled by Scheme code directly. */
 Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
   Value result = fn_env_lookup(state, argc, argv);
 
@@ -701,9 +735,7 @@ Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
   
   if(result == C_SYNTAX) return C_TRUE;
 
-  if(result.type() == FUNCTION && result.function_is_macro()) return C_TRUE;
-
-  return C_FALSE;
+  return Value::make_boolean(result.type() == FUNCTION && result.function_is_macro());
 }
 
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
@@ -735,14 +767,13 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   return fn;
 }
 
-Value fn_install_macroexpander(State& state, size_t argc, Value* argv) {
+Value fn_install_expander(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "install-macroexpander";
   AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
 
-  state.macroexpander = argv[0];
+  state.set_global_value(State::G_EXPANDER, argv[0]);
 
   return C_UNSPECIFIED;
-
 }
 
 Value fn_make_rename(State& state, size_t argc, Value* argv) {
@@ -813,7 +844,7 @@ void State::install_builtin_functions() {
   defun("box?", fn_boxp, 1);
   defun("fixnum?", fn_fixnump, 1);
   defun("flonum?", fn_flonump, 1);
-  //defun("constant=?", fn_constantp, 1);
+  defun("string?", fn_stringp, 1);
 
   // Strings
   defun("string-copy", fn_string_copy, 1);
@@ -826,7 +857,9 @@ void State::install_builtin_functions() {
   defun("length", fn_length, 1);
   defun("map", fn_map, 2);
   defun("for-each.", fn_for_each_dot, 2);
+  defun("memq", fn_memq, 2);
   defun("memv", fn_memv, 2);
+  defun("member", fn_member, 2);
   
   defun("apply", fn_apply, 2);
   defun("eval", fn_eval, 1);
@@ -848,6 +881,7 @@ void State::install_builtin_functions() {
 
   // I/O
   defun("display", fn_display, 1, 1, false);
+  defun("write", fn_write, 1, 1, false);
   defun("newline", fn_newline, 0);
   defun("print", fn_print, 0, 0, true);
   defun("print-string", fn_print_string, 0, 0, true);
@@ -859,7 +893,7 @@ void State::install_builtin_functions() {
   // Exceptions
   defun("raise", fn_raise, 3);
 
-  // Macroexpansion support functionality
+  // Expansion support functionality
   defun("cons-source", fn_cons_source, 3);
   defun("list-source", fn_list_source, 0, 0, true);
   defun("source-location", fn_source_location, 1);
@@ -870,10 +904,12 @@ void State::install_builtin_functions() {
   defun("env-lookup", fn_env_lookup, 2);
   defun("env-syntax?", fn_env_syntaxp, 2);
 
+  // OK, going to need...
+
   defun("gensym", fn_gensym, 0, 1);
 
   // TODO: Full eval/apply necessary? Probably...
-  defun("install-macroexpander", fn_install_macroexpander, 1);
+  defun("install-expander", fn_install_expander, 1);
   defun("make-rename", fn_make_rename, 2);
   defun("rename-env", fn_rename_env, 1);
   defun("rename-expr", fn_rename_expr, 1);
