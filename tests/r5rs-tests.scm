@@ -1,5 +1,7 @@
 ;; r5rs-tests.scm - R5RS tests, swiped from chibi
-;; several tests disabled
+
+;; several tests disabled, including continuations and chibi's apparently custom ability to change the ellipsis
+;; in syntax-rules
 
 (define *tests-run* 0)
 (define *tests-passed* 0)
@@ -13,6 +15,7 @@
         (#,if (equal? #,result #,expect)
           (#,begin
             (#,set! #,*tests-passed* (fx+ #,*tests-passed* 1))
+            (#,print (#,quote ,(caddr x)))
             (#,print " [PASS]"))
           (#,begin
             (#,print " [FAIL]\n")))))))
@@ -32,11 +35,6 @@
 (test '(3 4 5 6) ((lambda x x) 3 4 5 6))
 
 
-(test-end)
-
-#|
-(test-begin "r5rs")
-
 (test 8 ((lambda (x) (+ x x)) 4))
 
 (test '(3 4 5 6) ((lambda x x) 3 4 5 6))
@@ -49,7 +47,7 @@
 
 (test 1 (if (> 3 2) (- 3 2) (+ 3 2)))
 
-(test 'greater (cond ((> 3 2) 'greater) ((< 3 2) 'less)))
+;(test 'greater (cond ((> 3 2) 'greater) ((< 3 2) 'less)))
 
 (test 'equal (cond ((> 3 3) 'greater) ((< 3 3) 'less) (else 'equal)))
 
@@ -72,6 +70,10 @@
 (test #t (or (= 2 2) (> 2 1)))
 
 (test #t (or (= 2 2) (< 2 1)))
+
+
+#|
+(test-begin "r5rs")
 
 (test '(b c) (or (memq 'b '(a b c)) (/ 3 0)))
 

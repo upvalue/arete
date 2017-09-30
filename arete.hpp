@@ -416,6 +416,14 @@ struct Value {
     return bits == other.bits;
   }
 
+  inline bool eqv(const Value& rhs) const {
+    if(bits == rhs.bits) return true;
+    if(type() == FLONUM && rhs.type() == FLONUM) {
+      return flonum_value() == rhs.flonum_value();
+    }
+    return false;
+  }
+
   inline bool operator!=(const Value& other) const { return bits != other.bits; }
 
   // CASTING
@@ -2402,6 +2410,10 @@ struct State {
         if(res == C_SYNTAX) {
           std::stringstream os;
           os << "attempt to use syntax " << exp << " as value";
+          if(exp == get_symbol(S_define_syntax)) {
+            // if this happened, it's probably because the macroexpander has not been loaded
+            os << " (did you load boot.scm?)";
+          }
           EVAL_TRACE(car, fn_name);
           return eval_error(os.str(), exp);
         }

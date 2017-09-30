@@ -132,6 +132,10 @@
                      (set! else-clause (list-ref x 3)))
 
                  (list-source x (car x) (macroexpand condition env) (macroexpand then env) (macroexpand else-clause env)))
+                ;; COND
+                ((eq? kar 'cond)
+                 ;; (if clause-condition clause-body else rest-of-clauses...right?
+                 x)
                 ;; LAMBDA
                 ((eq? kar 'lambda)
                  (if (fx< (length x) 3)
@@ -251,8 +255,6 @@
 
 ;; after install-macroexpand is called, it will do everything in the "core" module.
 
-
-
 (define-syntax let
   (lambda (x r c)
     (if (fx< (length x) 3)
@@ -362,6 +364,45 @@
 
     `(#,if (#,not ,(list-ref x 1))
       (#,begin ,@(cddr x)))))
+
+;; case
+(define-syntax case
+  (lambda (x rename c)
+    (if (fx< (length x) 3)
+      (raise 'syntax "case expects at least three arguments (a key and a clause)" x))
+
+    (define key (cadr x))
+    (define clauses (cddr x))
+
+    (if (not (list? clauses))
+      (raise 'syntax "case expects a list of clauses" x))
+
+    (define code (let loop ((clause (car clauses))
+               (clauses clauses))
+      (unless (pair? clause)
+        (raise 'syntax "case expects clause to be a datum" x))
+
+      ;; TODO: Most Schemes seem to support a direct comparison as well e.g.
+      ;; (case 5 (5 #t))
+      (unless (or (c (car clause) #'else) (list? (car clause)))
+        (raise 'syntax "case expects a list or else as its datum" x))
+
+      (define condition
+        (if (c (car clause) #'else)
+          #t 
+          `(#,memv #,result (#,quote ,(car clause)))))
+      
+      (if (null? (cdr clauses))
+        `(#,if ,condition
+          (#,begin ,(cadr clause))
+          unspecified)
+        `(#,if ,condition
+          (#,begin ,(cadr clause))
+          ,(loop (cadr clauses) (cdr clauses))))
+      ))
+
+    `(#,let ((#,result ,key))
+      ,code)))
 
 ;; let*, letrec
 ;; define* and type stuff

@@ -6,6 +6,7 @@ rough outline of major projects, in order
 
 runtime
 - 0.25 / 9 prints different than python. difference in I/O or some kind of error?
+- there needs to be a level of type assertion that simply prints warnings
 - value representation: should 0 be false?
 - also, being able to initialize Values with ints is convenient for returning constants, but seems error-prone in other
   ways (e.g. occasionally trying to write off a C++ boolean as a Scheme boolean and it not being rejected by the compiler)

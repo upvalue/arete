@@ -146,6 +146,8 @@ Value fn_eq(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_eqv(State& state, size_t argc, Value* argv) {
+  if(argv[0].type() == FLONUM && argv[1].type() == FLONUM)
+    return Value::make_boolean(argv[0].flonum_value() == argv[1].flonum_value());
   return fn_eq(state, argc, argv);
 }
 
@@ -436,6 +438,25 @@ Value fn_for_each_dot(State& state, size_t argc, Value* argv) {
   }
 
   return C_UNSPECIFIED;
+}
+
+Value fn_memv(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "memv";
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
+
+  if(argv[1] == C_NIL) {
+    return C_FALSE;
+  }
+
+  Value lst = argv[1], obj = argv[0];
+  while(lst.type() == PAIR) {
+    if(lst.car().eqv(obj)) {
+      return lst;
+    }
+    lst = lst.cdr();
+  }
+
+  return C_FALSE;
 }
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
@@ -805,6 +826,8 @@ void State::install_builtin_functions() {
   defun("length", fn_length, 1);
   defun("map", fn_map, 2);
   defun("for-each.", fn_for_each_dot, 2);
+  defun("memv", fn_memv, 2);
+  
   defun("apply", fn_apply, 2);
   defun("eval", fn_eval, 1);
 
