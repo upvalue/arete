@@ -1,4 +1,11 @@
+rough outline of major projects, in order
+- modules
+- structs with inheritance, and basic methods
+- syntax-rules
+- compiler
+
 runtime
+- 0.25 / 9 prints different than python. difference in I/O or some kind of error?
 - value representation: should 0 be false?
 - also, being able to initialize Values with ints is convenient for returning constants, but seems error-prone in other
   ways (e.g. occasionally trying to write off a C++ boolean as a Scheme boolean and it not being rejected by the compiler)

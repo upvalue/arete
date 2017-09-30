@@ -246,8 +246,15 @@ struct Value {
   /** Returns true if this value is immediate */
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
   static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
+
   bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION; }
   bool identifierp() const { return type() == RENAME || type() == SYMBOL; }
+
+  bool numeric() const {
+    Type tipe = type();
+    return tipe == FLONUM || tipe == FIXNUM;
+  }
+
   bool hashable() const {
     Type tipe = type();
     return tipe == STRING || tipe == SYMBOL || tipe == FIXNUM || tipe == CONSTANT;

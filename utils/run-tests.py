@@ -62,3 +62,7 @@ if __name__ == '__main__':
             run_tests(suite, suites[suite])
 
     print('%s out of %s tests successful' % (successful_tests, total_tests))
+
+    if successful_tests != total_tests:
+        sys.exit(1)
+
