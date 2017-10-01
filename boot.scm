@@ -13,8 +13,6 @@
 
 (define unspecified (if #f #f))
 
-
-
 ;;;;; MACROEXPANSION
 
 ;; Shortcut for applying expand with an environment, since this is used pretty often
@@ -89,7 +87,7 @@
               (cons-source x (make-rename #f 'begin) (cddr x))))
             )))
     
-    (define result (list-source x (car x) name (expand value env)))
+    (define result (list-source x (car x) (env-qualify env name) (expand value env)))
     ;(print result)
     result))
 
@@ -97,13 +95,14 @@
   (lambda (x env) 
     (if (self-evaluating? x)
         x
-        (if (or (rename? x) (symbol? x))
+        (if (identifier? x)
           (if (env-syntax? env x)
               (raise 'expand (print-string "used syntax" x "as value") x)
               ;; TODO... could this annotate with module info?
               (begin
                 ;(print "expander encountered variable" x)
-                x))
+                (env-qualify env x)
+                #;x))
           (begin
             (define kar (car x))
             (define len (length x))
@@ -215,6 +214,7 @@
 
 ;;;;; BASIC SYNTACTIC FORMS
 ;; eg let & friends, quasiquote, when/unless
+#|
 
 (define-syntax let
   (lambda (x r c)
@@ -365,6 +365,7 @@
     `(#,let ((#,result ,key))
       ,code)))
 
+|#
 
 ;; let*, letrec
 ;; define* and type stuff

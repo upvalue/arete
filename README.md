@@ -1,1 +1,2 @@
-Arete is a simple, embeddable Scheme interpreter written in C++ and itself. 
+Arete is an implementation of the Scheme programming language.
+

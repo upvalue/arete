@@ -1902,8 +1902,8 @@ struct State {
 
   void install_core_functions();
 
-  /** Define a function on a module */
-  void defun_impl(Value module, Value name, Value cfn) {
+  /** Define a variable on a module */
+  void qualified_define(Value module, Value name, Value cfn) {
     // name = unqualified, qname = qualified
     // my-variable becomes ##my-module#my-variable
     Value qname, module_name;
@@ -1930,7 +1930,7 @@ struct State {
     sym = get_symbol(name);
     sym.set_symbol_value(cfn);
 
-    defun_impl(get_global_value(G_MODULE_CORE), sym, cfn);
+    qualified_define(get_global_value(G_MODULE_CORE), sym, cfn);
   }
  
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
@@ -2026,10 +2026,11 @@ struct State {
       if(name.rename_env() == C_FALSE) {
         name = name.rename_expr();
       } else {
-        std::cout << "rename in non-toplevel env" << name.rename_env() << std::endl;
+        std::cerr << "rename in non-toplevel env" << name.rename_env() << std::endl;
+        AR_ASSERT(!"rename in toplevel env");
       }
-
     }
+
     return name.as<Symbol>()->value;
   }
 
@@ -2513,6 +2514,7 @@ struct State {
         if(res.bits == 0) {
           return C_UNSPECIFIED;
         } 
+
         if(res == C_UNDEFINED) {
           std::ostringstream os;
           os << "reference to undefined variable " << exp;
@@ -2547,7 +2549,11 @@ struct State {
     if(expand != C_UNDEFINED) {
       Value args, sym;
       AR_FRAME(this, expand, exp, args, sym);
+#if 1
+      args = make_pair(get_global_value(G_MODULE_CORE), C_NIL);
+#else 
       args = make_pair(C_FALSE, C_NIL);
+#endif
       args = make_pair(exp.maybe_unbox(), args);
 
       exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);

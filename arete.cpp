@@ -694,6 +694,8 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
 
   if(argv[0] == C_FALSE) {
     name.as<Symbol>()->value = value;
+  } else if(argv[0].type() == TABLE) {
+    state.qualified_define(env, name, value);
   } else {
     state.vector_append(env, name);
     state.vector_append(env, value);
@@ -752,9 +754,17 @@ Value fn_env_qualify(State& state, size_t argc, Value* argv) {
   Value mname = state.table_get(argv[0], state.get_symbol(State::S_MODULE_NAME), found);
   AR_ASSERT(found && "env-qualify table_get S_MODULE_NAME failed, probably passed a bad module");
 
-  // std::ostringstream qname;
-  // qname << "##" << mname.string_data() << "#" << argv[1] << std::endl;
-  // return state.get_symbol(qname.str());
+  // TODO search environments
+
+  // env_define needs to be modified to add symbol to environment
+  // env_qualify then picks that out.
+  
+  //
+
+
+  std::ostringstream qname;
+  qname << "##" << mname.string_data() << "#" << argv[1];
+  return state.get_symbol(qname.str());
 
   return C_UNSPECIFIED;
 }
@@ -918,6 +928,7 @@ void State::install_core_functions() {
   defun_core("length", fn_length, 1);
   defun_core("map", fn_map, 2);
   defun_core("for-each.", fn_for_each_dot, 2);
+
   defun_core("memq", fn_memq, 2);
   defun_core("memv", fn_memv, 2);
   defun_core("member", fn_member, 2);
