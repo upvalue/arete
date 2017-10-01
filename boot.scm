@@ -25,7 +25,10 @@
     (if (not (symbol? name))
         (raise 'expand "macro name must be a symbol" x))
 
-    (define fn (eval-lambda (expand body env) env))
+    (define expanded-body (expand body env))
+
+    ;; (print expanded-body)
+    (define fn (eval-lambda expanded-body env))
 
     (set-function-name! fn name)
     (set-function-macro-bit! fn)
@@ -86,8 +89,20 @@
             (set! value (list-source x (make-rename #f 'lambda) (cdr kar)
               (cons-source x (make-rename #f 'begin) (cddr x))))
             )))
+
+
+    ;; If this isn't a module, we have to note it as a 'variable so env-qualify will treat it as a local variable
+    (if (not (table? env))
+      (env-define env name 'variable)
+      (begin
+        ;; Otherwise, we have to note its qualified name in the environment
+        (env-define env name (env-qualify env name) #f)
+        (set! name (env-qualify env name))))
+
+    ;; (print name)
+    ;; (env-define env name qualified-name)
     
-    (define result (list-source x (car x) (env-qualify env name) (expand value env)))
+    (define result (list-source x (car x) name (expand value env)))
     ;(print result)
     result))
 
@@ -188,7 +203,9 @@
                       (define result
                         (lookup x
                           ;; renaming procedure
-                          (lambda (name) (make-rename (function-env lookup) name))
+                          (lambda (name) 
+                            
+                            (make-rename (function-env lookup) name))
                           ;; comparison procedure
                           (lambda (a b)
                             (env-compare env a b))))
@@ -214,7 +231,6 @@
 
 ;;;;; BASIC SYNTACTIC FORMS
 ;; eg let & friends, quasiquote, when/unless
-#|
 
 (define-syntax let
   (lambda (x r c)
@@ -270,6 +286,7 @@
    ;; let return
     result))
 
+
 ;;;;; QUASIQUOTE
 
 (define (concat-list x y)
@@ -302,6 +319,7 @@
     (qq-object rename c (cadr x))
     ))
 
+
 ;; er-macro-transformer. Not necessary in Arete, but here for compatibility with other Schemes which use this prefix 
 ;; for explicit renaming macros.
 (define-syntax er-macro-transformer
@@ -315,8 +333,11 @@
     (if (fx< (length x) 3)
       (raise 'syntax "when expects a condition and a body" x))
 
-    `(#,if ,(list-ref x 1)
-       (#,begin  ,@(cddr x)))))
+    (define result 
+      `(#,if ,(list-ref x 1)
+         (#,begin  ,@(cddr x))))
+
+    result))
 
 (define-syntax unless
   (lambda (x rename c)
@@ -364,8 +385,6 @@
 
     `(#,let ((#,result ,key))
       ,code)))
-
-|#
 
 ;; let*, letrec
 ;; define* and type stuff

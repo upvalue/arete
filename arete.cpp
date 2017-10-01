@@ -246,6 +246,10 @@ Value fn_flonump(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == FLONUM);
 }
 
+Value fn_tablep(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(argv[0].type() == TABLE);
+}
+
 Value fn_fixnump(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == FIXNUM);
 }
@@ -695,7 +699,16 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
   if(argv[0] == C_FALSE) {
     name.as<Symbol>()->value = value;
   } else if(argv[0].type() == TABLE) {
-    state.qualified_define(env, name, value);
+    // Fourth argument, if provided, tells us NOT to set the value of the global variable
+
+    // This is necessary when noting down variables that are defined at the top-level of a module
+
+    // We only want to point references to those variables at the global variable, not actually set
+    // them
+
+    // Otherwise, this is a macro definition and we do want to set the global value immediately
+    // so it can be referenced from other modules
+    state.qualified_define(env, name, value, argc != 4);
   } else {
     state.vector_append(env, name);
     state.vector_append(env, value);
@@ -733,8 +746,8 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
 
   Value rename_env = id1.rename_env();
 
-  state.env_lookup_impl(rename_env, id1.rename_expr(), false);
-  state.env_lookup_impl(env, id2, false);
+  state.env_lookup_impl(rename_env, id1.rename_expr());
+  state.env_lookup_impl(env, id2);
 
   return Value::make_boolean(rename_env == env && id1.rename_expr() == id2);
 }
@@ -746,27 +759,38 @@ Value fn_env_qualify(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_ENV(state, 0);
   AR_FN_EXPECT_IDENT(state, 1);
 
-  if(argv[0].type() != TABLE || argv[1].type() != SYMBOL) {
+  Value env = argv[0];
+
+  // (env-qualify (<table> vars) name)
+  // We need to check whether this is a reference to a module-level variable, and if so, qualify it
+  // Otherwise we return it untouched
+  if(argv[0].type() == VECTOR) {
+    // Note that env_lookup_impl modifies env
+    Value result = state.env_lookup_impl(env, argv[1]);
+
+    if(env.type() != TABLE) {
+      return argv[1];
+    }
+  }
+
+  if(env.type() != TABLE || argv[1].type() != SYMBOL) {
     return argv[1];
   }
 
+  AR_ASSERT(argv[1].type() == SYMBOL && "env-qualify passed a rename");
+
   bool found;
-  Value mname = state.table_get(argv[0], state.get_symbol(State::S_MODULE_NAME), found);
+  Value mname = state.table_get(env, state.get_symbol(State::S_MODULE_NAME), found);
   AR_ASSERT(found && "env-qualify table_get S_MODULE_NAME failed, probably passed a bad module");
 
   // TODO search environments
 
   // env_define needs to be modified to add symbol to environment
   // env_qualify then picks that out.
-  
-  //
-
 
   std::ostringstream qname;
   qname << "##" << mname.string_data() << "#" << argv[1];
   return state.get_symbol(qname.str());
-
-  return C_UNSPECIFIED;
 }
 
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
@@ -823,6 +847,18 @@ Value fn_install_expander(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
 
   state.set_global_value(State::G_EXPANDER, argv[0]);
+
+  return C_UNSPECIFIED;
+}
+
+Value fn_set_print_expansions(State& state, size_t argc, Value* argv) {
+  // static const char* fn_name = "set-print-expansions!";
+
+  if(argv[0] == C_FALSE) {
+    state.print_expansions = false;
+  } else {
+    state.print_expansions = true;
+  }
 
   return C_UNSPECIFIED;
 }
@@ -915,6 +951,7 @@ void State::install_core_functions() {
   defun_core("box?", fn_boxp, 1);
   defun_core("fixnum?", fn_fixnump, 1);
   defun_core("flonum?", fn_flonump, 1);
+  defun_core("table?", fn_tablep, 1);
   defun_core("string?", fn_stringp, 1);
 
   // Strings
@@ -974,14 +1011,13 @@ void State::install_core_functions() {
   // Environments
   defun_core("env-make", fn_env_make, 1);
   defun_core("env-qualify", fn_env_qualify, 2);
-  defun_core("env-define", fn_env_define, 3);
+  defun_core("env-define", fn_env_define, 3, 4);
   defun_core("env-compare", fn_env_compare, 3);
   defun_core("env-lookup", fn_env_lookup, 2);
   defun_core("env-syntax?", fn_env_syntaxp, 2);
 
   defun_core("gensym", fn_gensym, 0, 1);
   defun_core("top-level-value", fn_top_level_value, 1);
-  defun_core("install-expander", fn_install_expander, 1);
   defun_core("make-rename", fn_make_rename, 2);
   defun_core("rename-env", fn_rename_env, 1);
   defun_core("rename-expr", fn_rename_expr, 1);
@@ -989,6 +1025,9 @@ void State::install_core_functions() {
   defun_core("set-function-name!", fn_set_function_name, 2);
   defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun_core("function-env", fn_function_env, 1);
+
+  defun_core("install-expander", fn_install_expander, 1);
+  defun_core("set-print-expansions!", fn_set_print_expansions, 1);
 }
 
 }

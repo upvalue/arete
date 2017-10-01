@@ -1902,12 +1902,12 @@ struct State {
 
   void install_core_functions();
 
-  /** Define a variable on a module */
-  void qualified_define(Value module, Value name, Value cfn) {
+  /** Define a variable on a module and on a global, qualified symbol */
+  void qualified_define(Value module, Value name, Value value, bool set_value = true) {
     // name = unqualified, qname = qualified
     // my-variable becomes ##my-module#my-variable
     Value qname, module_name;
-    AR_FRAME(this, module, module_name, qname, name, cfn);
+    AR_FRAME(this, module, module_name, qname, name, value);
     bool found;
     module_name = table_get(module, get_symbol(S_MODULE_NAME), found);
     AR_ASSERT(found);
@@ -1915,7 +1915,10 @@ struct State {
     cqname << "##" << module_name.string_data() << "#" << name;
     qname = make_string(cqname.str());
     qname = get_symbol(qname);
-    qname.set_symbol_value(cfn);
+    if(set_value) {
+      qname.set_symbol_value(value);
+    }
+
     table_set(module, name, qname);
   }
 
@@ -1997,27 +2000,80 @@ struct State {
     return false;
   }
 
-  /** This is the env_lookup backend, which takes env as a reference and modifies it
-   to the env the symbol is located in (if there is one). It's done like this
-   because this more complex logic is necessary for hygienic macros (see fn_env_compare) */
-  Value env_lookup_impl(Value& env, Value name, bool one_level = false) {
+  bool env_defined(Value env, Value name) {
+    if(name.type() != SYMBOL) return false;
 
+    if(env.type() == VECTOR) {
+      for(size_t i = env.vector_length() -1; i >= 1; i -= 2) {
+        if(identifier_equal(env.vector_ref(i-1), name)) {
+          return true;
+        }
+      }
+    } else if(env == C_FALSE) {
+      return name.symbol_value() != C_UNDEFINED;
+    } else if(env.type() == TABLE) {
+      bool found;
+      Value tmp = table_get(env, name, found);
+      return found;
+    }
+    return false;
+  }
+
+  /** This is the env_lookup backend, which takes env as a reference and modifies it
+   to the env the symbol is located in (if there is one). It
+   because this more complex logic is necessary for hygienic macros (see fn_env_compare, and fn_env_qualify) */
+  Value env_lookup_impl(Value& env, Value name) {
     while(env.type() == VECTOR) {
       for(size_t i = env.vector_length() - 1; i >= 1; i -= 2) {
         if(identifier_equal(env.vector_ref(i-1), name))
           return env.vector_ref(i);
       }
       env = env.vector_ref(0); // check parent environment
-      if(one_level) break; // TODO should this return?
     }
 
-    if(env.type() == TABLE) {
-      AR_ASSERT(name.type() != RENAME && "encountered rename at table-level");
+    // Level 1 lookup needs to handle tables and renames
+    
+    // There are several complex situations possible here
+
+    // Environment search has already reached #f; this is possible if a rename is intended to refer
+    // to a builtin function (e.g. cons)
+
+    // A rename has an env of C_FALSE, these are created by the macroexpander to refer to core forms
+    // like define, lambda etc
+
+    // A rename has an env that is the same as the table we're searching, meaning it's a table-level
+    // varible that's been defined by a macro
+
+    // A symbol is defined in a table
+    if(env.type() == TABLE || env == C_FALSE) {
+      Value renamed;
+      if(name.type() == RENAME) {
+        if(name.rename_env() == env || name.rename_env() == C_FALSE || env == C_FALSE) {
+          // If rename-env is this table or #f, the symbol itself can be used to resolve the variable.
+          if(env == C_FALSE) {
+            env = name.rename_env();
+          }
+          name = name.rename_expr();
+        } else  {
+          // This is where gensym probably has to come into the picture; 
+          // For example, imagine a macro that defines something at the toplevel it doesn't want 
+          // to be seen
+          // (define-syntax thing (lambda (x r c) `(begin (define ,(r 'var) #t) ,(r 'var))))
+          // Will trigger this as an error
+          // env-qualify will have to generate a gensym when called against a table-level rename.
+          // then env-lookup should compare gensyms
+          std::cout << name.rename_env() << ' ' << env << std::endl;
+          std::cout << name << std::endl;
+          AR_ASSERT(!"don't know what to do with rename at table-level");
+        }
+      }
       bool found;
-      Value chk = table_get(env, name, found);
-      if(found)  {
-        AR_ASSERT(chk.type() == SYMBOL);
-        return chk.as<Symbol>()->value;
+      if(env != C_FALSE) {
+        Value chk = table_get(env, name, found);
+        if(found)  {
+          AR_ASSERT(chk.type() == SYMBOL);
+          return chk.symbol_value();
+        }
       }
     }
 
@@ -2026,7 +2082,11 @@ struct State {
       if(name.rename_env() == C_FALSE) {
         name = name.rename_expr();
       } else {
-        std::cerr << "rename in non-toplevel env" << name.rename_env() << std::endl;
+        // If a search for a rename fails in its environment, that means it refers to a table-level
+        // value
+
+        // *cons table
+        // std::cerr << "rename in non-toplevel env " << env << ' ' << name.rename_expr() << ' ' << name.rename_env() << std::endl;
         AR_ASSERT(!"rename in toplevel env");
       }
     }
@@ -2034,8 +2094,8 @@ struct State {
     return name.as<Symbol>()->value;
   }
 
-  Value env_lookup(Value env, Value name, bool one_level = false) {
-    return env_lookup_impl(env, name, one_level);
+  Value env_lookup(Value env, Value name) {
+    return env_lookup_impl(env, name);
   }
 
   Value type_error(const std::string& msg) {
@@ -2204,13 +2264,23 @@ struct State {
       return eval_error("first argument to define must be a symbol", exp);
     }
 
-    tmp = env_lookup(env, name, true);
-    if(tmp != C_UNDEFINED) {
-      warn() << source_info(exp.pair_src()) << " shadows existing definition of " << name << std::endl;;
+
+    if(env_defined(env, name)) {
+      std::cout << env << ' ' << name << std::endl;
+      warn() << source_info(exp.pair_src()) << ' ' <<  name << " shadows existing definition of " << name << std::endl;;
     }
 
     tmp = eval(env,  body, fn_name);
+
     EVAL_CHECK(tmp, exp, fn_name);
+
+    // Hacky hack. Because the macroexpander defines several functions before it can be installed 
+    // and begin qualifying names by module, we do it here 
+    // e.g. (define not (lambda (x) (eq? x #f)))
+    // will also define ##arete.core#not 
+    if(get_global_value(G_EXPANDER) == C_UNDEFINED && env == C_FALSE) {
+      qualified_define(get_global_value(G_MODULE_CORE), name, tmp);
+    } 
 
     if(env == C_FALSE) {
       name.as<Symbol>()->value = tmp;
@@ -2219,6 +2289,7 @@ struct State {
       vector_append(env, tmp);
     }
 
+    // TODO how to handle qualified names here? Should we just check the string? Probably.
     if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
       tmp.as<Function>()->name = name.maybe_unbox();
     }
@@ -2473,7 +2544,11 @@ struct State {
 
         if(car.type() != FUNCTION && car.type() != CFUNCTION) {
           std::ostringstream os;
-          os << "attempt to apply non-procedure value " << car << std::endl;
+          if(car == C_UNDEFINED) {
+            os << "attempt to apply undefined function " << exp.car() << std::endl;
+          } else {
+            os << "attempt to apply non-procedure value " << car << std::endl;
+          }
           return eval_error(os.str(), exp);
         } else {
           if(car.type() == FUNCTION) {
@@ -2497,7 +2572,7 @@ struct State {
 
         // Then we look it up in the rename env
         // e.g. ((r 'lambda) () #t)
-        return env_lookup(exp.rename_env(), exp.rename_expr(), false);
+        return env_lookup(exp.rename_env(), exp.rename_expr());
       }
       case BOX:
       case SYMBOL: {
@@ -3132,6 +3207,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         case C_EOF: return os << "#<eof>";
         case C_UNSPECIFIED: return os << "#<unspecified>";
         case C_SYNTAX: return os << "#<syntax>";
+        case C_UNDEFINED: return os << "#<undefined>";
         default: return os << "<unknown constant>";
       }
     case FLONUM:
