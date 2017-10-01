@@ -13,9 +13,9 @@
 
 (define unspecified (if #f #f))
 
-;;;;; MACROEXPANSION
 
-(define LOG-expand #f)
+
+;;;;; MACROEXPANSION
 
 ;; Shortcut for applying expand with an environment, since this is used pretty often
 (define expand-map
@@ -173,6 +173,11 @@
                  (cons-source x (car x) (expand-map (cdr x) env)))
                 ;; DEFINE
                 ((eq? kar 'set!)
+                 (if (not (fx= (length x) 3))
+                   (raise 'expand "set! must be a list with exactly three elements" (list x)))
+                 (if (not (identifier? (list-ref x 1)))
+                   (raise 'expand "non-identifier as set! first argument" (list x (list-ref x 1))))
+
                  (list-source x (car x) (expand (list-ref x 1) env) (expand (list-ref x 2) env))
                  )
                 ((eq? kar 'define) (expand-define x env))
@@ -194,7 +199,7 @@
                       
                       result
                       )
-                      ;; not a macro application, members must be expanded
+                      ;; not a macro application, elements must be expanded
                       (expand-map x env))))
                   ;; else: handle something like ((lambda () #t))
                   (begin 
@@ -210,52 +215,6 @@
 
 ;;;;; BASIC SYNTACTIC FORMS
 ;; eg let & friends, quasiquote, when/unless
-
-;; (let ((x #t)) `(,x))
-;; how does the expander work on this?
-;; first we encounter let which returns something like
-
-;; ((lambda (x) (quasiquote (unquote x)) #t))
-;; then in the body...
-
-;; quasiquote is expanded, becomes ... ?
-
-;; (cons x '())
-;; x would never be qualified here, right?
-
-;; it's more like
-
-;; (define something (macro))
-
-;; (macro2 something)
-
-;; (define ##module#something #t)
-;; (macro2 something)
-
-;; right, this is a problematic case... we don't know whether "something" is intended to be used as a variable
-;; or is it?
-
-;; if "something" is returned directly as something like
-;; (print something)
-;; and if "something" is modified in any way, it doesn't matter because the macro-writer can't reasonably expect it to 
-;; refer to anything useful right?
-;; when expanding the result, we'll make it ##module#something right?
-
-;; (module test)
-;; (export one two three four five)
-
-;; basically, is there a possibility that with this simple scheme we will end up passing a qualified variable to
-;; a macro which wants to use basic symbols?
-
-;; also, tables aren't really necessary yet, can just keep going with vectors until it slows down horrifically.
-
-;; So, modifications which are necessary
-
-;; (module blah) form which takes a symbol as its sole argument
-;; (a module table?)
-;; a module table.
-
-;; after install-expand is called, it will do everything in the "core" module.
 
 (define-syntax let
   (lambda (x r c)
@@ -415,3 +374,4 @@
 ;; constant definitions
 ;; modules
 ;; compiler (?)
+

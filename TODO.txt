@@ -6,7 +6,8 @@ rough outline of major projects, in order
 
 runtime
 - 0.25 / 9 prints different than python. difference in I/O or some kind of error?
-- there needs to be a level of type assertion that simply prints warnings
+- some symbols should most likely be immutable
+- there needs to be a level of type assertion that simply prints warnings, or throws C++ exceptions if that's what the user wants
 - value representation: should 0 be false?
 - also, being able to initialize Values with ints is convenient for returning constants, but seems error-prone in other
   ways (e.g. occasionally trying to write off a C++ boolean as a Scheme boolean and it not being rejected by the compiler)
@@ -18,6 +19,7 @@ x hash tables
 x are C++ exceptions okay to use? 
   nah
 garbage collection
+- default heap size should be set after memory usage is understood
 - better handling of large allocations
 x semispace garbage collection for extreme debugging and robustness
 - could semispace collector also be used to optionally compact the incremental collector?
@@ -48,6 +50,9 @@ x block comments #|
 - unicode
 x attach source code info to symbols by boxing them
 macroexpander
+-
+  (let-syntax () (define x #t)) x => #T
+
 - nested renames and identifier_equal
 - error messages should be super descriptive
   e.g.

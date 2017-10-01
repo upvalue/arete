@@ -140,6 +140,13 @@ Value fn_fx_gt(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].fixnum_value() > argv[1].fixnum_value());
 }
 
+// Conversions
+Value fn_string_to_symbol(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "string->symbol";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  return state.get_symbol(argv[0]);
+}
+
 Value fn_eq(State& state, size_t argc, Value* argv) {
   // static const char* fn_name = "eq?";
   return Value::make_boolean(argv[0].bits == argv[1].bits);
@@ -198,6 +205,15 @@ Value fn_print_string(State& state, size_t argc, Value* argv) {
   std::ostringstream os;
   fn_print_impl(state, argc, argv, os);
   return state.make_string(os.str());
+}
+
+Value fn_print_table_verbose(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "print-table-verbose";
+  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
+
+  state.print_table_verbose(argv[0]);
+  
+  return C_UNSPECIFIED;
 }
 
 ///// PREDICATES
@@ -559,7 +575,7 @@ Value fn_vector_set(State& state, size_t argc, Value* argv) {
 
   size_t position = argv[1].fixnum_value();
 
-  if(argv[0].vector_length() <= argv[1].fixnum_value()) {
+  if(argv[0].vector_length() <= (size_t) argv[1].fixnum_value()) {
     std::ostringstream os;
     os << "vector-set! bounds error, attempted to set position " << argv[1].fixnum_value() << " on a vector of length " << argv[0].vector_length();
     return state.eval_error(os.str());
@@ -650,7 +666,10 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
 
 /** Macro that asserts an argument is a valid environment */
 #define AR_FN_EXPECT_ENV(state, n) \
-  AR_FN_ASSERT_ARG((state), (n), "to be a valid environment (vector or #f)", argv[(n)].type() == VECTOR || argv[(n)] == C_FALSE);
+ AR_FN_ASSERT_ARG((state), (n), "to be a valid environment (vector, table or #f)", argv[(n)].type() == VECTOR || argv[(n)].type() == TABLE || argv[(n)] == C_FALSE);
+
+#define AR_FN_EXPECT_IDENT(state, n) \
+  AR_FN_ASSERT_ARG((state), (n), "to be a valid identifier (symbol or rename)", argv[(n)].identifierp())
 
 Value fn_source_location(State& state, size_t argc, Value* argv) {
   if(argv[0].type() != BOX && argv[0].type() != PAIR)
@@ -668,7 +687,7 @@ Value fn_env_make(State& state, size_t argc, Value* argv) {
 Value fn_env_define(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-define";
   AR_FN_EXPECT_ENV(state, 0);
-  AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
+  AR_FN_EXPECT_IDENT(state, 1);
 
   Value env = argv[0], name = argv[1], value = argv[2];
   AR_FRAME(state, env, name, value);
@@ -694,8 +713,8 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
 
   //std::cout << argv[0] << std::endl;
   AR_FN_EXPECT_ENV(state, 0);
-  AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
-  AR_FN_ASSERT_ARG(state, 2, "to be a valid identifier (symbol or rename)", argv[2].type() == RENAME || argv[2].type() == SYMBOL);
+  AR_FN_EXPECT_IDENT(state, 1);
+  AR_FN_EXPECT_IDENT(state, 2);
 
   Value env = argv[0];
   Value id1 = argv[1];
@@ -718,9 +737,31 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(rename_env == env && id1.rename_expr() == id2);
 }
 
+/** env-qualify takes an environment and identifier and returns an appropriately qualified
+ * symbol. For example, references to arete.core functions like car become ##arete.core#car */
+Value fn_env_qualify(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "env-qualify";
+  AR_FN_EXPECT_ENV(state, 0);
+  AR_FN_EXPECT_IDENT(state, 1);
+
+  if(argv[0].type() != TABLE || argv[1].type() != SYMBOL) {
+    return argv[1];
+  }
+
+  bool found;
+  Value mname = state.table_get(argv[0], state.get_symbol(State::S_MODULE_NAME), found);
+  AR_ASSERT(found && "env-qualify table_get S_MODULE_NAME failed, probably passed a bad module");
+
+  // std::ostringstream qname;
+  // qname << "##" << mname.string_data() << "#" << argv[1] << std::endl;
+  // return state.get_symbol(qname.str());
+
+  return C_UNSPECIFIED;
+}
+
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-lookup";
-  AR_FN_ASSERT_ARG(state, 0, "to be a valid environment (vector or #f)", argv[0].type() == VECTOR || argv[0] == C_FALSE);
+  AR_FN_EXPECT_ENV(state, 0);
   AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
   
   return state.env_lookup(argv[0], argv[1]);
@@ -776,6 +817,12 @@ Value fn_install_expander(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+Value fn_top_level_value(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "top-level-value";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+  return argv[0].as<Symbol>()->value;
+}
+
 Value fn_make_rename(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "make-rename";
   AR_FN_EXPECT_ENV(state, 0);
@@ -811,112 +858,126 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   exc = state.make_exception(tag, message, irritants);
   return exc;
 }
+/*
 
-void State::install_builtin_functions() {
+void core_defun_core(State* state, Value module, const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
+  state->defun_core(module, name, addr, min_arity, max_arity, variable_arity);
+  state->toplevel_defun_core(name, addr, min_arity, max_arity, variable_arity);
+}
+*/
+
+void State::install_core_functions() {
+  Value core = get_global_value(G_MODULE_CORE);
+
+  AR_FRAME(this, core);
+
   // Numbers
-  defun("fx+", fn_fx_add, 1, 1, true);
-  defun("fx=", fn_fx_equals, 2, 2, true);
-  defun("fx-", fn_fx_sub, 1, 1, true);
-  defun("fx<", fn_fx_lt, 2);
-  defun("fx>", fn_fx_gt, 2);
+  defun_core("fx+", fn_fx_add, 1, 1, true);
+  defun_core("fx=", fn_fx_equals, 2, 2, true);
+  defun_core("fx-", fn_fx_sub, 1, 1, true);
+  defun_core("fx<", fn_fx_lt, 2);
+  defun_core("fx>", fn_fx_gt, 2);
 
   // TODO Variadic arguments
-  defun("+", fn_add, 1, 1, true);
-  defun("-", fn_sub, 1, 1, true);
-  defun("/", fn_div, 2, 2, true);
-  defun("*", fn_mul, 1, 1, true);
-  defun("=", fn_num_equal, 2, 2, true);
-  defun("<", fn_lt, 2, 2, true);
-  defun(">", fn_gt, 2, 2, true);
-  defun("<=", fn_lte, 2, 2, true);
-  defun(">=", fn_gte, 2, 2, true);
+  defun_core("+", fn_add, 1, 1, true);
+  defun_core("-", fn_sub, 1, 1, true);
+  defun_core("/", fn_div, 2, 2, true);
+  defun_core("*", fn_mul, 1, 1, true);
+  defun_core("=", fn_num_equal, 2, 2, true);
+  defun_core("<", fn_lt, 2, 2, true);
+  defun_core(">", fn_gt, 2, 2, true);
+  defun_core("<=", fn_lte, 2, 2, true);
+  defun_core(">=", fn_gte, 2, 2, true);
+
+  // Conversion
+  defun_core("string->symbol", fn_string_to_symbol, 1);
 
   // Predicates
-  defun("null?", fn_nullp, 1);
-  defun("char?", fn_charp, 1);
-  defun("procedure?", fn_procedurep, 1);
-  defun("pair?", fn_pairp, 1);
-  defun("symbol?", fn_symbolp, 1);
-  defun("rename?", fn_renamep, 1);
-  defun("macro?", fn_macrop, 1);
-  defun("self-evaluating?", fn_self_evaluatingp, 1);
-  defun("identifier?", fn_identifierp, 1);
-  defun("box?", fn_boxp, 1);
-  defun("fixnum?", fn_fixnump, 1);
-  defun("flonum?", fn_flonump, 1);
-  defun("string?", fn_stringp, 1);
+  defun_core("null?", fn_nullp, 1);
+  defun_core("char?", fn_charp, 1);
+  defun_core("procedure?", fn_procedurep, 1);
+  defun_core("pair?", fn_pairp, 1);
+  defun_core("symbol?", fn_symbolp, 1);
+  defun_core("rename?", fn_renamep, 1);
+  defun_core("macro?", fn_macrop, 1);
+  defun_core("self-evaluating?", fn_self_evaluatingp, 1);
+  defun_core("identifier?", fn_identifierp, 1);
+  defun_core("box?", fn_boxp, 1);
+  defun_core("fixnum?", fn_fixnump, 1);
+  defun_core("flonum?", fn_flonump, 1);
+  defun_core("string?", fn_stringp, 1);
 
   // Strings
-  defun("string-copy", fn_string_copy, 1);
+  defun_core("string-copy", fn_string_copy, 1);
 
   // Lists
-  defun("cons", fn_cons, 2);
-  defun("list", fn_list, 0, 0, true);
-  defun("list?", fn_listp, 1);
-  defun("list-ref", fn_list_ref, 2);
-  defun("length", fn_length, 1);
-  defun("map", fn_map, 2);
-  defun("for-each.", fn_for_each_dot, 2);
-  defun("memq", fn_memq, 2);
-  defun("memv", fn_memv, 2);
-  defun("member", fn_member, 2);
+  defun_core("cons", fn_cons, 2);
+  defun_core("list", fn_list, 0, 0, true);
+  defun_core("list?", fn_listp, 1);
+  defun_core("list-ref", fn_list_ref, 2);
+  defun_core("length", fn_length, 1);
+  defun_core("map", fn_map, 2);
+  defun_core("for-each.", fn_for_each_dot, 2);
+  defun_core("memq", fn_memq, 2);
+  defun_core("memv", fn_memv, 2);
+  defun_core("member", fn_member, 2);
   
-  defun("apply", fn_apply, 2);
-  defun("eval", fn_eval, 1);
+  defun_core("apply", fn_apply, 2);
+  defun_core("eval", fn_eval, 1);
 
   // Vectors
-  defun("make-vector", fn_make_vector, 0, 2);
-  defun("vector-ref", fn_vector_ref, 2);
-  defun("vector-set!", fn_vector_set, 3);
+  defun_core("make-vector", fn_make_vector, 0, 2);
+  defun_core("vector-ref", fn_vector_ref, 2);
+  defun_core("vector-set!", fn_vector_set, 3);
 
   // Tables
-  defun("make-table", fn_make_table, 0);
-  defun("table-ref", fn_table_ref, 2);
-  defun("table-set!", fn_table_set, 3);
+  defun_core("make-table", fn_make_table, 0);
+  defun_core("table-ref", fn_table_ref, 2);
+  defun_core("table-set!", fn_table_set, 3);
 
   // Equality
-  defun("eq?", fn_eq, 2);
-  defun("eqv?", fn_eqv, 2);
-  defun("equal?", fn_equal, 2);
+  defun_core("eq?", fn_eq, 2);
+  defun_core("eqv?", fn_eqv, 2);
+  defun_core("equal?", fn_equal, 2);
 
   // I/O
-  defun("display", fn_display, 1, 1, false);
-  defun("write", fn_write, 1, 1, false);
-  defun("newline", fn_newline, 0);
-  defun("print", fn_print, 0, 0, true);
-  defun("print-string", fn_print_string, 0, 0, true);
+  defun_core("display", fn_display, 1, 1, false);
+  defun_core("write", fn_write, 1, 1, false);
+  defun_core("newline", fn_newline, 0);
+  defun_core("print", fn_print, 0, 0, true);
+  defun_core("print-string", fn_print_string, 0, 0, true);
+  defun_core("print-table-verbose", fn_print_table_verbose, 1);
 
   // Pairs
-  defun("car", fn_car, 1, 1);
-  defun("cdr", fn_cdr, 1, 1);
+  defun_core("car", fn_car, 1, 1);
+  defun_core("cdr", fn_cdr, 1, 1);
 
   // Exceptions
-  defun("raise", fn_raise, 3);
+  defun_core("raise", fn_raise, 3);
 
   // Expansion support functionality
-  defun("cons-source", fn_cons_source, 3);
-  defun("list-source", fn_list_source, 0, 0, true);
-  defun("source-location", fn_source_location, 1);
+  defun_core("cons-source", fn_cons_source, 3);
+  defun_core("list-source", fn_list_source, 0, 0, true);
+  defun_core("source-location", fn_source_location, 1);
 
-  defun("env-make", fn_env_make, 1);
-  defun("env-define", fn_env_define, 3);
-  defun("env-compare", fn_env_compare, 3);
-  defun("env-lookup", fn_env_lookup, 2);
-  defun("env-syntax?", fn_env_syntaxp, 2);
+  // Environments
+  defun_core("env-make", fn_env_make, 1);
+  defun_core("env-qualify", fn_env_qualify, 2);
+  defun_core("env-define", fn_env_define, 3);
+  defun_core("env-compare", fn_env_compare, 3);
+  defun_core("env-lookup", fn_env_lookup, 2);
+  defun_core("env-syntax?", fn_env_syntaxp, 2);
 
-  // OK, going to need...
-
-  defun("gensym", fn_gensym, 0, 1);
-
-  // TODO: Full eval/apply necessary? Probably...
-  defun("install-expander", fn_install_expander, 1);
-  defun("make-rename", fn_make_rename, 2);
-  defun("rename-env", fn_rename_env, 1);
-  defun("rename-expr", fn_rename_expr, 1);
-  defun("eval-lambda", fn_eval_lambda, 2);
-  defun("set-function-name!", fn_set_function_name, 2);
-  defun("set-function-macro-bit!", fn_set_function_macro_bit, 1);
-  defun("function-env", fn_function_env, 1);
+  defun_core("gensym", fn_gensym, 0, 1);
+  defun_core("top-level-value", fn_top_level_value, 1);
+  defun_core("install-expander", fn_install_expander, 1);
+  defun_core("make-rename", fn_make_rename, 2);
+  defun_core("rename-env", fn_rename_env, 1);
+  defun_core("rename-expr", fn_rename_expr, 1);
+  defun_core("eval-lambda", fn_eval_lambda, 2);
+  defun_core("set-function-name!", fn_set_function_name, 2);
+  defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
+  defun_core("function-env", fn_function_env, 1);
 }
 
 }

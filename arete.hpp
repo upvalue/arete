@@ -47,6 +47,10 @@
 # define ARETE_BLOCK_SIZE 4096
 #endif
 
+#ifndef ARETE_HEAP_SIZE 
+# define ARETE_HEAP_SIZE (512000)
+#endif 
+
 //= ### ARETE_GC_LOAD_FACTOR = 80
 //= If more than ARETE_GC_LOAD_FACTOR percent memory is used after a collection, Arete will allocate
 //= more memory up to ARETE_GC_MAX_HEAP_SIZE
@@ -278,7 +282,6 @@ struct Value {
 
   // FIXNUMS
 
-  /** Get the value of a fixnum */
   ptrdiff_t fixnum_value() const {
     AR_ASSERT(type_unsafe() == FIXNUM);
     
@@ -342,6 +345,7 @@ struct Value {
   Value symbol_name() const;
   const char* symbol_name_data() const;
   Value symbol_value() const;
+  void set_symbol_value(Value);
 
   /** Quickly compare symbol to string */
   bool symbol_equals(const char* s) const {
@@ -455,6 +459,10 @@ inline const char* Value::symbol_name_data() const {
 
 inline Value Value::symbol_value() const {
   return as<Symbol>()->value;
+}
+
+inline void Value::set_symbol_value(Value v) {
+  as<Symbol>()->value = v;
 }
 
 struct Rename : HeapValue {
@@ -1364,13 +1372,20 @@ struct State {
     S_READ_ERROR,
     S_EVAL_ERROR,
     S_TYPE_ERROR,
+    // Module internals
+    // Todo, perhaps these should be strings in order to avoid conflicts,
+    // (also needs to support strings and not just symbols)
+    S_MODULE_NAME,
+    S_MODULE_IMPORTS,
     // Global variables
     G_EXPANDER,
+    G_MODULE_TABLE,
+    G_MODULE_CORE,
     G_END
   };
 
   /** Performs various initializations required for an instance of Arete;
-    * this is separate so the State itself can be used for lightweight testing */
+    * this is separate so the uninitialized State can be unit tests in various ways */
   void boot() {
     source_names.push_back("unknown");
     source_names.push_back("c-string");
@@ -1385,8 +1400,10 @@ struct State {
       "quasiquote", "unquote", "unquote-splicing", "rename",
       // Errors that may be thrown by the runtime
       "read", "eval", "type",
+      "%module-name",
+      "%module-imports",
       // Various variables
-      "expander",
+      "expander", "module-table", "core",
     };
 
     for(size_t i = 0; i != G_END; i++) {
@@ -1399,7 +1416,10 @@ struct State {
       globals.push_back(s);
     }
 
-    install_builtin_functions();
+    set_global_value(G_MODULE_TABLE, make_table());
+    set_global_value(G_MODULE_CORE, make_module("arete.core"));
+
+    install_core_functions();
   }
 
 #undef AR_SYMBOLS
@@ -1423,6 +1443,12 @@ struct State {
 
   void set_global_value(Global sym, Value v) {
     globals.at((size_t) sym).as<Symbol>()->value = v;
+  }
+
+  Value get_symbol(Value name) {
+    AR_TYPE_ASSERT(name.type() == STRING);
+    std::string cname(name.string_data());
+    return get_symbol(cname);
   }
 
   Value get_symbol(const std::string& name) {
@@ -1684,7 +1710,6 @@ struct State {
 
     htable = table.as<Table>();
 
-
     // Handle collision
     if(htable->chains->data[index] != C_FALSE) {
       chain = make_pair(chain, htable->chains->data[index]);
@@ -1698,15 +1723,6 @@ struct State {
     htable->entries++;
 
     return C_UNSPECIFIED;
-  }
-
-  Value make_table(size_t size_log2 = 4) {
-    Value table = static_cast<Table*>(gc.allocate(TABLE, sizeof(Table)));
-    AR_FRAME(this, table);
-
-    table_setup(table, size_log2);
-
-    return table;
   }
 
   Value make_string(const std::string& body) {
@@ -1753,8 +1769,46 @@ struct State {
     return make_exception(tag, cmessage, irritants);
   }
   
+  /** Make an exception with a builtin tag */
   Value make_exception(Global s, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
     return make_exception(get_symbol(s), cmessage, irritants);
+  }
+
+  Value make_table(size_t size_log2 = 4) {
+    Value table = static_cast<Table*>(gc.allocate(TABLE, sizeof(Table)));
+    AR_FRAME(this, table);
+
+    table_setup(table, size_log2);
+
+    return table;
+  }
+  
+  Value make_module(const std::string& cname) {
+    Value tbl, str, module_tbl;
+    AR_FRAME(this, tbl, module_tbl, str);
+    tbl = make_table();
+    str = make_string(cname);
+    table_set(tbl, get_symbol(S_MODULE_NAME), str);
+
+    // module_tbl = get_global_value(G_MODULE_TABLE);
+    // table_set(tbl, )
+
+    return tbl;
+  }
+
+  Value make_c_function(Value name, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
+    if(max_arity == 0)
+      max_arity = min_arity;
+    AR_FRAME(this, name);
+    CFunction *cfn = static_cast<CFunction*>(gc.allocate(CFUNCTION, sizeof(CFunction)));
+    cfn->name = name;
+    cfn->addr = addr;
+    cfn->min_arity = min_arity;
+    cfn->max_arity = max_arity;
+    if(variable_arity) {
+      cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
+    }
+    return cfn;
   }
 
   // Print out a table's internal structure for debugging purposes
@@ -1846,27 +1900,39 @@ struct State {
       stack_trace.clear();
   }
 
-  void install_builtin_functions();
+  void install_core_functions();
 
-  void defun(const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
-    if(max_arity == 0)
-      max_arity = min_arity;
-    Value sym, str;
-    CFunction* cfn = 0;
-    AR_FRAME(this, sym,str);
-    sym = get_symbol(name);
-    str = make_string(name);
-    cfn = static_cast<CFunction*>(gc.allocate(CFUNCTION, sizeof(CFunction)));
-    cfn->name = str;
-    cfn->addr = addr;
-    cfn->min_arity = min_arity;
-    cfn->max_arity = max_arity;
-    if(variable_arity) {
-      cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
-    }
-    sym.as<Symbol>()->value = cfn;
+  /** Define a function on a module */
+  void defun_impl(Value module, Value name, Value cfn) {
+    // name = unqualified, qname = qualified
+    // my-variable becomes ##my-module#my-variable
+    Value qname, module_name;
+    AR_FRAME(this, module, module_name, qname, name, cfn);
+    bool found;
+    module_name = table_get(module, get_symbol(S_MODULE_NAME), found);
+    AR_ASSERT(found);
+    std::ostringstream cqname;
+    cqname << "##" << module_name.string_data() << "#" << name;
+    qname = make_string(cqname.str());
+    qname = get_symbol(qname);
+    qname.set_symbol_value(cfn);
+    table_set(module, name, qname);
   }
 
+  /** Defines a function both in the core module and as a top-level value; used during booting */
+  void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
+    Value cfn, sym, name;
+
+    AR_FRAME(this, cfn, sym, name);
+    name = make_string(cname);
+    cfn = make_c_function(name, addr, min_arity, max_arity, variable_arity);
+
+    sym = get_symbol(name);
+    sym.set_symbol_value(cfn);
+
+    defun_impl(get_global_value(G_MODULE_CORE), sym, cfn);
+  }
+ 
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
 
   #define EVAL_TRACE(exp, fn_name) \
@@ -1936,7 +2002,7 @@ struct State {
    because this more complex logic is necessary for hygienic macros (see fn_env_compare) */
   Value env_lookup_impl(Value& env, Value name, bool one_level = false) {
 
-    while(env != C_FALSE) {
+    while(env.type() == VECTOR) {
       for(size_t i = env.vector_length() - 1; i >= 1; i -= 2) {
         if(identifier_equal(env.vector_ref(i-1), name))
           return env.vector_ref(i);
@@ -1944,6 +2010,17 @@ struct State {
       env = env.vector_ref(0); // check parent environment
       if(one_level) break; // TODO should this return?
     }
+
+    if(env.type() == TABLE) {
+      AR_ASSERT(name.type() != RENAME && "encountered rename at table-level");
+      bool found;
+      Value chk = table_get(env, name, found);
+      if(found)  {
+        AR_ASSERT(chk.type() == SYMBOL);
+        return chk.as<Symbol>()->value;
+      }
+    }
+
     // reached toplevel, check symbol.
     if(name.type() == RENAME) {
       if(name.rename_env() == C_FALSE) {
@@ -2153,13 +2230,17 @@ struct State {
     Value tmp, name, body;
     AR_FRAME(this, name, tmp, body, exp, env, fn_name);
 
+    if(exp.list_length() != 3) {
+      return eval_error("set! must be a list with exactly three elements");
+    }
+
     name = exp.cadr().maybe_unbox();
     body = exp.caddr();
 
     tmp = env_lookup(env, name);
     if(tmp == C_UNDEFINED) {
       std::ostringstream os;
-      os << "attempt to set! undefined variable " << tmp;
+      os << "attempt to set! undefined variable " << name;
       return eval_error(os.str(), exp);
     }
 
@@ -3110,7 +3191,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       //return os << "&" << v.unbox();
       return os << v.unbox();
     case TABLE:
-      return os << "#<table size: " << v.as<Table>()->entries << '>';
+      return os << "#<table entries: " << v.as<Table>()->entries << '>';
     case EXCEPTION:
       os << "#<exception '" << v.exception_tag() << " " << v.exception_message();
       if(v.exception_irritants() != C_UNSPECIFIED) {

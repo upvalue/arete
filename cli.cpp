@@ -71,7 +71,7 @@ bool do_repl() {
 
   std::ostringstream prompt;
 
-  std::cout << "; Arete 0.1" << std::endl;
+  std::cout << ";) Arete 0.1" << std::endl;
 
   while(i++) {
     prompt << "> ";
@@ -136,7 +136,7 @@ int main(int argc, const char **argv) {
 
   if(argc > 1) {
     // read files
-    for(size_t i = 1; i != argc; i++) {
+    for(int i = 1; i != argc; i++) {
       if(open_repl.compare(argv[i]) == 0) {
         do_repl();
       } else if(quiet.compare(argv[i]) == 0) {
