@@ -779,8 +779,11 @@ inline ptrdiff_t hash_value(Value x, bool& unhashable) {
     case STRING:
       return x31_string_hash(x.string_data());
     case SYMBOL:
-      // TODO If the collector doesn't move, we can simply hash the pointer
+#if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE
+      // If symbols can be moved (semispace), we need to hash the string, otherwise we can just
+      // hash the pointer
       return x31_string_hash(x.symbol_name_data());
+#endif
     case FIXNUM:
     case CONSTANT:
       return wang_integer_hash(x.bits);
@@ -875,7 +878,7 @@ struct GCCommon {
 
   ~GCCommon() {}
 
-  // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) ==6
+  // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) == 16
   static size_t align(size_t boundary, size_t value) {
     return (((((value) - 1) / (boundary)) + 1) * (boundary));
   }
@@ -1374,15 +1377,14 @@ struct State {
     S_READ_ERROR,
     S_EVAL_ERROR,
     S_TYPE_ERROR,
-    // Module internals
-    // Todo, perhaps these should be strings in order to avoid conflicts,
-    // (also needs to support strings and not just symbols)
-    S_MODULE_NAME,
-    S_MODULE_IMPORTS,
     // Global variables
     G_EXPANDER,
     G_MODULE_TABLE,
     G_MODULE_CORE,
+    // Module internals
+    G_STR_MODULE_NAME,
+    G_STR_MODULE_RENAMES,
+    G_STR_MODULE_IMPORTS,
     G_END
   };
 
@@ -1402,18 +1404,25 @@ struct State {
       "quasiquote", "unquote", "unquote-splicing", "rename",
       // Errors that may be thrown by the runtime
       "read", "eval", "type",
-      "%module-name",
-      "%module-imports",
       // Various variables
       "expander", "module-table", "core",
+      "module-name",
+      "module-renames",
+      "module-imports",
     };
 
     for(size_t i = 0; i != G_END; i++) {
-      Value s = get_symbol(_symbols[i]);
-      if(i <= S_LETREC_SYNTAX) {
-        s.as<Symbol>()->value = C_SYNTAX;
+      Value s;
+      if(i >= G_STR_MODULE_NAME) {
+        s = make_string(_symbols[i]);
       } else {
-        s.as<Symbol>()->value = C_UNDEFINED;
+        s = get_symbol(_symbols[i]);
+
+        if(i <= S_LETREC_SYNTAX) {
+          s.as<Symbol>()->value = C_SYNTAX;
+        } else {
+          s.as<Symbol>()->value = C_UNDEFINED;
+        }
       }
       globals.push_back(s);
     }
@@ -1422,6 +1431,7 @@ struct State {
     set_global_value(G_MODULE_CORE, make_module("arete.core"));
 
     install_core_functions();
+    // gc.allocations = 0;
   }
 
 #undef AR_SYMBOLS
@@ -1435,7 +1445,10 @@ struct State {
   }
 
   Value get_symbol(Global sym) {
-    return (globals.at((size_t) sym));
+    Value sym2 =  (globals.at((size_t) sym));
+    // std::cout << sym2 << std::endl;
+    AR_ASSERT(sym2.type() == SYMBOL);
+    return sym2;
   }
 
   Value get_global_value(Global sym) {
@@ -1799,7 +1812,7 @@ struct State {
     AR_FRAME(this, tbl, module_tbl, str);
     tbl = make_table();
     str = make_string(cname);
-    table_set(tbl, get_symbol(S_MODULE_NAME), str);
+    table_set(tbl, globals[G_STR_MODULE_NAME], str);
 
     // module_tbl = get_global_value(G_MODULE_TABLE);
     // table_set(tbl, )
@@ -1920,7 +1933,7 @@ struct State {
     Value qname, module_name;
     AR_FRAME(this, module, module_name, qname, name, value);
     bool found;
-    module_name = table_get(module, get_symbol(S_MODULE_NAME), found);
+    module_name = table_get(module, globals[G_STR_MODULE_NAME], found);
     AR_ASSERT(found);
     std::ostringstream cqname;
     cqname << "##" << module_name.string_data() << "#" << name;
@@ -2043,6 +2056,8 @@ struct State {
   Value env_lookup_impl(Value& env, Value& rename_key, Value name) {
     rename_key = C_FALSE;
 
+    // First we search through vectors with identifier_equal, which only
+    // returns true if symbols are the same or if renames have the same env and expr
     while(env.type() == VECTOR) {
       for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
         if(identifier_equal(env.vector_ref(i-1), name)) {
@@ -2064,8 +2079,8 @@ struct State {
     // A rename has an env of C_FALSE, these are created by the macroexpander to refer to core forms
     // like define, lambda etc
 
-    // A rename has an env that is the same as the table we're searching, meaning it's a table-level
-    // varible that's been defined by a macro
+    // A rename has an env that is the same as the table we're searching, meaning it's a reference
+    // to a module-level variable or a renamed variable that has been introduced by a macro.
 
     // A symbol is defined in a table
     if(env.type() == TABLE || env == C_FALSE) {
@@ -2496,6 +2511,8 @@ struct State {
   }
 
   Value eval(Value env, Value exp, Value fn_name = C_FALSE) {
+    AR_ASSERT(env.type() != TABLE);
+    // Interpreter should never encounter tables
     Value res, car, tmp;
 
     AR_FRAME(this, env, exp, res, car, tmp, fn_name);
@@ -2589,6 +2606,11 @@ struct State {
         // e.g (lambda ((rename 'var )) (rename 'var))
         Value chk = env_lookup(env, exp);
 
+        if(exp.rename_env() != C_FALSE) {
+          std::cerr << "interpreter encountered a non-toplevel rename, but this should be gensymed " << exp << std::endl;
+          std::cerr << exp.rename_env() << std::endl;
+        }
+
         if(chk != C_UNDEFINED) {
           return chk;
         }
@@ -2647,11 +2669,7 @@ struct State {
     if(expand != C_UNDEFINED) {
       Value args, sym;
       AR_FRAME(this, expand, exp, args, sym);
-#if 1
       args = make_pair(get_global_value(G_MODULE_CORE), C_NIL);
-#else 
-      args = make_pair(C_FALSE, C_NIL);
-#endif
       args = make_pair(exp.maybe_unbox(), args);
 
       exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);

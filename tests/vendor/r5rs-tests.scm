@@ -34,7 +34,6 @@
 
 (test '(3 4 5 6) ((lambda x x) 3 4 5 6))
 
-
 (test 8 ((lambda (x) (+ x x)) 4))
 
 (test '(3 4 5 6) ((lambda x x) 3 4 5 6))

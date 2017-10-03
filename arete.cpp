@@ -415,61 +415,75 @@ Value fn_list_ref(State& state, size_t argc, Value* argv) {
   return h.car().maybe_unbox();
 }
 
-Value fn_map(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "map"; 
+/** 
+ * Underlying implementation of for-each and map. If improper is true, it will handle dotted lists,
+ * if ret is true it will allocate and return a list of the results of function application.
+ */
+Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, bool improper, bool ret) {
 
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
 
-  if(argv[1] == C_NIL) return C_NIL;
+  if(argv[1] == C_NIL) return ret ? C_NIL : C_UNSPECIFIED;
   AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
-  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1].list_length() > 0));
+
+  if(!improper) {
+    AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1].list_length() > 0));
+  } else {
+    AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
+  }
 
   Value nlst_head, nlst_current = C_NIL, tmp, lst = argv[1], fn = argv[0], arg;
-  AR_FRAME(state, nlst_head, nlst_current, lst, fn, arg);
+  AR_FRAME(state, nlst_head, nlst_current, lst, fn, arg, tmp);
 
   while(lst.type() == PAIR) {
     arg = state.make_pair(lst.car().maybe_unbox(), C_NIL);
     tmp = state.apply_generic(fn, arg, false);
     if(tmp.is_active_exception()) return tmp;
-    if(nlst_current == C_NIL) {
-      nlst_head = nlst_current = state.make_pair(tmp, C_NIL);
-    } else {
-      tmp = state.make_pair(tmp, C_NIL);
-      nlst_current.set_cdr(tmp);
-      nlst_current = tmp;
+    if(ret) {
+      if(nlst_current == C_NIL) {
+        nlst_head = nlst_current = state.make_pair(tmp, C_NIL);
+      } else {
+        tmp = state.make_pair(tmp, C_NIL);
+        nlst_current.set_cdr(tmp);
+        nlst_current = tmp;
+
+      }
     }
     lst = lst.cdr();
   }
 
-  return nlst_head;
+  if(lst != C_NIL) {
+    if(improper) {
+      arg = state.make_pair(lst.maybe_unbox(), C_NIL);
+      tmp = state.apply_generic(fn, arg, false);
+      if(tmp.is_active_exception()) return tmp;
+      if(ret) {
+        nlst_current.set_cdr(tmp);
+      }
+    } else {
+      std::ostringstream os;
+      os << fn_name << " got improper list";
+      return state.type_error(os.str());
+    }
+  }
+
+  return ret ? nlst_head : C_UNSPECIFIED;
 }
 
-/** This is a for-each that also applies the function to the end of a dotted list; it's used to
- * process lambda argument lists e.g. (lambda (first . rest) ...) */
-Value fn_for_each_dot(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "for-each.";
+Value fn_map_proper(State& state, size_t argc, Value* argv) {
+  return fn_map_impl(state, argc, argv, "map", false, true);
+}
 
-  AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
+Value fn_map_improper(State& state, size_t argc, Value* argv) {
+  return fn_map_impl(state, argc, argv, "map-improper", true, true);
+}
 
-  if(argv[1] == C_NIL) return C_NIL;
-  AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
+Value fn_foreach_proper(State& state, size_t argc, Value* argv) {
+  return fn_map_impl(state, argc, argv, "for-each", true, false);
+}
 
-  Value lst = argv[1], fn = argv[0], arg, tmp;
-  AR_FRAME(state, lst, fn, arg, tmp);
-
-  while(lst.type() == PAIR) {
-    arg = state.make_pair(lst.car().maybe_unbox(), C_NIL);
-    tmp = state.apply_generic(fn, arg, false);
-    if(tmp.is_active_exception()) return tmp;
-    lst = lst.cdr();
-  }
-
-  if(lst != C_NIL) {
-    arg = state.make_pair(lst.maybe_unbox(), C_NIL);
-    return state.apply_generic(fn, arg, false);
-  }
-
-  return C_UNSPECIFIED;
+Value fn_foreach_improper(State& state, size_t argc, Value* argv) {
+  return fn_map_impl(state, argc, argv, "for-each-improper", true, false);
 }
 
 enum Mem { MEMQ, MEMV, MEMBER };
@@ -647,6 +661,7 @@ Value fn_string_copy(State& state, size_t argc, Value* argv) {
 /** Generate a unique, unused symbol */
 Value fn_gensym(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "gensym";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
 
   std::string prefix("g");
 
@@ -743,8 +758,8 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(rename_env == env && id1.rename_expr() == id2);
 }
 
-/** env-resolve takes an environment and identifier and returns an appropriate symbols
- * symbol. For example, references to arete.core functions like car become ##arete.core#car,
+/** env-resolve takes an environment and identifier and returns an appropriate symbol for runtime
+ * For example, references to arete.core functions like car become ##arete.core#car,
  * renames in lambda lists become gensyms, and so on */
 Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-resolve";
@@ -780,18 +795,26 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
         //std::cout << argv[1].rename_gensym() << std::endl;
       }
       return argv[1];
-    }
+    } 
   }
 
-  if(env.type() != TABLE || argv[1].type() == RENAME) {
-    return argv[1];
+  // Table-level renames also become gensyms
+  if(env.type() == TABLE && argv[1].type() == RENAME) {
+    bool found;
+    Value renames = state.table_get(env, state.globals[State::G_STR_MODULE_RENAMES], found);
+    if(!found) {
+      // Reassigning the argument vector is definitely NOT COOL
+      argv[1] = argv[1].rename_expr();
+    } else {
+      return argv[1];
+    }
   }
 
   AR_ASSERT(argv[1].type() == SYMBOL && "env-qualify passed a rename");
 
   bool found;
-  Value mname = state.table_get(env, state.get_symbol(State::S_MODULE_NAME), found);
-  AR_ASSERT(found && "env-qualify table_get S_MODULE_NAME failed, probably passed a bad module");
+  Value mname = state.table_get(env, state.globals[State::G_STR_MODULE_NAME], found);
+  AR_ASSERT(found && "env-qualify table_get G_STR_MODULE_NAME failed, probably passed a bad module");
 
   // TODO search environments
 
@@ -989,8 +1012,11 @@ void State::install_core_functions() {
   defun_core("list?", fn_listp, 1);
   defun_core("list-ref", fn_list_ref, 2);
   defun_core("length", fn_length, 1);
-  defun_core("map", fn_map, 2);
-  defun_core("for-each.", fn_for_each_dot, 2);
+
+  defun_core("map", fn_map_improper, 2);
+  defun_core("map-improper", fn_map_improper, 2);
+  defun_core("for-each", fn_foreach_proper, 2);
+  defun_core("for-each-improper", fn_foreach_improper, 2);
 
   defun_core("memq", fn_memq, 2);
   defun_core("memv", fn_memv, 2);

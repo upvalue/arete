@@ -168,7 +168,7 @@
                  (define bindings (cadr x))
 
                  (if (or (null? bindings) (pair? bindings))
-                   (for-each. (lambda (arg)
+                   (for-each-improper (lambda (arg)
                       (if (not (identifier? arg))
                         (raise 'expand "non-identifier in lambda argument list" (list x arg)))
                       ;; If a rename is encountered here, env-define will add a gensym
@@ -178,9 +178,12 @@
                         (rename-gensym! arg))
                       (env-define new-env arg 'variable)) bindings)
                    (if (not (identifier? bindings))
-                        (raise 'expand "non-identifier as lambda rest argument" (list x bindings))))
+                        (raise 'expand "non-identifier as lambda rest argument" (list x bindings))
+                        (env-define new-env bindings 'variable)))
 
-                 (set! bindings (map (lambda (x) (if (rename? x) (rename-gensym x) x)) bindings))
+                 (if (identifier? bindings)
+                   (if (and (rename? bindings) (rename-gensym bindings)) (rename-gensym bindings) x)
+                   (set! bindings (map-improper (lambda (x) (if (and (rename? x) (rename-gensym x)) (rename-gensym x) x)) bindings)))
 
                  (cons-source x (car x) (cons-source x bindings (expand-map (cddr x) new-env)))
                  )
@@ -240,19 +243,6 @@
             ))) ;; end expand
 
 (install-expander expand)
-
-; (set-print-expansions! #t)
-
-#|
-(define-syntax x
-  (lambda (x r c)
-    (list 
-      (list 'lambda (list (r 'hello)) 
-            (list (list 'lambda (list (r 'hello-second)) (r 'hello-second)) (r 'hello))
-            ) ''success)))
-
-(print (x))
-|#
 
 ;;;;; BASIC SYNTACTIC FORMS
 ;; eg let & friends, quasiquote, when/unless
@@ -343,15 +333,6 @@
     (qq-object rename c (cadr x))
     ))
 
-
-;; er-macro-transformer. Not necessary in Arete, but here for compatibility with other Schemes which use this prefix 
-;; for explicit renaming macros.
-(define-syntax er-macro-transformer
-  (lambda (x r c)
-    (if (not (eq? (length x) 2))
-        (raise 'syntax "er-macro-transformer expects one three-argument lambda as its argument" x))
-    (cadr x)))
-
 (define-syntax when
   (lambda (x rename c)
     (if (fx< (length x) 3)
@@ -407,15 +388,11 @@
           ,(loop (cadr clauses) (cdr clauses))))
       ))
 
+
     `(#,let ((#,result ,key))
       ,code)))
 
-;; let*, letrec
-;; define* and type stuff
-;; syntax-rules (?)
-;; structures/records
-;; types, type assertions, type dispatching, methods
-;; constant definitions
-;; modules
-;; compiler (?)
 
+(define-syntax er-macro-transformer
+  (lambda (x r c)
+    (cadr x)))
