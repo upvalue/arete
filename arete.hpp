@@ -290,6 +290,7 @@ struct Value {
 
   /** Create a fixnum */
   static Value make_fixnum(ptrdiff_t fixnum) {
+
     return Value(((fixnum << 1) + 1));
   }
 
@@ -1658,7 +1659,7 @@ struct State {
     return type_error(os.str());
   }
 
-  bool equals(Value a, Value b) {
+  bool equals(Value a, Value b) const {
     if(a.bits == b.bits) return true;
 
     if(a.type() == VECTOR && b.type() == VECTOR) {
@@ -1881,11 +1882,7 @@ struct State {
       Value chain = table->chains->data[i];
       if(chain != C_FALSE) {
         std::cout << "  chain " << i << ": ";
-        while(chain.type() == PAIR) {
-          std::cout << chain << " ";
-          chain = chain.cdr();
-        }
-        std::cout << std::endl;
+        std::cout << chain << std::endl;
       }
     }
 
@@ -2129,13 +2126,6 @@ struct State {
           }
           name = name.rename_expr();
         } else  {
-          // This is where gensym probably has to come into the picture; 
-          // For example, imagine a macro that defines something at the toplevel it doesn't want 
-          // to be seen
-          // (define-syntax thing (lambda (x r c) `(begin (define ,(r 'var) #t) ,(r 'var))))
-          // Will trigger this as an error
-          // env-qualify will have to generate a gensym when called against a table-level rename.
-          // then env-lookup should compare gensyms
           std::cout << name.rename_env() << ' ' << env << std::endl;
           std::cout << name << std::endl;
           AR_ASSERT(!"don't know what to do with rename at table-level");
@@ -3288,7 +3278,9 @@ inline Handle::~Handle() {
 /** Output Arete values */
 inline std::ostream& operator<<(std::ostream& os, Value v) {
   switch(v.type()) {
-    case FIXNUM: return os << v.fixnum_value(); break;
+    case FIXNUM:  {
+      return os << v.fixnum_value();
+    }
     case CONSTANT: 
       switch(v.constant_value()) {
         case C_TRUE: return os << "#t";

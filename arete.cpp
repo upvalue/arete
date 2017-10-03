@@ -882,23 +882,58 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   return qname;
 }
 
+// env-lookup
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-lookup";
   AR_FN_EXPECT_ENV(state, 0);
   AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
+
+  Value env = argv[0], qname, result;
+
+  qname = fn_env_resolve(state, argc, argv);
+  //std::cout << "env-lookup called against " << env << " with name " << argv[1] << std::endl;
+  //std::cout << "trying qname " << qname << std::endl; 
+
+  result = state.env_lookup(env, qname);
   
+  if(result != C_UNDEFINED) {
+    return result;
+  }
+
+  // std::cout << "but failed, trying just " << argv[1] << std::endl;
+
   return state.env_lookup(argv[0], argv[1]);
 }
 
 /** Check if a name is syntax (a builtin such as define, or a macro) in a particular environment.
   * Necessary because C_SYNTAX values cannot be handled by Scheme code directly. */
 Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
-  Value result = fn_env_lookup(state, argc, argv);
+  Value env, name, qname;
+  AR_FRAME(state, env, qname, name);
+  /*
+  env = argv[0];
+  name = argv[1];
+  qname = fn_env_resolve(state, argc, argv);
 
-  if(result.is_active_exception()) return result;
-  
+  Value result = state.env_lookup(env, qname);
+
+  if(result != C_FALSE) {
+    if(result == C_SYNTAX) return C_TRUE;
+
+    if(result.type() == FUNCTION && result.function_is_macro()) {
+      return C_TRUE;
+    }
+  }
+
+  result = state.env_lookup(env, name);
+
   if(result == C_SYNTAX) return C_TRUE;
 
+  return Value::make_boolean(result.type() == FUNCTION && result.function_is_macro());
+  */
+  Value result = fn_env_lookup(state, argc, argv);
+
+  if(result == C_SYNTAX) return C_TRUE;
   return Value::make_boolean(result.type() == FUNCTION && result.function_is_macro());
 }
 

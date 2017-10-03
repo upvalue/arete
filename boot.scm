@@ -103,7 +103,6 @@
             (rename-gensym! name)
             (vector-append! (table-ref env "module-renames") name))
           (begin
-            ;; (table-set! env "qq-object" "##arete.core#qq-object")
             (table-set! env name (string->symbol (string-append "##" (table-ref env "module-name") "#" (symbol->string name))))
             #t))
         (env-define env name (env-resolve env name) #f)
@@ -111,10 +110,6 @@
         (set! name (env-resolve env name)))
       (env-define env name 'variable))
 
-
-    ;; (print name)
-    ;; (env-define env name qualified-name)
-    
     (define result (list-source x (car x) name (expand value env)))
     ;(print result)
     result))
@@ -134,7 +129,10 @@
           (begin
             (define kar (car x))
             (define len (length x))
-            (define syntax? (and (or (symbol? kar) (rename? kar)) (env-syntax? env kar)))
+            ;(print (and (identifier? kar) (env-resolve env kar)))
+            (define syntax?
+              (and (identifier? kar)
+                   (env-syntax? env kar)))
             ;; Extract renamed syntax
             (if (and syntax? (rename? kar))
               (begin
@@ -143,9 +141,6 @@
               (cond 
                 ;; TODO this should strip renames I think
                 ((eq? kar 'quote)
-;                 x)
-;                 (print x)
-;                 (print (list-source x (make-rename #f 'quote) (cadr x)))
                  (list-source x (make-rename #f 'quote) (cadr x)))
                 ((eq? kar 'or)
                  (cons-source x (car x) (expand-map (cdr x) env)))
@@ -192,7 +187,7 @@
                    )
                    (cdr x))
 
-                 (print module-imports)
+                 ;(print module-imports)
 
 
                  unspecified)

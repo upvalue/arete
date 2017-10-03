@@ -111,12 +111,22 @@ TEST_CASE_FIXTURE(AS, "tables") {
     //CHECK(state.table_get(table, key, found))
   }
 
+  // state.print_table_verbose(table);
+
   for(ptrdiff_t i = 0; i != 100; i++) {
-    state.table_set(table, key, Value::make_fixnum(0 - i));
+    Value fx = Value::make_fixnum(0 - i);
+    std::ostringstream os;
+    os << i;
+    key = state.make_string(os.str());
+    state.table_set(table, key, fx);
     bool found;
-    CHECK(state.table_get(table, key, found) == Value::make_fixnum(0 - i));
-    //CHECK(state.table_get(table, key) == Value::make_Fixnum(i));
+    Value res = state.table_get(table, key, found);
+    CHECK(found);
+    CHECK(res.type() == FIXNUM);
+    CHECK(res.bits == fx.bits);
   }
+
+  // state.print_table_verbose(table);
 }
 
 ///// (READ) READER
