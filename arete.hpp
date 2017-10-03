@@ -623,7 +623,7 @@ inline Value Value::maybe_unbox() const {
 /// EXCEPTIONS
 
 struct Exception : HeapValue {
-  Value tag, message, irritants;
+  Value tag, irritants, message;
 };
 
 inline bool Value::is_active_exception() const {
@@ -1110,18 +1110,17 @@ struct GCIncremental : GCCommon {
       case VECTOR:
       case BOX:
       case CFUNCTION:
+      case TABLE:
         v = static_cast<CFunction*>(v)->name.heap;
         goto again;
       // Two pointers
       case SYMBOL:
+      case RENAME:
+      case PAIR:
         mark(static_cast<Symbol*>(v)->name.heap);
         v = static_cast<Symbol*>(v)->value.heap;
         goto again;
-      case RENAME:
-      case PAIR:
-        mark(static_cast<Pair*>(v)->data_car.heap);
-        v = static_cast<Pair*>(v)->data_cdr.heap;
-        goto again;
+      // Three pointers
       case EXCEPTION:
         mark(static_cast<Exception*>(v)->message.heap);
         mark(static_cast<Exception*>(v)->tag.heap);
@@ -1361,6 +1360,7 @@ struct State {
     S_DEFINE_SYNTAX,
     S_LET_SYNTAX,
     S_LETREC_SYNTAX,
+    // Everything above this line will be set to C_SYNTAX
     // Used by interpreter
     S_ELSE,
     // Used by reader
@@ -1620,6 +1620,7 @@ struct State {
     if(a.bits == b.bits) return true;
 
     if(a.type() == VECTOR && b.type() == VECTOR) {
+      if(a.vector_length() != b.vector_length()) return false;
       for(size_t i = 0; i < a.vector_length() && i < b.vector_length(); i++) {
         if(!equals(a.vector_ref(i), b.vector_ref(i))) {
           return false;
@@ -1962,11 +1963,14 @@ struct State {
   // #(#f hello 12345)
   // for a environment one level below toplevel after a (define hello 12345)
 
+  static const size_t VECTOR_ENV_FIELDS = 2;
+
   Value make_env(Value parent = C_FALSE) {
     Value vec;
     AR_FRAME(this, vec, parent);
     vec = make_vector(3);
     vector_append(vec, parent);
+    vector_append(vec, C_FALSE);
     return vec;
   }
 
@@ -1976,7 +1980,7 @@ struct State {
     // AR_TYPE_ASSERT(name.type() == SYMBOL);
     // Toplevel set
     while(env != C_FALSE) {
-      for(size_t i = env.vector_length() - 1; i >= 1; i -= 2) {
+      for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
         if(identifier_equal(env.vector_ref(i-1), name)) {
           env.vector_set(i, val);
           return;
@@ -2004,7 +2008,7 @@ struct State {
     if(name.type() != SYMBOL) return false;
 
     if(env.type() == VECTOR) {
-      for(size_t i = env.vector_length() -1; i >= 1; i -= 2) {
+      for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
         if(identifier_equal(env.vector_ref(i-1), name)) {
           return true;
         }
@@ -2021,10 +2025,10 @@ struct State {
 
   /** This is the env_lookup backend, which takes env as a reference and modifies it
    to the env the symbol is located in (if there is one). It
-   because this more complex logic is necessary for hygienic macros (see fn_env_compare, and fn_env_qualify) */
+   because this more complex logic is necessary for hygienic macros (see fn_env_compare, and fn_env_resolve) */
   Value env_lookup_impl(Value& env, Value name) {
     while(env.type() == VECTOR) {
-      for(size_t i = env.vector_length() - 1; i >= 1; i -= 2) {
+      for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
         if(identifier_equal(env.vector_ref(i-1), name))
           return env.vector_ref(i);
       }
@@ -2266,7 +2270,6 @@ struct State {
 
 
     if(env_defined(env, name)) {
-      std::cout << env << ' ' << name << std::endl;
       warn() << source_info(exp.pair_src()) << ' ' <<  name << " shadows existing definition of " << name << std::endl;;
     }
 

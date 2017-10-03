@@ -752,10 +752,11 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(rename_env == env && id1.rename_expr() == id2);
 }
 
-/** env-qualify takes an environment and identifier and returns an appropriately qualified
- * symbol. For example, references to arete.core functions like car become ##arete.core#car */
-Value fn_env_qualify(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "env-qualify";
+/** env-resolve takes an environment and identifier and returns an appropriate symbols
+ * symbol. For example, references to arete.core functions like car become ##arete.core#car,
+ * renames in lambda lists become gensyms, and so on */
+Value fn_env_resolve(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "env-resolve";
   AR_FN_EXPECT_ENV(state, 0);
   AR_FN_EXPECT_IDENT(state, 1);
 
@@ -1010,7 +1011,7 @@ void State::install_core_functions() {
 
   // Environments
   defun_core("env-make", fn_env_make, 1);
-  defun_core("env-qualify", fn_env_qualify, 2);
+  defun_core("env-resolve", fn_env_resolve, 2);
   defun_core("env-define", fn_env_define, 3, 4);
   defun_core("env-compare", fn_env_compare, 3);
   defun_core("env-lookup", fn_env_lookup, 2);

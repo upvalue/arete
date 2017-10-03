@@ -90,14 +90,17 @@
               (cons-source x (make-rename #f 'begin) (cddr x))))
             )))
 
+    (if (env-syntax? env name)
+      (raise 'expand "definition shadows syntax" (list x name)))
 
-    ;; If this isn't a module, we have to note it as a 'variable so env-qualify will treat it as a local variable
+    ;; If this isn't a module, we have to note it as a 'variable so env-resolve will treat it as a local variable
     (if (not (table? env))
       (env-define env name 'variable)
       (begin
         ;; Otherwise, we have to note its qualified name in the environment
-        (env-define env name (env-qualify env name) #f)
-        (set! name (env-qualify env name))))
+        (env-define env name (env-resolve env name) #f)
+        (set! name (env-resolve env name))))
+
 
     ;; (print name)
     ;; (env-define env name qualified-name)
@@ -116,7 +119,7 @@
               ;; TODO... could this annotate with module info?
               (begin
                 ;(print "expander encountered variable" x)
-                (env-qualify env x)
+                (env-resolve env x)
                 #;x))
           (begin
             (define kar (car x))
@@ -204,7 +207,6 @@
                         (lookup x
                           ;; renaming procedure
                           (lambda (name) 
-                            
                             (make-rename (function-env lookup) name))
                           ;; comparison procedure
                           (lambda (a b)
