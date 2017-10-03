@@ -648,24 +648,13 @@ Value fn_string_copy(State& state, size_t argc, Value* argv) {
 Value fn_gensym(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "gensym";
 
-  Value sym;
-
-  std::ostringstream os;
-
-  os << "#:";
+  std::string prefix("g");
 
   if(argc == 1) {
-    AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
-    os << argv[0].symbol_name_data();
-  } else {
-    os << "g";
+    prefix = argv[0].symbol_name_data();
   }
 
-  os << state.gensym_counter;
-
-  sym = state.get_symbol(os.str());
-  state.gensym_counter++;
-  return sym;  
+  return state.gensym(state.get_symbol(prefix));
 }
 
 /** Macro that asserts an argument is a valid environment */
@@ -746,8 +735,10 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
 
   Value rename_env = id1.rename_env();
 
-  state.env_lookup_impl(rename_env, id1.rename_expr());
-  state.env_lookup_impl(env, id2);
+  Value rename_key;
+
+  state.env_lookup_impl(rename_env, rename_key, id1.rename_expr());
+  state.env_lookup_impl(env, rename_key, id2);
 
   return Value::make_boolean(rename_env == env && id1.rename_expr() == id2);
 }
@@ -762,19 +753,37 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
 
   Value env = argv[0];
 
-  // (env-qualify (<table> vars) name)
-  // We need to check whether this is a reference to a module-level variable, and if so, qualify it
-  // Otherwise we return it untouched
-  if(argv[0].type() == VECTOR) {
-    // Note that env_lookup_impl modifies env
-    Value result = state.env_lookup_impl(env, argv[1]);
+  // (env-resolve (<table> vars) name)
 
+  // If this is a vector, these bindings have been found in a lambda body.
+
+  // Symbols and renames may refer to table-level variables, e.g. (print "something")
+  // Must become ##arete.core#print
+  // As might (make-rename <core> 'print)
+
+  // Or they might reference variables introduced in the argument list of a lambda, which means that
+  // symbols should be returned unmodified, and renames should become gensyms
+
+  if(argv[0].type() == VECTOR) {
+    // Note that env_lookup_impl takes env and rename_key as references
+    Value rename_key;
+    Value result = state.env_lookup_impl(env, rename_key, argv[1]);
+    (void) result;
+
+    // If a rename was introduced in the bindings of a lambda, it needs to resolve to a gensym
     if(env.type() != TABLE) {
+      if(argv[1].type() == RENAME) {
+        if(rename_key != C_FALSE) {
+          return rename_key.rename_gensym();
+        }
+        // std::cout << "env-resolve encountered sub-module rename " << argv[1].rename_expr() <<  " which should then return " << rename_key.rename_gensym() << std::endl;
+        //std::cout << argv[1].rename_gensym() << std::endl;
+      }
       return argv[1];
     }
   }
 
-  if(env.type() != TABLE || argv[1].type() != SYMBOL) {
+  if(env.type() != TABLE || argv[1].type() == RENAME) {
     return argv[1];
   }
 
@@ -785,9 +794,6 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   AR_ASSERT(found && "env-qualify table_get S_MODULE_NAME failed, probably passed a bad module");
 
   // TODO search environments
-
-  // env_define needs to be modified to add symbol to environment
-  // env_qualify then picks that out.
 
   std::ostringstream qname;
   qname << "##" << mname.string_data() << "#" << argv[1];
@@ -878,6 +884,19 @@ Value fn_make_rename(State& state, size_t argc, Value* argv) {
   return state.make_rename(argv[1], argv[0]);
 }
 
+Value fn_rename_set_gensym(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "rename-gensym!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
+
+  Value renam = argv[0], sym;
+  AR_FRAME(state, renam, sym);
+
+  sym = state.gensym(renam.rename_expr());
+
+  renam.as<Rename>()->gensym = sym;
+  return C_UNSPECIFIED;
+}
+
 Value fn_rename_env(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "rename-env";
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
@@ -888,6 +907,12 @@ Value fn_rename_expr(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "rename-env";
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
   return argv[0].rename_expr();
+}
+
+Value fn_rename_gensym(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "rename-gensym";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
+  return argv[0].rename_gensym();
 }
 
 Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
@@ -1020,8 +1045,10 @@ void State::install_core_functions() {
   defun_core("gensym", fn_gensym, 0, 1);
   defun_core("top-level-value", fn_top_level_value, 1);
   defun_core("make-rename", fn_make_rename, 2);
+  defun_core("rename-gensym!", fn_rename_set_gensym, 1);
   defun_core("rename-env", fn_rename_env, 1);
   defun_core("rename-expr", fn_rename_expr, 1);
+  defun_core("rename-gensym", fn_rename_gensym, 1);
   defun_core("eval-lambda", fn_eval_lambda, 2);
   defun_core("set-function-name!", fn_set_function_name, 2);
   defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);

@@ -18,7 +18,9 @@ x hash tables
 - flonum 4 is printed as 4 and not 4.0
 x are C++ exceptions okay to use? 
   nah
+
 garbage collection
+
 - default heap size should be set after memory usage is understood
 - better handling of large allocations
 x semispace garbage collection for extreme debugging and robustness
@@ -41,7 +43,9 @@ x stack traces
   + source code display (how hard?)
   x references to undefined symbols (reader should wrap with source info)
   + c-function names and source code locations
+
 reader
+
 - EOF in string should show where string *starts*
 - improve the mismatched bracket error message
 x expression comments #;
@@ -49,9 +53,9 @@ x block comments #|
 - extended symbols |
 - unicode
 x attach source code info to symbols by boxing them
+
 macroexpander
--
-  (let-syntax () (define x #t)) x => #T
+x (let-syntax () (define x #t)) x => #T
 
 - nested renames and identifier_equal
 - error messages should be super descriptive
@@ -70,19 +74,26 @@ macroexpander
 x explicit renaming
 x check validity of lambda
 - syntax-rules
+
 language
+
 - keywords
 - get some basic demos running. closures, fibonacci, that kind of stuff
 - macro expansion
 - r5rs support
 - r7rs support (within reason)
 - consider immutable pairs like Racket
+
 testing
 - doctests makes compile times obscene, maybe utest or something?
+
 benchmarks
+
 - GC
 - tables
+
 cleanup
+
 x use State::macroexpand and remove all other eval_args functionality
 
 major projects: types, modules, structs, tables, compiler.

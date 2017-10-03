@@ -101,7 +101,6 @@
         (env-define env name (env-resolve env name) #f)
         (set! name (env-resolve env name))))
 
-
     ;; (print name)
     ;; (env-define env name qualified-name)
     
@@ -125,14 +124,18 @@
             (define kar (car x))
             (define len (length x))
             (define syntax? (and (or (symbol? kar) (rename? kar)) (env-syntax? env kar)))
-            ;; Check renamed syntax
-            (if (and syntax? (rename? kar) )
+            ;; Extract renamed syntax
+            (if (and syntax? (rename? kar))
               (begin
                 (set! kar (rename-expr kar))))
             (if syntax?
               (cond 
                 ;; TODO this should strip renames I think
-                ((eq? kar 'quote) x)
+                ((eq? kar 'quote)
+;                 x)
+;                 (print x)
+;                 (print (list-source x (make-rename #f 'quote) (cadr x)))
+                 (list-source x (make-rename #f 'quote) (cadr x)))
                 ((eq? kar 'or)
                  (cons-source x (car x) (expand-map (cdr x) env)))
                 ((eq? kar 'and)
@@ -168,9 +171,16 @@
                    (for-each. (lambda (arg)
                       (if (not (identifier? arg))
                         (raise 'expand "non-identifier in lambda argument list" (list x arg)))
+                      ;; If a rename is encountered here, env-define will add a gensym
+                      ;; then env-resolve will search for that gensym with env-lookup
+                      ;; then bindings are map'd to remove renames
+                      (if (rename? arg)
+                        (rename-gensym! arg))
                       (env-define new-env arg 'variable)) bindings)
                    (if (not (identifier? bindings))
                         (raise 'expand "non-identifier as lambda rest argument" (list x bindings))))
+
+                 (set! bindings (map (lambda (x) (if (rename? x) (rename-gensym x) x)) bindings))
 
                  (cons-source x (car x) (cons-source x bindings (expand-map (cddr x) new-env)))
                  )
@@ -231,6 +241,19 @@
 
 (install-expander expand)
 
+; (set-print-expansions! #t)
+
+#|
+(define-syntax x
+  (lambda (x r c)
+    (list 
+      (list 'lambda (list (r 'hello)) 
+            (list (list 'lambda (list (r 'hello-second)) (r 'hello-second)) (r 'hello))
+            ) ''success)))
+
+(print (x))
+|#
+
 ;;;;; BASIC SYNTACTIC FORMS
 ;; eg let & friends, quasiquote, when/unless
 
@@ -287,7 +310,6 @@
 
    ;; let return
     result))
-
 
 ;;;;; QUASIQUOTE
 

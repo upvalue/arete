@@ -356,6 +356,7 @@ struct Value {
   // Syntactic closures
   Value rename_expr() const;
   Value rename_env() const;
+  Value rename_gensym() const;
 
   // PAIRS
   size_t list_length() const;
@@ -466,13 +467,14 @@ inline void Value::set_symbol_value(Value v) {
 }
 
 struct Rename : HeapValue {
-  Value expr, env;
+  Value expr, env, gensym;
 
   static const unsigned CLASS_TYPE = RENAME;
 };
 
 inline Value Value::rename_expr() const { return as<Rename>()->expr; }
 inline Value Value::rename_env() const { return as<Rename>()->env; }
+inline Value Value::rename_gensym() const { return as<Rename>()->gensym; }
 
 /** 
  * Identifies a location in source code. File is an integer that corresponds to a string in
@@ -970,11 +972,11 @@ struct GCSemispace : GCCommon {
         // Two pointers 
         case SYMBOL:
         case PAIR:
-        case RENAME:
           AR_COPY(Symbol, name);
           AR_COPY(Symbol, value);
           break;
         // Three pointers
+        case RENAME:
         case EXCEPTION:
           AR_COPY(Exception, message);
           AR_COPY(Exception, tag);
@@ -1115,12 +1117,12 @@ struct GCIncremental : GCCommon {
         goto again;
       // Two pointers
       case SYMBOL:
-      case RENAME:
       case PAIR:
         mark(static_cast<Symbol*>(v)->name.heap);
         v = static_cast<Symbol*>(v)->value.heap;
         goto again;
       // Three pointers
+      case RENAME:
       case EXCEPTION:
         mark(static_cast<Exception*>(v)->message.heap);
         mark(static_cast<Exception*>(v)->tag.heap);
@@ -1474,11 +1476,19 @@ struct State {
     }
   }
 
+  Value gensym(Value sym) {
+    std::ostringstream os;
+    os << "#:" << sym.symbol_name_data() << gensym_counter;
+    gensym_counter++;
+    return get_symbol(os.str());
+  }
+
   Value make_rename(Value expr, Value env) {
     AR_FRAME(this, expr, env);
     Rename* heap = static_cast<Rename*>(gc.allocate(RENAME, sizeof(Rename)));
     heap->expr = expr;
     heap->env = env;
+    heap->gensym = C_FALSE;
     return heap;
   }
 
@@ -2018,19 +2028,28 @@ struct State {
     } else if(env.type() == TABLE) {
       bool found;
       Value tmp = table_get(env, name, found);
+      (void) tmp;
       return found;
     }
     return false;
   }
 
-  /** This is the env_lookup backend, which takes env as a reference and modifies it
-   to the env the symbol is located in (if there is one). It
-   because this more complex logic is necessary for hygienic macros (see fn_env_compare, and fn_env_resolve) */
-  Value env_lookup_impl(Value& env, Value name) {
+
+  /**
+   * This is the env_lookup backend. It is necessarily complex because it handles lookups for the
+   * interpreter and for the hygienic macro expander. See fn_env_compare and fn_env_resolve in
+   * arete.cpp.
+   */
+  Value env_lookup_impl(Value& env, Value& rename_key, Value name) {
+    rename_key = C_FALSE;
+
     while(env.type() == VECTOR) {
       for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
-        if(identifier_equal(env.vector_ref(i-1), name))
+        if(identifier_equal(env.vector_ref(i-1), name)) {
+          rename_key = env.vector_ref(i-1);
           return env.vector_ref(i);
+
+        }
       }
       env = env.vector_ref(0); // check parent environment
     }
@@ -2099,7 +2118,8 @@ struct State {
   }
 
   Value env_lookup(Value env, Value name) {
-    return env_lookup_impl(env, name);
+    Value rename_key;
+    return env_lookup_impl(env, rename_key, name);
   }
 
   Value type_error(const std::string& msg) {
@@ -3271,7 +3291,11 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os << ')';
     case RENAME:
-      return os << "*" << v.rename_expr();
+      if(v.rename_gensym() != C_FALSE) {
+        return os << "*" << v.rename_gensym();
+      } else {
+        return os << "*" << v.rename_expr();
+      }
     case BOX:
       //return os << "&" << v.unbox();
       return os << v.unbox();
