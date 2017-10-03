@@ -94,17 +94,23 @@
       (raise 'expand "definition shadows syntax" (list x name)))
 
     ;; If this isn't a module, we have to note it as a 'variable so env-resolve will treat it as a local variable
-    (if (not (table? env))
-      (env-define env name 'variable)
+    (if (table? env)
       (begin
         ;; Otherwise, we have to note its qualified name in the environment
         (if (rename? name)
           ;; TODO: Should these renames be annotated with the module name?
           (begin
             (rename-gensym! name)
-            (vector-append! (table-ref env "module-renames") name)))
+            (vector-append! (table-ref env "module-renames") name))
+          (begin
+            ;; (table-set! env "qq-object" "##arete.core#qq-object")
+            (table-set! env name (string->symbol (string-append "##" (table-ref env "module-name") "#" (symbol->string name))))
+            #t))
         (env-define env name (env-resolve env name) #f)
-        (set! name (env-resolve env name))))
+
+        (set! name (env-resolve env name)))
+      (env-define env name 'variable))
+
 
     ;; (print name)
     ;; (env-define env name qualified-name)
@@ -168,6 +174,27 @@
                    (raise 'expand "module should have exactly one argument: a symbol" x))
 
                  (set-top-level-value! 'current-module (module-get (symbol->string (cadr x))))
+                 unspecified)
+
+                ((eq? kar 'import)
+
+                 (if (not (table? env))
+                   (raise 'syntax "imports must be at the top-level of a module" x))
+
+                 (define module-imports (table-ref env "module-imports"))
+
+                 (for-each
+                   (lambda (i)
+                     (if (not (symbol? i))
+                       (raise 'syntax "imports must be a symbol" x))
+
+                     (vector-append! module-imports (module-get (symbol->string i)))
+                   )
+                   (cdr x))
+
+                 (print module-imports)
+
+
                  unspecified)
                 ;; LAMBDA
                 ((eq? kar 'lambda)

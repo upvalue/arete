@@ -1371,6 +1371,8 @@ struct State {
     S_SET,
     // Module forms
     S_MODULE,
+    S_EXPORT,
+    S_IMPORT,
     S_DEFINE_SYNTAX,
     S_LET_SYNTAX,
     S_LETREC_SYNTAX,
@@ -1408,7 +1410,7 @@ struct State {
     static const char* _symbols[] = {
       // C_SYNTAX values
       "quote", "begin", "define", "lambda", "if", "cond", "and", "or", "set!",
-      "define-syntax", "let-syntax", "letrec-syntax", "module",
+      "define-syntax", "let-syntax", "letrec-syntax", "module", "export", "import",
       // Used by interpreter
       "else",
       // Used by reader      
@@ -1839,10 +1841,16 @@ struct State {
       tbl = make_table();
       // Install in module table
       table_set(module_tbl, tmp, tbl);
-      // Initialize fields: module-name and module-renames
+      // Initialize fields: module-name is the name string, module-renames and module-imports
+      // are (initially empty) vectors
+
       table_set(tbl, globals[G_STR_MODULE_NAME], tmp);
+
       tmp = make_vector();
       table_set(tbl, globals[G_STR_MODULE_RENAMES], tmp);
+
+      tmp = make_vector();
+      table_set(tbl, globals[G_STR_MODULE_IMPORTS], tmp);
     } 
 
     return tbl;

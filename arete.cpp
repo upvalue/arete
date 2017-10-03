@@ -190,7 +190,7 @@ Value fn_newline(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-void fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os) {
+void fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bool whitespace) {
   for(size_t i = 0; i != argc; i++) {
     if(argv[i].type() == STRING) {
       os << argv[i].string_data();
@@ -198,21 +198,31 @@ void fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os) {
       os << argv[i];
     }
 
-    if(i != argc - 1)  {
+    if(whitespace && i != argc - 1)  {
       os << ' ';
     }
   }
 }
 
 Value fn_print(State& state, size_t argc, Value* argv) {
-  fn_print_impl(state, argc, argv, std::cout);
+  fn_print_impl(state, argc, argv, std::cout, true);
   std::cout << std::endl;
   return C_UNSPECIFIED;
 }
 
 Value fn_print_string(State& state, size_t argc, Value* argv) {
   std::ostringstream os;
-  fn_print_impl(state, argc, argv, os);
+  fn_print_impl(state, argc, argv, os, true);
+  return state.make_string(os.str());
+}
+
+Value fn_string_append(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "string-append";
+  for(size_t i = 0; i != argc; i++) {
+    AR_FN_EXPECT_TYPE(state, argv, i, STRING);
+  }
+  std::ostringstream os;
+  fn_print_impl(state, argc, argv, os, false);
   return state.make_string(os.str());
 }
 
@@ -768,6 +778,16 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(rename_env == env && id1.rename_expr() == id2);
 }
 
+// Resolve an unqualified symbol in a module
+// e.g. x, if defined in a module user, becomes ##user#x, if not this returns a boolean indicating
+// it failed
+Value fn_env_resolve_symbol(State& state, bool& found, Value module, Value name) {
+  Value mname = state.table_get(module, state.globals[State::G_STR_MODULE_NAME], found);
+  AR_ASSERT(found && "fn_env_resolve_symbol table_get G_STR_MODULE_NAME failed, probably passed a bad module");
+
+  return state.table_get(module, name, found);
+}
+
 /** env-resolve takes an environment and identifier and returns an appropriate symbol for runtime
  * For example, references to arete.core functions like car become ##arete.core#car,
  * renames in lambda lists become gensyms, and so on */
@@ -828,17 +848,38 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
     name = name.rename_expr();
   }
 
-  AR_ASSERT(name.type() == SYMBOL && "env-qualify failed to resolve a rename");
+  AR_ASSERT(env.type() == TABLE && "env-resolve did not successfully get to table");
+  AR_ASSERT(name.type() == SYMBOL && "env-resolve failed to resolve a rename, this should never happen");
 
   bool found;
-  Value mname = state.table_get(env, state.globals[State::G_STR_MODULE_NAME], found);
-  AR_ASSERT(found && "env-qualify table_get G_STR_MODULE_NAME failed, probably passed a bad module");
+  Value qname = fn_env_resolve_symbol(state, found, env, name);
+  Value imports;
 
-  // TODO search environments
+  if(!found) {
+    imports = state.table_get(env, state.globals[State::G_STR_MODULE_IMPORTS], found);
+    AR_ASSERT(found);
 
-  std::ostringstream qname;
-  qname << "##" << mname.string_data() << "#" << name;
-  return state.get_symbol(qname.str());
+    if(imports.vector_length() != 0) {
+      for(size_t i = imports.vector_length(); i != 0; i--) {
+        qname = fn_env_resolve_symbol(state, found, imports.vector_ref(i-1), name);
+        if(found) break;
+      }
+    }
+  }
+
+  // If we've failed to resolve this variable, it's either (a) a truly bad variable reference
+  // or (b) has been defined somewhere below the call to env-resolve. We'll return a qualified
+  // symbol for the module and deal with the error later.
+  if(qname == C_FALSE) {
+    Value mname = state.table_get(env, state.globals[State::G_STR_MODULE_NAME], found);
+    AR_ASSERT(found && "env-resolve table_get G_STR_MODULE_NAME failed, probably passed a bad module");
+
+    std::ostringstream qname;
+    qname << "##" << mname.string_data() << "#" << name;
+    return state.get_symbol(qname.str());
+  }
+
+  return qname;
 }
 
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
@@ -1073,6 +1114,7 @@ void State::install_core_functions() {
   defun_core("newline", fn_newline, 0);
   defun_core("print", fn_print, 0, 0, true);
   defun_core("print-string", fn_print_string, 0, 0, true);
+  defun_core("string-append", fn_string_append, 0, 0, true);
   defun_core("print-table-verbose", fn_print_table_verbose, 1);
 
   // Pairs
