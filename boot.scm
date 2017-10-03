@@ -98,6 +98,11 @@
       (env-define env name 'variable)
       (begin
         ;; Otherwise, we have to note its qualified name in the environment
+        (if (rename? name)
+          ;; TODO: Should these renames be annotated with the module name?
+          (begin
+            (rename-gensym! name)
+            (vector-append! (table-ref env "module-renames") name)))
         (env-define env name (env-resolve env name) #f)
         (set! name (env-resolve env name))))
 
@@ -392,7 +397,7 @@
     `(#,let ((#,result ,key))
       ,code)))
 
-
 (define-syntax er-macro-transformer
   (lambda (x r c)
     (cadr x)))
+

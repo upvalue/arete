@@ -313,6 +313,7 @@ struct Value {
   Value vector_storage() const;
   Value vector_ref(size_t i) const;
   void vector_set(size_t i, Value);
+  void vector_clear();
   size_t vector_length() const;
 
   // STRINGS
@@ -727,15 +728,20 @@ inline Value Value::vector_ref(size_t i) const {
   // TODO: Should this enforce bounds checking? Should it return an exception?
   AR_TYPE_ASSERT(type() == VECTOR);
   VectorStorage* store = static_cast<VectorStorage*>(static_cast<Vector*>(heap)->storage.heap);
-  AR_ASSERT(i < store->length);
+  AR_ASSERT(i < store->length && "vector out of bounds error");
   return store->data[i];
 }
 
 inline void Value::vector_set(size_t i, Value val) {
   AR_TYPE_ASSERT(type() == VECTOR);
   VectorStorage* store = static_cast<VectorStorage*>(static_cast<Vector*>(heap)->storage.heap);
-  AR_ASSERT(i < store->length);
+  AR_ASSERT(i < store->length && "vector out of bounds error");
   store->data[i] = val;
+}
+
+inline void Value::vector_clear() {
+  AR_TYPE_ASSERT(type() == VECTOR);
+  as<Vector>()->storage.as<VectorStorage>()->length = 0;
 }
 
 inline size_t Value::vector_length() const {
@@ -1644,7 +1650,7 @@ struct State {
 
     if(a.type() == VECTOR && b.type() == VECTOR) {
       if(a.vector_length() != b.vector_length()) return false;
-      for(size_t i = 0; i < a.vector_length() && i < b.vector_length(); i++) {
+      for(size_t i = 0; i < a.vector_length(); i++) {
         if(!equals(a.vector_ref(i), b.vector_ref(i))) {
           return false;
         }
@@ -1808,11 +1814,13 @@ struct State {
   }
   
   Value make_module(const std::string& cname) {
-    Value tbl, str, module_tbl;
-    AR_FRAME(this, tbl, module_tbl, str);
+    Value tbl, tmp, module_tbl;
+    AR_FRAME(this, tbl, module_tbl, tmp);
     tbl = make_table();
-    str = make_string(cname);
-    table_set(tbl, globals[G_STR_MODULE_NAME], str);
+    tmp = make_string(cname);
+    table_set(tbl, globals[G_STR_MODULE_NAME], tmp);
+    tmp = make_vector();
+    table_set(tbl, globals[G_STR_MODULE_RENAMES], tmp);
 
     // module_tbl = get_global_value(G_MODULE_TABLE);
     // table_set(tbl, )
@@ -2662,26 +2670,40 @@ struct State {
     return C_UNSPECIFIED;
   }
 
-  Value eval_toplevel(Value exp) {
+  Value expand_expr(Value exp) {
     Value expand = get_global_value(G_EXPANDER);
 
     // Comment out to disable macroexpansion
     if(expand != C_UNDEFINED) {
-      Value args, sym;
+      Value args, sym, mod;
       AR_FRAME(this, expand, exp, args, sym);
       args = make_pair(get_global_value(G_MODULE_CORE), C_NIL);
       args = make_pair(exp.maybe_unbox(), args);
 
       exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
       if(exp.is_active_exception()) {
-        stack_trace.insert(stack_trace.begin(), "Error during macro expansion");
+        stack_trace.insert(stack_trace.begin(), "Error during expansion");
         return exp;
       }
 
       if(print_expansions) {
         std::cout << "Expanded: " << exp << std::endl;
       }
+
+      // Clear rename vector before every invocation.
+      // This step is not necessary but prevents it from becoming arbitrarily large
+      mod = get_global_value(G_MODULE_CORE);
+      bool found;
+      Value renames = table_get(mod, globals[G_STR_MODULE_RENAMES], found);
+      AR_ASSERT(found);
+      renames.vector_clear();
     } 
+
+    return exp;
+  }
+
+  Value eval_toplevel(Value exp) {
+    exp = expand_expr(exp);
 
     return eval(C_FALSE, exp);
   }

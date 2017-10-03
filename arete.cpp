@@ -603,6 +603,14 @@ Value fn_vector_set(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+Value fn_vector_append(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "vector-append!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, VECTOR);
+
+  state.vector_append(argv[0], argv[1]);
+  return C_UNSPECIFIED;
+}
+
 Value fn_vector_ref(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "vector-ref";
   AR_FN_EXPECT_TYPE(state, argv, 0, VECTOR);
@@ -661,11 +669,11 @@ Value fn_string_copy(State& state, size_t argc, Value* argv) {
 /** Generate a unique, unused symbol */
 Value fn_gensym(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "gensym";
-  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
 
   std::string prefix("g");
 
   if(argc == 1) {
+    AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
     prefix = argv[0].symbol_name_data();
   }
 
@@ -798,19 +806,27 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
     } 
   }
 
+  Value name = argv[1];
   // Table-level renames also become gensyms
   if(env.type() == TABLE && argv[1].type() == RENAME) {
     bool found;
     Value renames = state.table_get(env, state.globals[State::G_STR_MODULE_RENAMES], found);
-    if(!found) {
-      // Reassigning the argument vector is definitely NOT COOL
-      argv[1] = argv[1].rename_expr();
-    } else {
-      return argv[1];
+
+    AR_ASSERT(found);
+    AR_ASSERT(renames.type() == VECTOR);
+
+    if(renames.vector_length() > 0) {
+      // Search list of renames
+      for(size_t i = renames.vector_length(); i != 0; i--) {
+        if(state.identifier_equal(renames.vector_ref(i-1), argv[1])) {
+          return renames.vector_ref(i-1).rename_gensym();
+        }
+      }
     }
+    name = name.rename_expr();
   }
 
-  AR_ASSERT(argv[1].type() == SYMBOL && "env-qualify passed a rename");
+  AR_ASSERT(name.type() == SYMBOL && "env-qualify failed to resolve a rename");
 
   bool found;
   Value mname = state.table_get(env, state.globals[State::G_STR_MODULE_NAME], found);
@@ -819,7 +835,7 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   // TODO search environments
 
   std::ostringstream qname;
-  qname << "##" << mname.string_data() << "#" << argv[1];
+  qname << "##" << mname.string_data() << "#" << name;
   return state.get_symbol(qname.str());
 }
 
@@ -1029,6 +1045,7 @@ void State::install_core_functions() {
   defun_core("make-vector", fn_make_vector, 0, 2);
   defun_core("vector-ref", fn_vector_ref, 2);
   defun_core("vector-set!", fn_vector_set, 3);
+  defun_core("vector-append!", fn_vector_append, 2);
 
   // Tables
   defun_core("make-table", fn_make_table, 0);
