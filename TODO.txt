@@ -4,6 +4,7 @@ rough outline of major projects, in order
 - syntax-rules
 - compiler
 
+
 runtime
 - 0.25 / 9 prints different than python. difference in I/O or some kind of error?
 - some symbols should most likely be immutable

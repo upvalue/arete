@@ -147,6 +147,15 @@ Value fn_string_to_symbol(State& state, size_t argc, Value* argv) {
   return state.get_symbol(argv[0]);
 }
 
+Value fn_symbol_to_string(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "symbol->string";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+  std::string str(argv[0].symbol_name_data());
+  return state.make_string(str);
+}
+
+// Equality
+
 Value fn_eq(State& state, size_t argc, Value* argv) {
   // static const char* fn_name = "eq?";
   return Value::make_boolean(argv[0].bits == argv[1].bits);
@@ -687,13 +696,6 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
 #define AR_FN_EXPECT_IDENT(state, n) \
   AR_FN_ASSERT_ARG((state), (n), "to be a valid identifier (symbol or rename)", argv[(n)].identifierp())
 
-Value fn_source_location(State& state, size_t argc, Value* argv) {
-  if(argv[0].type() != BOX && argv[0].type() != PAIR)
-    return C_FALSE;
-
-  return C_FALSE;
-}
-
 Value fn_env_make(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-make";
   AR_FN_EXPECT_ENV(state, 0);
@@ -859,6 +861,13 @@ Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(result.type() == FUNCTION && result.function_is_macro());
 }
 
+Value fn_module_get(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "module-get";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  std::string str(argv[0].string_data());
+  return state.get_module(str);
+}
+
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-function-name!";
   AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
@@ -912,7 +921,14 @@ Value fn_set_print_expansions(State& state, size_t argc, Value* argv) {
 Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-value";
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
-  return argv[0].as<Symbol>()->value;
+  return argv[0].symbol_value();
+}
+
+Value fn_set_top_level_value(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-top-level-value!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+  argv[0].set_symbol_value(argv[1]);
+  return C_UNSPECIFIED;
 }
 
 Value fn_make_rename(State& state, size_t argc, Value* argv) {
@@ -969,13 +985,6 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   exc = state.make_exception(tag, message, irritants);
   return exc;
 }
-/*
-
-void core_defun_core(State* state, Value module, const std::string& name, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
-  state->defun_core(module, name, addr, min_arity, max_arity, variable_arity);
-  state->toplevel_defun_core(name, addr, min_arity, max_arity, variable_arity);
-}
-*/
 
 void State::install_core_functions() {
   Value core = get_global_value(G_MODULE_CORE);
@@ -1002,6 +1011,7 @@ void State::install_core_functions() {
 
   // Conversion
   defun_core("string->symbol", fn_string_to_symbol, 1);
+  defun_core("symbol->string", fn_symbol_to_string, 1);
 
   // Predicates
   defun_core("null?", fn_nullp, 1);
@@ -1072,10 +1082,9 @@ void State::install_core_functions() {
   // Exceptions
   defun_core("raise", fn_raise, 3);
 
-  // Expansion support functionality
+  ///// Expansion support functionality
   defun_core("cons-source", fn_cons_source, 3);
   defun_core("list-source", fn_list_source, 0, 0, true);
-  defun_core("source-location", fn_source_location, 1);
 
   // Environments
   defun_core("env-make", fn_env_make, 1);
@@ -1085,14 +1094,22 @@ void State::install_core_functions() {
   defun_core("env-lookup", fn_env_lookup, 2);
   defun_core("env-syntax?", fn_env_syntaxp, 2);
 
-  defun_core("gensym", fn_gensym, 0, 1);
-  defun_core("top-level-value", fn_top_level_value, 1);
+  // Modules
+  defun_core("module-get", fn_module_get, 1);
+
+  // Renames
   defun_core("make-rename", fn_make_rename, 2);
   defun_core("rename-gensym!", fn_rename_set_gensym, 1);
   defun_core("rename-env", fn_rename_env, 1);
   defun_core("rename-expr", fn_rename_expr, 1);
   defun_core("rename-gensym", fn_rename_gensym, 1);
+  defun_core("gensym", fn_gensym, 0, 1);
+
+  defun_core("top-level-value", fn_top_level_value, 1);
+  defun_core("set-top-level-value!", fn_set_top_level_value, 2);
   defun_core("eval-lambda", fn_eval_lambda, 2);
+  
+  // Function modification
   defun_core("set-function-name!", fn_set_function_name, 2);
   defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun_core("function-env", fn_function_env, 1);

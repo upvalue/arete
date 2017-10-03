@@ -1,4 +1,4 @@
-;; boot.scm - Macroexpansion, various key functions
+;; boot.scm - Expansion pass, various key functions
 
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
@@ -13,7 +13,7 @@
 
 (define unspecified (if #f #f))
 
-;;;;; MACROEXPANSION
+;;;;; EXPANSION
 
 ;; Shortcut for applying expand with an environment, since this is used pretty often
 (define expand-map
@@ -163,6 +163,12 @@
                 ((eq? kar 'cond)
                  ;; (if clause-condition clause-body else rest-of-clauses...right?
                  x)
+                ((eq? kar 'module)
+                 (if (or (not (fx= (length x) 2)) (not (symbol? (cadr x))))
+                   (raise 'expand "module should have exactly one argument: a symbol" x))
+
+                 (set-top-level-value! 'current-module (module-get (symbol->string (cadr x))))
+                 unspecified)
                 ;; LAMBDA
                 ((eq? kar 'lambda)
                  (if (fx< (length x) 3)
@@ -221,6 +227,9 @@
                   (define lookup (env-lookup env kar))
                   (if (macro? lookup)
                     (begin
+                      ;; TODO: If a C_SYNTAX value somehow falls through to here, it'll cause an interpreter error
+                      ;; A more descriptive error message is possible but this also shouldn't happen if the expander
+                      ;; is properly coded
                       (define result
                         (lookup x
                           ;; renaming procedure
@@ -358,6 +367,7 @@
       (#,begin ,@(cddr x)))))
 
 ;; case
+;; TODO =>
 (define-syntax case
   (lambda (x rename c)
     (if (fx< (length x) 3)
@@ -392,7 +402,6 @@
           (#,begin ,(cadr clause))
           ,(loop (cadr clauses) (cdr clauses))))
       ))
-
 
     `(#,let ((#,result ,key))
       ,code)))

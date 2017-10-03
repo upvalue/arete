@@ -468,7 +468,7 @@ inline void Value::set_symbol_value(Value v) {
 }
 
 struct Rename : HeapValue {
-  Value expr, env, gensym;
+  Value expr, gensym, env;
 
   static const unsigned CLASS_TYPE = RENAME;
 };
@@ -787,7 +787,8 @@ inline ptrdiff_t hash_value(Value x, bool& unhashable) {
     case SYMBOL:
 #if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE
       // If symbols can be moved (semispace), we need to hash the string, otherwise we can just
-      // hash the pointer
+      // hash the pointer, so this will fall-through to the below integer hash in the incremental
+      // collector
       return x31_string_hash(x.symbol_name_data());
 #endif
     case FIXNUM:
@@ -1356,7 +1357,7 @@ struct State {
   // by Scheme code. 
 
   // All the symbols here will be allocated on boot so that using them doesn't cause an allocation
-  // e..g in the reader. And are defined in the State::boot procedure.
+  // eg in the reader. And are defined in the State::boot procedure.
   enum Global {
     // C_SYNTAX values
     S_QUOTE,
@@ -1368,6 +1369,8 @@ struct State {
     S_AND,
     S_OR,
     S_SET,
+    // Module forms
+    S_MODULE,
     S_DEFINE_SYNTAX,
     S_LET_SYNTAX,
     S_LETREC_SYNTAX,
@@ -1383,8 +1386,10 @@ struct State {
     S_READ_ERROR,
     S_EVAL_ERROR,
     S_TYPE_ERROR,
+    S_EXPAND_ERROR,
     // Global variables
     G_EXPANDER,
+    G_CURRENT_MODULE,
     G_MODULE_TABLE,
     G_MODULE_CORE,
     // Module internals
@@ -1403,20 +1408,25 @@ struct State {
     static const char* _symbols[] = {
       // C_SYNTAX values
       "quote", "begin", "define", "lambda", "if", "cond", "and", "or", "set!",
-      "define-syntax", "let-syntax", "letrec-syntax",
+      "define-syntax", "let-syntax", "letrec-syntax", "module",
       // Used by interpreter
       "else",
       // Used by reader      
       "quasiquote", "unquote", "unquote-splicing", "rename",
       // Errors that may be thrown by the runtime
-      "read", "eval", "type",
+      "read", "eval", "type", "expand",
       // Various variables
-      "expander", "module-table", "core",
+      "expander", "current-module", "module-table", "core",
       "module-name",
       "module-renames",
       "module-imports",
     };
 
+    AR_ASSERT((sizeof(_symbols) / sizeof(const char*)) == G_END &&
+      "did you forget to change _symbols to match enum Global?");
+
+     // TODO: This is suitably confusing and there should probably be multiple vectors:
+     // for symbols used directly, for symbols used to store values, and for other values (strings)
     for(size_t i = 0; i != G_END; i++) {
       Value s;
       if(i >= G_STR_MODULE_NAME) {
@@ -1434,7 +1444,8 @@ struct State {
     }
 
     set_global_value(G_MODULE_TABLE, make_table());
-    set_global_value(G_MODULE_CORE, make_module("arete.core"));
+    set_global_value(G_MODULE_CORE, get_module("arete.core"));
+    set_global_value(G_CURRENT_MODULE, get_global_value(G_MODULE_CORE));
 
     install_core_functions();
     // gc.allocations = 0;
@@ -1813,19 +1824,29 @@ struct State {
     return table;
   }
   
-  Value make_module(const std::string& cname) {
+  Value get_module(const std::string& cname) {
     Value tbl, tmp, module_tbl;
     AR_FRAME(this, tbl, module_tbl, tmp);
-    tbl = make_table();
-    tmp = make_string(cname);
-    table_set(tbl, globals[G_STR_MODULE_NAME], tmp);
-    tmp = make_vector();
-    table_set(tbl, globals[G_STR_MODULE_RENAMES], tmp);
 
-    // module_tbl = get_global_value(G_MODULE_TABLE);
-    // table_set(tbl, )
+    tmp = make_string(cname);
+
+    module_tbl = get_global_value(G_MODULE_TABLE);
+
+    bool found;
+    tbl = table_get(module_tbl, tmp, found);
+
+    if(!found) {
+      tbl = make_table();
+      // Install in module table
+      table_set(module_tbl, tmp, tbl);
+      // Initialize fields: module-name and module-renames
+      table_set(tbl, globals[G_STR_MODULE_NAME], tmp);
+      tmp = make_vector();
+      table_set(tbl, globals[G_STR_MODULE_RENAMES], tmp);
+    } 
 
     return tbl;
+
   }
 
   Value make_c_function(Value name, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
@@ -1837,9 +1858,8 @@ struct State {
     cfn->addr = addr;
     cfn->min_arity = min_arity;
     cfn->max_arity = max_arity;
-    if(variable_arity) {
+    if(variable_arity)
       cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
-    }
     return cfn;
   }
 
@@ -2677,7 +2697,7 @@ struct State {
     if(expand != C_UNDEFINED) {
       Value args, sym, mod;
       AR_FRAME(this, expand, exp, args, sym);
-      args = make_pair(get_global_value(G_MODULE_CORE), C_NIL);
+      args = make_pair(get_global_value(G_CURRENT_MODULE), C_NIL);
       args = make_pair(exp.maybe_unbox(), args);
 
       exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
@@ -2691,8 +2711,7 @@ struct State {
       }
 
       // Clear rename vector before every invocation.
-      // This step is not necessary but prevents it from becoming arbitrarily large
-      mod = get_global_value(G_MODULE_CORE);
+      mod = get_global_value(G_CURRENT_MODULE);
       bool found;
       Value renames = table_get(mod, globals[G_STR_MODULE_RENAMES], found);
       AR_ASSERT(found);
