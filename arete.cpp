@@ -829,10 +829,12 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   }
 
   Value name = argv[1];
+
   // Table-level renames also become gensyms
   if(env.type() == TABLE && argv[1].type() == RENAME) {
     bool found;
     Value renames = state.table_get(env, state.globals[State::G_STR_MODULE_RENAMES], found);
+
 
     AR_ASSERT(found);
     AR_ASSERT(renames.type() == VECTOR);
@@ -891,16 +893,12 @@ Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   Value env = argv[0], qname, result;
 
   qname = fn_env_resolve(state, argc, argv);
-  //std::cout << "env-lookup called against " << env << " with name " << argv[1] << std::endl;
-  //std::cout << "trying qname " << qname << std::endl; 
 
   result = state.env_lookup(env, qname);
   
   if(result != C_UNDEFINED) {
     return result;
   }
-
-  // std::cout << "but failed, trying just " << argv[1] << std::endl;
 
   return state.env_lookup(argv[0], argv[1]);
 }
@@ -910,27 +908,7 @@ Value fn_env_lookup(State& state, size_t argc, Value* argv) {
 Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
   Value env, name, qname;
   AR_FRAME(state, env, qname, name);
-  /*
-  env = argv[0];
-  name = argv[1];
-  qname = fn_env_resolve(state, argc, argv);
 
-  Value result = state.env_lookup(env, qname);
-
-  if(result != C_FALSE) {
-    if(result == C_SYNTAX) return C_TRUE;
-
-    if(result.type() == FUNCTION && result.function_is_macro()) {
-      return C_TRUE;
-    }
-  }
-
-  result = state.env_lookup(env, name);
-
-  if(result == C_SYNTAX) return C_TRUE;
-
-  return Value::make_boolean(result.type() == FUNCTION && result.function_is_macro());
-  */
   Value result = fn_env_lookup(state, argc, argv);
 
   if(result == C_SYNTAX) return C_TRUE;

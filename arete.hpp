@@ -2093,67 +2093,37 @@ struct State {
     // returns true if symbols are the same or if renames have the same env and expr
     while(env.type() == VECTOR) {
       for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
+        // Here we check for function-level renames in the environment.
+        // This is necessary because the expansion pass will replace them
+        // with gensyms before returning the full expression
         if(identifier_equal(env.vector_ref(i-1), name)) {
           rename_key = env.vector_ref(i-1);
           return env.vector_ref(i);
-
         }
       }
       env = env.vector_ref(0); // check parent environment
     }
 
-    // Level 1 lookup needs to handle tables and renames
-    
-    // There are several complex situations possible here
-
-    // Environment search has already reached #f; this is possible if a rename is intended to refer
-    // to a builtin function (e.g. cons)
-
-    // A rename has an env of C_FALSE, these are created by the macroexpander to refer to core forms
-    // like define, lambda etc
-
-    // A rename has an env that is the same as the table we're searching, meaning it's a reference
-    // to a module-level variable or a renamed variable that has been introduced by a macro.
-
-    // A symbol is defined in a table
-    if(env.type() == TABLE || env == C_FALSE) {
-      Value renamed;
-      if(name.type() == RENAME) {
-        if(name.rename_env() == env || name.rename_env() == C_FALSE || env == C_FALSE) {
-          // If rename-env is this table or #f, the symbol itself can be used to resolve the variable.
-          if(env == C_FALSE) {
-            env = name.rename_env();
-          }
-          name = name.rename_expr();
-        } else  {
-          std::cout << name.rename_env() << ' ' << env << std::endl;
-          std::cout << name << std::endl;
-          AR_ASSERT(!"don't know what to do with rename at table-level");
-        }
-      }
-      bool found;
-      if(env != C_FALSE) {
-        Value chk = table_get(env, name, found);
-        if(found)  {
-          AR_ASSERT(chk.type() == SYMBOL);
-          return chk.symbol_value();
-        }
-      }
-    }
-
-    // reached toplevel, check symbol.
+    // If we've reached here, this is a module or toplevel rename and thus we can resolve it
+    // the same as a symbol
     if(name.type() == RENAME) {
-      if(name.rename_env() == C_FALSE) {
-        name = name.rename_expr();
-      } else {
-        // If a search for a rename fails in its environment, that means it refers to a table-level
-        // value
+      env = name.rename_env();
+      name = name.rename_expr();
+    }
 
-        // *cons table
-        // std::cerr << "rename in non-toplevel env " << env << ' ' << name.rename_expr() << ' ' << name.rename_env() << std::endl;
-        AR_ASSERT(!"rename in toplevel env");
+    AR_ASSERT(env.type() == TABLE || env == C_FALSE);
+
+    bool found;
+
+    if(env != C_FALSE) {
+      Value chk = table_get(env, name, found);
+      if(found)  {
+        AR_ASSERT(chk.type() == SYMBOL);
+        return chk.symbol_value();
       }
     }
+
+    AR_ASSERT(name.type() != RENAME);
 
     return name.as<Symbol>()->value;
   }
