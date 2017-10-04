@@ -741,43 +741,6 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-Value fn_env_compare(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "env-compare";
-
-  Type type1 = argv[1].type(), type2 = argv[2].type();
-
-  if((type1 != SYMBOL && type1 != RENAME) || (type2 != SYMBOL && type2 != RENAME)) {
-    return Value::make_boolean(argv[1].bits == argv[2].bits);
-  }
-
-  //std::cout << argv[0] << std::endl;
-  AR_FN_EXPECT_ENV(state, 0);
-  AR_FN_EXPECT_IDENT(state, 1);
-  AR_FN_EXPECT_IDENT(state, 2);
-
-  Value env = argv[0];
-  Value id1 = argv[1];
-  Value id2 = argv[2];
-
-  if(state.identifier_equal(id1, id2)) {
-    return C_TRUE;
-  }
-
-  // Ensure that id1 holds the rename
-  if(id2.type() == RENAME) {
-    std::swap(id1, id2);
-  }
-
-  Value rename_env = id1.rename_env();
-
-  Value rename_key;
-
-  state.env_lookup_impl(rename_env, rename_key, id1.rename_expr());
-  state.env_lookup_impl(env, rename_key, id2);
-
-  return Value::make_boolean(rename_env == env && id1.rename_expr() == id2);
-}
-
 // Resolve an unqualified symbol in a module
 // e.g. x, if defined in a module user, becomes ##user#x, if not this returns a boolean indicating
 // it failed
@@ -812,7 +775,8 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   if(argv[0].type() == VECTOR) {
     // Note that env_lookup_impl takes env and rename_key as references
     Value rename_key;
-    Value result = state.env_lookup_impl(env, rename_key, argv[1]);
+    bool found;
+    Value result = state.env_lookup_impl(env, argv[1], rename_key, found);
     (void) result;
 
     // If a rename was introduced in the bindings of a lambda, it needs to resolve to a gensym
@@ -882,6 +846,43 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   }
 
   return qname;
+}
+
+Value fn_env_compare(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "env-compare";
+
+  Type type1 = argv[1].type(), type2 = argv[2].type();
+
+  if((type1 != SYMBOL && type1 != RENAME) || (type2 != SYMBOL && type2 != RENAME)) {
+    return Value::make_boolean(argv[1].bits == argv[2].bits);
+  }
+
+  //std::cout << argv[0] << std::endl;
+  AR_FN_EXPECT_ENV(state, 0);
+  AR_FN_EXPECT_IDENT(state, 1);
+  AR_FN_EXPECT_IDENT(state, 2);
+
+  Value env = argv[0];
+  Value id1 = argv[1];
+  Value id2 = argv[2];
+
+  if(state.identifier_equal(id1, id2)) {
+    return C_TRUE;
+  }
+
+  // Ensure that id1 holds the rename
+  if(id2.type() == RENAME) {
+    std::swap(id1, id2);
+  }
+
+  Value rename_env = id1.rename_env();
+  Value rename_key;
+
+  bool found1, found2;
+  state.env_lookup_impl(rename_env, id1.rename_expr(), rename_key, found1);
+  state.env_lookup_impl(env, id2, rename_key, found2);
+
+  return Value::make_boolean((rename_env == env || (found1 == found2)) && id1.rename_expr() == id2);
 }
 
 // env-lookup

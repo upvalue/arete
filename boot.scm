@@ -103,8 +103,9 @@
             (rename-gensym! name)
             (vector-append! (table-ref env "module-renames") name))
           (begin
+            ;; Note down the qualified name of this variable
             (table-set! env name (string->symbol (string-append "##" (table-ref env "module-name") "#" (symbol->string name))))
-            #t))
+            ))
         (env-define env name (env-resolve env name) #f)
 
         (set! name (env-resolve env name)))
@@ -409,7 +410,9 @@
       ;; TODO: Most Schemes seem to support a direct comparison as well e.g.
       ;; (case 5 (5 #t))
       (unless (or (c (car clause) #'else) (list? (car clause)))
-        (raise 'syntax "case expects a list or else as its datum" x))
+        (if (eq? (car clause) 'else)
+          (raise 'syntax "case expected an else clause, but it seems else has been redefined" x)
+          (raise 'syntax "case expected a list or else clause as its datum" x)))
 
       (define condition
         (if (c (car clause) #'else)

@@ -2086,8 +2086,9 @@ struct State {
    * interpreter and for the hygienic macro expander. See fn_env_compare and fn_env_resolve in
    * arete.cpp.
    */
-  Value env_lookup_impl(Value& env, Value& rename_key, Value name) {
+  Value env_lookup_impl(Value& env, Value name, Value& rename_key, bool& found_at_toplevel) {
     rename_key = C_FALSE;
+    found_at_toplevel = false;
 
     // First we search through vectors with identifier_equal, which only
     // returns true if symbols are the same or if renames have the same env and expr
@@ -2113,15 +2114,16 @@ struct State {
 
     AR_ASSERT(env.type() == TABLE || env == C_FALSE);
 
-    bool found;
-
     if(env != C_FALSE) {
+      bool found;
       Value chk = table_get(env, name, found);
       if(found)  {
         AR_ASSERT(chk.type() == SYMBOL);
         return chk.symbol_value();
       }
     }
+
+    found_at_toplevel = true;
 
     AR_ASSERT(name.type() != RENAME);
 
@@ -2130,7 +2132,8 @@ struct State {
 
   Value env_lookup(Value env, Value name) {
     Value rename_key;
-    return env_lookup_impl(env, rename_key, name);
+    bool found;
+    return env_lookup_impl(env, name, rename_key, found);
   }
 
   Value type_error(const std::string& msg) {
