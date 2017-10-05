@@ -103,6 +103,9 @@
             (rename-gensym! name)
             (vector-append! (table-ref env "module-renames") name))
           (begin
+            (begin 
+              (if (table-ref env "module-export-all")
+                (table-set! (table-ref env "module-exports") name #t)))
             ;; If this is on the list of exports
             ;; Note down the qualified name of this variable
             ;(table-set! env name (string->symbol (string-append "##" (table-ref env "module-name") "#" (symbol->string name))))
@@ -118,10 +121,12 @@
     result))
 
 ;; import a module
-(define module-import!
+(define expand-module-import!
   (lambda (module spec)
+
     (define imported-module-name #f)
     (define module-import-rule 'all)
+    (define import-module #f)
 
     (if (or (not (list? spec)) (not (pair? spec)))
       (raise 'expand "imports must be a list of symbols" i))
@@ -132,13 +137,12 @@
         (set! module-import-rule (car spec)))
       (set! imported-module-name (list-join spec "#")))
 
-    (define import-module #f)
 
     ;; If module is not loaded at all, load it.
     (if (not (table-ref (top-level-value 'module-table) imported-module-name))
       (module-load! imported-module-name))
 
-    ;; Retrieve the module table
+    ;; Retrieve the module
     (set! import-module (table-ref (top-level-value 'module-table) imported-module-name))
 
     ;; If it's in the process of being expanded, this is a cyclic import error
@@ -146,8 +150,16 @@
       (raise 'expand "cyclic import" spec))
 
     ;; Now append this rule to the list of imports
-    (define module-imports (table-ref module "module-imports"))
+    ;;(define module-imports (table-ref module "module-imports"))
 
+    (module-import! module import-module #f '())
+
+
+    unspecified))
+
+    
+
+#|
     (define vec #f)
     (if (not (eq? module-import-rule 'all))
       (begin
@@ -174,6 +186,7 @@
 
     ;; TODO Duplicate imports.
     (vector-append! module-imports import-module)))
+|#
 
 (define expand
   (lambda (x env) 
@@ -257,11 +270,19 @@
                          ((eq? type 'import)
                          (for-each
                            (lambda (i)
-                             (module-import! module i))
+                             (expand-module-import! module i))
                            (cdr x)))
                          ((eq? type 'export-all)
                           (table-set! module "module-export-all" #t))
                          ((eq? type 'export)
+                          ;(if (table-ref module "module-exports")
+                          ;  (raise 'expand "multiple module export statements" x))
+                          (if (table-ref module "module-export-all")
+                            (raise 'expand "export-all and exports cannot coexist" x))
+                          (if (not (table-ref module "module-expots"))
+                            (table-set! module "module-exports" (make-table)))
+
+                          ;(table-set! module "module-exports" (make-table))
                            (for-each
                              (lambda (i)
                                (if (not (symbol? i))
@@ -275,7 +296,7 @@
                        )
                      clauses))
 
-                 (print module-body)
+                 ;(print module-body)
 
                  ;(set! module-body (cons (make-rename #f 'begin) module-body))
 
@@ -286,7 +307,7 @@
                 ((eq? kar 'import)
                  (for-each
                    (lambda (i)
-                     (module-import! (top-level-value 'current-module) i))
+                     (expand-module-import! (top-level-value 'current-module) i))
                    (cdr x)))
                ;; LAMBDA
                 ((eq? kar 'lambda)

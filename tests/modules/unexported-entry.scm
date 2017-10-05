@@ -1,0 +1,3 @@
+(import (unexported))
+
+(print var)

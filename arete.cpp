@@ -864,20 +864,79 @@ Value fn_env_resolve_symbol(State& state, bool& found, Value module, Value name)
   return state.table_get(module, name, found);
 }
 
-static Value fn_env_resolve_import(State& state, bool& found, Value rule, Value name) {
-  found = false;
-  // If rule is just a  table, we check export-all and list of exports
-  // If rule is a vector, it will look like this
+// (module-import! <module> <import-module> <rule> <list>)
 
-  // #(<table> only names...)
-  // #(<table> prefix prefix-string)
-  // #(<table> except names...)
-  // #(<table> rename name1 name2)
+// Where module is a module, rule is either #f indicating an unqualified import or 
+// one of 'only 'rename 'except 'prefix
 
-  // For only, if name isn't in vector we return false, otherwise we check normally
-  // For except, if name is in vector we return false, otherwise we check normally
-  // Prefix 
+// List is either a list of symbols, or in the case of rename a list of lists with two symbols
+// as members.
 
+// Copies all keys from import-module according to rule
+
+// First case, let's make this work
+
+// (define-library (lib) (export hello) (begin (define (hello) #t)))
+// (import (lib))
+
+Value fn_module_import(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "module-import!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
+  AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
+  AR_FN_ASSERT_ARG(state, 2, "to be a symbol or #f", (argv[2] == C_FALSE || argv[2].type() == SYMBOL));
+  AR_FN_ASSERT_ARG(state, 3, "to be a list", (argv[3] == C_NIL || argv[3].list_length() > 0));
+
+  Value module = argv[0], import_module = argv[1], rule = argv[2], symbols = argv[3], chains, chain,
+    cell, name, qname, import_module_exports, tmp;
+
+  AR_FRAME(state, module, import_module, rule, symbols, chains, chain, cell, name, qname,
+    import_module_exports, tmp);
+
+  AR_ASSERT(rule == C_FALSE);
+
+  bool found;
+  import_module_exports = state.table_get(import_module, state.globals[State::G_STR_MODULE_EXPORTS], found);
+
+  if(import_module_exports == C_FALSE) {
+    tmp = state.table_get(import_module, state.globals[State::G_STR_MODULE_EXPORT_ALL], found);
+    // Module exports no variables
+    if(tmp != C_TRUE) {
+      return C_UNSPECIFIED;
+    }
+  }
+
+  chains = import_module.as<Table>()->chains;
+  for (size_t i = 0; i != chains.as<VectorStorage>()->length; i++) {
+    chain = chains.as<VectorStorage>()->data[i];
+    while(chain.type() == PAIR) {
+      cell = chain.car();
+
+      name = cell.car();
+      qname = cell.cdr();
+
+      chain = chain.cdr();
+
+      if(import_module_exports != C_FALSE) {
+        state.table_get(import_module_exports, name, found);
+        if(!found) { 
+          continue;
+        }
+      }
+
+      // Except would go here: continue if name is in except list.
+      // Only would also go here: continue if name is NOT in only list.
+      qname = cell.cdr();
+
+      // We do not copy strings which are used to store module internals
+      if(name.type() == SYMBOL) {
+        // Prefix would go here: name would be modified with prefix.
+        // Rename would go here: 
+        state.table_set(module, name, qname);
+      }
+    }
+  }
+
+  return C_UNSPECIFIED;
 }
 
 /** env-resolve takes an environment and identifier and returns an appropriate symbol for runtime
@@ -1297,6 +1356,7 @@ void State::install_core_functions() {
 
   // Modules
   defun_core("module-instantiate!", fn_module_instantiate, 1);
+  defun_core("module-import!", fn_module_import, 4);
   defun_core("module-load!", fn_module_load, 1);
 
   // Renames
