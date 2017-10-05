@@ -40,12 +40,12 @@ Value State::load_stream(std::istream& input, size_t source) {
 Value State::load_file(const std::string& path) {
   std::ifstream handle(path);
 
-  std::cout << ";; loading module " << path << std::endl; 
+  // std::cout << ";; loading module " << path << std::endl; 
 
   if(!handle.good()) { 
     std::ostringstream os;
-    os << "Could not load file " << path << std::endl;
-    return make_exception("file-error", os.str());
+    os << "Could not load file " << path;
+    return make_exception(globals[S_FILE_ERROR], os.str());
   }
 
   return load_stream(handle);
@@ -53,9 +53,48 @@ Value State::load_file(const std::string& path) {
 
 // Various state methods that rely on forward declarations
 Value State::load_module(const std::string& identifier) {
-  std::ostringstream try_file;
-  try_file << identifier << ".sld";
-  return load_file(try_file.str());
+  std::ostringstream os;
+
+  for(size_t i = 0; i != identifier.size(); i++) {
+    if(identifier[i] == '#') {
+      os << '/';
+    } else {
+      os << identifier[i];
+    }
+  }
+
+  os << ".sld";
+
+  for(size_t i = 0; i != load_paths.size(); i++) {
+    std::ostringstream file_path;
+    file_path << load_paths[i] << '/' << os.str();
+    std::cout << ";; trying file " << file_path.str() << std::endl;
+    std::ifstream handle(file_path.str());
+
+    if(!handle.good()) {
+      continue;
+    }
+
+    Value result = load_stream(handle);
+
+    if(result.is_active_exception()) return result;
+
+    Value str = make_string(identifier);
+
+    bool found;
+    table_get(get_global_value(G_MODULE_TABLE), str, found);
+
+    if(!found) {
+      os << "expected file " << file_path.str() << " to provide module " << identifier;
+      return make_exception(globals[S_EVAL_ERROR], os.str());
+    }
+    
+    return C_UNSPECIFIED;
+  }
+
+  std::ostringstream msg;
+  msg << "Could not find file " << os.str();
+  return eval_error(msg.str());
 }
 
 
@@ -998,7 +1037,7 @@ Value fn_module_instantiate(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   std::string str(argv[0].string_data());
 
-  return state.get_module(str);
+  return state.instantiate_module(str);
 }
 
 Value fn_module_load(State& state, size_t argc, Value* argv) {

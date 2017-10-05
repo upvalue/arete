@@ -1450,7 +1450,7 @@ struct State {
     }
 
     set_global_value(G_MODULE_TABLE, make_table());
-    set_global_value(G_MODULE_CORE, get_module("arete.core", 2));
+    set_global_value(G_MODULE_CORE, instantiate_module("arete#core", 2));
     set_global_value(G_CURRENT_MODULE, get_global_value(G_MODULE_CORE));
 
     install_core_functions();
@@ -1830,7 +1830,7 @@ struct State {
     return table;
   }
   
-  Value get_module(const std::string& cname, ptrdiff_t module_stage = 0) {
+  Value instantiate_module(const std::string& cname, ptrdiff_t module_stage = 0) {
     Value tbl, tmp, module_tbl;
     AR_FRAME(this, tbl, module_tbl, tmp);
 
@@ -2319,9 +2319,9 @@ struct State {
 
     // Hacky hack. Because the macroexpander defines several functions before it can be installed 
     // and begin qualifying names by module, we simply mirror all definitions before it's installed
-    // into the arete.core module
+    // into the arete#core module
     // e.g. (define not (lambda (x) (eq? x #f)))
-    // will also define ##arete.core#not 
+    // will also define ##arete#core#not 
     if(get_global_value(G_EXPANDER) == C_UNDEFINED && env == C_FALSE) {
       qualified_define(get_global_value(G_MODULE_CORE), name, tmp);
     } 
@@ -2704,6 +2704,8 @@ struct State {
   }
 
   ///// LIBRARIES
+
+  std::vector<std::string> load_paths;
 
   Value load_stream(std::istream&, size_t source = 0);
   Value load_file(const std::string&);

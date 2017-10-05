@@ -129,11 +129,15 @@ int main(int argc, const char **argv) {
   // state.gc.collect_before_every_allocation = true;
   state.boot();
 
+  state.load_paths.push_back(".");
+
   std::string open_repl("--repl");
   std::string gcdebug("--gcdebug");
   std::string quiet("--quiet");
   std::string showread("--show-read");
   std::string showexpand("--show-expand");
+  std::string loadpath("--push-load-path=");
+
 
   if(argc > 1) {
     // read files
@@ -149,6 +153,22 @@ int main(int argc, const char **argv) {
       } else if(showexpand.compare(argv[i]) == 0) {
         state.print_expansions = true;
       } else {
+        // Flag arguments
+        std::string str(argv[i]);
+
+        std::string loadpathc(str.substr(0, loadpath.size()));
+
+        if(loadpathc.compare(loadpath) == 0) {
+          std::string new_load_path(str.substr(loadpath.size(), str.size()));
+          std::cout << new_load_path << std::endl;
+
+          state.load_paths.push_back(new_load_path);
+
+          continue;
+        }
+
+
+        // assume it's a file
         if(!do_file(argv[i], true)) {
           return EXIT_FAILURE;
         }

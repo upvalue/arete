@@ -2,6 +2,7 @@
 
 import glob
 import subprocess
+import os
 import sys
 
 successful_tests = 0
@@ -10,31 +11,42 @@ total_tests = 0
 def run_tests(path, args = []):
     global successful_tests, total_tests
     sys.stdout.write('running %s tests: ' % path)
-    for test_path in glob.glob('tests/%s/*.scm' % path):
+    for test_path in glob.glob('tests/%s/*.scm' % path) + glob.glob('tests/%s/*.sld' % path):
         total_tests += 1
         result_path = test_path[:-3] + 'exp'
+        expect_error = False
+
+        if not os.path.exists(result_path):
+            if os.path.exists(test_path[:-3] + 'err'):
+                expect_error = True
+            else:
+                print('no exp or err file for test %s' % test_path)
+                sys.exit(1)
 
         kmd = ['./arete', '--quiet'] + args + [test_path]
         cmd = subprocess.Popen(kmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         cmd_out, cmd_err = cmd.communicate()
 
-        if cmd.returncode != 0:
+        if expect_error and cmd.returncode == 0:
+            print('\n-- %s was supposed to error but didn\'t:\n%s\n' % (test_path, cmd_err.decode('utf-8').strip()))
+            print('!')
+        elif not expect_error and cmd.returncode != 0:
             print('\n-- %s errored with text:\n%s\n' % (test_path, cmd_err.decode('utf-8').strip()))
             print('!')
             continue
 
+        if not expect_error:
+            result = cmd_out.decode('utf-8').strip()
+            expected = ''
 
-        result = cmd_out.decode('utf-8').strip()
-        expected = ''
+            with open(result_path, 'r') as f:
+                expected = f.read().strip()
 
-        with open(result_path, 'r') as f:
-            expected = f.read().strip()
-
-        if expected != result:
-            print('\n-- %s failed, expected\n%s\n-- but got\n%s' % (test_path, expected, result))
-            print('!')
-            continue
+            if expected != result:
+                print('\n-- %s failed, expected\n%s\n-- but got\n%s' % (test_path, expected, result))
+                print('!')
+                continue
 
         sys.stdout.write('+')
 
@@ -42,10 +54,11 @@ def run_tests(path, args = []):
 
     print('')
 
-suites = {
-    'preboot': [],
-    'expander': ['boot.scm']
-}
+suites = (
+    ('preboot', []),
+    ('expander', ['boot.scm']),
+    ('modules', ['boot.scm', '--push-load-path=tests/modules'])
+)
 
 if __name__ == '__main__':
 
@@ -58,8 +71,8 @@ if __name__ == '__main__':
         run_tests(arg, suites[arg])
 
     if len(sys.argv[1:]) == 0:
-        for suite in suites:
-            run_tests(suite, suites[suite])
+        for (path, args) in suites:
+            run_tests(path, args)
 
     print('%s out of %s tests successful' % (successful_tests, total_tests))
 

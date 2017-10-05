@@ -122,7 +122,7 @@
   (lambda (module spec)
     (if (not (list? spec))
       (raise 'expand "imports must be a list of symbols" i))
-    (define imported-module-name (list-join spec "."))
+    (define imported-module-name (list-join spec "#"))
     (define import-module #f)
     (define module-imports (table-ref module "module-imports"))
 
@@ -132,7 +132,7 @@
 
     (set! import-module (table-ref (top-level-value 'module-table) imported-module-name))
 
-    (print "module stage for " spec (table-ref import-module "module-stage"))
+    ;(print "module stage for " spec (table-ref import-module "module-stage"))
     ;; If it's in the process of being expanded, this is a cyclic import error
     (if (fx= (table-ref import-module "module-stage") 1)
       (raise 'expand "cyclic import" spec))
@@ -194,7 +194,7 @@
                  (if (or (fx< (length x) 2) (not (list (cadr x))))
                    (raise 'expand "define-library expects a list as its first argument" x))
 
-                 (define name-string (list-join (cadr x) "."))
+                 (define name-string (list-join (cadr x) "#"))
                  (define existing-module?
                    (table-ref (top-level-value 'module-table) name-string))
 
@@ -232,12 +232,9 @@
 
                  (set! module-body (cons (make-rename #f 'begin) module-body))
 
+                 ;; Body is expanded, this is now a stage 2 module
                  (table-set! module "module-stage" 2)
 
-                 ;(print module-body)
-
-                 ;(print module-body)
-                 ;(set-top-level-value! 'current-module module)
                  module-body)
                 ((eq? kar 'import)
                  (for-each
