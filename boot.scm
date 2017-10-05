@@ -120,22 +120,57 @@
 ;; import a module
 (define module-import!
   (lambda (module spec)
-    (if (not (list? spec))
+    (define imported-module-name #f)
+    (define module-import-rule 'all)
+
+    (if (or (not (list? spec)) (not (pair? spec)))
       (raise 'expand "imports must be a list of symbols" i))
-    (define imported-module-name (list-join spec "#"))
+
+    (if (memq (car spec) '(only rename prefix except))
+      (begin
+        (set! imported-module-name (list-join (cadr spec) "#"))
+        (set! module-import-rule (car spec)))
+      (set! imported-module-name (list-join spec "#")))
+
     (define import-module #f)
-    (define module-imports (table-ref module "module-imports"))
 
     ;; If module is not loaded at all, load it.
     (if (not (table-ref (top-level-value 'module-table) imported-module-name))
       (module-load! imported-module-name))
 
+    ;; Retrieve the module table
     (set! import-module (table-ref (top-level-value 'module-table) imported-module-name))
 
-    ;(print "module stage for " spec (table-ref import-module "module-stage"))
     ;; If it's in the process of being expanded, this is a cyclic import error
     (if (fx= (table-ref import-module "module-stage") 1)
       (raise 'expand "cyclic import" spec))
+
+    ;; Now append this rule to the list of imports
+    (define module-imports (table-ref module "module-imports"))
+
+    (define vec #f)
+    (if (not (eq? module-import-rule 'all))
+      (begin
+        (set! vec (make-vector))
+        (vector-append! vec import-module)
+        (vector-append! vec module-import-rule)))
+
+    (cond
+      ((eq? module-import-rule 'all)
+       (vector-append! module-imports import-module))
+      ((eq? module-import-rule 'prefix)
+       (vector-append! module-imports (list-ref spec 2)))
+      ((or (eq? module-import-rule 'only) (eq? module-import-rule 'except))
+       (for-each
+         (lambda (item)
+           (if (not (symbol? item))
+             (raise 'expand "import only/except arguments must be symbols" item))
+
+           (vector-append! module-imports item))
+         (cddr spec))))
+
+    ;; If following a rule, we'll build a vector describing that rule
+    (print import-module)
 
     ;; TODO Duplicate imports.
     (vector-append! module-imports import-module)))
@@ -210,32 +245,44 @@
                  (if (not (list? clauses))
                    (raise 'expand "module declaration must be a valid list" x))
 
-                 (define module-body #f)
+                 (define module-body 
+                   (map
+                     (lambda (x)
+                       (if (not (list? x))
+                         (raise 'expand "module clause must be a valid list" x))
 
-                 (for-each 
-                   (lambda (x)
-                     (if (not (list? x))
-                       (raise 'expand "module clause must be a valid list" x))
+                       (define type (car x))
 
-                     (define type (car x))
+                       (cond 
+                         ((eq? type 'import)
+                         (for-each
+                           (lambda (i)
+                             (module-import! module i))
+                           (cdr x)))
+                         ((eq? type 'export-all)
+                          (table-set! module "module-export-all" #t))
+                         ((eq? type 'export)
+                           (for-each
+                             (lambda (i)
+                               (if (not (symbol? i))
+                                 (raise 'expand "exports must be symbols" i))
 
-                     (if (eq? type 'import)
-                       (for-each
-                         (lambda (i)
-                           (module-import! module i))
-                        (cdr x)))
+                               (table-set! (table-ref module "module-exports") i #t))
 
-                     (if (eq? type 'begin)
-                       (set! module-body (expand-map (cdr x) module)))
-                     )
-                   clauses)
+                             (cdr x)))
+                         ((eq? type 'begin)
+                           (cons (make-rename #f 'begin) (expand-map (cdr x) module))))
+                       )
+                     clauses))
 
-                 (set! module-body (cons (make-rename #f 'begin) module-body))
+                 (print module-body)
+
+                 ;(set! module-body (cons (make-rename #f 'begin) module-body))
 
                  ;; Body is expanded, this is now a stage 2 module
                  (table-set! module "module-stage" 2)
 
-                 module-body)
+                 (cons (make-rename #f 'begin) module-body))
                 ((eq? kar 'import)
                  (for-each
                    (lambda (i)

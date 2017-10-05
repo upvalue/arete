@@ -42,7 +42,7 @@ bool do_file(const char* file_path, bool eval ) {
       }
       if(eval) {
         x = state.eval_toplevel(x);
-        if(x.type() == EXCEPTION) {
+        if(x.is_active_exception()) {
           std::cerr << "Evaluation error: " << x.exception_message().string_data() << std::endl;
           state.print_stack_trace();
           return false;
@@ -138,7 +138,6 @@ int main(int argc, const char **argv) {
   std::string showexpand("--show-expand");
   std::string loadpath("--push-load-path=");
 
-
   if(argc > 1) {
     // read files
     for(int i = 1; i != argc; i++) {
@@ -165,7 +164,6 @@ int main(int argc, const char **argv) {
 
           continue;
         }
-
 
         // assume it's a file
         if(!do_file(argv[i], true)) {

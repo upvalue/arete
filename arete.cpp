@@ -694,7 +694,7 @@ Value fn_cdr(State& state, size_t argc, Value* argv) {
 
 Value fn_make_vector(State& state, size_t argc, Value* argv) {
   const char* fn_name = "make-vector";
-  size_t size = 0;
+  size_t size= 0, capacity = 2;
   Value vec, fill = C_FALSE;
   AR_FRAME(state, vec, fill);
   if(argc > 0) {
@@ -707,7 +707,8 @@ Value fn_make_vector(State& state, size_t argc, Value* argv) {
     }
   }
 
-  vec = state.make_vector(size);
+
+  vec = state.make_vector(size < capacity ? capacity : size);
   vec.vector_storage().as<VectorStorage>()->length = size;
   for(size_t i = 0; i != size; i++) {
     vec.vector_set(i, fill);
@@ -863,6 +864,22 @@ Value fn_env_resolve_symbol(State& state, bool& found, Value module, Value name)
   return state.table_get(module, name, found);
 }
 
+static Value fn_env_resolve_import(State& state, bool& found, Value rule, Value name) {
+  found = false;
+  // If rule is just a  table, we check export-all and list of exports
+  // If rule is a vector, it will look like this
+
+  // #(<table> only names...)
+  // #(<table> prefix prefix-string)
+  // #(<table> except names...)
+  // #(<table> rename name1 name2)
+
+  // For only, if name isn't in vector we return false, otherwise we check normally
+  // For except, if name is in vector we return false, otherwise we check normally
+  // Prefix 
+
+}
+
 /** env-resolve takes an environment and identifier and returns an appropriate symbol for runtime
  * For example, references to arete.core functions like car become ##arete.core#car,
  * renames in lambda lists become gensyms, and so on. If it can't resolve a symbol, it is eitehr
@@ -930,6 +947,10 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   AR_ASSERT(env.type() == TABLE && "env-resolve did not successfully get to table");
   AR_ASSERT(name.type() == SYMBOL && "env-resolve failed to resolve a rename, this should never happen");
 
+  // Check exports list
+
+  // Enforce rules:
+
   bool found;
   qname = fn_env_resolve_symbol(state, found, env, name);
 
@@ -939,7 +960,18 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
 
     if(imports.vector_length() != 0) {
       for(size_t i = imports.vector_length(); i != 0; i--) {
-        qname = fn_env_resolve_symbol(state, found, imports.vector_ref(i-1), name);
+        Value import_rule = imports.vector_ref(i-1);
+        // This is an unqualified import, just search it directly
+        if(import_rule.type() == TABLE)  {
+          // If export-all is set, we can check this for sure
+          if(state.table_get(import_rule, state.globals[state.G_STR_MODULE_EXPORT_ALL], found) == C_TRUE) {
+            qname = fn_env_resolve_symbol(state, found, imports.vector_ref(i-1), name);
+            if(found) break;
+          }
+        } else {
+          std::cerr << "don't know how to handle import rule "<< import_rule << std::endl;
+        }
+
         if(found) break;
       }
     }

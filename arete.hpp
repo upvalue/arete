@@ -1401,6 +1401,8 @@ struct State {
     G_STR_MODULE_RENAMES,
     G_STR_MODULE_IMPORTS,
     G_STR_MODULE_STAGE,
+    G_STR_MODULE_EXPORT_ALL,
+    G_STR_MODULE_EXPORTS,
     G_END
   };
 
@@ -1426,6 +1428,8 @@ struct State {
       "module-renames",
       "module-imports",
       "module-stage",
+      "module-export-all",
+      "module-exports",
     };
 
     AR_ASSERT((sizeof(_symbols) / sizeof(const char*)) == G_END &&
@@ -1450,7 +1454,7 @@ struct State {
     }
 
     set_global_value(G_MODULE_TABLE, make_table());
-    set_global_value(G_MODULE_CORE, instantiate_module("arete#core", 2));
+    set_global_value(G_MODULE_CORE, instantiate_module("arete#core", 2, true));
     set_global_value(G_CURRENT_MODULE, get_global_value(G_MODULE_CORE));
 
     install_core_functions();
@@ -1830,7 +1834,7 @@ struct State {
     return table;
   }
   
-  Value instantiate_module(const std::string& cname, ptrdiff_t module_stage = 0) {
+  Value instantiate_module(const std::string& cname, ptrdiff_t module_stage = 0, bool export_all = false) {
     Value tbl, tmp, module_tbl;
     AR_FRAME(this, tbl, module_tbl, tmp);
 
@@ -1856,8 +1860,13 @@ struct State {
       tmp = make_vector();
       table_set(tbl, globals[G_STR_MODULE_IMPORTS], tmp);
 
+      tmp = make_table();
+      table_set(tbl, globals[G_STR_MODULE_EXPORTS], tmp);
+
       tmp = Value::make_fixnum(module_stage);
       table_set(tbl, globals[G_STR_MODULE_STAGE], tmp);
+
+      table_set(tbl, globals[G_STR_MODULE_EXPORT_ALL], Value::make_boolean(export_all));
     } 
 
     return tbl;
@@ -2742,7 +2751,7 @@ struct Reader {
   static bool is_separator(char c) {
     return c == '#' || c == '(' || c == ')' ||
       c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '[' 
-      || c == ']' || c == '"';
+      || c == ']' || c == '"' || c == '\'' || c == ',' || c == '`';
   }
 
   /** Return current source code location so we'll know where e.g.
