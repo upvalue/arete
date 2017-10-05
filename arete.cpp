@@ -68,7 +68,7 @@ Value State::load_module(const std::string& identifier) {
   for(size_t i = 0; i != load_paths.size(); i++) {
     std::ostringstream file_path;
     file_path << load_paths[i] << '/' << os.str();
-    std::cout << ";; trying file " << file_path.str() << std::endl;
+    // std::cout << ";; trying file " << file_path.str() << std::endl;
     std::ifstream handle(file_path.str());
 
     if(!handle.good()) {
@@ -96,7 +96,6 @@ Value State::load_module(const std::string& identifier) {
   msg << "Could not find file " << os.str();
   return eval_error(msg.str());
 }
-
 
 // Casting arithmetic
 

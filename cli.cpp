@@ -160,7 +160,6 @@ int main(int argc, const char **argv) {
 
         if(loadpathc.compare(loadpath) == 0) {
           std::string new_load_path(str.substr(loadpath.size(), str.size()));
-          std::cout << new_load_path << std::endl;
 
           state.load_paths.push_back(new_load_path);
 

@@ -20,8 +20,7 @@ def run_tests(path, args = []):
             if os.path.exists(test_path[:-3] + 'err'):
                 expect_error = True
             else:
-                print('no exp or err file for test %s' % test_path)
-                sys.exit(1)
+                continue
 
         kmd = ['./arete', '--quiet'] + args + [test_path]
         cmd = subprocess.Popen(kmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
