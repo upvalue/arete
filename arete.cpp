@@ -883,19 +883,19 @@ Value fn_module_import(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "module-import!";
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
   AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
-  AR_FN_ASSERT_ARG(state, 2, "to be a symbol or #f", (argv[2] == C_FALSE || argv[2].type() == SYMBOL));
-  AR_FN_ASSERT_ARG(state, 3, "to be a list", (argv[3] == C_NIL || argv[3].list_length() > 0));
+  AR_FN_EXPECT_TYPE(state, argv, 2, SYMBOL);
+  AR_FN_ASSERT_ARG(state, 3, "to be a list or symbol", (argv[3].type() == SYMBOL || argv[3] == C_NIL || argv[3].list_length() > 0));
 
   Value module = argv[0], import_module = argv[1], rule = argv[2], symbols = argv[3], chains, chain,
-    cell, name, qname, import_module_exports, tmp;
+    cell, name, qname, import_module_exports, tmp, prefix = C_FALSE;
 
   AR_FRAME(state, module, import_module, rule, symbols, chains, chain, cell, name, qname,
-    import_module_exports, tmp);
-
-  AR_ASSERT(rule == C_FALSE);
+    import_module_exports, tmp, prefix);
 
   bool found;
   import_module_exports = state.table_get(import_module, state.globals[State::G_STR_MODULE_EXPORTS], found);
+
+
 
   if(import_module_exports == C_FALSE) {
     tmp = state.table_get(import_module, state.globals[State::G_STR_MODULE_EXPORT_ALL], found);
@@ -903,6 +903,10 @@ Value fn_module_import(State& state, size_t argc, Value* argv) {
     if(tmp != C_TRUE) {
       return C_UNSPECIFIED;
     }
+  }
+
+  if(rule == state.globals[State::S_PREFIX]) {
+    prefix = argv[3];
   }
 
   chains = import_module.as<Table>()->chains;
@@ -929,9 +933,16 @@ Value fn_module_import(State& state, size_t argc, Value* argv) {
 
       // We do not copy strings which are used to store module internals
       if(name.type() == SYMBOL) {
-        // Prefix would go here: name would be modified with prefix.
-        // Rename would go here: 
-        state.table_set(module, name, qname);
+        std::ostringstream nname;
+        if(prefix != C_FALSE) {
+          std::ostringstream nname;
+          nname << prefix << name;
+          tmp = state.get_symbol(nname.str());
+          // std::cout << "defining " << tmp << " as " << qname << std::endl;
+          state.table_set(module, tmp, qname);
+        } else {
+          state.table_set(module, name, qname);
+        }
       }
     }
   }

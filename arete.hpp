@@ -1385,6 +1385,7 @@ struct State {
     S_UNQUOTE_SPLICING,
     S_RENAME,
     // Used by module system (rename is also used in module declarations)
+    S_UNQUALIFIED,
     S_ONLY,
     S_EXCEPT,
     S_PREFIX,
@@ -1425,7 +1426,7 @@ struct State {
       // Used by reader      
       "quasiquote", "unquote", "unquote-splicing", "rename",
       // Modules
-      "only", "except", "prefix",
+      "unqualified", "only", "except", "prefix",
       // Tags for errors that may be thrown by the runtime
       "file", "read", "eval", "type", "expand", "syntax",
       // Various variables

@@ -25,6 +25,10 @@
     (if (not (symbol? name))
         (raise 'expand "macro name must be a symbol" x))
 
+    (if (table? env)
+      (if (table-ref env "module-export-all")
+        (table-set! (table-ref env "module-exports") name #t)))
+
     (define expanded-body (expand body env))
 
     ;; (print expanded-body)
@@ -125,18 +129,21 @@
   (lambda (module spec)
 
     (define imported-module-name #f)
-    (define module-import-rule 'all)
+    (define module-import-rule 'unqualified)
+    (define rule-arguments '())
     (define import-module #f)
 
     (if (or (not (list? spec)) (not (pair? spec)))
       (raise 'expand "imports must be a list of symbols" i))
 
+    ;(print spec)
     (if (memq (car spec) '(only rename prefix except))
       (begin
+        (if (not (list? (cadr spec)))
+          (raise 'expand "bad module spec" spec))
         (set! imported-module-name (list-join (cadr spec) "#"))
         (set! module-import-rule (car spec)))
       (set! imported-module-name (list-join spec "#")))
-
 
     ;; If module is not loaded at all, load it.
     (if (not (table-ref (top-level-value 'module-table) imported-module-name))
@@ -152,8 +159,14 @@
     ;; Now append this rule to the list of imports
     ;;(define module-imports (table-ref module "module-imports"))
 
-    (module-import! module import-module #f '())
+    (cond
+      ((eq? module-import-rule 'prefix)
+       (define pfx (list-ref spec 2))
+       (if (not (symbol? pfx))
+         (raise 'expand "bad prefix" pfx))
+       (set! rule-arguments pfx)))
 
+    (module-import! module import-module module-import-rule rule-arguments)
 
     unspecified))
 
