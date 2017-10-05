@@ -21,10 +21,11 @@ bool do_file(const char* file_path, bool eval ) {
 
   vec = state.make_vector();
   std::ifstream file_handle(file_path, std::ios::in);
-  std::stringstream ss;
-  // CHECK IF FILE EXISTS
-  ss << file_handle.rdbuf();
-  Reader reader(state, ss);
+  if(!file_handle.good()) {
+    std::cerr << "Could not read " << file_path << ". Does it exist?" << std::endl;
+    return false;
+  }
+  Reader reader(state, file_handle);
   reader.file = state.register_file(file_path);
   while(true) {
     x = reader.read();

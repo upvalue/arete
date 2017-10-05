@@ -15,7 +15,7 @@
 
 ;;;;; EXPANSION
 
-;; Shortcut for applying expand with an environment, since this is used pretty often
+;; Shortcut for applying expand with an environment, since this is used pretty often in the code.
 (define expand-map
   (lambda (x env)
     (map (lambda (sub-x) (expand sub-x env)) x)))
@@ -93,27 +93,52 @@
     (if (env-syntax? env name)
       (raise 'expand "definition shadows syntax" (list x name)))
 
-    ;; If this isn't a module, we have to note it as a 'variable so env-resolve will treat it as a local variable
     (if (table? env)
       (begin
-        ;; Otherwise, we have to note its qualified name in the environment
+        ;; If this is a module, we have to note its qualified name in the environment
+        ;; If this is a module, we have to note its qualified name in the environment
         (if (rename? name)
           ;; TODO: Should these renames be annotated with the module name?
           (begin
             (rename-gensym! name)
             (vector-append! (table-ref env "module-renames") name))
           (begin
+            ;; If this is on the list of exports
             ;; Note down the qualified name of this variable
-            (table-set! env name (string->symbol (string-append "##" (table-ref env "module-name") "#" (symbol->string name))))
+            ;(table-set! env name (string->symbol (string-append "##" (table-ref env "module-name") "#" (symbol->string name))))
             ))
         (env-define env name (env-resolve env name) #f)
 
         (set! name (env-resolve env name)))
+      ;; If this isn't a module, we have to note it as a 'variable so env-resolve will treat it as a local variable
       (env-define env name 'variable))
 
     (define result (list-source x (car x) name (expand value env)))
     ;(print result)
     result))
+
+;; import a module
+(define module-import!
+  (lambda (module spec)
+    (if (not (list? spec))
+      (raise 'expand "imports must be a list of symbols" i))
+    (define imported-module-name (list-join spec "."))
+    (define import-module #f)
+    (define module-imports (table-ref module "module-imports"))
+
+    ;; If module is not loaded at all, load it.
+    (if (not (table-ref (top-level-value 'module-table) imported-module-name))
+      (module-load! imported-module-name))
+
+    (set! import-module (table-ref (top-level-value 'module-table) imported-module-name))
+
+    (print "module stage for " spec (table-ref import-module "module-stage"))
+    ;; If it's in the process of being expanded, this is a cyclic import error
+    (if (fx= (table-ref import-module "module-stage") 1)
+      (raise 'expand "cyclic import" spec))
+
+    ;; TODO Duplicate imports.
+    (vector-append! module-imports import-module)))
 
 (define expand
   (lambda (x env) 
@@ -165,34 +190,61 @@
                 ((eq? kar 'cond)
                  ;; (if clause-condition clause-body else rest-of-clauses...right?
                  x)
-                ((eq? kar 'module)
-                 (if (or (not (fx= (length x) 2)) (not (symbol? (cadr x))))
-                   (raise 'expand "module should have exactly one argument: a symbol" x))
+                ((eq? kar 'define-library)
+                 (if (or (fx< (length x) 2) (not (list (cadr x))))
+                   (raise 'expand "define-library expects a list as its first argument" x))
 
-                 (set-top-level-value! 'current-module (module-get (symbol->string (cadr x))))
-                 unspecified)
+                 (define name-string (list-join (cadr x) "."))
+                 (define existing-module?
+                   (table-ref (top-level-value 'module-table) name-string))
 
+                 (if existing-module?
+                   (raise 'expand (string-append "redefinition of module " name-string) x))
+
+                 (define module (module-instantiate! name-string))
+                 (define module-imports (table-ref module "module-imports"))
+                 (define clauses (cddr x))
+
+                 (table-set! module "module-stage" 1)
+
+                 (if (not (list? clauses))
+                   (raise 'expand "module declaration must be a valid list" x))
+
+                 (define module-body #f)
+
+                 (for-each 
+                   (lambda (x)
+                     (if (not (list? x))
+                       (raise 'expand "module clause must be a valid list" x))
+
+                     (define type (car x))
+
+                     (if (eq? type 'import)
+                       (for-each
+                         (lambda (i)
+                           (module-import! module i))
+                        (cdr x)))
+
+                     (if (eq? type 'begin)
+                       (set! module-body (expand-map (cdr x) module)))
+                     )
+                   clauses)
+
+                 (set! module-body (cons (make-rename #f 'begin) module-body))
+
+                 (table-set! module "module-stage" 2)
+
+                 ;(print module-body)
+
+                 ;(print module-body)
+                 ;(set-top-level-value! 'current-module module)
+                 module-body)
                 ((eq? kar 'import)
-
-                 (if (not (table? env))
-                   (raise 'syntax "imports must be at the top-level of a module" x))
-
-                 (define module-imports (table-ref env "module-imports"))
-
                  (for-each
                    (lambda (i)
-                     (if (not (symbol? i))
-                       (raise 'syntax "imports must be a symbol" x))
-
-                     (vector-append! module-imports (module-get (symbol->string i)))
-                   )
-                   (cdr x))
-
-                 ;(print module-imports)
-
-
-                 unspecified)
-                ;; LAMBDA
+                     (module-import! (top-level-value 'current-module) i))
+                   (cdr x)))
+               ;; LAMBDA
                 ((eq? kar 'lambda)
                  (if (fx< (length x) 3)
                      (raise 'expand "lambda has no body" x))
@@ -279,7 +331,7 @@
               )) ;; (if (symbol? x))
             ))) ;; end expand
 
-(install-expander expand)
+(set-top-level-value! 'expander expand)
 
 ;;;;; BASIC SYNTACTIC FORMS
 ;; eg let & friends, quasiquote, when/unless
@@ -418,7 +470,7 @@
         (if (c (car clause) #'else)
           #t 
           `(#,memv #,result (#,quote ,(car clause)))))
-      
+
       (if (null? (cdr clauses))
         `(#,if ,condition
           (#,begin ,(cadr clause))

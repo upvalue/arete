@@ -1,11 +1,63 @@
 // arete.cpp - arete builtin functions
 
+#include <fstream>
+#include <iostream>
+
 #include "arete.hpp"
 
 namespace arete {
 
 size_t gc_collect_timer = 0;
 State* current_state = 0;
+
+Value State::load_stream(std::istream& input, size_t source) {
+  Reader reader(*this, input);
+  Value x;
+  AR_FRAME(this, x);
+
+  if(source > 0) {
+    reader.file = source;
+  }
+
+  while(true) {
+    x = reader.read();
+    if(x == C_EOF) {
+      break;
+    }
+
+    if(x.is_active_exception()) {
+      return x;
+    } else {
+      x = eval_toplevel(x);
+      if(x.is_active_exception()) {
+        return x;
+      }
+    }
+  }
+  return x;
+}
+
+Value State::load_file(const std::string& path) {
+  std::ifstream handle(path);
+
+  std::cout << ";; loading module " << path << std::endl; 
+
+  if(!handle.good()) { 
+    std::ostringstream os;
+    os << "Could not load file " << path << std::endl;
+    return make_exception("file-error", os.str());
+  }
+
+  return load_stream(handle);
+}
+
+// Various state methods that rely on forward declarations
+Value State::load_module(const std::string& identifier) {
+  std::ostringstream try_file;
+  try_file << identifier << ".sld";
+  return load_file(try_file.str());
+}
+
 
 // Casting arithmetic
 
@@ -434,6 +486,27 @@ Value fn_list_ref(State& state, size_t argc, Value* argv) {
   return h.car().maybe_unbox();
 }
 
+Value fn_list_join(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "list-join";
+
+  AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
+  AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
+  AR_FN_ASSERT_ARG(state, 0, "to be a list", (argv[0].list_length() > 0));
+
+  Value lst = argv[0], join_char = argv[1];
+  std::ostringstream ss;
+
+  while(lst.type() == PAIR) {
+    ss << lst.car();
+    lst = lst.cdr();
+    if(lst != C_NIL) {
+      ss << join_char.string_data();
+    }
+  }
+
+  return state.make_string(ss.str());
+}
+
 /** 
  * Underlying implementation of for-each and map. If improper is true, it will handle dotted lists,
  * if ret is true it will allocate and return a list of the results of function application.
@@ -746,6 +819,7 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
 // it failed
 Value fn_env_resolve_symbol(State& state, bool& found, Value module, Value name) {
   Value mname = state.table_get(module, state.globals[State::G_STR_MODULE_NAME], found);
+  (void) mname;
   AR_ASSERT(found && "fn_env_resolve_symbol table_get G_STR_MODULE_NAME failed, probably passed a bad module");
 
   return state.table_get(module, name, found);
@@ -753,13 +827,17 @@ Value fn_env_resolve_symbol(State& state, bool& found, Value module, Value name)
 
 /** env-resolve takes an environment and identifier and returns an appropriate symbol for runtime
  * For example, references to arete.core functions like car become ##arete.core#car,
- * renames in lambda lists become gensyms, and so on */
+ * renames in lambda lists become gensyms, and so on. If it can't resolve a symbol, it is eitehr
+ * an undefined variable or a toplevel variable and is returned unmodified. */
 Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-resolve";
   AR_FN_EXPECT_ENV(state, 0);
   AR_FN_EXPECT_IDENT(state, 1);
 
-  Value env = argv[0];
+  Value env = argv[0], name, rename_key, result, renames, qname, imports, arg1 = argv[1], mname;
+  AR_FRAME(state, env, name, rename_key, result, renames, qname, imports, arg1, mname);
+
+  //Value env = argv[0];
 
   // (env-resolve (<table> vars) name)
 
@@ -774,9 +852,8 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
 
   if(argv[0].type() == VECTOR) {
     // Note that env_lookup_impl takes env and rename_key as references
-    Value rename_key;
     bool found;
-    Value result = state.env_lookup_impl(env, argv[1], rename_key, found);
+    result = state.env_lookup_impl(env, argv[1], rename_key, found);
     (void) result;
 
     // If a rename was introduced in the bindings of a lambda, it needs to resolve to a gensym
@@ -785,19 +862,17 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
         if(rename_key != C_FALSE) {
           return rename_key.rename_gensym();
         }
-        // std::cout << "env-resolve encountered sub-module rename " << argv[1].rename_expr() <<  " which should then return " << rename_key.rename_gensym() << std::endl;
-        //std::cout << argv[1].rename_gensym() << std::endl;
       }
       return argv[1];
     } 
   }
 
-  Value name = argv[1];
+  name = argv[1];
 
   // Table-level renames also become gensyms
   if(env.type() == TABLE && argv[1].type() == RENAME) {
     bool found;
-    Value renames = state.table_get(env, state.globals[State::G_STR_MODULE_RENAMES], found);
+    renames = state.table_get(env, state.globals[State::G_STR_MODULE_RENAMES], found);
 
 
     AR_ASSERT(found);
@@ -818,8 +893,7 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   AR_ASSERT(name.type() == SYMBOL && "env-resolve failed to resolve a rename, this should never happen");
 
   bool found;
-  Value qname = fn_env_resolve_symbol(state, found, env, name);
-  Value imports;
+  qname = fn_env_resolve_symbol(state, found, env, name);
 
   if(!found) {
     imports = state.table_get(env, state.globals[State::G_STR_MODULE_IMPORTS], found);
@@ -837,7 +911,7 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   // or (b) has been defined somewhere below the call to env-resolve. We'll return a qualified
   // symbol for the module and deal with the error later.
   if(qname == C_FALSE) {
-    Value mname = state.table_get(env, state.globals[State::G_STR_MODULE_NAME], found);
+    mname = state.table_get(env, state.globals[State::G_STR_MODULE_NAME], found);
     AR_ASSERT(found && "env-resolve table_get G_STR_MODULE_NAME failed, probably passed a bad module");
 
     std::ostringstream qname;
@@ -882,7 +956,8 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
   state.env_lookup_impl(rename_env, id1.rename_expr(), rename_key, found1);
   state.env_lookup_impl(env, id2, rename_key, found2);
 
-  return Value::make_boolean((rename_env == env || (found1 == found2)) && id1.rename_expr() == id2);
+  // If these both refer to a toplevel variable (i.e. not defined), this is true
+  return Value::make_boolean((rename_env == env || (found1 && found1 == found2)) && id1.rename_expr() == id2);
 }
 
 // env-lookup
@@ -891,7 +966,9 @@ Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_ENV(state, 0);
   AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
 
+  Value arg0 = argv[0], arg1 = argv[1];
   Value env = argv[0], qname, result;
+  AR_FRAME(state, env, qname, result, arg0, arg1);
 
   qname = fn_env_resolve(state, argc, argv);
 
@@ -901,7 +978,7 @@ Value fn_env_lookup(State& state, size_t argc, Value* argv) {
     return result;
   }
 
-  return state.env_lookup(argv[0], argv[1]);
+  return state.env_lookup(arg0, arg1);
 }
 
 /** Check if a name is syntax (a builtin such as define, or a macro) in a particular environment.
@@ -916,11 +993,17 @@ Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(result.type() == FUNCTION && result.function_is_macro());
 }
 
-Value fn_module_get(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "module-get";
+Value fn_module_instantiate(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "module-instantiate!";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   std::string str(argv[0].string_data());
+
   return state.get_module(str);
+}
+
+Value fn_module_load(State& state, size_t argc, Value* argv) {
+  std::string str(argv[0].string_data());
+  return state.load_module(str);
 }
 
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
@@ -950,15 +1033,6 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   fn->set_header_bit(Value::FUNCTION_MACRO_BIT);
 
   return fn;
-}
-
-Value fn_install_expander(State& state, size_t argc, Value* argv) {
-  static const char *fn_name = "install-macroexpander";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
-
-  state.set_global_value(State::G_EXPANDER, argv[0]);
-
-  return C_UNSPECIFIED;
 }
 
 Value fn_set_print_expansions(State& state, size_t argc, Value* argv) {
@@ -1092,6 +1166,7 @@ void State::install_core_functions() {
   defun_core("list", fn_list, 0, 0, true);
   defun_core("list?", fn_listp, 1);
   defun_core("list-ref", fn_list_ref, 2);
+  defun_core("list-join", fn_list_join, 2);
   defun_core("length", fn_length, 1);
 
   defun_core("map", fn_map_improper, 2);
@@ -1151,7 +1226,8 @@ void State::install_core_functions() {
   defun_core("env-syntax?", fn_env_syntaxp, 2);
 
   // Modules
-  defun_core("module-get", fn_module_get, 1);
+  defun_core("module-instantiate!", fn_module_instantiate, 1);
+  defun_core("module-load!", fn_module_load, 1);
 
   // Renames
   defun_core("make-rename", fn_make_rename, 2);
@@ -1170,7 +1246,6 @@ void State::install_core_functions() {
   defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun_core("function-env", fn_function_env, 1);
 
-  defun_core("install-expander", fn_install_expander, 1);
   defun_core("set-print-expansions!", fn_set_print_expansions, 1);
 }
 

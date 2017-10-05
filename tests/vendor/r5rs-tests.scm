@@ -1,7 +1,6 @@
 ;; r5rs-tests.scm - R5RS tests, swiped from chibi
 
-;; several tests disabled, including continuations and chibi's apparently custom ability to change the ellipsis
-;; in syntax-rules
+;; several tests disabled, including continuations 
 
 (define *tests-run* 0)
 (define *tests-passed* 0)

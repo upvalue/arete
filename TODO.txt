@@ -4,6 +4,12 @@ rough outline of major projects, in order
 - syntax-rules
 - compiler
 
+What are the major projects I want to undertake before this is "completed"? Or at least v0.1...
+- modules
+- structs with inheritance and basic methods
+- syntax-rules
+- compiler
+- documentation and error messages.
 
 runtime
 - 0.25 / 9 prints different than python. difference in I/O or some kind of error?
@@ -28,6 +34,7 @@ x semispace garbage collection for extreme debugging and robustness
 - could semispace collector also be used to optionally compact the incremental collector?
 - how to reduce code duplication between copy & mark routines?
 - finalizers
+- ephemerons
 - benchmarking
 interpreter
 x let
@@ -75,6 +82,11 @@ x (let-syntax () (define x #t)) x => #T
 x explicit renaming
 x check validity of lambda
 - syntax-rules
+
+modules
+
+- could be compressed by the use of perfect hash tables after being "sealed." this might also simplify some loading
+  issues if we treated most/all modules as unmodifiable after definition.
 
 language
 

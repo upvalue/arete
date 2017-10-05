@@ -1371,8 +1371,7 @@ struct State {
     S_OR,
     S_SET,
     // Module forms
-    S_MODULE,
-    S_EXPORT,
+    S_DEFINE_LIBRARY,
     S_IMPORT,
     S_DEFINE_SYNTAX,
     S_LET_SYNTAX,
@@ -1386,10 +1385,12 @@ struct State {
     S_UNQUOTE_SPLICING,
     S_RENAME,
     // Errors that may be thrown by the runtime
+    S_FILE_ERROR,
     S_READ_ERROR,
     S_EVAL_ERROR,
     S_TYPE_ERROR,
     S_EXPAND_ERROR,
+    S_SYNTAX_ERROR,
     // Global variables
     G_EXPANDER,
     G_CURRENT_MODULE,
@@ -1399,6 +1400,7 @@ struct State {
     G_STR_MODULE_NAME,
     G_STR_MODULE_RENAMES,
     G_STR_MODULE_IMPORTS,
+    G_STR_MODULE_STAGE,
     G_END
   };
 
@@ -1411,18 +1413,19 @@ struct State {
     static const char* _symbols[] = {
       // C_SYNTAX values
       "quote", "begin", "define", "lambda", "if", "cond", "and", "or", "set!",
-      "define-syntax", "let-syntax", "letrec-syntax", "module", "export", "import",
+      "define-syntax", "let-syntax", "letrec-syntax", "define-library", "import",
       // Used by interpreter
       "else",
       // Used by reader      
       "quasiquote", "unquote", "unquote-splicing", "rename",
-      // Errors that may be thrown by the runtime
-      "read", "eval", "type", "expand",
+      // Tags for errors that may be thrown by the runtime
+      "file", "read", "eval", "type", "expand", "syntax",
       // Various variables
       "expander", "current-module", "module-table", "core",
       "module-name",
       "module-renames",
       "module-imports",
+      "module-stage",
     };
 
     AR_ASSERT((sizeof(_symbols) / sizeof(const char*)) == G_END &&
@@ -1447,7 +1450,7 @@ struct State {
     }
 
     set_global_value(G_MODULE_TABLE, make_table());
-    set_global_value(G_MODULE_CORE, get_module("arete.core"));
+    set_global_value(G_MODULE_CORE, get_module("arete.core", 2));
     set_global_value(G_CURRENT_MODULE, get_global_value(G_MODULE_CORE));
 
     install_core_functions();
@@ -1827,7 +1830,7 @@ struct State {
     return table;
   }
   
-  Value get_module(const std::string& cname) {
+  Value get_module(const std::string& cname, ptrdiff_t module_stage = 0) {
     Value tbl, tmp, module_tbl;
     AR_FRAME(this, tbl, module_tbl, tmp);
 
@@ -1852,6 +1855,9 @@ struct State {
 
       tmp = make_vector();
       table_set(tbl, globals[G_STR_MODULE_IMPORTS], tmp);
+
+      tmp = Value::make_fixnum(module_stage);
+      table_set(tbl, globals[G_STR_MODULE_STAGE], tmp);
     } 
 
     return tbl;
@@ -2086,9 +2092,9 @@ struct State {
    * interpreter and for the hygienic macro expander. See fn_env_compare and fn_env_resolve in
    * arete.cpp.
    */
-  Value env_lookup_impl(Value& env, Value name, Value& rename_key, bool& found_at_toplevel) {
+  Value env_lookup_impl(Value& env, Value name, Value& rename_key, bool& reached_toplevel) {
     rename_key = C_FALSE;
-    found_at_toplevel = false;
+    reached_toplevel = false;
 
     // First we search through vectors with identifier_equal, which only
     // returns true if symbols are the same or if renames have the same env and expr
@@ -2123,7 +2129,7 @@ struct State {
       }
     }
 
-    found_at_toplevel = true;
+    reached_toplevel = true;
 
     AR_ASSERT(name.type() != RENAME);
 
@@ -2312,7 +2318,8 @@ struct State {
     EVAL_CHECK(tmp, exp, fn_name);
 
     // Hacky hack. Because the macroexpander defines several functions before it can be installed 
-    // and begin qualifying names by module, we do it here 
+    // and begin qualifying names by module, we simply mirror all definitions before it's installed
+    // into the arete.core module
     // e.g. (define not (lambda (x) (eq? x #f)))
     // will also define ##arete.core#not 
     if(get_global_value(G_EXPANDER) == C_UNDEFINED && env == C_FALSE) {
@@ -2579,8 +2586,6 @@ struct State {
 
         if(car.is_active_exception()) return car;
 
-        //EVAL_CHECK(car, exp, fn_name);
-
         if(car.type() != FUNCTION && car.type() != CFUNCTION) {
           std::ostringstream os;
           if(car == C_UNDEFINED) {
@@ -2697,6 +2702,12 @@ struct State {
 
     return eval(C_FALSE, exp);
   }
+
+  ///// LIBRARIES
+
+  Value load_stream(std::istream&, size_t source = 0);
+  Value load_file(const std::string&);
+  Value load_module(const std::string&);
 };
 
 ///// (READ) Reader
@@ -2762,7 +2773,7 @@ struct Reader {
     } 
     os << description;
 
-    return state.make_exception("read-error", os.str());
+    return state.make_exception(state.globals[State::S_READ_ERROR], os.str());
   }
 
   /** getc that tracks line/column information */
@@ -3263,7 +3274,7 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         case C_UNSPECIFIED: return os << "#<unspecified>";
         case C_SYNTAX: return os << "#<syntax>";
         case C_UNDEFINED: return os << "#<undefined>";
-        default: return os << "<unknown constant>";
+        default: return os << "<unknown constant " << ((ptrdiff_t) v.bits) << '>';
       }
     case FLONUM:
       return os << v.flonum_value(); 
