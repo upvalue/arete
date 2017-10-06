@@ -136,7 +136,6 @@
     (if (or (not (list? spec)) (not (pair? spec)))
       (raise 'expand "imports must be a list of symbols" i))
 
-    ;(print spec)
     (if (memq (car spec) '(only rename prefix except))
       (begin
         (if (not (list? (cadr spec)))

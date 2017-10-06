@@ -1332,7 +1332,6 @@ struct State {
   size_t gensym_counter;
   bool print_expansions;
   symbol_table_t symbol_table;
-  std::vector<std::string> source_names;
 
   State():  gc(*this), gensym_counter(0), print_expansions(0) {
     current_state = this;
@@ -1340,6 +1339,9 @@ struct State {
   ~State() {
     current_state = 0;
   }
+
+  std::vector<std::string> source_names;
+  std::vector<std::string> source_contents;
 
   // Source code location tracking
   unsigned register_file(const std::string& path) {
@@ -1994,12 +1996,15 @@ struct State {
     cqname << "##" << module_name.string_data() << "#" << name;
     qname = make_string(cqname.str());
     qname = get_symbol(qname);
+    table_set(module, name, qname);
     if(set_value) {
       qname.set_symbol_value(value);
+      module = table_get(module, globals[G_STR_MODULE_EXPORTS], found);
+      table_set(module, name, C_TRUE);
     }
-
-    table_set(module, name, qname);
   }
+
+
 
   /** Defines a function both in the core module and as a top-level value; used during booting */
   void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
@@ -2324,7 +2329,6 @@ struct State {
       return eval_error("first argument to define must be a symbol", exp);
     }
 
-
     if(env_defined(env, name)) {
       warn() << source_info(exp.pair_src()) << ' ' <<  name << " shadows existing definition of " << name << std::endl;;
     }
@@ -2340,6 +2344,8 @@ struct State {
     // will also define ##arete#core#not 
     if(get_global_value(G_EXPANDER) == C_UNDEFINED && env == C_FALSE) {
       qualified_define(get_global_value(G_MODULE_CORE), name, tmp);
+      // Value export_table = table_get(get_global_value(G_MODULE_CORE), globals[G_STR_MODULE_EXPORTS], found);
+      // table_set(export_table, name, C_TRUE);
     } 
 
     if(env == C_FALSE) {
@@ -2766,7 +2772,6 @@ struct Reader {
   SourceLocation save() {
     return SourceLocation(file, line);
   }
-
 
   /** Make a pair annotated with current source location */
   Value make_pair(Value car, Value cdr = C_NIL) {
@@ -3351,12 +3356,18 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         if(i != v.vector_length() - 1) os << ' ';
       }
       return os << ')';
-    case RENAME:
-      if(v.rename_gensym() != C_FALSE) {
-        return os << "*" << v.rename_gensym();
+    case RENAME: {
+      Value env = v.rename_env(),
+        sym = v.rename_gensym() == C_FALSE ? v.rename_expr() : v.rename_gensym();
+
+      if(env == C_FALSE) {
+        return os << "#R:" << sym;
+      } else if(env.type() == TABLE) {
+        return os << "#R:module:" << sym;
       } else {
-        return os << "*" << v.rename_expr();
+        return os << "#R:local:" << sym;
       }
+    }
     case BOX:
       //return os << "&" << v.unbox();
       return os << v.unbox();

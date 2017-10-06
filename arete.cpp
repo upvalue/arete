@@ -872,7 +872,7 @@ Value fn_env_resolve_symbol(State& state, bool& found, Value module, Value name)
 // List is either a list of symbols, or in the case of rename a list of lists with two symbols
 // as members.
 
-// Copies all keys from import-module according to rule
+// Copies all keys as specified by rule from import-module into module
 
 // First case, let's make this work
 
@@ -884,7 +884,7 @@ Value fn_module_import(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
   AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
   AR_FN_EXPECT_TYPE(state, argv, 2, SYMBOL);
-  AR_FN_ASSERT_ARG(state, 3, "to be a list or symbol", (argv[3].type() == SYMBOL || argv[3] == C_NIL || argv[3].list_length() > 0));
+  AR_FN_ASSERT_ARG(state, 3, "to be a list, symbol or table", (argv[3].type() == TABLE || argv[3].type() == SYMBOL || argv[3] == C_NIL || argv[3].list_length() > 0));
 
   Value module = argv[0], import_module = argv[1], rule = argv[2], symbols = argv[3], chains, chain,
     cell, name, qname, import_module_exports, tmp, prefix = C_FALSE;
@@ -894,8 +894,6 @@ Value fn_module_import(State& state, size_t argc, Value* argv) {
 
   bool found;
   import_module_exports = state.table_get(import_module, state.globals[State::G_STR_MODULE_EXPORTS], found);
-
-
 
   if(import_module_exports == C_FALSE) {
     tmp = state.table_get(import_module, state.globals[State::G_STR_MODULE_EXPORT_ALL], found);
@@ -908,6 +906,8 @@ Value fn_module_import(State& state, size_t argc, Value* argv) {
   if(rule == state.globals[State::S_PREFIX]) {
     prefix = argv[3];
   }
+
+  // Copy everything
 
   chains = import_module.as<Table>()->chains;
   for (size_t i = 0; i != chains.as<VectorStorage>()->length; i++) {
@@ -940,6 +940,8 @@ Value fn_module_import(State& state, size_t argc, Value* argv) {
           tmp = state.get_symbol(nname.str());
           // std::cout << "defining " << tmp << " as " << qname << std::endl;
           state.table_set(module, tmp, qname);
+        } else if(rule == state.globals[State::S_RENAME]) {
+
         } else {
           state.table_set(module, name, qname);
         }
@@ -1023,29 +1025,6 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
 
   bool found;
   qname = fn_env_resolve_symbol(state, found, env, name);
-
-  if(!found) {
-    imports = state.table_get(env, state.globals[State::G_STR_MODULE_IMPORTS], found);
-    AR_ASSERT(found);
-
-    if(imports.vector_length() != 0) {
-      for(size_t i = imports.vector_length(); i != 0; i--) {
-        Value import_rule = imports.vector_ref(i-1);
-        // This is an unqualified import, just search it directly
-        if(import_rule.type() == TABLE)  {
-          // If export-all is set, we can check this for sure
-          if(state.table_get(import_rule, state.globals[state.G_STR_MODULE_EXPORT_ALL], found) == C_TRUE) {
-            qname = fn_env_resolve_symbol(state, found, imports.vector_ref(i-1), name);
-            if(found) break;
-          }
-        } else {
-          std::cerr << "don't know how to handle import rule "<< import_rule << std::endl;
-        }
-
-        if(found) break;
-      }
-    }
-  }
 
   // If we've failed to resolve this variable, it's either (a) a truly bad variable reference
   // or (b) has been defined somewhere below the call to env-resolve. We'll return a qualified
