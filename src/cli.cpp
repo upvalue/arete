@@ -88,8 +88,6 @@ static bool do_repl(State& state, bool read_only) {
 
     }
 
-
-
     linenoiseHistoryAdd(line);
   }
 

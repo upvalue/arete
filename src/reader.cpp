@@ -178,6 +178,20 @@ XReader::TokenType XReader::next_token() {
       return TK_DOT;
     } else if (c == ',') {
       eatc();
+      char c2;
+      if(!peekc(c2)) {
+        // Error will be returned later
+        unexpected_eof("after , ", line, position - 1);
+        return TK_ERROR;
+      }
+      if(c2 == '@') {
+        eatc();
+        return TK_UNQUOTE_SPLICING;
+      }
+
+      return TK_UNQUOTE;
+    } else if(c == '`') {
+      eatc();
       return TK_QUASIQUOTE;
     } else if (c == '\'') {
       eatc();
@@ -210,6 +224,16 @@ XReader::TokenType XReader::next_token() {
   
 #define NEXT_TOKEN(name) \
     name = next_token(); if(active_error != C_FALSE) { return active_error; }
+
+Value XReader::read_aux(const std::string& text, unsigned highlight_size, Value symbol) {
+  Value x = read_expr(TK_READ_NEXT);
+  if(x == C_EOF) {
+    return unexpected_eof(text, line, position - highlight_size);
+  }
+
+  x = state.make_pair(x, C_NIL);
+  return state.make_pair(symbol, x);
+}
 
 Value XReader::read_expr(TokenType tk) {
   if(tk == TK_READ_NEXT) {
@@ -255,16 +279,13 @@ Value XReader::read_expr(TokenType tk) {
     }
 
     // Auxiliary syntax
-    case TK_QUOTE: {
-      Value x = read_expr(TK_READ_NEXT);
-      if(x == C_EOF) {
-        unexpected_eof("after '", line, position - 1);
-        return active_error;
-      }
-      x = state.make_pair(x, C_NIL);
-      return state.make_pair(state.globals[State::S_QUOTE], x);
-    }
+    case TK_UNQUOTE: return read_aux("after ,", 2, state.globals[State::S_UNQUOTE]);
+    case TK_QUASIQUOTE: return read_aux("after `", 1, state.globals[State::S_QUASIQUOTE]);
+    case TK_QUOTE: return read_aux("after '", 1, state.globals[State::S_QUOTE]);
+    case TK_UNQUOTE_SPLICING:
+     return read_aux("after ,@", 2, state.globals[State::S_UNQUOTE_SPLICING]);
 
+    // Lists
     case TK_LPAREN: {
       // Read a list
       LOG_NOBUFFER("TK_LPAREN", '(');

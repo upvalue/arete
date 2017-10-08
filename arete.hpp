@@ -3309,6 +3309,7 @@ struct XReader {
   void tokenize_string();
 
   TokenType next_token();
+  Value read_aux(const std::string&, unsigned, Value);
   Value read_expr(TokenType);
   /** The entry point for reading an expression */
   Value read();
