@@ -1,16 +1,29 @@
-// test.cpp - in-progress C++ stuff
-#include <assert.h>
-#include <iostream>
-#include <sstream>
-
-#define ARETE_LOG_TAGS 2
+// reader.cpp - S-Expression reader.
+#ifndef AR_INTERNAL
+# define AR_INTERNAL 1
+#endif 
 
 #include "arete.hpp"
-#include "arete.cpp"
 
-#include "vendor/linenoise.h"
+namespace arete {
 
-using namespace arete;
+// Some explication is probably needed on how this works.
+
+// Essentially, it looks ahead one token at a time, and sometimes
+// saves the source code position on the stack. This is necessary to attach helpful source code
+// information to programs at runtime, which it does by noting the source (file or string) a list
+// was read from, and occasionally saving its line and position (in terms of bytes) in the stream
+// on the stack
+
+// This allows us to produce lists with the following level of information
+
+// (define 5 bad-value)
+
+// The (define 5 #t) pair will have the entire list noted down in its SourceLocation
+
+// The sub-cell containing 5 will have the number five noted down in its SourceLocation
+
+// Thus we can report errors with a level of granularity generally not provided by Scheme systems.
 
 enum TokenType {
   TK_ERROR,
@@ -23,6 +36,7 @@ enum TokenType {
   TK_QUOTE,
   TK_UNQUOTE,
   TK_UNQUOTE_SPLICING,
+  TK_QUASIQUOTE,
   TK_FIXNUM,
   TK_TRUE,
   TK_FALSE,
@@ -229,6 +243,9 @@ struct XReader {
       } else if(c == '.') {
         eatc();
         return TK_DOT;
+      } else if (c == ',') {
+        eatc();
+        return TK_QUASIQUOTE;
       } else if (c == '\'') {
         eatc();
         return TK_QUOTE;
@@ -318,7 +335,6 @@ struct XReader {
 
         Value head = C_FALSE, tail = C_FALSE, elt, swap = C_FALSE;
         AR_FRAME(state, head, tail, elt, swap);
-        bool dotted = false;
 
         // (a b c)
         // (a)
@@ -385,43 +401,34 @@ struct XReader {
     return read_expr(TK_READ_NEXT);
   }
 
-
 };
 
-void do_string(State& state, const std::string& str) {
-  std::stringstream ss;
-  ss >> std::noskipws;
-  ss << str;
+#ifdef ARETE_DEV
 
-  XReader xreader(state, ss);
-  xreader.source = state.register_file("imaginary-file.scm", ss);
-  while(true) {
-    Value x = xreader.read();
-    if(x == C_EOF) break;
-    if(x.is_active_exception()) {
-      std::cout << x.exception_message().string_data() << std::endl;
-      break;
+lest::tests& specification();
+
+
+lest_CASE( specification(), "A passing test" ) 
+{
+    EXPECT( 42 == 42 );
+}
+
+/*
+lest_CASE( specification(), "reader" )
+{
+  SETUP("reader") {
+    arete::State state;
+
+    state.boot();
+
+    SECTION("dotted lists") {
+
     }
-    std::cout << x << std::endl;
+
   }
+};
+*/
+
 }
 
-int main(void) {
-  State state;
-
-  state.boot();
-
-  do_string(state, "(1 2 3)");
-  do_string(state, "(1 . )");
-  do_string(state, "(.)");
-
-  // do_string(state, "#;(12345)");
-
-  // do_string(state, "(12345 6789");
-  // do_string(state, "(12345");
-  // do_string(state, "(12345 #)");
-  // do_string(state, "(12345)");
-  // do_string(state, "\"12345");
-
-  return 0;
-}
+#endif

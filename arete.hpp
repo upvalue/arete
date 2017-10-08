@@ -13,6 +13,16 @@
 #include <unordered_map>
 #include <chrono>
 
+// Include testing framework for internal files compiled under development mode
+#ifdef AR_INTERNAL
+# ifdef ARETE_DEV
+#  define lest_FEATURE_AUTO_REGISTER 1
+#  define lest_FEATURE_COLOURISE 1
+
+#  include "lest.hpp"
+# endif
+#endif
+
 //= ## Configuration macros
 //= As Arete is contained in a single header, it is configured in part through the use of #defines.
 //= These should be defined before every inclusion of arete.hpp if changing them is desired.
@@ -482,7 +492,7 @@ inline Value Value::rename_gensym() const { return as<Rename>()->gensym; }
 
 /** 
  * Identifies a location in source code. File is an integer that corresponds to a string in
- * State::source_files
+ * State::source_names
  */
 struct SourceLocation {
   SourceLocation(): file(0), line(0), begin(0), length(0) {}
@@ -3205,6 +3215,40 @@ struct Reader {
     return exp;
   }
 };
+
+#if 0
+
+struct XReader {
+  State& state;
+  std::istream& is;
+  unsigned source, position, line, column;
+  Value active_error;
+
+  std::string buffer;
+  unsigned token_start_position;
+
+  XReader(State& state_, std::istream& is_): state(state_), is(is_), source(0), position(0),
+    line(0), column(0), active_error(C_FALSE) {
+    is >> std::noskipws;
+  }
+
+  ~XReader() {}
+
+  /**
+   * Read a character while tracking source code location
+   * @param c reference to a character to be read.
+   * @return Whether the stream has hit EOF
+   */
+  bool getc(char& c);
+
+  /**
+   * Peek at the next character
+   * @return Whether the stream has hit EOF
+   */
+  bool peekc(char& c);
+
+}
+#endif
 
 /** Converts a C++ string to an std::istream for reading expressions */
 struct StringReader {
