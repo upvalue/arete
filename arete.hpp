@@ -1356,7 +1356,8 @@ struct State {
   std::vector<std::string> source_contents;
 
   // Source code location tracking
-  unsigned register_file(const std::string& path, std::istream& is) {
+  unsigned register_source(const std::string& path, std::istream& is) {
+    ARETE_LOG_READ("registering source " << path);
     std::ostringstream contents;
     contents << is.rdbuf();
     is.seekg(0, std::ios::beg);
@@ -3216,16 +3217,40 @@ struct Reader {
   }
 };
 
-#if 0
-
 struct XReader {
+  /** Instance of the Arete runtime */
   State& state;
+  /** Open stream */
   std::istream& is;
+  /** Current position in the stream */
   unsigned source, position, line, column;
+  /** Either C_FALSE or an exception that has been encountered during reading; necessary because 
+   * the tokenizer does not return Values. read should never be called after this has been set */
   Value active_error;
 
+  /** A temporary buffer that the tokenizer will fill with atomic data (strings, numbers, etc) */
   std::string buffer;
+  /** Position where BUFFER has started */
   unsigned token_start_position;
+
+  enum TokenType {
+    TK_ERROR,
+    TK_READ_NEXT,
+    TK_LPAREN,
+    TK_RPAREN,
+    TK_DOT,
+    TK_SYMBOL,
+    TK_STRING,
+    TK_QUOTE,
+    TK_UNQUOTE,
+    TK_UNQUOTE_SPLICING,
+    TK_QUASIQUOTE,
+    TK_FIXNUM,
+    TK_TRUE,
+    TK_FALSE,
+    TK_EXPRESSION_COMMENT,
+    TK_EOF
+  };
 
   XReader(State& state_, std::istream& is_): state(state_), is(is_), source(0), position(0),
     line(0), column(0), active_error(C_FALSE) {
@@ -3239,16 +3264,75 @@ struct XReader {
    * @param c reference to a character to be read.
    * @return Whether the stream has hit EOF
    */
-  bool getc(char& c);
+  bool getc(char& c) {
+    is >> c;
+    if(is.eof()) return false;
+    column++;
+    position++;
+    if(c == '\n') {
+      line++; column = 0;
+    }
+    return !is.eof();
+  }
 
   /**
    * Peek at the next character
    * @return Whether the stream has hit EOF
    */
-  bool peekc(char& c);
+  bool peekc(char& c) {
+    c = is.peek();
+    return !is.eof();
+  }
 
-}
-#endif
+  /**
+   * Consume a character while tracking source code location
+   */
+  void eatc() {
+    char c;
+    getc(c);
+  }
+
+  /**
+   * Set active_error to an exception highlighting an erronenous expression
+   * @param message Exception text
+   * @param start_line The line the irritant occurred on
+   * @param start_position The position in the stream where the irritant occurred
+   * @param end_position The position in the stream to stop highlighting at; will continue to the end of the line if 0.
+   */
+  void read_error(const std::string& message, unsigned start_line, unsigned start_position, unsigned end_position);
+
+  /** Set active_error to a message describing an unexpected end-of-file. Same params as read_error */
+  void unexpected_eof(const std::string& message, unsigned start_line, unsigned start_position);
+
+  void tokenize_number();
+  void tokenize_symbol();
+  void tokenize_string();
+
+  TokenType next_token();
+  Value read_expr(TokenType);
+  /** The entry point for reading an expression */
+  Value read();
+};
+
+/** Convenience class for reading expressions from a C string */
+struct XStringReader {
+  std::istringstream ss;
+  XReader reader;
+
+
+  XStringReader(State& state, std::string str, const std::string& desc = "anonymous"):
+    ss(str), reader(state, ss) {
+
+      std::istream& iss = ss;
+      reader.source = desc.compare("anonymous") == 0 ? 1 : state.register_source(desc, iss);
+  }
+
+  ~XStringReader() {}
+
+  XReader* operator->() {
+    return &reader;
+  }
+};
 
 /** Converts a C++ string to an std::istream for reading expressions */
 struct StringReader {
@@ -3256,8 +3340,8 @@ struct StringReader {
   Reader reader;
 
   StringReader(State& state, std::string str, const std::string& desc = "anonymous"): ss(str), reader(state, ss) {
-    std::istream & iss = ss;
-    reader.file = desc.compare("anonymous") == 0 ? 1 : state.register_file(desc, iss);
+    // std::istream & iss = ss;
+    // reader.file = desc.compare("anonymous") == 0 ? 1 : state.register_file(desc, iss);
   }
 
   ~StringReader() {

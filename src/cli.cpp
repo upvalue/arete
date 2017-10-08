@@ -51,7 +51,7 @@ static void  print_help() {
 
 static bool do_repl(State& state, bool read_only) {
   char* line = 0;
-  Value x;
+  Value x = C_FALSE;
   AR_FRAME(state, x);
 
   std::ostringstream hist_file;
@@ -72,9 +72,25 @@ static bool do_repl(State& state, bool read_only) {
       break;
     }
 
-    linenoiseHistoryAdd(line);
+    XStringReader reader(state, line);
 
-    std::cout << line << std::endl;
+    for(x = reader->read(); x != C_EOF; x = reader->read()) {
+
+      if(x.is_active_exception()) {
+        std::cerr << x.exception_message().string_data() << std::endl;
+        break;
+      }
+
+      if(read_only) {
+        std::cout << x << std::endl;
+        continue;
+      }
+
+    }
+
+
+
+    linenoiseHistoryAdd(line);
   }
 
 
@@ -97,7 +113,6 @@ int enter_cli(State& state, int argc, char* argv[]) {
       return 0;
     } else if(read.compare(arg) == 0) {
       EXPECT_NEXT_ARG();
-      std::cout << arg2 << std::endl;
       if(repl.compare(arg2) == 0) {
         if(do_repl(state, true) == false) {
           return 1;
