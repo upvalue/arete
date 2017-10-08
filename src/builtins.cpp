@@ -1,4 +1,4 @@
-// arete.cpp - arete builtin functions
+// builtins.cpp - builtin functionality
 
 #include <fstream>
 #include <iostream>

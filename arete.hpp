@@ -3299,10 +3299,10 @@ struct XReader {
    * @param start_position The position in the stream where the irritant occurred
    * @param end_position The position in the stream to stop highlighting at; will continue to the end of the line if 0.
    */
-  void read_error(const std::string& message, unsigned start_line, unsigned start_position, unsigned end_position);
+  Value read_error(const std::string& message, unsigned start_line, unsigned start_position, unsigned end_position);
 
   /** Set active_error to a message describing an unexpected end-of-file. Same params as read_error */
-  void unexpected_eof(const std::string& message, unsigned start_line, unsigned start_position);
+  Value unexpected_eof(const std::string& message, unsigned start_line, unsigned start_position);
 
   void tokenize_number();
   void tokenize_symbol();
@@ -3353,7 +3353,6 @@ struct StringReader {
   }
 };
 
-
 /** Macro for giving descriptive source info for Scheme code in C strings e.g.
   * c-string@asdf.cpp:351 */
 #define AR_STRINGIZE2(x) #x
@@ -3361,7 +3360,7 @@ struct StringReader {
 #define AR_STRINGIZE(x) AR_STRINGIZE2(x)
 
 #define AR_STRING_READER(name, state, string) \
-  arete::StringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRINGIZE(__LINE__)));
+  arete::XStringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRINGIZE(__LINE__)));
 
 // Various inline functions relying on State and GC having been declared
 
@@ -3432,6 +3431,18 @@ inline void Handle::initialize() {
 inline Handle::~Handle() {
   state.gc.handles.erase(it);
 }
+
+///// CLI! 
+// Command line interface
+
+/**
+ * Hand over execution to the Arete CLI under the given State
+ * @returns an exit code 
+ */
+int enter_cli(State&, int, char*[]);
+
+///// TEST! 
+// Functionality related to builtin unit tests
 
 /** Output Arete values */
 inline std::ostream& operator<<(std::ostream& os, Value v) {

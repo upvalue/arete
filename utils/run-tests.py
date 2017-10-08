@@ -23,7 +23,7 @@ def run_tests(path, args = []):
                 continue
         total_tests += 1
 
-        kmd = ['./arete', '--quiet'] + args + [test_path]
+        kmd = ['./arete'] + args + [test_path]
         cmd = subprocess.Popen(kmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         cmd_out, cmd_err = cmd.communicate()
@@ -35,6 +35,8 @@ def run_tests(path, args = []):
             print('\n-- %s errored with text:\n%s\n' % (test_path, cmd_err.decode('utf-8').strip()))
             print('!')
             continue
+
+        # print(cmd_err.decode('utf-8').strip())
 
         if not expect_error:
             result = cmd_out.decode('utf-8').strip()
@@ -55,9 +57,10 @@ def run_tests(path, args = []):
     print('')
 
 suites = (
-    ('preboot', []),
-    ('expander', ['boot.scm']),
-    ('modules', ['boot.scm', '--push-load-path=tests/modules'])
+    ('reader', ['--read']),
+#    ('preboot', []),
+#    ('expander', ['boot.scm']),
+#    ('modules', ['boot.scm', '--push-load-path=tests/modules'])
 )
 
 if __name__ == '__main__':

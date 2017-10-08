@@ -5,7 +5,7 @@ CFLAGS := $(CFLAGS) -g3 -O0
 CXXFLAGS := $(CPPFLAGS) -std=c++11 -fno-rtti $(CFLAGS)
 LDFLAGS := $(LDFLAGS) -g3  -O0
 
-CXXOBJS := src/cli.o arete.o src/reader.o vendor/linenoise/linenoise.o vendor/linenoise/wcwidth.o vendor/linenoise/ConvertUTF.o
+CXXOBJS := $(patsubst %.cpp,%.o,$(wildcard src/*.cpp vendor/linenoise/*.cpp)) 
 DEPS := $(CXXOBJS:.o=.d)
 
 # site.mk allows the user to override settings

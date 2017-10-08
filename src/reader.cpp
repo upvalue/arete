@@ -42,7 +42,8 @@ static bool is_symbol(char c) {
   return c == '.' || c == '+' || c == '-';
 }
 
-void XReader::read_error(const std::string& message, unsigned start_line, unsigned start_position, unsigned end_position) {
+Value XReader::read_error(const std::string& message, unsigned start_line, unsigned start_position,
+    unsigned end_position) {
   // If end_position is zero, we'll just underline the whole line
   std::string source_line;
   char c;
@@ -85,13 +86,14 @@ void XReader::read_error(const std::string& message, unsigned start_line, unsign
     }
   }
 
-  active_error = state.make_exception(state.globals[State::S_READ_ERROR], os.str());
+  return active_error = state.make_exception(state.globals[State::S_READ_ERROR], os.str());
 }
 
-void XReader::unexpected_eof(const std::string& message, unsigned start_line, unsigned start_position) {
+Value XReader::unexpected_eof(const std::string& message, unsigned start_line,
+    unsigned start_position) {
   std::ostringstream os;
   os << "unexpected end of file " << message;
-  read_error(os.str(), start_line, start_position, 0);
+  return read_error(os.str(), start_line, start_position, 0);
 }
 
 void XReader::tokenize_number() {
@@ -169,7 +171,7 @@ XReader::TokenType XReader::next_token() {
         return TK_EXPRESSION_COMMENT;
       }
       else {
-        read_error("unknown # syntax", line, position - 1, position);
+        (void) read_error("unknown # syntax", line, position - 1, position);
       }
     } else if(c == '.') {
       eatc();
@@ -252,6 +254,17 @@ Value XReader::read_expr(TokenType tk) {
       return state.get_symbol(buffer);
     }
 
+    // Auxiliary syntax
+    case TK_QUOTE: {
+      Value x = read_expr(TK_READ_NEXT);
+      if(x == C_EOF) {
+        unexpected_eof("after '", line, position - 1);
+        return active_error;
+      }
+      x = state.make_pair(x, C_NIL);
+      return state.make_pair(state.globals[State::S_QUOTE], x);
+    }
+
     case TK_LPAREN: {
       // Read a list
       LOG_NOBUFFER("TK_LPAREN", '(');
@@ -263,8 +276,7 @@ Value XReader::read_expr(TokenType tk) {
       if(tk2 == TK_RPAREN) {
         return C_NIL;
       } else if(tk2 == TK_DOT) {
-        read_error("unexpected . at beginning of list", line, cposition, position);
-        return active_error;
+        return read_error("unexpected . at beginning of list", line, cposition, position);
       }
 
       Value head = C_FALSE, tail = C_FALSE, elt, swap = C_FALSE;
@@ -309,6 +321,7 @@ Value XReader::read_expr(TokenType tk) {
         }
         unsigned endpos = position;
         swap = read_expr(tk2);
+        NEXT_TOKEN(tk2);
         if(tk2 != TK_RPAREN) {
           // TODO EOF
           read_error("expected one expression after dot in list but got multiple", cline, endpos, position);
@@ -317,7 +330,7 @@ Value XReader::read_expr(TokenType tk) {
         tail.set_cdr(swap);
       }
 
-      std::cout << "List 1 goes from " << cposition << " to " << position << std::endl;
+      // std::cout << "List 1 goes from " << cposition << " to " << position << std::endl;
 
       return head;
     }
@@ -339,12 +352,10 @@ Value XReader::read() {
 
 lest::tests& specification();
 
-
-lest_CASE( specification(), "A passing test" ) 
+lest_CASE( specification(), "reading atomic expressions" ) 
 {
     EXPECT( 42 == 42 );
 }
-
 
 }
 
