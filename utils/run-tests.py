@@ -7,6 +7,7 @@ import sys
 
 successful_tests = 0
 total_tests = 0
+print_errors = False
 
 def run_tests(path, args = []):
     global successful_tests, total_tests

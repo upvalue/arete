@@ -1,4 +1,3 @@
-// arete.hpp - an embeddable scheme implementation
 #ifndef ARETE_HPP
 #define ARETE_HPP
 
@@ -6,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
+#include <fstream>
 #include <list>
 #include <iostream>
 #include <sstream>
@@ -86,6 +86,7 @@
 #endif 
 
 #define ARETE_LOG_TAG_GC (1 << 0)
+#define ARETE_LOG_TAG_READER (1 << 1)
 
 #define ARETE_COLOR_RED "\033[1;31m"
 #define ARETE_COLOR_RESET "\033[0m"
@@ -98,6 +99,7 @@
 #endif 
 
 #define ARETE_LOG_GC(msg) ARETE_LOG((ARETE_LOG_TAG_GC), "gc", msg)
+#define ARETE_LOG_READ(msg) ARETE_LOG((ARETE_LOG_TAG_READER), "read", msg)
 
 namespace arete {
 
@@ -483,10 +485,10 @@ inline Value Value::rename_gensym() const { return as<Rename>()->gensym; }
  * State::source_files
  */
 struct SourceLocation {
-  SourceLocation(): file(0), line(0) {}
-  SourceLocation(size_t file_, size_t line_): file(file_), line(line_) {}
+  SourceLocation(): file(0), line(0), begin(0), length(0) {}
+  SourceLocation(unsigned file_, unsigned line_): file(file_), line(line_) {}
 
-  size_t file, line;
+  unsigned file, line, begin, length;
 };
 
 struct Pair : HeapValue {
@@ -1344,8 +1346,14 @@ struct State {
   std::vector<std::string> source_contents;
 
   // Source code location tracking
-  unsigned register_file(const std::string& path) {
+  unsigned register_file(const std::string& path, std::istream& is) {
+    std::ostringstream contents;
+    contents << is.rdbuf();
+    is.seekg(0, std::ios::beg);
+
     source_names.push_back(path);
+    source_contents.push_back(contents.str());
+
     return source_names.size() - 1;
   }
 
@@ -1418,6 +1426,8 @@ struct State {
   void boot() {
     source_names.push_back("unknown");
     source_names.push_back("c-string");
+    source_contents.push_back("");
+    source_contents.push_back("");
 
     static const char* _symbols[] = {
       // C_SYNTAX values
@@ -1923,6 +1933,10 @@ struct State {
 #endif
   }
 
+  std::string source_name(unsigned source) {
+    return source_names.at(source);
+  }
+
   /** Return a description of a source location */
   std::string source_info(const SourceLocation* loc, Value fn_name = C_FALSE) {
     std::ostringstream ss;
@@ -2003,8 +2017,6 @@ struct State {
       table_set(module, name, C_TRUE);
     }
   }
-
-
 
   /** Defines a function both in the core module and as a top-level value; used during booting */
   void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
@@ -2725,7 +2737,7 @@ struct State {
     return eval(C_FALSE, exp);
   }
 
-  ///// LIBRARIES
+  ///// MODULES
 
   std::vector<std::string> load_paths;
 
@@ -2743,7 +2755,7 @@ struct State {
 struct Reader {
   State& state;
   std::istream is;
-  size_t file, line, column;
+  size_t file, line, column, position;
 
   Reader(State& state_, std::istream& is_):
     state(state_), is(is_.rdbuf()), file(0), line(1), column(0) {
@@ -2808,7 +2820,13 @@ struct Reader {
       column = 0;
     }
     column++;
+    position++;
     return !is.eof();
+  }
+
+  void eatc() {
+    char c;
+    (void) getc(c);
   }
 
   /** Handles #| |# comments, which can nest */
@@ -2870,7 +2888,7 @@ struct Reader {
         break;
       }
       buffer += c;
-      is >> c;
+      eatc();
     }
     Value sym;
     AR_FRAME(state, sym);
@@ -3039,7 +3057,11 @@ struct Reader {
         // Attach source code information
         while(true) {
           Token tk;
+          //size_t ln = line, col = column;
           elt = read_expr(tk, box);
+          //size_t len = column - col;
+          // Alright so we have to save location here.
+          // std::cout << "read an element" << elt << std::endl;
           if(dotted) {
             return read_error("expected one expression after dot in list but got multiple", list_start.line);
           }
@@ -3186,11 +3208,12 @@ struct Reader {
 
 /** Converts a C++ string to an std::istream for reading expressions */
 struct StringReader {
-  std::stringstream ss;
+  std::istringstream ss;
   Reader reader;
 
   StringReader(State& state, std::string str, const std::string& desc = "anonymous"): ss(str), reader(state, ss) {
-    reader.file = desc.compare("anonymous") == 0 ? 1 : state.register_file(desc);
+    std::istream & iss = ss;
+    reader.file = desc.compare("anonymous") == 0 ? 1 : state.register_file(desc, iss);
   }
 
   ~StringReader() {

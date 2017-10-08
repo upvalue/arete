@@ -1,9 +1,9 @@
 # Variables
 CXX := clang++
 CPPFLAGS := -Wall -I. -Ivendor
-CFLAGS := $(CFLAGS) -g3 -O3
+CFLAGS := $(CFLAGS) -g3 -O0
 CXXFLAGS := $(CPPFLAGS) -std=c++11 -fno-exceptions -fno-rtti $(CFLAGS)
-LDFLAGS := $(LDFLAGS) -g3  -O3
+LDFLAGS := $(LDFLAGS) -g3  -O0
 
 -include site.mk
 
@@ -35,7 +35,7 @@ arete: cli.o vendor/linenoise.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
-test: test.o
+test: test.o vendor/linenoise.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 

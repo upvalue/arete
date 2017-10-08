@@ -100,7 +100,6 @@
     (if (table? env)
       (begin
         ;; If this is a module, we have to note its qualified name in the environment
-        ;; If this is a module, we have to note its qualified name in the environment
         (if (rename? name)
           ;; TODO: Should these renames be annotated with the module name?
           (begin
@@ -420,6 +419,8 @@
     (define let-fn-name #f)
     (define bindings #f)
     (define body #f)
+    (define names #f)
+    (define vals #f)
 
     (if (symbol? (list-ref x 1))
       (begin
@@ -430,8 +431,6 @@
         (set! bindings (list-ref x 1))
         (set! body (cddr x))))
 
-    (define names #f)
-    (define vals #f)
 
     (set! names
       (map (lambda (binding)
@@ -564,3 +563,6 @@
   (lambda (x r c)
     (cadr x)))
 
+(define-syntax syntax-rules
+  (lambda (x r c)
+    #t))

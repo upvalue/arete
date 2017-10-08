@@ -26,7 +26,7 @@ bool do_file(const char* file_path, bool eval ) {
     return false;
   }
   Reader reader(state, file_handle);
-  reader.file = state.register_file(file_path);
+  reader.file = state.register_file(file_path, file_handle);
   while(true) {
     x = reader.read();
     if(x == C_EOF) {
