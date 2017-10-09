@@ -42,63 +42,52 @@ static bool is_symbol(char c) {
   return c == '.' || c == '+' || c == '-';
 }
 
+Value XReader::make_src_pair(Value kar, Value kdr, unsigned line, unsigned position, unsigned length) {
+  if(source == 0) {
+    return state.make_pair(kar, kdr);
+  }
+  
+  SourceLocation src;
+  src.source = source;
+  src.line = line;
+  src.begin = position;
+  src.length = length;
+
+  return state.make_src_pair(kar, kdr, src);
+}
+
 Value XReader::read_error(const std::string& message, unsigned start_line, unsigned start_position,
     unsigned end_position) {
+ 
+  ARETE_LOG_READ("read_error " << start_line << ' ' << start_position << ' ' << message << std::endl);
+  SourceLocation src;
+  src.source = source;
+  src.line = start_line;
+  src.begin = start_position;
   // If end_position is zero, we'll just underline the whole line
-  std::string source_line;
-  char c;
-  unsigned seek_line = 0;
-
-  ARETE_LOG_READ("unexpected_eof " << start_line << ' ' << start_position << ' ' << message << std::endl);
-  std::ostringstream os;
-  os << state.source_name(source) << ':' << start_line << ": Reader error: " << message << std::endl << std::endl;
-  // Print line in question
-  is.clear();
-  is.seekg(0, std::ios::beg);
-
-  while(!is.eof()) {
-    if(seek_line == start_line) {
-      unsigned line_position = is.tellg();
-      std::getline(is, source_line);
-      os << "  " << ARETE_COLOR_RED << source_line << ARETE_COLOR_RESET << std::endl;
-      os << "  ";
-      size_t i, j;
-
-      // TODO UNICODE
-      for(i = line_position, j = 0; i < start_position; i++, j++) {
-        os << ' ';
-      }
-
-      // If end_position is 0, we'll highlight the whole line this error occurred on. Otherwise,
-      // try to highlight specific errors e.g.
-      // (hello #bad)
-      //         ^
-      for(; j != source_line.size() && ((end_position == 0) || j != (end_position - start_position)); j++) {
-        os << '^';
-      }
-      break;
-    }
-
-    is >> c;
-
-    if(c == '\n') {
-      seek_line++;
-    }
+  if(start_position > end_position) {
+    src.length = 0;
+  } else {
+    src.length = end_position - start_position;
   }
-
+  
+  std::ostringstream os;
+  os << "Reader error: " << message << std::endl;
+  state.print_src_line(os, src);
   return active_error = state.make_exception(state.globals[State::S_READ_ERROR], os.str());
 }
 
 Value XReader::unexpected_eof(const std::string& message, unsigned start_line,
-    unsigned start_position) {
+    unsigned start_position, unsigned end_position = 0) {
   std::ostringstream os;
   os << "unexpected end of file " << message;
-  return read_error(os.str(), start_line, start_position, 0);
+  return read_error(os.str(), start_line, start_position, end_position);
 }
 
 void XReader::tokenize_number() {
   char c;
-  token_start_position = position;
+  //token_start_position = position;
+  //token_start_line = line;
 
   while(peekc(c)) {
     if(c >= '0' && c <= '9') {
@@ -112,6 +101,8 @@ void XReader::tokenize_number() {
 
 void XReader::tokenize_symbol() {
   char c;
+  //token_start_position = position;
+  //token_start_line = line;
 
   while(peekc(c)) {
     if(is_symbol(c)) {
@@ -126,7 +117,9 @@ void XReader::tokenize_symbol() {
 void XReader::tokenize_string() {
   char c;
   unsigned cline = line;
-  token_start_position = position;
+  //token_start_position = position;
+  //token_start_line = line;
+
   AR_ASSERT(is.tellg() == token_start_position);
   eatc();
 
@@ -148,6 +141,8 @@ XReader::TokenType XReader::next_token() {
   char c;
   buffer.clear();
   while(peekc(c)) {
+      token_start_line = line;
+      token_start_position = position;// - 2;
     if(c >= '0' && c <= '9') {
       tokenize_number();
       return TK_FIXNUM;
@@ -161,6 +156,7 @@ XReader::TokenType XReader::next_token() {
         unexpected_eof("after # read syntax", line, position - 1);
         return TK_ERROR;
       }
+
 
       if(c2 == 't') return TK_TRUE;
       else if(c2 == 'f') return TK_FALSE;
@@ -177,6 +173,8 @@ XReader::TokenType XReader::next_token() {
       eatc();
       return TK_DOT;
     } else if (c == ',') {
+      //token_start_line = line;
+      //token_start_position = position;
       eatc();
       char c2;
       if(!peekc(c2)) {
@@ -226,13 +224,18 @@ XReader::TokenType XReader::next_token() {
     name = next_token(); if(active_error != C_FALSE) { return active_error; }
 
 Value XReader::read_aux(const std::string& text, unsigned highlight_size, Value symbol) {
+  unsigned cline = token_start_line, cposition = token_start_position;
+  std::cout << token_start_position << std::endl;
+
   Value x = read_expr(TK_READ_NEXT);
   if(x == C_EOF) {
-    return unexpected_eof(text, line, position - highlight_size);
+    return unexpected_eof(text, line, position - highlight_size, highlight_size);
   }
 
   x = state.make_pair(x, C_NIL);
-  return state.make_pair(symbol, x);
+  // x = make_src_pair(x, )
+  return make_src_pair(symbol, x, cline, cposition, position - cposition);
+  // return state.make_pair(symbol, x);
 }
 
 Value XReader::read_expr(TokenType tk) {
@@ -244,6 +247,7 @@ Value XReader::read_expr(TokenType tk) {
 
   switch(tk) {
     case TK_RPAREN: {
+      // This should error.
       std::cout << "RPAREN" << std::endl;
       break;
     }
@@ -289,8 +293,10 @@ Value XReader::read_expr(TokenType tk) {
     case TK_LPAREN: {
       // Read a list
       LOG_NOBUFFER("TK_LPAREN", '(');
+      // These variables track where the list began
       unsigned cline = line, cposition = position - 1;
 
+      unsigned eltposition = position;
       TokenType tk2;
       NEXT_TOKEN(tk2);
 
@@ -319,7 +325,18 @@ Value XReader::read_expr(TokenType tk) {
           return elt;
         }
 
-        swap = state.make_pair(elt, C_NIL);
+        // Here we want to find the position of the elt.
+
+        // If an elt is another pair, it already has as much source information as it's going
+        // to get
+        if(elt.type() == PAIR) {
+          swap = state.make_pair(elt, C_NIL);
+        } else {
+          std::cout << "ELT " << elt << " from " << token_start_position << " to " << position << std::endl;
+
+
+          swap = make_src_pair(elt, C_NIL, token_start_line, token_start_position, position - token_start_position); // -1 ?
+        }
 
         if(tail != C_FALSE) {
           tail.set_cdr(swap);
@@ -351,9 +368,8 @@ Value XReader::read_expr(TokenType tk) {
         tail.set_cdr(swap);
       }
 
-      // std::cout << "List 1 goes from " << cposition << " to " << position << std::endl;
-
-      return head;
+      // Lists will have the whole thing highlighted.
+      return make_src_pair(head.car(), head.cdr(), cline, cposition, position - cposition);
     }
 
     default: {

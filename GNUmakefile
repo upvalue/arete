@@ -29,11 +29,6 @@ endef
 
 all: arete
 
-#cli.o: cli.cpp arete.cpp arete.hpp
-#test.o: test.cpp arete.cpp arete.hpp
-#tests/test-semispace.o: tests/test-runtime.cpp arete.cpp arete.hpp
-#tests/test-incremental.o: tests/test-runtime.cpp arete.cpp arete.hpp
-
 -include $(DEPS)
 
 # Link 
@@ -61,7 +56,7 @@ arete: $(CXXOBJS)
 .PHONY: count clean
 
 count:
-	cloc arete.hpp arete.cpp boot.scm
+	cloc arete.hpp $(wildcard src/*.cpp) boot.scm
 
 clean:
 	rm -f arete test $(patsubst *.o,*.d,$(CXXOBJS)) $(CXXOBJS) tests/test-semispace tests/test-incremental

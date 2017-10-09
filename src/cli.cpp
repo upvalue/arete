@@ -57,25 +57,30 @@ static bool do_repl(State& state, bool read_only) {
   std::ostringstream hist_file;
 
   hist_file << getenv("HOME") << "/.arete_history";
-  size_t i = 1;
-
+  size_t i = 0;
 
   linenoiseHistorySetMaxLen(1024);
   linenoiseHistoryLoad(hist_file.str().c_str());
 
   static const char* prompt = "> ";
 
-  while(i++) {
+  while(++i) {
     line = linenoise(prompt);
 
     if(!line) {
       break;
     }
 
-    XStringReader reader(state, line);
+    std::ostringstream line_name;
+    line_name << "repl-line-" << i;
 
-    for(x = reader->read(); x != C_EOF; x = reader->read()) {
+    std::stringstream liness;
+    liness >> std::noskipws;
+    liness << line;
 
+    XReader reader(state, liness, line_name.str());
+
+    for(x = reader.read(); x != C_EOF; x = reader.read()) {
       if(x.is_active_exception()) {
         std::cerr << x.exception_message().string_data() << std::endl;
         break;
@@ -83,6 +88,25 @@ static bool do_repl(State& state, bool read_only) {
 
       if(read_only) {
         std::cout << x << std::endl;
+        if(x.type() == PAIR) {
+          if(x.list_length() > 1) {
+            // std::cout << x << std::endl;
+            // std::cout << x.cadr().pair_has_source() << std::endl;
+            state.print_src_pair(std::cout, x.cadr());
+            // std::cout << (*x.cadr().pair_src()) << std::endl;
+            state.print_src_pair(std::cout, x.cdr());
+            std::cout << std::endl;
+            // std::cout << "Src of pair printed!" << std::endl;
+
+            // std::cout << std::endl;
+          }
+
+          state.print_src_pair(std::cout, x);
+          std::cout << std::endl;
+          // std::cout << x.list_ref(2) << std::endl;
+          //state.print_pair_src(std::cout, x.list_ref(2));
+          // state.print_pair_src(std::cout, x);
+        }
         continue;
       }
 
@@ -90,7 +114,6 @@ static bool do_repl(State& state, bool read_only) {
 
     linenoiseHistoryAdd(line);
   }
-
 
   linenoiseHistorySave(hist_file.str().c_str());
   return true;
