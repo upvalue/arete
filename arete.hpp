@@ -1961,18 +1961,16 @@ struct State {
    * Print an erroneous line of source code with offending information highlighted
    */
   void print_src_line(std::ostream& os, const SourceLocation& src) {
-    unsigned seek_line = 0;
+    unsigned seek_line = 1;
     std::string source_line;
     char c;
     
-    unsigned end_position = src.begin + src.length;
-    // std::cout << src << std::endl;
-
     if(src.source > 0 && source_contents[src.source].size() > 0) {
       std::stringstream ss;
 
+      ss >> std::noskipws;
       ss << source_contents[src.source];
-      os << "At " << source_name(src.source) << std::endl;
+      os << "At " << source_name(src.source) << " line " << src.line << std::endl;
 
       while(!ss.eof()) {
         if(seek_line == src.line) {
@@ -1986,11 +1984,12 @@ struct State {
             os << ' ';
           }
 
+          unsigned limit = j + src.length;
           // If end_position is 0, we'll highlight the whole line this error occurred on.
           // Otherwise, try to highlight specific errors eg.
           // (hello #bad)
           //         ^
-          for(; j != source_line.size() && ((src.length == 0) || j != (end_position)); j++) {
+          for(; j != source_line.size() && ((src.length == 0) || j != limit); j++) {
             os << '^';
           }
           break;
@@ -3319,6 +3318,7 @@ struct XReader {
     TK_READ_NEXT,
     TK_LPAREN,
     TK_RPAREN,
+    TK_VECTOR_OPEN,
     TK_DOT,
     TK_SYMBOL,
     TK_STRING,
@@ -3326,7 +3326,9 @@ struct XReader {
     TK_UNQUOTE,
     TK_UNQUOTE_SPLICING,
     TK_QUASIQUOTE,
+    TK_FLONUM,
     TK_FIXNUM,
+    TK_CHARACTER,
     TK_TRUE,
     TK_FALSE,
     TK_EXPRESSION_COMMENT,
@@ -3334,7 +3336,7 @@ struct XReader {
   };
 
   XReader(State& state_, std::istream& is_, const std::string& desc = "anonymous"): state(state_), is(is_), source(0), position(0),
-      line(0), column(0), active_error(C_FALSE) {
+      line(1), column(1), active_error(C_FALSE) {
     
     is >> std::noskipws;
 
@@ -3395,7 +3397,7 @@ struct XReader {
   /** Set active_error to a message describing an unexpected end-of-file. Same params as read_error */
   Value unexpected_eof(const std::string& message, unsigned start_line, unsigned start_position, unsigned end_position);
 
-  void tokenize_number();
+  TokenType tokenize_number(bool negative = false);
   void tokenize_symbol();
   void tokenize_string();
 

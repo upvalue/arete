@@ -31,6 +31,7 @@ const char* help[] = {
   "  --read --repl: Same but with REPL",
   "  --repl: Open REPL",
   "  --test: Run builtin test suite, if compiled in; all arguments after this will be passed to lest",
+  "  --debug-gc: Forces a collection after every allocation, used to flush out GC bugs"
 };
 
 static void  print_help() {
@@ -90,22 +91,13 @@ static bool do_repl(State& state, bool read_only) {
         std::cout << x << std::endl;
         if(x.type() == PAIR) {
           if(x.list_length() > 1) {
-            // std::cout << x << std::endl;
-            // std::cout << x.cadr().pair_has_source() << std::endl;
             state.print_src_pair(std::cout, x.cadr());
-            // std::cout << (*x.cadr().pair_src()) << std::endl;
             state.print_src_pair(std::cout, x.cdr());
             std::cout << std::endl;
-            // std::cout << "Src of pair printed!" << std::endl;
-
-            // std::cout << std::endl;
           }
 
           state.print_src_pair(std::cout, x);
           std::cout << std::endl;
-          // std::cout << x.list_ref(2) << std::endl;
-          //state.print_pair_src(std::cout, x.list_ref(2));
-          // state.print_pair_src(std::cout, x);
         }
         continue;
       }
@@ -130,8 +122,7 @@ bool do_file(State& state, std::string path, bool read_only) {
     return false;
   }
 
-  XReader reader(state, fs);
-  reader.source = state.register_source(path, fs);
+  XReader reader(state, fs, path);
   
   while(x != C_EOF) {
     x = reader.read();
@@ -148,11 +139,12 @@ bool do_file(State& state, std::string path, bool read_only) {
 }
 
 int enter_cli(State& state, int argc, char* argv[]) {
-  std::string test("--test");
-  std::string read("--read");
-  std::string help("--help");
-  std::string repl("--repl");
-  std::string bad("--");
+  static std::string test("--test");
+  static std::string read("--read");
+  static std::string help("--help");
+  static std::string repl("--repl");
+  static std::string bad("--");
+  static std::string debug_gc("--debug-gc");
 
   for(size_t i = 0; i != argc; i++) {
     const char* arg = argv[i];
@@ -173,6 +165,8 @@ int enter_cli(State& state, int argc, char* argv[]) {
       if(do_repl(state, false) == false) {
         return 1;
       }
+    } else if(debug_gc.compare(arg) == 0) {
+      state.gc.collect_before_every_allocation = true;
     } else {
       std::string cxxarg(arg);
       std::string badc(cxxarg.substr(0, bad.size()));

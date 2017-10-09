@@ -5,7 +5,7 @@ CFLAGS := $(CFLAGS) -g3 -O0
 CXXFLAGS := $(CPPFLAGS) -std=c++11 -fno-rtti $(CFLAGS)
 LDFLAGS := $(LDFLAGS) -g3  -O0
 
-CXXOBJS := $(patsubst %.cpp,%.o,$(wildcard src/*.cpp vendor/linenoise/*.cpp)) 
+CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp vendor/linenoise/*.cpp)))
 DEPS := $(CXXOBJS:.o=.d)
 
 # site.mk allows the user to override settings
@@ -27,15 +27,22 @@ endef
 	$(call colorecho, "CC $< ")
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-all: arete
+all: arete 
 
 -include $(DEPS)
 
 # Link 
-arete: $(CXXOBJS) 
+arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
+tests/test-semispace: $(CXXOBJS) tests/test-semispace.o
+	$(call colorecho, "LD $@ ")
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+#arete: $(CXXOBJS) 
+#	$(call colorecho, "LD $@ ")
+#	$(CXX) $(LDFLAGS) -o $@ $^
 #test: test.o vendor/linenoise.o
 #	$(call colorecho, "LD $@ ")
 #	$(CXX) $(LDFLAGS) -o $@ $^

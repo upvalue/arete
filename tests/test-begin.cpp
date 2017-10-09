@@ -1,6 +1,6 @@
 #include <sstream>
 
-#include "arete.cpp"
+#include "arete.hpp"
 
 using namespace arete;
 
