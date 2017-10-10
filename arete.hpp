@@ -387,11 +387,19 @@ struct Value {
   void set_car(Value);
   void set_cdr(Value);
 
+  // True if a pair has been allocated with source code information
   static const unsigned PAIR_SOURCE_BIT = 1 << 9; 
+  // True if a pair has been generated as a result of the expansion pass
+  static const unsigned PAIR_GENERATED_BIT = 1 << 10;
 
   bool pair_has_source() const {
     AR_TYPE_ASSERT(type() == PAIR);
     return heap->get_header_bit(PAIR_SOURCE_BIT);
+  }
+
+  bool pair_generated() const {
+    AR_TYPE_ASSERT(type() == PAIR);
+    return heap->get_header_bit(PAIR_GENERATED_BIT);
   }
 
   /** Return a pointer to a pair's source location. Note that this may be moved by the GC, so should
@@ -2001,6 +2009,7 @@ struct State {
         }
       }
     }
+    os << std::endl;
   }
 
   /**
@@ -2011,7 +2020,16 @@ struct State {
   void print_exception(std::ostream& os, Value exc) {
     AR_TYPE_ASSERT(exc.type() == EXCEPTION);
 
+    print_stack_trace();
 
+    if(exc.exception_tag() == globals[State::S_EVAL_ERROR]) {
+      os << "Evaluation error: " << exc.exception_message().string_data() << std::endl;
+      print_src_pair(std::cout, exc.exception_irritants());
+
+
+    } else {
+      os << exc << std::endl;
+    }
   }
 
   void print_gc_stats(std::ostream& os) {
@@ -2025,6 +2043,17 @@ struct State {
 
   std::string source_name(unsigned source) {
     return source_names.at(source);
+  }
+
+  void print_stack_trace(std::ostream& os = std::cerr, bool clear = true) {
+    if(stack_trace.size() > 0)
+      os << "Stack trace: " << std::endl;
+    for(size_t i = 0; i != stack_trace.size(); i++)
+      os << stack_trace.at(i) << std::endl;
+
+
+    if(clear)
+      stack_trace.clear();
   }
 
   /** Return a description of a source location */
@@ -2077,13 +2106,6 @@ struct State {
 
   std::vector<std::string> stack_trace;
 
-  void print_stack_trace(std::ostream& os = std::cerr, bool clear = true) {
-    for(size_t i = 0; i != stack_trace.size(); i++)
-      os << stack_trace.at(i) << std::endl;
-
-    if(clear)
-      stack_trace.clear();
-  }
 
   void install_core_functions();
 
@@ -2278,7 +2300,7 @@ struct State {
     }
 
     os << msg;
-    return make_exception("eval-error", os.str());
+    return make_exception(globals[State::S_EVAL_ERROR], os.str(), exp);
   }
 
   Value eval_body(Value env,  Value fn_name, Value calling_fn_name, Value src_exp, Value body) {
@@ -2389,14 +2411,14 @@ struct State {
         Value argi = args;
         while(argi.type() == PAIR) {
           if(!argi.car().maybe_unbox().identifierp()) {
-            return eval_error("lambda argument list all be identifiers", exp);
+            return eval_error("lambda argument list all be identifiers", argi);
           }
           argi.set_car(argi.car().maybe_unbox());
           if(argi.cdr() == C_NIL) {
             break;
           } else if(argi.cdr().type() != PAIR) {
             if(!argi.cdr().maybe_unbox().identifierp()) {
-              return eval_error("lambda argument list must all be identifiers", exp);
+              return eval_error("lambda argument list must all be identifiers", args);
             }
 
             fn->rest_arguments = argi.cdr().maybe_unbox();
@@ -2428,7 +2450,7 @@ struct State {
     body = exp.caddr();
 
     if(name.type() != SYMBOL) {
-      return eval_error("first argument to define must be a symbol", exp);
+      return eval_error("first argument to define must be a symbol", exp.cdr());
     }
 
     if(env_defined(env, name)) {
@@ -2475,16 +2497,22 @@ struct State {
     }
 
     name = exp.cadr().maybe_unbox();
+
+    if(name.type() != SYMBOL) {
+      return eval_error("first argument to set! must be a symbol", exp.cdr());
+    }
+
     body = exp.caddr();
 
     tmp = env_lookup(env, name);
     if(tmp == C_UNDEFINED) {
       std::ostringstream os;
       os << "attempt to set! undefined variable " << name;
-      return eval_error(os.str(), exp);
+      return eval_error(os.str(), exp.cdr());
     }
 
     tmp = eval(env, body, fn_name);
+    EVAL_CHECK(tmp, exp, fn_name);
     env_set(env, name, tmp);
 
     return C_UNSPECIFIED;
@@ -2498,7 +2526,6 @@ struct State {
     size_t given_args = args.list_length();
     size_t min_arity = fn.as<CFunction>()->min_arity;
     size_t max_arity = fn.as<CFunction>()->max_arity;
-
 
     if(given_args < min_arity) {
       std::ostringstream os;
@@ -2699,7 +2726,8 @@ struct State {
 
             return eval_if(env,  exp, length == 4, fn_name);
           } else if(car == get_symbol(S_QUOTE)) {
-            if(length > 2) return eval_error("quote takes exactly 1 argument", exp);
+            if(length == 1) return eval_error("quote needs at least one argument", exp);
+            else if(length > 2) return eval_error("quote takes exactly 1 argument", exp.cddr());
             return exp.cadr().maybe_unbox();
           }
           // form, let, set!, if, quote
@@ -2708,7 +2736,12 @@ struct State {
         // Normal function application
         car = eval(env, exp.car(), fn_name);
 
-        if(car.is_active_exception()) return car;
+        if(car.is_active_exception()) {
+          if(exp.car().type() == SYMBOL) {
+            return eval_error("attempt to apply undefined function", exp);
+          }
+          return car;
+        }
 
         if(car.type() != FUNCTION && car.type() != CFUNCTION) {
           std::ostringstream os;
@@ -2720,7 +2753,7 @@ struct State {
           return eval_error(os.str(), exp);
         } else {
           if(car.type() == FUNCTION) {
-            return apply_scheme(env,  car, exp.cdr(), exp, fn_name);
+            return apply_scheme(env, car, exp.cdr(), exp, fn_name);
           } else {
             return apply_c(env,  car, exp.cdr(), exp, fn_name);
           }
@@ -2767,8 +2800,9 @@ struct State {
           std::ostringstream os;
           os << "reference to undefined variable " << exp;
           EVAL_TRACE(car, fn_name);
-          return eval_error(os.str());
+          return eval_error(os.str(), exp);
         }
+
         if(res == C_SYNTAX) {
           std::stringstream os;
           os << "attempt to use syntax " << exp << " as value";
@@ -2779,6 +2813,7 @@ struct State {
           EVAL_TRACE(car, fn_name);
           return eval_error(os.str(), exp);
         }
+
         return res;
       }
       default: {

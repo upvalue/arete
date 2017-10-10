@@ -23,8 +23,8 @@ const char* help[] = {
   "Note: Arguments are evaluated left to right, e.g. arete <file1> --repl <file2>",
   "will cause <file1> to be loaded, a REPL to be opened, and <file2> to be loaded after it is closed.\n",
   "  --help: Print this message",
-  "  --set <variable> <expr>: Set a top-level variable to an expression",
-  "  Important variable examples:",
+  "  --set <variable> <expr>: Set a top-level variable to an expression (only read, not evaluated)",
+  "  Important variable variables:",
   "     --set \"*show-expand*\" #t ",
   "        Print all expansions to current output port as they occur",
   "  --read <file>: Read and print S-expressions from a file without expanding or evaluating them",
@@ -52,8 +52,8 @@ static void  print_help() {
 
 static bool do_repl(State& state, bool read_only) {
   char* line = 0;
-  Value x = C_FALSE;
-  AR_FRAME(state, x);
+  Value x = C_FALSE, tmp;
+  AR_FRAME(state, x, tmp);
 
   std::ostringstream hist_file;
 
@@ -89,6 +89,7 @@ static bool do_repl(State& state, bool read_only) {
 
       if(read_only) {
         std::cout << x << std::endl;
+        /*
         if(x.type() == PAIR) {
           if(x.list_length() > 1) {
             state.print_src_pair(std::cout, x.cadr());
@@ -99,8 +100,18 @@ static bool do_repl(State& state, bool read_only) {
           state.print_src_pair(std::cout, x);
           std::cout << std::endl;
         }
+        */
         continue;
       }
+
+      tmp = state.eval_toplevel(x);
+
+      if(tmp.is_active_exception()) {
+        state.print_exception(std::cout, tmp);
+        continue;
+      }
+
+      std::cout << tmp << std::endl;
 
     }
 
