@@ -1,9 +1,9 @@
 # Variables
 CXX := clang++
 CPPFLAGS := -Wall -I. -Ivendor -Ivendor/linenoise -DARETE_DEV
-CFLAGS := $(CFLAGS) -g3 -O0
+CFLAGS := $(CFLAGS) -g3 -Os
 CXXFLAGS := $(CPPFLAGS) -std=c++11 -fno-rtti $(CFLAGS)
-LDFLAGS := $(LDFLAGS) -g3  -O0
+LDFLAGS := $(LDFLAGS) -g3  -Os
 
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp vendor/linenoise/*.cpp)))
 DEPS := $(CXXOBJS:.o=.d)

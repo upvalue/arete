@@ -363,7 +363,7 @@ Value XReader::read_expr(TokenType tk) {
     case TK_EXPRESSION_COMMENT: {
       Value x = read_expr(TK_READ_NEXT);
       if(x.is_active_exception()) return x;
-      // std::cout << "Ignoring read expression " << x << std::endl;
+      // Check next token
       return read_expr(TK_READ_NEXT);
     }
 
@@ -411,19 +411,21 @@ Value XReader::read_expr(TokenType tk) {
      return read_aux("after ,@", 2, state.globals[State::S_UNQUOTE_SPLICING]);
 
     case TK_VECTOR_OPEN: {
-      TokenType tk2;
-
-      Value vec, x;
+      Value vec, x, tmp;
 
       unsigned cline = line, cposition = position - 2;
 
-      AR_FRAME(state, vec, x);
+      AR_FRAME(state, vec, x, tmp);
 
       vec = state.make_vector();
 
       while(tk != TK_RPAREN) {
         NEXT_TOKEN(tk);
-        if(tk == TK_RPAREN) {
+        if(tk == TK_EXPRESSION_COMMENT) {
+          tmp = read_expr(TK_READ_NEXT);
+          if(tmp.is_active_exception()) return tmp;
+          continue;
+        } else if(tk == TK_RPAREN) {
 
         } else if(tk == TK_EOF) {
           return unexpected_eof("in vector", cline, cposition);
@@ -443,7 +445,7 @@ Value XReader::read_expr(TokenType tk) {
       // These variables track where the list began
       unsigned cline = line, cposition = position - 1;
 
-      TokenType tk2;
+      TokenType tk2 = TK_READ_NEXT;
       NEXT_TOKEN(tk2);
 
       if(tk2 == TK_RPAREN) {
@@ -452,7 +454,7 @@ Value XReader::read_expr(TokenType tk) {
         return read_error("unexpected . at beginning of list", line, cposition, position);
       }
 
-      Value head = C_FALSE, tail = C_FALSE, elt, swap = C_FALSE;
+      Value head = C_NIL, tail = C_FALSE, elt = C_FALSE, swap = C_FALSE, tmp = C_FALSE;
       AR_FRAME(state, head, tail, elt, swap);
 
       // (a b c)
@@ -462,7 +464,16 @@ Value XReader::read_expr(TokenType tk) {
       // (a b . c)
       // (. c)
       while(tk2 != TK_RPAREN && tk2 != TK_DOT) {
-        Value elt = read_expr(tk2);
+        // Special case: Expression comment at the end of a list has to be handled up here
+        // because recursion will not be able to handle TK_RPAREN
+        if(tk2 == TK_EXPRESSION_COMMENT) {
+          tmp = read_expr(TK_READ_NEXT);
+          if(tmp.is_active_exception()) return tmp;
+          NEXT_TOKEN(tk2);
+          continue;
+        }
+
+        elt = read_expr(tk2);
 
         if(elt == C_EOF) {
           unexpected_eof("in list", cline, cposition);
@@ -479,8 +490,6 @@ Value XReader::read_expr(TokenType tk) {
           swap = state.make_pair(elt, C_NIL);
         } else {
           // std::cout << "ELT " << elt << " from " << token_start_position << " to " << position << std::endl;
-
-
           swap = make_src_pair(elt, C_NIL, token_start_line, token_start_position, position - token_start_position); // -1 ?
         }
 
@@ -490,7 +499,7 @@ Value XReader::read_expr(TokenType tk) {
 
         tail = swap;
 
-        if(head == C_FALSE) {
+        if(head == C_NIL) {
           head = tail;
         }
         
@@ -515,8 +524,15 @@ Value XReader::read_expr(TokenType tk) {
         tail.set_cdr(swap);
       }
 
-      // Lists will have the whole thing highlighted.
-      return make_src_pair(head.car(), head.cdr(), cline, cposition, position - cposition);
+      if(head.type() == PAIR) {
+        // Lists will have the whole thing highlighted.
+        return make_src_pair(head.car(), head.cdr(), cline, cposition, position - cposition);
+      }
+
+      // It is possible to end up with a nil here: (#;x)
+      AR_ASSERT(head == C_NIL);
+      return head;
+
     }
 
     default: {
