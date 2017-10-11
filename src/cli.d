@@ -1,2 +1,1 @@
-src/cli.o: src/cli.cpp vendor/lest.hpp vendor/linenoise/linenoise.h \
-  arete.hpp
+src/cli.o: src/cli.cpp vendor/linenoise/linenoise.h arete.hpp

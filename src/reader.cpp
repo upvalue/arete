@@ -551,15 +551,4 @@ Value XReader::read() {
   return read_expr(TK_READ_NEXT);
 }
 
-#ifdef ARETE_DEV
-
-lest::tests& specification();
-
-lest_CASE( specification(), "reading atomic expressions" ) 
-{
-    EXPECT( 42 == 42 );
 }
-
-}
-
-#endif

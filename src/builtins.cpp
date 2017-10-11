@@ -11,12 +11,12 @@ size_t gc_collect_timer = 0;
 State* current_state = 0;
 
 Value State::load_stream(std::istream& input, size_t source) {
-  Reader reader(*this, input);
+  XReader reader(*this, input);
   Value x;
   AR_FRAME(this, x);
 
   if(source > 0) {
-    reader.file = source;
+    reader.source = source;
   }
 
   while(true) {
@@ -176,6 +176,7 @@ OPV_BOOL(fn_lte, "<=", <=)
 OPV_BOOL(fn_gte, ">=", >=)
 OPV_BOOL(fn_gt, ">", >)
 
+#undef OPV_BOOL
 // Fixnum arithmetic
 
 Value fn_fx_sub(State& state, size_t argc, Value* argv) {
@@ -1083,7 +1084,7 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-lookup";
   AR_FN_EXPECT_ENV(state, 0);
-  AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].type() == RENAME || argv[1].type() == SYMBOL);
+  AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].identifierp());
 
   Value arg0 = argv[0], arg1 = argv[1];
   Value env = argv[0], qname, result;

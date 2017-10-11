@@ -13,23 +13,6 @@
 #include <unordered_map>
 #include <chrono>
 
-// Include testing framework for internal files compiled under development mode
-#ifdef AR_INTERNAL
-# ifdef ARETE_DEV
-#  define lest_FEATURE_AUTO_REGISTER 1
-#  define lest_FEATURE_COLOURISE 1
-
-#  include "lest.hpp"
-# endif
-#endif
-
-//= ## Configuration macros
-//= As Arete is contained in a single header, it is configured in part through the use of #defines.
-//= These should be defined before every inclusion of arete.hpp if changing them is desired.
-//= In most cases, the defaults should be sane.
-
-//= ### AR_ASSERT(expression)
-//= This assertion is used throughout Arete to check internal invariants. Can be safely turned off.
 #ifndef AR_ASSERT
 # define AR_ASSERT assert
 #endif
@@ -1439,6 +1422,7 @@ struct State {
     S_EXPAND_ERROR,
     S_SYNTAX_ERROR,
     // Global variables
+    G_PRINT_EXPAND,
     G_EXPANDER,
     G_CURRENT_MODULE,
     G_MODULE_TABLE,
@@ -1474,6 +1458,7 @@ struct State {
       // Tags for errors that may be thrown by the runtime
       "file", "read", "eval", "type", "expand", "syntax",
       // Various variables
+      "*print-expand*",
       "expander", "current-module", "module-table", "core",
       "module-name",
       "module-renames",
@@ -2020,13 +2005,20 @@ struct State {
   void print_exception(std::ostream& os, Value exc) {
     AR_TYPE_ASSERT(exc.type() == EXCEPTION);
 
-    print_stack_trace();
+    print_stack_trace(os);
 
     if(exc.exception_tag() == globals[State::S_EVAL_ERROR]) {
       os << "Evaluation error: " << exc.exception_message().string_data() << std::endl;
-      print_src_pair(std::cout, exc.exception_irritants());
+      print_src_pair(os, exc.exception_irritants());
+    } else if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]) {
+      Value irritants = exc.exception_irritants();
+      os << "Expansion error: " << exc.exception_message().string_data() << std::endl;
+      if(irritants.list_length() == 1) {
+        print_src_pair(os, irritants.list_ref(0));
+      } else if(irritants.list_length() == 2) {
+        print_src_pair(os, irritants.list_ref(1));
 
-
+      }
     } else {
       os << exc << std::endl;
     }
@@ -2788,8 +2780,6 @@ struct State {
           exp = exp.unbox();
         }
 
-        // std::cout << env << ' ' << exp << std::endl;
-
         res = env_lookup(env, exp);
 
         if(res.bits == 0) {
@@ -2841,7 +2831,7 @@ struct State {
         return exp;
       }
 
-      if(print_expansions) {
+      if(get_global_value(G_PRINT_EXPAND) == C_TRUE) {
         std::cout << "Expanded: " << exp << std::endl;
       }
 
@@ -2871,465 +2861,7 @@ struct State {
   Value load_module(const std::string&);
 };
 
-///// (READ) Reader
-
-/**
- * The reader is a dead simple recursive s-expression reader.
- * It does take pains to track source code information, when possible.
- */
-struct Reader {
-  State& state;
-  std::istream is;
-  size_t file, line, column, position;
-
-  Reader(State& state_, std::istream& is_):
-    state(state_), is(is_.rdbuf()), file(0), line(1), column(0) {
-    // No skipping whitespace because we need to track lines
-    is >> std::noskipws;
-    }
-  ~Reader() {}
-
-  enum Token {
-    TK_NONE, 
-    TK_RPAREN,
-    TK_DOT,
-    TK_RBRACKET,
-  };
-  
-  /** Returns true if a char is a separator and therefore
-    * should stop reading of symbols, numbers etc */
-  static bool is_separator(char c) {
-    return c == '#' || c == '(' || c == ')' ||
-      c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '[' 
-      || c == ']' || c == '"' || c == '\'' || c == ',' || c == '`';
-  }
-
-  /** Return current source code location so we'll know where e.g.
-   * an erronous multi-line list began */
-  SourceLocation save() {
-    return SourceLocation(file, line);
-  }
-
-  /** Make a pair annotated with current source location */
-  Value make_pair(Value car, Value cdr = C_NIL) {
-    Value pair;
-    AR_FRAME(state, pair, car, cdr);
-    SourceLocation loc(file, line);
-    pair = state.make_src_pair(car, cdr, loc);
-    AR_ASSERT(pair.type() == PAIR);
-    AR_ASSERT(pair.pair_has_source());
-    return pair;
-  }
-
-  /** Return an error */
-  Value read_error(const std::string& description, size_t begin_line = 0, bool list = true) {
-    std::ostringstream os;
-    SourceLocation loc(file, begin_line == 1 ? line : begin_line);
-
-    os << state.source_info(&loc) << ' ';
-    if(begin_line != 0 && list) {
-      // If a beginning line has been provided
-      os << "in list: ";
-    } 
-    os << description;
-
-    return state.make_exception(state.globals[State::S_READ_ERROR], os.str());
-  }
-
-  /** getc that tracks line/column information */
-  bool getc(char& c) {
-    is >> c;
-    if(is.eof()) return false;
-    if(c == '\n') {
-      line++;
-      column = 0;
-    }
-    column++;
-    position++;
-    return !is.eof();
-  }
-
-  void eatc() {
-    char c;
-    (void) getc(c);
-  }
-
-  /** Handles #| |# comments, which can nest */
-  Value consume_multiline_comment() {
-    char c;
-    size_t comment_nesting = 1;
-    size_t begin_line = line;
-    while(!is.eof()) {
-      getc(c);
-      if(c == '#') {
-        c = is.peek();
-        if(c == '|') {
-          getc(c);
-          comment_nesting++;
-        }
-      } else if(c == '|') {
-        c = is.peek();
-        if(c == '#') {
-          getc(c);
-          if(--comment_nesting == 0) break;
-        }
-      }
-    }
-
-    if(comment_nesting > 0) {
-      return read_error("unexpected EOF in multi-line comment", begin_line, false);
-    }
-
-    return C_FALSE;
-  }
-
-  /** cons quote/quasiquote and friends with an expression */
-  Value read_aux(State::Global name) {
-    Value symbol, expr;
-    AR_FRAME(state, symbol, expr);
-    expr = read(false);
-    if(expr.is_active_exception())
-      return expr;
-    else if(expr == C_EOF) {
-      std::ostringstream os;
-      os << "unexpected EOF after " << name;
-      return read_error(os.str());
-    }
-    symbol = state.get_symbol(name);
-    expr = state.make_pair(expr, C_NIL);
-    expr = state.make_pair(symbol, expr);
-    return expr;
-  }
-
-
-  /** Read a symbol */
-  Value read_symbol(char c, bool box = true) {
-    SourceLocation loc = save();
-    std::string buffer;
-    buffer += c;
-    while(true) {
-      c = is.peek();
-      if(is.eof() || is_separator(c)) {
-        break;
-      }
-      buffer += c;
-      eatc();
-    }
-    Value sym;
-    AR_FRAME(state, sym);
-    sym = state.get_symbol(buffer);
-    if(box) {
-      sym = state.make_src_box(sym, loc);
-    }
-    return sym;
-  }
-
-  /** Consumes whitespace until the next token, if there is one */
-  void peek_token(Token& return_token) {
-    char c = is.peek();
-    return_token = TK_NONE;
-    while(!is.eof()) {
-      switch(c) {
-        case ' ': case '\r': case '\t': case '\n': getc(c); continue;
-        case ')': getc(c); return_token = TK_RPAREN; return;
-        case ']': getc(c); return_token = TK_RBRACKET; return;
-        case '.': getc(c); return_token = TK_DOT; return;
-        default: return;
-      }
-    }
-  }
-
-  Value read_number(ptrdiff_t start, bool negative) {
-    // Fixnums
-    ptrdiff_t number = start;
-    ptrdiff_t length = 1;
-    while(true) {
-      char c = is.peek();
-      if(c >= '0' && c <= '9') {
-        is >> c;
-        length++;
-        number = (number * 10) + (c - '0');
-      } else if(c == '.') {
-        is >> c;
-        c = is.peek();
-        is.seekg(-(length + 1), is.cur);
-        double d;
-        // TODO This definitely probably isn't compliant with whatever standards
-        is >> d;
-        return state.make_flonum(d);
-      } else {
-        break;
-      }
-    }
-    return Value::make_fixnum(negative ? -number : number);
-
-  }
-
-  /** Read a single expression */
-  Value read_expr(Token& return_token, bool box = true) {
-    return_token = TK_NONE;
-    char c;
-    while(getc(c)) {
-      if(c >= '0' && c <= '9') {
-        return read_number(c - '0', false);
-      } else if(c == '#') {
-        getc(c); // consume first char
-        if(c == 't' || c == 'f') {
-          // Constants (#t, #f)
-          return c == 't' ? C_TRUE : C_FALSE;
-        } else if(c == '\'' || c == ',') {
-          // Rename shortcut
-          // #'lambda => (rename (quote lambda))
-          // #,lambda => (unquote (rename (quote lambda)))
-          Value exp, exp2;
-          AR_FRAME(state, exp, exp2);
-          exp = read_aux(State::S_RENAME);
-          if(exp.is_active_exception()) return exp;
-          exp2 = exp.cdr();
-          exp2 = state.make_pair(state.get_symbol(State::S_QUOTE), exp2);
-          exp2 = state.make_pair(exp2, C_NIL);
-          exp.set_cdr(exp2);
-          if(c == ',') {
-            exp = state.make_pair(exp, C_NIL);
-            exp = state.make_pair(state.get_symbol(State::S_UNQUOTE), exp);
-          }
-          return exp;
-
-        } else if(c == '|') {
-          // Multi-line nested comments
-          Value exc = consume_multiline_comment();
-          if(exc.is_active_exception()) return exc;
-          continue;
-        } else if(c == ';') {
-          // Expression comments eg #;#t #;(some things)
-          Token tk = TK_NONE;
-          read_expr(tk);
-          continue;
-        } else if(c == '(') {
-          // Vectors 
-          Value vec, x;
-          AR_FRAME(state, vec, x);
-
-          vec = state.make_vector();
-          Token tk = TK_NONE;
-          while(true) {
-            x = read_expr(tk).maybe_unbox();
-            if(x == C_EOF) {
-              return read_error("unexpected EOF in vector");
-            }
-            if(tk == TK_RPAREN) break;
-            else if(tk == TK_DOT || tk == TK_RBRACKET) {
-              return read_error("unexpected token in vector");
-            }
-            state.vector_append(vec, x);
-          }
-          return vec;
-        } else if(c == '\\') {
-          // Character literals
-
-          // Get character
-          char c2;
-          getc(c2);
-
-          if(is.eof()) return read_error("unexpected EOF in character literal");
-
-          if(c2 == ' ') return state.make_char(c2);
-
-          // Get character afterwards; if it's a letter, this
-          // may be #\space or #\newline etc
-          char c3 = is.peek();
-          if(!is.eof() && ((c3 >= 'A' && c3 <= 'Z') || (c3 >= 'a' && c <= 'z'))) {
-            Value symbol;
-            AR_FRAME(state, symbol);
-            symbol = read_symbol(c2, false);
-            // TODO: These should be saved off
-            // and compared by identity
-            if(symbol.symbol_equals("newline")) {
-              c2 = '\n';
-            } else if(symbol.symbol_equals("space")) {
-              c2 = ' ';
-            } else {
-              std::ostringstream os;
-              os << "unknown character constant #\\" << symbol;
-              return read_error(os.str());
-            }
-          } 
-          return state.make_char(c2);
-        } else {
-          return read_error("invalid sharp syntax");
-        }
-      } else if(c == ';') {
-        // Comments
-        while(true) {
-          c = is.peek();
-          // EOF in comment
-          if(is.eof()) return C_EOF;
-          else if(c == '\n') {
-            break;
-          }
-          is >> c;
-        }
-      } else if(c == ' ' || c == '\r' || c == '\t' || c == '\n') {
-        // Eat whitespace
-      } else if(c == '(' || c == '[') {
-        Token match = c == '(' ? TK_RPAREN : TK_RBRACKET;
-        // Read a list
-        Value head, tail, elt, swap;
-        SourceLocation list_start = save();
-        AR_FRAME(state, head, tail, elt, swap);
-        bool dotted = false;
-
-        // Attach source code information
-        while(true) {
-          Token tk;
-          //size_t ln = line, col = column;
-          elt = read_expr(tk, box);
-          //size_t len = column - col;
-          // Alright so we have to save location here.
-          // std::cout << "read an element" << elt << std::endl;
-          if(dotted) {
-            return read_error("expected one expression after dot in list but got multiple", list_start.line);
-          }
-
-          if(elt == C_EOF) {
-            AR_ASSERT(is.eof());
-            return read_error("unexpected EOF", list_start.line);
-          } else if(elt.is_active_exception()) {
-            return elt;
-          }
-
-          // ()
-          if(tk == match && head.bits == 0) {
-            return C_NIL;
-          }
-
-          // TODO: NEED A WAY TO CHECK ) HERE
-          if(tk == TK_DOT) {
-            if(tail.bits == 0) {
-              return read_error("unexpected dot at beginning of list", list_start.line);
-            }
-            dotted = true;
-            elt = read_expr(tk, box);
-            if(elt == C_EOF) {
-              return read_error("unexpected EOF after dot", list_start.line);
-            } else if(elt.is_active_exception()) {
-              return elt;
-            } else if(tk == match) {
-              return read_error("expected expression after dot but got )", list_start.line);
-            } 
-
-            peek_token(tk);
-            if(tk == match) {
-              tail.set_cdr(elt);
-              return head;
-            } else {
-              dotted = true;
-            }
-          } else if(tk == match) {
-            break;
-          } else if(tk == TK_RPAREN || tk == TK_RBRACKET) {
-            // Little silly: this relies on the above else if failing to catch
-            // which bracket shouldn't match
-
-            // TODO: Do a better job of reporting mismatch
-            return read_error("unexpected bracket in list",  list_start.line);
-          }
-
-          swap = make_pair(elt, C_NIL);
-
-          if(head.bits == 0) {
-            head = tail = swap;
-          } else {
-            tail.set_cdr(swap);
-            tail = swap;
-          }
-        }
-
-        // Read a list.
-        return head;
-      } else if(c == ')') {
-        return_token = TK_RPAREN;
-        return C_FALSE;
-      } else if(c == ']') {
-        return_token = TK_RBRACKET;
-        return C_FALSE;
-      } else if(c == '\'') {
-        return read_aux(State::S_QUOTE);
-      } else if(c == '`') {
-        return read_aux(State::S_QUASIQUOTE);
-      } else if(c == '"') {
-        // Strings
-        std::string buffer;
-        while(true) {
-          getc(c);
-          if(is.eof()) {
-            return read_error("unexpected EOF in string", 1);
-          } else if(c == '"') {
-            break;
-          } else if(c == '\\') {
-            getc(c); // get escape code
-            if(c == 'n') {
-              buffer += '\n';
-            } else if(c == 't') {
-              buffer += '\t';
-            } else if(c == 'r') {
-              buffer += '\r';
-            } else if(c == '"' || c == '\\') {
-              buffer += c;
-            } else {
-              std::ostringstream os;
-              os << "unknown string escape \\" << c;
-              return read_error(os.str());
-            }
-            continue;
-          }
-          
-          buffer += c;
-        }
-        return state.make_string(buffer);
-      } else if(c == ',') {
-        // unquote and unquote-splicing
-        c = is.peek();
-        if(c == '@') {
-          is >> c;
-          return read_aux(State::S_UNQUOTE_SPLICING);
-        } 
-        return read_aux(State::S_UNQUOTE);
-      } else {
-        // Symbols
-        // Special case: .. is also a valid symbol (really?)
-        if(c == '.' && is.peek() != '.') {
-          return_token = TK_DOT;
-          return C_FALSE;
-        }
-        // Negative numbers
-        if(c == '-'){
-          char c2 = is.peek();
-          if(c2 >= '0' && c2 <= '9') {
-            getc(c);
-            return read_number(c2 - '0', true);
-          }
-        }
-        return read_symbol(c, box);
-      }
-    }
-    // Should not be reached unless there is an actual EOF
-    AR_ASSERT(is.eof());
-    return C_EOF;
-  }
-
-  Value read(bool box = true) {
-    Token tk;
-    Value exp = read_expr(tk, box);
-    if(tk == TK_DOT) {
-      return read_error("unexpected . at toplevel");
-    } else if(tk == TK_RPAREN) {
-      return read_error("unexpected ) at toplevel");
-    } 
-
-    return exp;
-  }
-};
+///// READ! S-Expression reader
 
 /* Expression reader */
 struct XReader {
@@ -3442,34 +2974,6 @@ struct XReader {
   /** The entry point for reading an expression */
   Value read();
 };
-
-/** Converts a C++ string to an std::istream for reading expressions */
-struct StringReader {
-  std::istringstream ss;
-  Reader reader;
-
-  StringReader(State& state, std::string str, const std::string& desc = "anonymous"): ss(str), reader(state, ss) {
-    // std::istream & iss = ss;
-    // reader.file = desc.compare("anonymous") == 0 ? 1 : state.register_file(desc, iss);
-  }
-
-  ~StringReader() {
-    // delete reader;
-  }
-
-  Reader* operator->() {
-    return &reader;
-  }
-};
-
-/** Macro for giving descriptive source info for Scheme code in C strings e.g.
-  * c-string@asdf.cpp:351 */
-#define AR_STRINGIZE2(x) #x
-
-#define AR_STRINGIZE(x) AR_STRINGIZE2(x)
-
-#define AR_STRING_READER(name, state, string) \
-  arete::XStringReader name ((state), (string), ("c-string@" __FILE__ ":" AR_STRINGIZE(__LINE__)));
 
 // Various inline functions relying on State and GC having been declared
 

@@ -4,7 +4,6 @@
 #include <iostream>
 #include <stdlib.h>
 
-#include "lest.hpp"
 #include "linenoise.h"
 
 #include "arete.hpp"
@@ -13,11 +12,6 @@ using namespace arete;
 using namespace std;
 
 namespace arete {
-
-lest::tests& specification() {
-  static lest::tests tests;
-  return tests;
-}
 
 const char* help[] = {
   "Note: Arguments are evaluated left to right, e.g. arete <file1> --repl <file2>",
@@ -30,7 +24,6 @@ const char* help[] = {
   "  --read <file>: Read and print S-expressions from a file without expanding or evaluating them",
   "  --read --repl: Same but with REPL",
   "  --repl: Open REPL",
-  "  --test: Run builtin test suite, if compiled in; all arguments after this will be passed to lest",
   "  --debug-gc: Forces a collection after every allocation, used to flush out GC bugs"
 };
 
@@ -107,11 +100,12 @@ static bool do_repl(State& state, bool read_only) {
       tmp = state.eval_toplevel(x);
 
       if(tmp.is_active_exception()) {
-        state.print_exception(std::cout, tmp);
+        state.print_exception(std::cerr, tmp);
         continue;
       }
 
-      std::cout << tmp << std::endl;
+      if(tmp != C_UNSPECIFIED)
+        std::cout << tmp << std::endl;
 
     }
 
@@ -123,9 +117,9 @@ static bool do_repl(State& state, bool read_only) {
 }
 
 bool do_file(State& state, std::string path, bool read_only) {
-  Value x;
+  Value x = C_FALSE, tmp = C_FALSE;
 
-  AR_FRAME(state, x);
+  AR_FRAME(state, x, tmp);
 
   std::ifstream fs(path);
   if(!fs.good()) {
@@ -141,7 +135,16 @@ bool do_file(State& state, std::string path, bool read_only) {
       std::cerr << x.exception_message().string_data() << std::endl;
       return false;
     } else if(x != C_EOF) {
-      std::cout << x << std::endl;
+      if(read_only) {
+        std::cout << x << std::endl;
+        continue;
+      }
+
+      tmp = state.eval_toplevel(x);
+
+      if(tmp.is_active_exception()) {
+        state.print_exception(std::cerr, tmp);
+      }
     }
   }
 
@@ -150,14 +153,14 @@ bool do_file(State& state, std::string path, bool read_only) {
 }
 
 int enter_cli(State& state, int argc, char* argv[]) {
-  static std::string test("--test");
   static std::string read("--read");
   static std::string help("--help");
   static std::string repl("--repl");
   static std::string bad("--");
   static std::string debug_gc("--debug-gc");
+  static std::string set("--set");
 
-  for(size_t i = 0; i != argc; i++) {
+  for(size_t i = 1; i != argc; i++) {
     const char* arg = argv[i];
 
     if(help.compare(arg) == 0) {
@@ -172,9 +175,44 @@ int enter_cli(State& state, int argc, char* argv[]) {
         if(!do_file(state, arg2, true))
           return EXIT_FAILURE;
       }
+    } else if(set.compare(arg) == 0) {
+
+      if((i + 2) >= argc) {
+        std::cerr << "Expected at least two arguments after --set" << std::endl;
+        return EXIT_FAILURE;
+      }
+
+      std::stringstream ss;
+      ss >> std::noskipws;
+      ss << argv[i+1] << std::endl;
+      ss << argv[i+2] << std::endl;
+
+      i += 2;
+
+      XReader reader(state, ss, "set variable");
+      Value name, value;
+
+      AR_FRAME(state, name, value);
+
+      name = reader.read();
+      value = reader.read();
+
+      if(name.type() != SYMBOL) {
+        std::cerr << "--set first argument must be a symbol" << std::endl;
+      } else if(name.is_active_exception()) {
+        state.print_exception(std::cerr, name);
+        std::cerr << "--set first argument resulted in an exception" << std::endl;
+      }
+
+      if(value.is_active_exception()) {
+        state.print_exception(std::cerr, value);
+        std::cerr << "--set second argument resulted in an exception" << std::endl;
+      }
+
+      name.set_symbol_value(value);
     } else if(repl.compare(arg) == 0) {
       if(do_repl(state, false) == false) {
-        return 1;
+        return EXIT_FAILURE;
       }
     } else if(debug_gc.compare(arg) == 0) {
       state.gc.collect_before_every_allocation = true;
@@ -186,11 +224,11 @@ int enter_cli(State& state, int argc, char* argv[]) {
         std::cerr << "Unknown -- option " << cxxarg << std::endl << std::endl;
         print_help();
         return EXIT_FAILURE;
+      } else {
+        std::string path(argv[i]);
+        if(!do_file(state, path, false))
+          return EXIT_FAILURE;
       }
-    }
-
-    if(test.compare(arg) == 0) {
-      return lest::run(specification(), argc - i, &argv[i]);
     }
   }
 

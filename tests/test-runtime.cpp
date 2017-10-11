@@ -131,6 +131,7 @@ TEST_CASE_FIXTURE(AS, "tables") {
 
 ///// (READ) READER
 
+#if 0
 TEST_SUITE_BEGIN("reader");
 
 TEST_CASE_FIXTURE(AS, "read fixnum") {
@@ -336,6 +337,7 @@ TEST_CASE_FIXTURE(ASB, "reader flonums") {
 }
 
 TEST_SUITE_END();
+#endif
 
 ///// INTERPRETER TESTS
 
