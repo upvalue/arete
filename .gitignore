@@ -1,3 +1,4 @@
+/src/*.d
 /arete
 /tests/test-incremental
 /tests/test-semispace

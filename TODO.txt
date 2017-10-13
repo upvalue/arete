@@ -54,6 +54,7 @@ x stack traces
 
 reader
 
+- ') crashes hardcore 
 - EOF in string should show where string *starts*
 - improve the mismatched bracket error message
 x expression comments #;

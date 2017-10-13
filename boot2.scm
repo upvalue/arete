@@ -13,6 +13,18 @@
 
 (define unspecified (if #f #f))
 
+(define rename
+  (lambda (name)
+    (define env (top-level-value '*current-rename-env*))
+
+    (if (not (symbol? name))
+      (raise 'expand "attempt to rename non-symbol" (list x)))
+
+    (if (eq? (top-level-value '*current-rename-env*) unspecified)
+      (raise 'expand "(rename) called without environment" (list name)))
+    
+    (make-rename env name)))
+
 ;;;;; EXPAND! Expansion pass
 
 ;; Shorthand for mapping expand because it's so common
@@ -40,9 +52,11 @@
       (raise 'expand "define first argument must be a name or a list" (list x (cdr x))))
 
     (if (identifier? kar)
-      (begin
-        (set! name kar)
-        (set! value (caddr x)))
+      (if (not (fx= len 3))
+        (raise 'expand "define expects exactly two arguments (name and value)" (list x))
+        (begin
+          (set! name kar)
+          (set! value (caddr x))))
       (begin
         ;; Take apart the more complex (define (function) ...) case
         (set! name (car kar))
@@ -50,7 +64,8 @@
           (list-source x (make-rename #f 'lambda) (cdr kar)
             (cons-source x (make-rename #f 'begin) (cddr x))))))
 
-    (set! result (list-source x (car x) name (expand value env)))
+    (if (env-syntax? env name)
+      (raise 'expand (print-string "definition of" name "shadows syntax") (list x)))
 
     ;; Handle module stuff
     (if (table? env)
@@ -62,9 +77,12 @@
           (begin
             (if (table-ref env "module-export-all")
               (table-set! (table-ref env "module-exports") name #t))))
+        ;; TODO. Could probably use string-append here instead of relying on env-resolve to fail.
         (env-define env name (env-resolve env name) #f)
         (set! name (env-resolve env name)))
       (env-define env name 'variable))
+
+    (set! result (list-source x (car x) name (expand value env)))
 
     result))
 
@@ -93,6 +111,7 @@
       (cond
         ((eq? kar 'define) (expand-define x env))
         ((eq? kar 'define-syntax) (expand-define-syntax x env))
+        ((or (eq? kar 'letrec-syntax) (eq? kar 'let-syntax)) (expand-let-syntax x env))
         ((eq? kar 'lambda) (expand-lambda x env))
         ((eq? kar 'begin) (cons-source x (car x) (expand-map (cdr x) env)))
         ((eq? kar 'if) (expand-if x env))
@@ -180,117 +199,206 @@
   (lambda (x env)
     (expand x env)))
 
+(define expand-define-transformer!
+  (lambda (x env name body)
+    (define expanded-body #f)
+    (define fn #f)
+    (define fn-arity #f)
+
+    (if (not (symbol? name))
+      (raise 'expand "define-syntax first argument (macro name) must be a symbol" (list x (cdr x))))
+
+    (if (table? env)
+      (if (table-ref env "module-export-all")
+        (table-set! (table-ref env "module-exports") name #t)))
+
+    ;(set! body (caddr x))
+    (set! expanded-body (expand body env))
+    (set! fn (eval-lambda expanded-body env))
+    (set! fn-arity (function-min-arity fn))
+
+    (if (fx< fn-arity 1)
+      (raise 'expand "transformer must take at least one argument" (list x (cdr x))))
+
+    (set-function-name! fn name)
+    (set-function-macro-bit! fn)
+
+    (env-define env name fn)
+
+    unspecified))
+
+(define expand-define-syntax
+  (lambda (x env)
+    (define len (length x))
+    (define name #f)
+    (define body #f)
+
+    (if (fx< len 3)
+      (raise 'expand "define-syntax expects at least two arguments: a name and a body" (list x)))
+
+    (set! name (cadr x))
+    (set! body (caddr x))
+
+    (expand-define-transformer! x env name body)))
+
+;; TODO (let-syntax () (define x #t))
+
+(define expand-let-syntax
+  (lambda (x env)
+    (define new-env (env-make env))
+    (define bindings #f)
+    (define body #f)
+
+    (if (fx< (length x) 3)
+      (raise 'expand "let-syntax expands at least three arguments" (list x)))
+
+    (set! bindings (cadr x))
+    (set! body (cddr x))
+
+    (if (not (list? bindings))
+      (raise 'expand "let-syntax bindings list must be a valid list" (list x (cadr x))))
+
+    (for-each
+      (lambda (x)
+        (define name #f)
+        (define body #f)
+
+        (if (not (fx= (length x) 2))
+          (raise 'expand "let-syntax bindings should have two values: a name and a transformer" (list x)))
+
+        (set! name (car x))
+        (set! body (cadr x))
+
+        (expand-define-transformer! x new-env name body))
+      bindings)
+
+    (cons-source x (make-rename #f 'begin) (expand body new-env))))
+
+;; Expand a macro appplication
+(define expand-macro 
+  (lambda (x env)
+    (define lookup (env-lookup env (car x)))
+    (define arity (function-min-arity lookup))
+    (define result #f)
+    (define saved-rename-env (top-level-value '*current-rename-env*))
+
+    (set-top-level-value! '*current-rename-env* (function-env lookup))
+
+    (set! result
+      (if (eq? arity 1)
+        ;; Only pass form
+        (lookup x)
+        (if (eq? arity 2)
+          ;; Only pass form and comparison procedure
+          (lookup x (lambda (a b) (env-compare env a b)))
+
+          (lookup x
+            ;; rename procedure
+            (lambda (name) (make-rename (function-env lookup) name))
+            ;; compare procedure
+            (lambda (a b) (env-compare env a b))))))
+
+    (set-top-level-value! '*current-rename-env* saved-rename-env)
+
+    (set! result (expand result env))
+
+    result))
+
+;; cond expander
+(define expand-cond-full-clause
+  (lambda (x env clause rest)
+    (define len #f)
+    (define condition #f)
+    (define body #f)
+
+    (if (not (list? clause))
+      (raise 'expand "cond clause should be a list" (list clause)))
+
+    (set! len (length clause))
+
+    (if (not (fx= len 2))
+      (raise 'expand "cond clause should have two members: condition and body" (list x clause)))
+
+    (set! condition (car clause))
+    (set! body (cadr clause))
+
+    ;; Handle else clause
+    (if (env-compare env condition (make-rename env 'else))
+      (set! condition #t))
+
+    (list-source x
+      (make-rename #f 'if)
+      (expand condition env)
+      (expand-map (list-source x (make-rename #f 'begin) body) env)
+      (if (null? rest)
+        unspecified
+        (expand-cond-full-clause x env (car rest) (cdr rest))))))
+
+(define expand-cond-clause 
+  (lambda (x env clause rest)
+    (if (null? clause)
+      unspecified
+      (expand-cond-full-clause x env clause rest))))
+
+(define expand-cond
+  (lambda (x env)
+    (if (fx= (length x) 1)
+      unspecified
+      (expand-cond-clause x env (cadr x) (cddr x)))))
+
 ;; Install expander
 (set-top-level-value! 'expander expand-toplevel)
 
-;; Is this a hack or what? We use the expander even as we're implementing it. 
+(define-syntax let
+  (lambda (x r c)
+    (define let-fn-name #f)
+    (define bindings #f)
+    (define body #f)
+    (define names #f)
+    (define vals #f)
 
-(define (expand-define-transformer! x env name body)
-  (if (not (symbol? name))
-    (raise 'expand "define-syntax first argument (macro name) must be a symbol" (list x (cdr x))))
+    (if (fx< (length x) 3)
+      (raise 'expand "let has no body" x))
 
-  (set! body (caddr x))
+    (if (symbol? (list-ref x 1))
+      (begin
+        (set! let-fn-name (list-ref x 1))
+        (set! bindings (list-ref x 2))
+        (set! body (cdddr x)))
+      (begin
+        (set! bindings (list-ref x 1))
+        (set! body (cddr x))))
 
-  (define fn (eval-lambda (expand body env) env))
+    (set! names
+      (map (lambda (binding)
+             (if (not (list? binding))
+                 (raise 'expand "let binding should be a list with a name and a value" x))
+             (define name (car binding))
+             (if (not (fx= (length binding) 2))
+                 (raise 'expand "let binding should have only 2 elements (name and value)" x))
+             (if (not (identifier? name))
+                 (raise 'expand "let binding name should be a symbol" x))
+             name)
+           bindings))
 
-  (set-function-name! fn name)
-  (set-function-macro-bit! fn))
+    (set! vals 
+      (map (lambda (binding)
+             ;; TODO expand.
+             (cadr binding)
+             ) bindings))
 
+    (define result 
+       (cons-source x (r 'lambda)
+         (cons-source x names body)))
 
-(define (expand-define-syntax x env)
-  (define len (length x))
-  (define name #f)
-  (define body #f)
+    (set! result
+      (if let-fn-name
+        ;; named function application
+        (cons-source x (list-source x (r 'lambda) '()
+          (list-source x (r 'define) let-fn-name result)
+          (cons-source x let-fn-name vals)) '())
+        ;; anonymous function application
+        (cons-source x result vals)))
 
-  (if (fx< len 3)
-    (raise 'expand "define-syntax expects at least two arguments: a name and a body" (list x)))
-
-  (set! name (cadr x))
-
-  (expand-define-transformer! x env name body))
-
-(define (expand-let-syntax x env)
-  (define new-env (env-make env))
-  (define bindings #f)
-  (define body #f)
-
-  (if (fx< (length x) 3)
-    (raise 'expand "let-syntax expands at least three arguments" (list x)))
-
-  (set! bindings (cadr x))
-  (set! body (cddr x))
-
-  (if (not (list? bindings))
-    (raise 'expand "let-syntax bindings list must be a valid list" (list x (cadr x))))
-
-  (for-each
-    (lambda (x)
-      (define name #f)
-      (define body #f)
-
-      (if (not (fx= (length x) 2))
-        (raise 'expand "let-syntax bindings should have two values: a name and a transformer" (list x)))
-
-      (set! name (car x))
-      (set! body (cadr x))
-
-      (expand-define-syntax x new-env name body))
-    bindings)
-
-  (cons-source x (make-rename #f 'begin) (expand body new-env)))
-
-
-;; Expand a macro appplication
-(define (expand-macro x env)
-  (define lookup (env-lookup env (car x)))
-
-  (define result
-    (lookup x
-      ;; rename procedure
-      (lambda (name) (make-rename (function-env lookup) name))
-      ;; compare procedure
-      (lambda (a b) (env-compare env a b))))
-
-  (set! result (expand result env))
-
-  result)
-
-;; cond expander
-(define (expand-cond-full-clause x env clause rest)
-  (define len #f)
-  (define condition #f)
-  (define body #f)
-
-  (if (not (list? clause))
-    (raise 'expand "cond clause should be a list" (list clause)))
-
-  (set! len (length clause))
-
-  (if (not (fx= len 2))
-    (raise 'expand "cond clause should have two members: condition and body" (list x clause)))
-
-  (set! condition (car clause))
-  (set! body (cadr clause))
-
-  ;; Handle else clause
-  (if (env-compare env condition (make-rename env 'else))
-    (set! condition #t))
-
-  (list-source x
-    (make-rename #f 'if)
-    (expand condition env)
-    (expand-map (list-source x (make-rename #f 'begin) body) env)
-    (if (null? rest)
-      unspecified
-      (expand-cond-full-clause x env (car rest) (cdr rest)))))
-
-
-(define (expand-cond-clause x env clause rest)
-  (if (null? clause)
-    unspecified
-    (expand-cond-full-clause x env clause rest)))
-
-(define (expand-cond x env)
-  (if (fx= (length x) 1)
-    unspecified
-    (expand-cond-clause x env (cadr x) (cddr x))))
+   ;; let return
+    result))

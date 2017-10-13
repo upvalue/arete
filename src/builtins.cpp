@@ -348,10 +348,6 @@ Value fn_symbolp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == SYMBOL);
 }
 
-Value fn_boxp(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == BOX);
-}
-
 Value fn_flonump(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == FLONUM);
 }
@@ -1159,11 +1155,20 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   return fn;
 }
 
+Value fn_function_min_arity(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "function-min-arity";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+
+  return Value::make_fixnum(argv[0].function_arguments().list_length());
+}
 
 Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-value";
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
-  return argv[0].symbol_value();
+
+  Value r = argv[0].symbol_value();
+  if(r == C_UNDEFINED) return C_UNSPECIFIED;
+  return r;
 }
 
 Value fn_set_top_level_value(State& state, size_t argc, Value* argv) {
@@ -1265,7 +1270,6 @@ void State::install_core_functions() {
   defun_core("macro?", fn_macrop, 1);
   defun_core("self-evaluating?", fn_self_evaluatingp, 1);
   defun_core("identifier?", fn_identifierp, 1);
-  defun_core("box?", fn_boxp, 1);
   defun_core("fixnum?", fn_fixnump, 1);
   defun_core("flonum?", fn_flonump, 1);
   defun_core("table?", fn_tablep, 1);
@@ -1358,6 +1362,7 @@ void State::install_core_functions() {
   // Function modification
   defun_core("set-function-name!", fn_set_function_name, 2);
   defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
+  defun_core("function-min-arity", fn_function_min_arity, 1);
   defun_core("function-env", fn_function_env, 1);
 }
 

@@ -338,6 +338,8 @@ Value XReader::read_aux(const std::string& text, unsigned highlight_size, Value 
   x = read_expr(TK_READ_NEXT);
   if(x == C_EOF) {
     return unexpected_eof(text, line, position - highlight_size, highlight_size);
+  } else if(x.is_active_exception()) {
+    return x;
   }
 
   x = state.make_pair(x, C_NIL);

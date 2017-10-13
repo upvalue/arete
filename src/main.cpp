@@ -4,7 +4,7 @@
 int do_main(int argc, char* argv[]) {
   arete::State state;
   state.boot();
-  return arete::enter_cli(state, argc, argv);
+  return state.enter_cli(argc, argv);
 }
 
 int main(int argc, char *argv[]) {

@@ -13,7 +13,7 @@ using namespace std;
 
 namespace arete {
 
-const char* help[] = {
+static const char* help[] = {
   "Note: Arguments are evaluated left to right, e.g. arete <file1> --repl <file2>",
   "will cause <file1> to be loaded, a REPL to be opened, and <file2> to be loaded after it is closed.\n",
   "  --help: Print this message",
@@ -110,6 +110,7 @@ static bool do_repl(State& state, bool read_only) {
     }
 
     linenoiseHistoryAdd(line);
+    free(line);
   }
 
   linenoiseHistorySave(hist_file.str().c_str());
@@ -153,7 +154,7 @@ bool do_file(State& state, std::string path, bool read_only) {
   return true;
 }
 
-int enter_cli(State& state, int argc, char* argv[]) {
+int State::enter_cli(int argc, char* argv[]) {
   static std::string read("--read");
   static std::string help("--help");
   static std::string repl("--repl");
@@ -170,10 +171,10 @@ int enter_cli(State& state, int argc, char* argv[]) {
     } else if(read.compare(arg) == 0) {
       EXPECT_NEXT_ARG();
       if(repl.compare(arg2) == 0) {
-        if(!do_repl(state, true))
+        if(!do_repl(*this, true))
           return EXIT_FAILURE;
       } else {
-        if(!do_file(state, arg2, true))
+        if(!do_file(*this, arg2, true))
           return EXIT_FAILURE;
       }
     } else if(set.compare(arg) == 0) {
@@ -190,10 +191,10 @@ int enter_cli(State& state, int argc, char* argv[]) {
 
       i += 2;
 
-      XReader reader(state, ss, "set variable");
+      XReader reader(*this, ss, "set variable");
       Value name, value;
 
-      AR_FRAME(state, name, value);
+      AR_FRAME(this, name, value);
 
       name = reader.read();
       value = reader.read();
@@ -201,22 +202,24 @@ int enter_cli(State& state, int argc, char* argv[]) {
       if(name.type() != SYMBOL) {
         std::cerr << "--set first argument must be a symbol" << std::endl;
       } else if(name.is_active_exception()) {
-        state.print_exception(std::cerr, name);
+        print_exception(std::cerr, name);
         std::cerr << "--set first argument resulted in an exception" << std::endl;
+        return EXIT_FAILURE;
       }
 
       if(value.is_active_exception()) {
-        state.print_exception(std::cerr, value);
+        print_exception(std::cerr, value);
         std::cerr << "--set second argument resulted in an exception" << std::endl;
+        return EXIT_FAILURE;
       }
 
       name.set_symbol_value(value);
     } else if(repl.compare(arg) == 0) {
-      if(do_repl(state, false) == false) {
+      if(do_repl(*this, false) == false) {
         return EXIT_FAILURE;
       }
     } else if(debug_gc.compare(arg) == 0) {
-      state.gc.collect_before_every_allocation = true;
+      gc.collect_before_every_allocation = true;
     } else {
       std::string cxxarg(arg);
       std::string badc(cxxarg.substr(0, bad.size()));
@@ -227,7 +230,7 @@ int enter_cli(State& state, int argc, char* argv[]) {
         return EXIT_FAILURE;
       } else {
         std::string path(argv[i]);
-        if(!do_file(state, path, false))
+        if(!do_file(*this, path, false))
           return EXIT_FAILURE;
       }
     }
