@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
-#include <fstream>
 #include <list>
 #include <iostream>
 #include <sstream>
@@ -387,23 +386,8 @@ struct Value {
 
   /** Return a pointer to a pair's source location. Note that this may be moved by the GC, so should
   be copied. */
-  SourceLocation* pair_src() const;
+  SourceLocation pair_src() const;
   void set_pair_src(const SourceLocation&);
-
-  // BOX
-
-  Value unbox() const;
-  Type boxed_type() const;
-  Value maybe_unbox() const;
-
-  static const unsigned BOX_SOURCE_BIT = 1 << 9;
-  bool box_has_source() const {
-    AR_TYPE_ASSERT(type() == BOX);
-    return heap->get_header_bit(BOX_SOURCE_BIT);
-  }
-
-  SourceLocation* box_src() const;
-  void set_box_src(const SourceLocation&);
 
   // EXCEPTION
   static const unsigned EXCEPTION_ACTIVE_BIT = 1 << 9;
@@ -512,10 +496,10 @@ struct Pair : HeapValue {
   static const unsigned char CLASS_TYPE = PAIR;
 };
 
-inline SourceLocation* Value::pair_src() const {
+inline SourceLocation Value::pair_src() const {
   AR_TYPE_ASSERT(type() == PAIR);
   AR_TYPE_ASSERT(pair_has_source());
-  return &(static_cast<Pair*>(heap)->src);
+  return (static_cast<Pair*>(heap)->src);
 }
 
 inline void Value::set_pair_src(const SourceLocation& loc) {
@@ -601,43 +585,6 @@ inline void Value::set_car(Value v) {
 inline void Value::set_cdr(Value v) {
   AR_TYPE_ASSERT(type() == PAIR);
   static_cast<Pair*>(heap)->data_cdr = v;
-}
-
-/// BOXES 
-
-struct Box : HeapValue {
-  Value value;
-  SourceLocation src;
-
-  static const unsigned CLASS_TYPE = BOX;
-};
-
-inline SourceLocation* Value::box_src() const {
-  AR_TYPE_ASSERT(type() == BOX);
-  AR_TYPE_ASSERT(box_has_source());
-  return &(static_cast<Box*>(heap)->src);
-}
-
-inline void Value::set_box_src(const SourceLocation& loc) {
-  AR_TYPE_ASSERT(type() == BOX);
-  AR_TYPE_ASSERT(box_has_source());
-  static_cast<Box*>(heap)->src = loc;
-}
-
-inline Value Value::unbox() const { return as<Box>()->value; }
-
-inline Type Value::boxed_type() const {
-  if(type() == BOX) {
-    return as<Box>()->value.type();
-  }
-  return type();
-}
-
-inline Value Value::maybe_unbox() const {
-  if(type() == BOX) {
-    return as<Box>()->value;
-  }
-  return heap;
 }
 
 /// EXCEPTIONS
@@ -991,7 +938,6 @@ struct GCSemispace : GCCommon {
         case FLONUM: case CHARACTER: case STRING: break;
         // One pointer
         case VECTOR:
-        case BOX:
         case CFUNCTION:
         case TABLE:
           AR_COPY(Vector, storage);
@@ -1137,7 +1083,6 @@ struct GCIncremental : GCCommon {
         break;
       // One pointer
       case VECTOR:
-      case BOX:
       case CFUNCTION:
       case TABLE:
         v = static_cast<CFunction*>(v)->name.heap;
@@ -1346,10 +1291,12 @@ struct State {
 
   typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
   size_t gensym_counter;
+  // Fascinating: removing this causes some kind of error with symbol_table_t.
+  // Some kind of C++ initialization issue, but I'm not sure what kind.
   bool print_expansions;
   symbol_table_t symbol_table;
 
-  State():  gc(*this), gensym_counter(0), print_expansions(0) {
+  State():  gc(*this), gensym_counter(0) {
     current_state = this;
   }
   ~State() {
@@ -1473,8 +1420,8 @@ struct State {
 
      // TODO: This is suitably confusing and there should probably be multiple vectors:
      // for symbols used directly, for symbols used to store values, and for other values (strings)
+    Value s;
     for(size_t i = 0; i != G_END; i++) {
-      Value s;
       if(i >= G_STR_MODULE_NAME) {
         s = make_string(_symbols[i]);
       } else {
@@ -1579,20 +1526,9 @@ struct State {
     return heap;
   }
 
-  Value make_src_box(Value v, SourceLocation& loc) {
-    Value box;
-    AR_FRAME(this, box, v);
-    box = gc.allocate(BOX, sizeof(Box));
-    box.heap->header += Value::BOX_SOURCE_BIT;
-    static_cast<Box*>(box.heap)->value = v;
-    box.set_box_src(loc);
-
-    return box;
-  }
-
   /** Generate a pair with source code information */
   Value make_src_pair(Value car, Value cdr, SourceLocation& loc) {
-    Value pare;
+    Value pare = C_FALSE;
     AR_FRAME(this, pare, car, cdr);
     pare = make_pair(car, cdr, sizeof(Pair));
     pare.heap->set_header_bit(Value::PAIR_SOURCE_BIT);
@@ -1945,7 +1881,7 @@ struct State {
    */
   void print_src_pair(std::ostream& os, Value pair) {
     if(pair.type() == PAIR && pair.pair_has_source()) {
-      SourceLocation src(*pair.pair_src());
+      SourceLocation src(pair.pair_src());
       print_src_line(os, src);
     }
   }
@@ -2049,9 +1985,9 @@ struct State {
   }
 
   /** Return a description of a source location */
-  std::string source_info(const SourceLocation* loc, Value fn_name = C_FALSE) {
+  std::string source_info(const SourceLocation loc, Value fn_name = C_FALSE) {
     std::ostringstream ss;
-    ss << source_names[loc->source] << ':' << loc->line;
+    ss << source_names[loc.source] << ':' << loc.line;
     if(fn_name == C_TRUE) 
       ss << " in toplevel";
     else if(fn_name != C_FALSE)
@@ -2063,7 +1999,7 @@ struct State {
   std::string source_info(Value expr, bool& found) {
     found = false;
     if(expr.type() == PAIR && expr.pair_has_source()) {
-      SourceLocation* loc = expr.pair_src();
+      SourceLocation loc = expr.pair_src();
       found = true;
       return source_info(loc);
     } else {
@@ -2116,6 +2052,7 @@ struct State {
     qname = get_symbol(qname);
     table_set(module, name, qname);
     if(set_value) {
+      std::cout << "qualified define: " << qname << std::endl;
       qname.set_symbol_value(value);
       module = table_get(module, globals[G_STR_MODULE_EXPORTS], found);
       table_set(module, name, C_TRUE);
@@ -2142,10 +2079,6 @@ struct State {
     if((exp).type() == PAIR && (exp).pair_has_source()) { \
       std::ostringstream os; \
       os << source_info((exp).pair_src(), (fn_name)); \
-      stack_trace.push_back(os.str()); \
-    } else if((exp).type() == BOX && (exp).box_has_source()) { \
-      std::ostringstream os; \
-      os << source_info((exp.box_src()), (fn_name)); \
       stack_trace.push_back(os.str()); \
     }
     
@@ -2333,7 +2266,7 @@ struct State {
     // Check for else clause
     pred = lst.caar();
     body = lst.cdar();
-    if(pred.maybe_unbox() == get_symbol(S_ELSE)) {
+    if(pred == get_symbol(S_ELSE)) {
       return eval_body(env,  fn_name, fn_name, body, body);
     } else {
       tmp = eval(env,  pred, fn_name);
@@ -2389,9 +2322,9 @@ struct State {
       return eval_error("lambda must be a list with at least three elements",  exp);
 
     args = exp.cadr();
-    if(args.maybe_unbox().identifierp()) {
+    if(args.identifierp()) {
       fn->arguments = C_NIL;
-      fn->rest_arguments = args.maybe_unbox();
+      fn->rest_arguments = args;
     } else {
       // First case: (lambda rest ...)
       if(args == C_NIL) {
@@ -2402,18 +2335,18 @@ struct State {
         fn->rest_arguments = C_FALSE;
         Value argi = args;
         while(argi.type() == PAIR) {
-          if(!argi.car().maybe_unbox().identifierp()) {
+          if(!argi.car().identifierp()) {
             return eval_error("lambda argument list all be identifiers", argi);
           }
-          argi.set_car(argi.car().maybe_unbox());
+          argi.set_car(argi.car());
           if(argi.cdr() == C_NIL) {
             break;
           } else if(argi.cdr().type() != PAIR) {
-            if(!argi.cdr().maybe_unbox().identifierp()) {
+            if(!argi.cdr().identifierp()) {
               return eval_error("lambda argument list must all be identifiers", args);
             }
 
-            fn->rest_arguments = argi.cdr().maybe_unbox();
+            fn->rest_arguments = argi.cdr();
             argi.set_cdr(C_NIL);
           }
           argi = argi.cdr();
@@ -2437,7 +2370,7 @@ struct State {
       return eval_error("define expects exactly three arguments", exp);
     }
 
-    name = exp.cadr().maybe_unbox();
+    name = exp.cadr();
 
     body = exp.caddr();
 
@@ -2460,8 +2393,9 @@ struct State {
     // will also define ##arete#core#not 
     if(get_global_value(G_EXPANDER) == C_UNDEFINED && env == C_FALSE) {
       qualified_define(get_global_value(G_MODULE_CORE), name, tmp);
-      // Value export_table = table_get(get_global_value(G_MODULE_CORE), globals[G_STR_MODULE_EXPORTS], found);
-      // table_set(export_table, name, C_TRUE);
+      bool found;
+      Value export_table = table_get(get_global_value(G_MODULE_CORE), globals[G_STR_MODULE_EXPORTS], found);
+      table_set(export_table, name, C_TRUE);
     } 
 
     if(env == C_FALSE) {
@@ -2473,7 +2407,7 @@ struct State {
 
     // TODO how to handle qualified names here? Should we just check the string? Probably.
     if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
-      tmp.as<Function>()->name = name.maybe_unbox();
+      tmp.as<Function>()->name = name;
     }
     // std::cout << "env_set " << env << ' ' << name << std::endl;
 
@@ -2488,7 +2422,7 @@ struct State {
       return eval_error("set! must be a list with exactly three elements");
     }
 
-    name = exp.cadr().maybe_unbox();
+    name = exp.cadr();
 
     if(name.type() != SYMBOL) {
       return eval_error("first argument to set! must be a symbol", exp.cdr());
@@ -2679,9 +2613,6 @@ struct State {
         }
         car = exp.car();
 
-        // Handle syntactic forms
-        car = car.maybe_unbox();
-        
         // Check for rename in application
         if(car.type() == RENAME) {
           tmp = car.rename_expr();
@@ -2720,7 +2651,7 @@ struct State {
           } else if(car == get_symbol(S_QUOTE)) {
             if(length == 1) return eval_error("quote needs at least one argument", exp);
             else if(length > 2) return eval_error("quote takes exactly 1 argument", exp.cddr());
-            return exp.cadr().maybe_unbox();
+            return exp.cadr();
           }
           // form, let, set!, if, quote
         } 
@@ -2774,11 +2705,13 @@ struct State {
       }
       case BOX:
       case SYMBOL: {
+        #if 0 
         if(exp.type_unsafe() == BOX) {
           // spaghetti coding: just re-using car here to store box with source code
           car = exp;
           exp = exp.unbox();
         }
+        #endif
 
         res = env_lookup(env, exp);
 
@@ -2823,7 +2756,7 @@ struct State {
       Value args, sym, mod;
       AR_FRAME(this, expand, exp, args, sym);
       args = make_pair(get_global_value(G_CURRENT_MODULE), C_NIL);
-      args = make_pair(exp.maybe_unbox(), args);
+      args = make_pair(exp, args);
 
       exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
       if(exp.is_active_exception()) {
@@ -3143,9 +3076,6 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         return os << "#R:local:" << sym;
       }
     }
-    case BOX:
-      //return os << "&" << v.unbox();
-      return os << v.unbox();
     case TABLE:
       return os << "#<table entries: " << v.as<Table>()->entries << '>';
     case EXCEPTION:

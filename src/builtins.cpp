@@ -416,16 +416,14 @@ Value fn_cons_source(State& state, size_t argc, Value* argv) {
     return state.make_pair(argv[1], argv[2]);
   }
 
-  AR_FN_ASSERT_ARG(state, 0, "to be a box or pair with source information",
-    (type == PAIR && src.pair_has_source() || type == BOX && src.box_has_source()));
+  AR_FN_ASSERT_ARG(state, 0, "to be a pair with source information",
+    (type == PAIR && src.pair_has_source()));
   kar = argv[1];
   kdr = argv[2];
   SourceLocation loc;
   if(type == PAIR) {
-    loc = *(src.pair_src());
-  } else {
-    loc = *(src.box_src());
-  }
+    loc = (src.pair_src());
+  } 
   pare = state.make_src_pair(kar, kdr, loc);
   return pare;
 }
@@ -441,7 +439,7 @@ Value fn_list_impl(State& state, size_t argc, Value* _argv, bool copy_source) {
 
   if(copy_source) {
     if(_argv[0].type() == PAIR && _argv[0].pair_has_source()) {
-      loc = *_argv[0].pair_src();
+      loc = _argv[0].pair_src();
     }
   }
 
@@ -522,7 +520,7 @@ Value fn_list_ref(State& state, size_t argc, Value* argv) {
     h = h.cdr();
   }
 
-  return h.car().maybe_unbox();
+  return h.car();
 }
 
 Value fn_list_join(State& state, size_t argc, Value* argv) {
@@ -567,17 +565,23 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
   AR_FRAME(state, nlst_head, nlst_current, lst, fn, arg, tmp);
 
   while(lst.type() == PAIR) {
-    arg = state.make_pair(lst.car().maybe_unbox(), C_NIL);
+    arg = state.make_pair(lst.car(), C_NIL);
     tmp = state.apply_generic(fn, arg, false);
     if(tmp.is_active_exception()) return tmp;
     if(ret) {
-      if(nlst_current == C_NIL) {
-        nlst_head = nlst_current = state.make_pair(tmp, C_NIL);
-      } else {
+      // Try to preserve source information if it's available
+      if(lst.pair_has_source()) {
+        SourceLocation src = (lst.pair_src());
+        tmp = state.make_src_pair(tmp, C_NIL, src);
+      } else{
         tmp = state.make_pair(tmp, C_NIL);
+      }
+
+      if(nlst_current == C_NIL) {
+        nlst_head = nlst_current = tmp; // state.make_pair(tmp, C_NIL);
+      } else {
         nlst_current.set_cdr(tmp);
         nlst_current = tmp;
-
       }
     }
     lst = lst.cdr();
@@ -585,7 +589,7 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
 
   if(lst != C_NIL) {
     if(improper) {
-      arg = state.make_pair(lst.maybe_unbox(), C_NIL);
+      arg = state.make_pair(lst, C_NIL);
       tmp = state.apply_generic(fn, arg, false);
       if(tmp.is_active_exception()) return tmp;
       if(ret) {
@@ -682,13 +686,13 @@ Value fn_apply(State& state, size_t argc, Value* argv) {
 Value fn_car(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "car";
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
-  return argv[0].car().maybe_unbox();
+  return argv[0].car();
 }
 
 Value fn_cdr(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "cdr";
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
-  return argv[0].cdr().maybe_unbox();
+  return argv[0].cdr();
 }
 
 ///// VECTORS
@@ -1155,17 +1159,6 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   return fn;
 }
 
-Value fn_set_print_expansions(State& state, size_t argc, Value* argv) {
-  // static const char* fn_name = "set-print-expansions!";
-
-  if(argv[0] == C_FALSE) {
-    state.print_expansions = false;
-  } else {
-    state.print_expansions = true;
-  }
-
-  return C_UNSPECIFIED;
-}
 
 Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-value";
@@ -1366,8 +1359,6 @@ void State::install_core_functions() {
   defun_core("set-function-name!", fn_set_function_name, 2);
   defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun_core("function-env", fn_function_env, 1);
-
-  defun_core("set-print-expansions!", fn_set_print_expansions, 1);
 }
 
 }

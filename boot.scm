@@ -431,7 +431,6 @@
         (set! bindings (list-ref x 1))
         (set! body (cddr x))))
 
-
     (set! names
       (map (lambda (binding)
              (if (not (list? binding))

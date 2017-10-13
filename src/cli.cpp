@@ -113,6 +113,7 @@ static bool do_repl(State& state, bool read_only) {
   }
 
   linenoiseHistorySave(hist_file.str().c_str());
+  linenoiseHistoryFree();
   return true;
 }
 
