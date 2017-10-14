@@ -1392,16 +1392,6 @@ struct State {
     // Global variables
     G_EXPANDER_PRINT,
     G_EXPANDER,
-    G_CURRENT_MODULE,
-    G_MODULE_TABLE,
-    G_MODULE_CORE,
-    // Module internals
-    G_STR_MODULE_NAME,
-    G_STR_MODULE_RENAMES,
-    G_STR_MODULE_IMPORTS,
-    G_STR_MODULE_STAGE,
-    G_STR_MODULE_EXPORT_ALL,
-    G_STR_MODULE_EXPORTS,
     G_END
   };
 
@@ -1427,13 +1417,7 @@ struct State {
       "file", "read", "eval", "type", "expand", "syntax",
       // Various variables
       "*expander-print*",
-      "expander", "current-module", "module-table", "core",
-      "module-name",
-      "module-renames",
-      "module-imports",
-      "module-stage",
-      "module-export-all",
-      "module-exports",
+      "expander"
     };
 
     AR_ASSERT((sizeof(_symbols) / sizeof(const char*)) == G_END &&
@@ -1443,7 +1427,7 @@ struct State {
      // for symbols used directly, for symbols used to store values, and for other values (strings)
     Value s;
     for(size_t i = 0; i != G_END; i++) {
-      if(i >= G_STR_MODULE_NAME) {
+      if(i >= G_END) {
         s = make_string(_symbols[i]);
       } else {
         s = get_symbol(_symbols[i]);
@@ -1456,10 +1440,6 @@ struct State {
       }
       globals.push_back(s);
     }
-
-    set_global_value(G_MODULE_TABLE, make_table());
-    set_global_value(G_MODULE_CORE, instantiate_module("arete#core", 2, true));
-    set_global_value(G_CURRENT_MODULE, get_global_value(G_MODULE_CORE));
 
     install_core_functions();
     // gc.allocations = 0;
@@ -1827,45 +1807,6 @@ struct State {
     return table;
   }
   
-  Value instantiate_module(const std::string& cname, ptrdiff_t module_stage = 0, bool export_all = false) {
-    Value tbl, tmp, module_tbl;
-    AR_FRAME(this, tbl, module_tbl, tmp);
-
-    tmp = make_string(cname);
-
-    module_tbl = get_global_value(G_MODULE_TABLE);
-
-    bool found;
-    tbl = table_get(module_tbl, tmp, found);
-
-    if(!found) {
-      tbl = make_table();
-      // Install in module table
-      table_set(module_tbl, tmp, tbl);
-      // Initialize fields: module-name is the name string, module-renames and module-imports
-      // are (initially empty) vectors
-
-      table_set(tbl, globals[G_STR_MODULE_NAME], tmp);
-
-      tmp = make_vector();
-      table_set(tbl, globals[G_STR_MODULE_RENAMES], tmp);
-
-      tmp = make_vector();
-      table_set(tbl, globals[G_STR_MODULE_IMPORTS], tmp);
-
-      tmp = make_table();
-      table_set(tbl, globals[G_STR_MODULE_EXPORTS], tmp);
-
-      tmp = Value::make_fixnum(module_stage);
-      table_set(tbl, globals[G_STR_MODULE_STAGE], tmp);
-
-      table_set(tbl, globals[G_STR_MODULE_EXPORT_ALL], Value::make_boolean(export_all));
-    } 
-
-    return tbl;
-
-  }
-
   Value make_c_function(Value name, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
     if(max_arity == 0)
       max_arity = min_arity;
@@ -2067,27 +2008,6 @@ struct State {
 
   void install_core_functions();
 
-  /** Define a variable on a module and on a global, qualified symbol */
-  void qualified_define(Value module, Value name, Value value, bool set_value = true) {
-    // name = unqualified, qname = qualified
-    // my-variable becomes ##my-module#my-variable
-    Value qname, module_name;
-    AR_FRAME(this, module, module_name, qname, name, value);
-    bool found;
-    module_name = table_get(module, globals[G_STR_MODULE_NAME], found);
-    AR_ASSERT(found);
-    std::ostringstream cqname;
-    cqname << "##" << module_name.string_data() << "#" << name;
-    qname = make_string(cqname.str());
-    qname = get_symbol(qname);
-    table_set(module, name, qname);
-    if(set_value) {
-      qname.set_symbol_value(value);
-      module = table_get(module, globals[G_STR_MODULE_EXPORTS], found);
-      table_set(module, name, C_TRUE);
-    }
-  }
-
   /** Defines a function both in the core module and as a top-level value; used during booting */
   void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
     Value cfn, sym, name;
@@ -2099,7 +2019,6 @@ struct State {
     sym = get_symbol(name);
     sym.set_symbol_value(cfn);
 
-    qualified_define(get_global_value(G_MODULE_CORE), sym, cfn);
   }
  
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
@@ -2162,11 +2081,6 @@ struct State {
       }
     } else if(env == C_FALSE) {
       return name.symbol_value() != C_UNDEFINED;
-    } else if(env.type() == TABLE) {
-      bool found;
-      Value tmp = table_get(env, name, found);
-      (void) tmp;
-      return found;
     }
     return false;
   }
@@ -2203,20 +2117,9 @@ struct State {
       name = name.rename_expr();
     }
 
-    AR_ASSERT(env.type() == TABLE || env == C_FALSE);
-
-    if(env != C_FALSE) {
-      bool found;
-      Value chk = table_get(env, name, found);
-      if(found)  {
-        AR_ASSERT(chk.type() == SYMBOL);
-        return chk.symbol_value();
-      }
-    }
-
     reached_toplevel = true;
 
-    AR_ASSERT(name.type() != RENAME);
+    AR_ASSERT(name.type() == SYMBOL);
 
     return name.as<Symbol>()->value;
   }
@@ -2263,7 +2166,7 @@ struct State {
     if(expand != C_UNDEFINED) {
       Value args, sym, mod;
       AR_FRAME(this, expand, exp, args, sym);
-      args = make_pair(get_global_value(G_CURRENT_MODULE), C_NIL);
+      args = make_pair(C_FALSE, C_NIL);
       args = make_pair(exp, args);
 
       exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
@@ -2275,13 +2178,6 @@ struct State {
       if(get_global_value(G_EXPANDER_PRINT) == C_TRUE) {
         std::cout << "Expanded: " << exp << std::endl;
       }
-
-      // Clear rename vector before every invocation.
-      mod = get_global_value(G_CURRENT_MODULE);
-      bool found;
-      Value renames = table_get(mod, globals[G_STR_MODULE_RENAMES], found);
-      AR_ASSERT(found);
-      renames.vector_clear();
     } 
 
     return exp;

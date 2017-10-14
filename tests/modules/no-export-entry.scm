@@ -1,2 +1,0 @@
-(import (no-export))
-var

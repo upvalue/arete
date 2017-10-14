@@ -1,7 +1,7 @@
-/src/*.d
+*.d
+*.o
 /arete
 /tests/test-incremental
 /tests/test-semispace
-*.o
 vgcore*
 /site.mk

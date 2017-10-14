@@ -187,18 +187,6 @@ Value State::eval_define(Value env,  Value exp, Value fn_name) {
 
   EVAL_CHECK(tmp, exp, fn_name);
 
-  // Hacky hack. Because the macroexpander defines several functions before it can be installed 
-  // and begin qualifying names by module, we simply mirror all definitions before it's installed
-  // into the arete#core module
-  // e.g. (define not (lambda (x) (eq? x #f)))
-  // will also define ##arete#core#not 
-  if(get_global_value(G_EXPANDER) == C_UNDEFINED && env == C_FALSE) {
-    qualified_define(get_global_value(G_MODULE_CORE), name, tmp);
-    bool found;
-    Value export_table = table_get(get_global_value(G_MODULE_CORE), globals[G_STR_MODULE_EXPORTS], found);
-    table_set(export_table, name, C_TRUE);
-  } 
-
   if(env == C_FALSE) {
     name.as<Symbol>()->value = tmp;
   } else {

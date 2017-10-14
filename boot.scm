@@ -117,7 +117,7 @@
 
         (set! name (env-resolve env name)))
       ;; If this isn't a module, we have to note it as a 'variable so env-resolve will treat it as a local variable
-      (env-define env name 'variable))
+      (env-define env name 'variable (not (eq? env #f))))
 
     (define result (list-source x (car x) name (expand value env)))
     ;(print result)

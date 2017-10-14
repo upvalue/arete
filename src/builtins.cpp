@@ -53,48 +53,7 @@ Value State::load_file(const std::string& path) {
 
 // Various state methods that rely on forward declarations
 Value State::load_module(const std::string& identifier) {
-  std::ostringstream os;
-
-  for(size_t i = 0; i != identifier.size(); i++) {
-    if(identifier[i] == '#') {
-      os << '/';
-    } else {
-      os << identifier[i];
-    }
-  }
-
-  os << ".sld";
-
-  for(size_t i = 0; i != load_paths.size(); i++) {
-    std::ostringstream file_path;
-    file_path << load_paths[i] << '/' << os.str();
-    // std::cout << ";; trying file " << file_path.str() << std::endl;
-    std::ifstream handle(file_path.str());
-
-    if(!handle.good()) {
-      continue;
-    }
-
-    Value result = load_stream(handle);
-
-    if(result.is_active_exception()) return result;
-
-    Value str = make_string(identifier);
-
-    bool found;
-    table_get(get_global_value(G_MODULE_TABLE), str, found);
-
-    if(!found) {
-      os << "expected file " << file_path.str() << " to provide module " << identifier;
-      return make_exception(globals[S_EVAL_ERROR], os.str());
-    }
-    
-    return C_UNSPECIFIED;
-  }
-
-  std::ostringstream msg;
-  msg << "Could not find file " << os.str();
-  return eval_error(msg.str());
+  return C_FALSE;
 }
 
 // Casting arithmetic
@@ -814,7 +773,7 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
 
 /** Macro that asserts an argument is a valid environment */
 #define AR_FN_EXPECT_ENV(state, n) \
- AR_FN_ASSERT_ARG((state), (n), "to be a valid environment (vector, table or #f)", argv[(n)].type() == VECTOR || argv[(n)].type() == TABLE || argv[(n)] == C_FALSE);
+ AR_FN_ASSERT_ARG((state), (n), "to be a valid environment (vector or #f)", argv[(n)].type() == VECTOR || argv[(n)] == C_FALSE);
 
 #define AR_FN_EXPECT_IDENT(state, n) \
   AR_FN_ASSERT_ARG((state), (n), "to be a valid identifier (symbol or rename)", argv[(n)].identifierp())
@@ -834,120 +793,13 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
   AR_FRAME(state, env, name, value);
 
   if(argv[0] == C_FALSE) {
-    name.as<Symbol>()->value = value;
-  } else if(argv[0].type() == TABLE) {
-    // Fourth argument, if provided, tells us NOT to set the value of the global variable
+    if(argc == 4 && argv[3] == C_TRUE) {
+      name.as<Symbol>()->value = value;
+    }
 
-    // This is necessary when noting down variables that are defined at the top-level of a module
-
-    // We only want to point references to those variables at the global variable, not actually set
-    // them
-
-    // Otherwise, this is a macro definition and we do want to set the global value immediately
-    // so it can be referenced from other modules
-    state.qualified_define(env, name, value, argc != 4);
   } else {
     state.vector_append(env, name);
     state.vector_append(env, value);
-  }
-
-  return C_UNSPECIFIED;
-}
-
-// Resolve an unqualified symbol in a module
-// e.g. x, if defined in a module user, becomes ##user#x, if not this returns a boolean indicating
-// it failed
-Value fn_env_resolve_symbol(State& state, bool& found, Value module, Value name) {
-  Value mname = state.table_get(module, state.globals[State::G_STR_MODULE_NAME], found);
-  (void) mname;
-  AR_ASSERT(found && "fn_env_resolve_symbol table_get G_STR_MODULE_NAME failed, probably passed a bad module");
-
-  return state.table_get(module, name, found);
-}
-
-// (module-import! <module> <import-module> <rule> <list>)
-
-// Where module is a module, rule is either #f indicating an unqualified import or 
-// one of 'only 'rename 'except 'prefix
-
-// List is either a list of symbols, or in the case of rename a list of lists with two symbols
-// as members.
-
-// Copies all keys as specified by rule from import-module into module
-
-// First case, let's make this work
-
-// (define-library (lib) (export hello) (begin (define (hello) #t)))
-// (import (lib))
-
-Value fn_module_import(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "module-import!";
-  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
-  AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
-  AR_FN_EXPECT_TYPE(state, argv, 2, SYMBOL);
-  AR_FN_ASSERT_ARG(state, 3, "to be a list, symbol or table", (argv[3].type() == TABLE || argv[3].type() == SYMBOL || argv[3] == C_NIL || argv[3].list_length() > 0));
-
-  Value module = argv[0], import_module = argv[1], rule = argv[2], symbols = argv[3], chains, chain,
-    cell, name, qname, import_module_exports, tmp, prefix = C_FALSE;
-
-  AR_FRAME(state, module, import_module, rule, symbols, chains, chain, cell, name, qname,
-    import_module_exports, tmp, prefix);
-
-  bool found;
-  import_module_exports = state.table_get(import_module, state.globals[State::G_STR_MODULE_EXPORTS], found);
-
-  if(import_module_exports == C_FALSE) {
-    tmp = state.table_get(import_module, state.globals[State::G_STR_MODULE_EXPORT_ALL], found);
-    // Module exports no variables
-    if(tmp != C_TRUE) {
-      return C_UNSPECIFIED;
-    }
-  }
-
-  if(rule == state.globals[State::S_PREFIX]) {
-    prefix = argv[3];
-  }
-
-  // Copy everything
-
-  chains = import_module.as<Table>()->chains;
-  for (size_t i = 0; i != chains.as<VectorStorage>()->length; i++) {
-    chain = chains.as<VectorStorage>()->data[i];
-    while(chain.type() == PAIR) {
-      cell = chain.car();
-
-      name = cell.car();
-      qname = cell.cdr();
-
-      chain = chain.cdr();
-
-      if(import_module_exports != C_FALSE) {
-        state.table_get(import_module_exports, name, found);
-        if(!found) { 
-          continue;
-        }
-      }
-
-      // Except would go here: continue if name is in except list.
-      // Only would also go here: continue if name is NOT in only list.
-      qname = cell.cdr();
-
-      // We do not copy strings which are used to store module internals
-      if(name.type() == SYMBOL) {
-        std::ostringstream nname;
-        if(prefix != C_FALSE) {
-          std::ostringstream nname;
-          nname << prefix << name;
-          tmp = state.get_symbol(nname.str());
-          // std::cout << "defining " << tmp << " as " << qname << std::endl;
-          state.table_set(module, tmp, qname);
-        } else if(rule == state.globals[State::S_RENAME]) {
-
-        } else {
-          state.table_set(module, name, qname);
-        }
-      }
-    }
   }
 
   return C_UNSPECIFIED;
@@ -995,51 +847,7 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
     } 
   }
 
-  name = argv[1];
-
-  // Table-level renames also become gensyms
-  if(env.type() == TABLE && argv[1].type() == RENAME) {
-    bool found;
-    renames = state.table_get(env, state.globals[State::G_STR_MODULE_RENAMES], found);
-
-
-    AR_ASSERT(found);
-    AR_ASSERT(renames.type() == VECTOR);
-
-    if(renames.vector_length() > 0) {
-      // Search list of renames
-      for(size_t i = renames.vector_length(); i != 0; i--) {
-        if(state.identifier_equal(renames.vector_ref(i-1), argv[1])) {
-          return renames.vector_ref(i-1).rename_gensym();
-        }
-      }
-    }
-    name = name.rename_expr();
-  }
-
-  AR_ASSERT(env.type() == TABLE && "env-resolve did not successfully get to table");
-  AR_ASSERT(name.type() == SYMBOL && "env-resolve failed to resolve a rename, this should never happen");
-
-  // Check exports list
-
-  // Enforce rules:
-
-  bool found;
-  qname = fn_env_resolve_symbol(state, found, env, name);
-
-  // If we've failed to resolve this variable, it's either (a) a truly bad variable reference
-  // or (b) has been defined somewhere below the call to env-resolve. We'll return a qualified
-  // symbol for the module and deal with the error later.
-  if(qname == C_FALSE) {
-    mname = state.table_get(env, state.globals[State::G_STR_MODULE_NAME], found);
-    AR_ASSERT(found && "env-resolve table_get G_STR_MODULE_NAME failed, probably passed a bad module");
-
-    std::ostringstream qname;
-    qname << "##" << mname.string_data() << "#" << name;
-    return state.get_symbol(qname.str());
-  }
-
-  return qname;
+  return argv[1];
 }
 
 Value fn_env_compare(State& state, size_t argc, Value* argv) {
@@ -1111,19 +919,6 @@ Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
 
   if(result == C_SYNTAX) return C_TRUE;
   return Value::make_boolean(result.type() == FUNCTION && result.function_is_macro());
-}
-
-Value fn_module_instantiate(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "module-instantiate!";
-  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
-  std::string str(argv[0].string_data());
-
-  return state.instantiate_module(str);
-}
-
-Value fn_module_load(State& state, size_t argc, Value* argv) {
-  std::string str(argv[0].string_data());
-  return state.load_module(str);
 }
 
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
@@ -1234,10 +1029,6 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
 }
 
 void State::install_core_functions() {
-  Value core = get_global_value(G_MODULE_CORE);
-
-  AR_FRAME(this, core);
-
   // Numbers
   defun_core("fx+", fn_fx_add, 1, 1, true);
   defun_core("fx=", fn_fx_equals, 2, 2, true);
@@ -1341,12 +1132,7 @@ void State::install_core_functions() {
   defun_core("env-compare", fn_env_compare, 3);
   defun_core("env-lookup", fn_env_lookup, 2);
   defun_core("env-syntax?", fn_env_syntaxp, 2);
-
-  // Modules
-  defun_core("module-instantiate!", fn_module_instantiate, 1);
-  defun_core("module-import!", fn_module_import, 4);
-  defun_core("module-load!", fn_module_load, 1);
-
+  
   // Renames
   defun_core("make-rename", fn_make_rename, 2);
   defun_core("rename-gensym!", fn_rename_set_gensym, 1);
