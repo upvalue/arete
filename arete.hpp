@@ -1,5 +1,16 @@
+// arete.hpp - scheme implementation
 #ifndef ARETE_HPP
 #define ARETE_HPP
+
+///// Table of contents 
+// PRE! Preprocessor macros and compile-time configuration options 
+// FWD! Forward declarations
+// TYPE! Internal value representation and basic operations
+// GC! Garbage collection
+// RUN! Runtime 
+// CLI! Command line interface
+// READ! S-expression input and output
+// MISC! Various inline functions 
 
 #include <assert.h>
 #include <stdlib.h>
@@ -11,6 +22,23 @@
 #include <vector>
 #include <unordered_map>
 #include <chrono>
+
+
+///// PRE! Preprocessor macros and compile-time configuration macros
+
+
+// 0 = Do not evaluate assertions, internal assertions
+// 1 = Print warnings, disable some internal assertions
+// 2 = Use ARETE_ASSERTION_FAIL macro on failure (by default, exits program)
+
+#ifdef ARETE_DEV
+# define ARETE_GC_DEBUG 1
+# define ARETE_ASSERTION_LEVEL 2
+#endif
+
+#ifndef ARETE_ASSERTION_LEVEL 
+# define ARETE_ASSERTION_LEVEL 2
+#endif
 
 #ifndef AR_ASSERT
 # define AR_ASSERT assert
@@ -87,7 +115,8 @@
 
 namespace arete {
 
-// Forward declarations
+// FWD! Forward declarations
+
 struct State;
 struct Block;
 struct Value;
@@ -102,6 +131,8 @@ extern State* current_state;
 typedef Value (*c_function_t)(State&, size_t, Value*);
 
 std::ostream& operator<<(std::ostream& os,  Value);
+
+///// TYPE! Internal value representation and basic operations
 
 //= # Value representation
 
@@ -752,7 +783,7 @@ inline ptrdiff_t hash_value(Value x, bool& unhashable) {
   }
 }
 
-///// (GC) Garbage collector
+///// GC! Garbage collection
 
 struct GC;
 
@@ -1268,6 +1299,8 @@ struct GCIncremental : GCCommon {
   }
 };
 
+// RUN! The Arete Runtime
+
 /** A re-entrant instance of the Arete runtime */
 struct State {
 
@@ -1357,7 +1390,7 @@ struct State {
     S_EXPAND_ERROR,
     S_SYNTAX_ERROR,
     // Global variables
-    G_PRINT_EXPAND,
+    G_EXPANDER_PRINT,
     G_EXPANDER,
     G_CURRENT_MODULE,
     G_MODULE_TABLE,
@@ -1393,7 +1426,7 @@ struct State {
       // Tags for errors that may be thrown by the runtime
       "file", "read", "eval", "type", "expand", "syntax",
       // Various variables
-      "*print-expand*",
+      "*expander-print*",
       "expander", "current-module", "module-table", "core",
       "module-name",
       "module-renames",
@@ -1934,9 +1967,19 @@ struct State {
     if(exc.exception_tag() == globals[State::S_EVAL_ERROR]) {
       os << "Evaluation error: " << exc.exception_message().string_data() << std::endl;
       print_src_pair(os, exc.exception_irritants());
-    } else if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]) {
+    } else if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]
+      || exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {
+
       Value irritants = exc.exception_irritants();
-      os << "Expansion error: " << exc.exception_message().string_data() << std::endl;
+
+      if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]) {
+        os << "Error during expansion: ";
+      } else if(exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {
+        os << "Error in macro synatx: ";
+      }
+
+      os << exc.exception_message().string_data() << std::endl;
+
       if(irritants.list_length() == 1) {
         print_src_pair(os, irritants.list_ref(0));
       } else if(irritants.list_length() == 2) {
@@ -2229,7 +2272,7 @@ struct State {
         return exp;
       }
 
-      if(get_global_value(G_PRINT_EXPAND) == C_TRUE) {
+      if(get_global_value(G_EXPANDER_PRINT) == C_TRUE) {
         std::cout << "Expanded: " << exp << std::endl;
       }
 
@@ -2265,7 +2308,6 @@ struct State {
 
 ///// READ! S-Expression reader
 
-/* Expression reader */
 struct XReader {
   /** Instance of the Arete runtime */
   State& state;
@@ -2295,6 +2337,7 @@ struct XReader {
     TK_UNQUOTE,
     TK_UNQUOTE_SPLICING,
     TK_QUASIQUOTE,
+    TK_RENAME,
     TK_FLONUM,
     TK_FIXNUM,
     TK_CHARACTER,
@@ -2372,92 +2415,12 @@ struct XReader {
 
   TokenType next_token();
   Value read_aux(const std::string&, unsigned, Value);
+  // #'asdf => (rename (quote asdf))
+  Value read_aux2(const std::string&, unsigned, Value, Value);
   Value read_expr(TokenType);
   /** The entry point for reading an expression */
   Value read();
 };
-
-// Various inline functions relying on State and GC having been declared
-
-inline void GCIncremental::mark_symbol_table() {
-  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
-  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
-    mark(x->second);
-  }
-}
-
-inline void GCSemispace::copy_roots() {
-  // std::cout << state.symbol_table.size() << " live symbols" << std::endl;
-  for(size_t i = 0; i != frames.size(); i++) {
-    Frame* f = frames[i];
-    for(size_t j = 0; j != f->size; j++) {
-      copy(f->values[j]);
-    }
-  }
-
-  for(size_t i = 0; i != state.globals.size(); i++) {
-    copy(&state.globals[i].heap);
-  }
-
-  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
-    copy(&((*i)->ref.heap));
-  }
-
-  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
-  // TODO: To make this a weak table, simply check for RESERVED in this. If forwarded, set it up
-  // otherwise delete reference
-  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
-    HeapValue* v = x->second;
-    copy(&v);
-    state.symbol_table[x->first] = (Symbol*) v;
-  }
-}
-
-inline Type Value::type() const {
-  if(!immediatep()) {
-    ARETE_ASSERT_LIVE(heap);
-  }
-  return type_unsafe();
-}
-
-inline Frame::Frame(State& state_, size_t size_, HeapValue*** ptrs): state(state_), size(size_), values(ptrs) {
-  state.gc.frames.push_back(this);
-}
-
-inline Frame::Frame(State* state_, size_t size_, HeapValue*** ptrs): state(*state_), size(size_), values(ptrs) {
-  state.gc.frames.push_back(this);
-}
-
-inline Frame::~Frame() {
-  AR_ASSERT(state.gc.frames.back() == this);
-  state.gc.frames.pop_back();
-}
-
-inline Handle::Handle(State& state_): state(state_), ref(C_FALSE) { initialize(); }
-inline Handle::Handle(State& state_, Value ref_): state(state_), ref(ref_) { initialize(); }
-inline Handle::Handle(const Handle& cpy): state(cpy.state), ref(cpy.ref) {
-  it = state.gc.handles.insert(state.gc.handles.end(), this);
-}
-
-inline void Handle::initialize() {
-  it = state.gc.handles.insert(state.gc.handles.end(), this);
-}
-
-inline Handle::~Handle() {
-  state.gc.handles.erase(it);
-}
-
-///// CLI! 
-// Command line interface
-
-/**
- * Hand over execution to the Arete CLI under the given State
- * @returns an exit code 
- */
-int enter_cli(State&, int, char*[]);
-
-///// TEST! 
-// Functionality related to builtin unit tests
 
 /** Output Arete values */
 inline std::ostream& operator<<(std::ostream& os, Value v) {
@@ -2558,6 +2521,88 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
   }
   return os;
 }
+
+// MISC! Various inline functions 
+
+inline void GCIncremental::mark_symbol_table() {
+  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
+  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
+    mark(x->second);
+  }
+}
+
+inline void GCSemispace::copy_roots() {
+  // std::cout << state.symbol_table.size() << " live symbols" << std::endl;
+  for(size_t i = 0; i != frames.size(); i++) {
+    Frame* f = frames[i];
+    for(size_t j = 0; j != f->size; j++) {
+      copy(f->values[j]);
+    }
+  }
+
+  for(size_t i = 0; i != state.globals.size(); i++) {
+    copy(&state.globals[i].heap);
+  }
+
+  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
+    copy(&((*i)->ref.heap));
+  }
+
+  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
+  // TODO: To make this a weak table, simply check for RESERVED in this. If forwarded, set it up
+  // otherwise delete reference
+  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
+    HeapValue* v = x->second;
+    copy(&v);
+    state.symbol_table[x->first] = (Symbol*) v;
+  }
+}
+
+inline Type Value::type() const {
+  if(!immediatep()) {
+    ARETE_ASSERT_LIVE(heap);
+  }
+  return type_unsafe();
+}
+
+inline Frame::Frame(State& state_, size_t size_, HeapValue*** ptrs): state(state_), size(size_), values(ptrs) {
+  state.gc.frames.push_back(this);
+}
+
+inline Frame::Frame(State* state_, size_t size_, HeapValue*** ptrs): state(*state_), size(size_), values(ptrs) {
+  state.gc.frames.push_back(this);
+}
+
+inline Frame::~Frame() {
+  AR_ASSERT(state.gc.frames.back() == this);
+  state.gc.frames.pop_back();
+}
+
+inline Handle::Handle(State& state_): state(state_), ref(C_FALSE) { initialize(); }
+inline Handle::Handle(State& state_, Value ref_): state(state_), ref(ref_) { initialize(); }
+inline Handle::Handle(const Handle& cpy): state(cpy.state), ref(cpy.ref) {
+  it = state.gc.handles.insert(state.gc.handles.end(), this);
+}
+
+inline void Handle::initialize() {
+  it = state.gc.handles.insert(state.gc.handles.end(), this);
+}
+
+inline Handle::~Handle() {
+  state.gc.handles.erase(it);
+}
+
+///// CLI! 
+// Command line interface
+
+/**
+ * Hand over execution to the Arete CLI under the given State
+ * @returns an exit code 
+ */
+int enter_cli(State&, int, char*[]);
+
+///// TEST! 
+// Functionality related to builtin unit tests
 
 } // namespace arete
 

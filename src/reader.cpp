@@ -209,6 +209,7 @@
 
         if(c2 == 't') return TK_TRUE;
         else if(c2 == 'f') return TK_FALSE;
+        else if(c2 == '\'') return TK_RENAME;
         else if(c2 == '(') return TK_VECTOR_OPEN;
         else if(c2 == '\\') {
           // Character literals
@@ -346,6 +347,20 @@ Value XReader::read_aux(const std::string& text, unsigned highlight_size, Value 
   return make_src_pair(symbol, x, cline, cposition, position - cposition);
 }
 
+Value XReader::read_aux2(const std::string& text, unsigned highlight_size, Value symbol,
+    Value symbol2) {
+  unsigned cline = token_start_line, cposition = token_start_position;
+
+  Value x;
+  
+  AR_FRAME(state, x, symbol, symbol2);
+  x = read_aux(text, highlight_size, symbol);
+  if(x.is_active_exception()) return x;
+
+  x = state.make_pair(x, C_NIL);
+  return make_src_pair(symbol2, x, cline, cposition, position - cposition);
+}
+
 Value XReader::read_expr(TokenType tk) {
 #define NEXT_TOKEN(name) \
     name = next_token(); if(active_error != C_FALSE) { return active_error; }
@@ -409,6 +424,8 @@ Value XReader::read_expr(TokenType tk) {
     case TK_UNQUOTE: return read_aux("after ,", 2, state.globals[State::S_UNQUOTE]);
     case TK_QUASIQUOTE: return read_aux("after `", 1, state.globals[State::S_QUASIQUOTE]);
     case TK_QUOTE: return read_aux("after '", 1, state.globals[State::S_QUOTE]);
+    case TK_RENAME: return read_aux2("after #'", 1, state.globals[State::S_QUOTE],
+      state.globals[State::S_RENAME]);
     case TK_UNQUOTE_SPLICING:
      return read_aux("after ,@", 2, state.globals[State::S_UNQUOTE_SPLICING]);
 

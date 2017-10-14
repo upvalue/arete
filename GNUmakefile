@@ -66,4 +66,4 @@ count:
 	cloc arete.hpp $(wildcard src/*.cpp) boot.scm
 
 clean:
-	rm -f arete test $(patsubst *.o,*.d,$(CXXOBJS)) $(CXXOBJS) tests/test-semispace tests/test-incremental
+	rm -f arete test $(patsubst *.o,*.d,$(CXXOBJS)) $(CXXOBJS) src/main.o tests/test-semispace tests/test-incremental

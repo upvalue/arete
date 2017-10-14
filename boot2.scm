@@ -94,6 +94,10 @@
     (env-resolve env x)))
 
 
+(define module-id->string
+  (lambda (id)
+    (list-join id "#")))
+
 ;; Expand an application. Could be a special form, a macro, or a normal function application
 (define expand-apply
   (lambda (x env)
@@ -356,6 +360,7 @@
     (define body #f)
     (define names #f)
     (define vals #f)
+    (define result #f)
 
     (if (fx< (length x) 3)
       (raise 'expand "let has no body" x))
@@ -371,13 +376,18 @@
 
     (set! names
       (map (lambda (binding)
+             (define name #f)
              (if (not (list? binding))
-                 (raise 'expand "let binding should be a list with a name and a value" x))
-             (define name (car binding))
+               (raise 'syntax "let binding should be a list with a name and a value" (list binding)))
+
              (if (not (fx= (length binding) 2))
-                 (raise 'expand "let binding should have only 2 elements (name and value)" x))
+               (raise 'syntax "let binding should have only 2 elements (name and value)" (list binding (cddr binding))))
+
+             (set! name (car binding))
+
              (if (not (identifier? name))
-                 (raise 'expand "let binding name should be a symbol" x))
+               (raise 'syntax "let binding name should be a symbol" (list binding)))
+
              name)
            bindings))
 
@@ -387,7 +397,7 @@
              (cadr binding)
              ) bindings))
 
-    (define result 
+    (set! result 
        (cons-source x (r 'lambda)
          (cons-source x names body)))
 
@@ -400,5 +410,5 @@
         ;; anonymous function application
         (cons-source x result vals)))
 
-   ;; let return
+    ;; let return
     result))
