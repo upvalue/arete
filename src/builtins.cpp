@@ -245,7 +245,7 @@ void fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, boo
     if(argv[i].type() == STRING) {
       os << argv[i].string_data();
     } else {
-      os << argv[i];
+      (void) state.print(argv[i], os);
     }
 
     if(whitespace && i != argc - 1)  {
@@ -449,6 +449,12 @@ Value fn_length(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(length);
 }
 
+Value fn_appendm(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "append!";
+
+  return C_FALSE;
+}
+
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
   if(argv[0] == C_NIL) return C_TRUE;
@@ -614,12 +620,6 @@ Value fn_memv(State& state, size_t argc, Value* argv) {
 
 Value fn_member(State& state, size_t argc, Value* argv) {
   return fn_mem_impl("member", MEMBER, state, argc, argv);
-}
-
-Value fn_eval(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "eval"; (void) fn_name;
-
-  return state.eval_toplevel(argv[0]);
 }
 
 Value fn_apply(State& state, size_t argc, Value* argv) {
@@ -1012,8 +1012,8 @@ Value fn_rename_gensym(State& state, size_t argc, Value* argv) {
   return argv[0].rename_gensym();
 }
 
-Value fn_eval_lambda(State& state, size_t argc, Value* argv) {
-  return state.eval_lambda(argv[1], argv[0]);
+Value fn_eval(State& state, size_t argc, Value* argv) {
+  return state.eval(argv[1], argv[0]);
 }
 
 ///// MISC
@@ -1026,6 +1026,76 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   AR_FRAME(state, tag, message, irritants, exc);
   exc = state.make_exception(tag, message, irritants);
   return exc;
+}
+
+///// RECORDS
+Value fn_register_record_type(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "register-record-type";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
+
+  Value name = argv[0], fields = argv[1], data = argv[2];
+
+  // TODO: Is it possible this doesn't copy string data and could potentially be moved?
+  // Should string_data return char* ?
+  std::string cname(name.string_data());
+
+  size_t tag = state.register_record_type(cname, fields.fixnum_value(), data.fixnum_value());
+
+  return state.globals[tag];
+}
+
+#define AR_FN_EXPECT_RECORD(state, expected_type, record) \
+  if(record.record_type() != (expected_type)) { \
+    std::ostringstream msg; \
+    msg << fn_name << "expected a record of type " << \
+      (expected_type).record_type_name().string_data() << " but got a record of type " <<  \
+      (record).record_type().record_type_name(); \
+    return (state).type_error(msg.str()); \
+  }
+
+Value fn_record_set(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "record-set!";
+
+  AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
+  AR_FN_EXPECT_TYPE(state, argv, 1, RECORD);
+  AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
+
+  AR_FN_EXPECT_RECORD(state, argv[0], argv[1]);
+
+  argv[1].record_set(argv[2].fixnum_value(), argv[3]);
+
+  return C_UNSPECIFIED;
+}
+
+Value fn_record_ref(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "record-ref";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
+  AR_FN_EXPECT_TYPE(state, argv, 1, RECORD);
+  AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
+
+  AR_FN_EXPECT_RECORD(state, argv[0], argv[1]);
+
+  return argv[1].record_ref(argv[2].fixnum_value());
+}
+
+Value fn_make_record(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "make-record";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
+
+  return state.make_record(argv[0].as<RecordType>());
+}
+
+Value fn_record_type_descriptor(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "record-type-descriptor";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
+  return argv[0].as<Record>()->type;
+}
+
+Value fn_gc_collect(State& state, size_t argc, Value* argv) {
+  state.gc.collect();
+  return C_UNSPECIFIED;
 }
 
 void State::install_core_functions() {
@@ -1076,6 +1146,7 @@ void State::install_core_functions() {
   defun_core("list-ref", fn_list_ref, 2);
   defun_core("list-join", fn_list_join, 2);
   defun_core("length", fn_length, 1);
+  defun_core("append!", fn_appendm, 2);
 
   defun_core("map", fn_map_improper, 2);
   defun_core("map-improper", fn_map_improper, 2);
@@ -1087,7 +1158,7 @@ void State::install_core_functions() {
   defun_core("member", fn_member, 2);
   
   defun_core("apply", fn_apply, 2);
-  defun_core("eval", fn_eval, 1);
+  defun_core("eval", fn_eval, 2);
 
   // Vectors
   defun_core("make-vector", fn_make_vector, 0, 2);
@@ -1141,15 +1212,24 @@ void State::install_core_functions() {
   defun_core("rename-gensym", fn_rename_gensym, 1);
   defun_core("gensym", fn_gensym, 0, 1);
 
-  defun_core("top-level-value", fn_top_level_value, 1);
-  defun_core("set-top-level-value!", fn_set_top_level_value, 2);
-  defun_core("eval-lambda", fn_eval_lambda, 2);
-  
   // Function modification
   defun_core("set-function-name!", fn_set_function_name, 2);
   defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun_core("function-min-arity", fn_function_min_arity, 1);
   defun_core("function-env", fn_function_env, 1);
+
+  defun_core("top-level-value", fn_top_level_value, 1);
+  defun_core("set-top-level-value!", fn_set_top_level_value, 2);
+
+  // Records
+  defun_core("register-record-type", fn_register_record_type, 3);
+  defun_core("make-record", fn_make_record, 1);
+  defun_core("record-ref", fn_record_ref, 3);
+  defun_core("record-set!", fn_record_set, 4);
+  defun_core("record-type-descriptor", fn_record_type_descriptor, 1);
+
+  // Garbage collector
+  defun_core("gc:collect", fn_gc_collect, 0);
 }
 
 }

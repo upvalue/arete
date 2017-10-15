@@ -162,6 +162,7 @@ int State::enter_cli(int argc, char* argv[]) {
   static std::string debug_gc("--debug-gc");
   static std::string set("--set");
 
+
   for(size_t i = 1; i != argc; i++) {
     const char* arg = argv[i];
 

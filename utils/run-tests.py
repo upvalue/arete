@@ -58,8 +58,8 @@ def run_tests(path, args = []):
 
 suites = (
     ('reader', ['--read']),
-#    ('preboot', []),
-#    ('expander', ['boot.scm']),
+    ('preboot', []),
+    ('expander', ['boot2.scm']),
 #    ('modules', ['boot.scm', '--push-load-path=tests/modules'])
 )
 

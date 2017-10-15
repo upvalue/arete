@@ -1,4 +1,5 @@
 // arete.hpp - scheme implementation
+
 #ifndef ARETE_HPP
 #define ARETE_HPP
 
@@ -23,9 +24,7 @@
 #include <unordered_map>
 #include <chrono>
 
-
 ///// PRE! Preprocessor macros and compile-time configuration macros
-
 
 // 0 = Do not evaluate assertions, internal assertions
 // 1 = Print warnings, disable some internal assertions
@@ -174,6 +173,8 @@ enum Type {
   CFUNCTION = 14,
   TABLE = 15,
   RENAME = 16,
+  RECORD = 17,
+  RECORD_TYPE = 18,
 };
 
 inline std::ostream& operator<<(std::ostream& os, Type type) {
@@ -376,6 +377,7 @@ struct Value {
 
   // PAIRS
   size_t list_length() const;
+  bool listp() const;
   Value list_ref(size_t) const;
 
   Value car() const;
@@ -432,6 +434,13 @@ struct Value {
   c_function_t c_function_addr() const;
   Value c_function_name() const;
   bool c_function_variable_arity() const;
+
+  // RECORD
+  Value record_type() const;
+  Value record_ref(unsigned) const;
+  void record_set(unsigned, Value);
+
+  Value record_type_name() const;
 
   // OPERATORS
 
@@ -546,6 +555,10 @@ inline size_t Value::list_length() const {
     }
   }
   return len;
+}
+
+inline bool Value::listp() const {
+  return bits == C_NIL || list_length() > 0;
 }
 
 inline Value Value::list_ref(size_t n) const {
@@ -783,6 +796,52 @@ inline ptrdiff_t hash_value(Value x, bool& unhashable) {
   }
 }
 
+struct RecordType : HeapValue {
+  /** Allow record to handle application */
+  Value apply;
+
+  /** String name describing the record-type */
+  Value name;
+
+  /** Count of garbage-collected data stored in the record */
+  unsigned field_count;
+  /** Size of uncollected data at the end of the record */
+  unsigned data_size;
+
+  static const unsigned CLASS_TYPE = RECORD_TYPE;
+};
+
+inline Value Value::record_type_name() const {
+  return as<RecordType>()->name;
+}
+
+/** 
+ * A record is a fixed size array with some type information included; it is used internally 
+ * to implement records, multiple return values, and user-extended data types. The underlying
+ * pointer arithmetic
+ * is therefore somewhat tricky.
+ */
+struct Record : HeapValue {
+  RecordType* type;
+  Value fields[1];
+
+  static const unsigned CLASS_TYPE = RECORD;
+};
+
+inline Value Value::record_type() const {
+  return as<Record>()->type;
+}
+
+inline Value Value::record_ref(unsigned i) const {
+  AR_ASSERT(record_type().as<RecordType>()->field_count > i && "record out of bounds error");
+  return as<Record>()->fields[i];
+}
+
+inline void Value::record_set(unsigned i, Value v) {
+  AR_ASSERT(record_type().as<RecordType>()->field_count > i && "record out of bounds error");
+  as<Record>()->fields[i] = v;
+}
+
 ///// GC! Garbage collection
 
 struct GC;
@@ -917,6 +976,7 @@ struct GCSemispace : GCCommon {
   }
 
   void copy_roots();
+  void copy_record(Record*);
 
   void collect(size_t request = 0, bool force = false) {
     collections++;
@@ -945,7 +1005,6 @@ struct GCSemispace : GCCommon {
 
     copy_roots();
 
-
     char* sweep = other->data;
     while(sweep != other_cursor) {
       HeapValue* obj = (HeapValue*) sweep;
@@ -962,6 +1021,7 @@ struct GCSemispace : GCCommon {
           AR_COPY(Vector, storage);
           break;
         // Two pointers 
+        case RECORD_TYPE:
         case SYMBOL:
         case PAIR:
           AR_COPY(Symbol, name);
@@ -982,6 +1042,10 @@ struct GCSemispace : GCCommon {
           AR_COPY(Function, rest_arguments);
           AR_COPY(Function, body);
           break;
+        case RECORD: {
+          copy_record(static_cast<Record*>(obj));
+          break;
+        }
         // Variable ptrs
         case VECTOR_STORAGE: {
           size_t length = static_cast<VectorStorage*>(obj)->length;
@@ -1311,15 +1375,18 @@ struct State {
 #endif 
 
   typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
+
   size_t gensym_counter;
   // Fascinating: removing this causes some kind of error with symbol_table_t.
   // Some kind of C++ initialization issue, but I'm not sure what kind.
   bool print_expansions;
   symbol_table_t symbol_table;
+  std::vector<RecordType> record_types;
 
   State():  gc(*this), gensym_counter(0) {
     current_state = this;
   }
+
   ~State() {
     current_state = 0;
   }
@@ -1749,6 +1816,51 @@ struct State {
     return C_UNSPECIFIED;
   }
 
+  // Strings
+  
+  Value string_copy(Value x) {
+    AR_FRAME(this, x);
+    String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + x.string_bytes()));
+    strncpy(heap->data, x.string_data(), x.string_bytes());
+    heap->bytes = x.string_bytes();
+    heap->data[x.string_bytes()] = '\0';
+    return heap;
+  }
+
+  // Records
+
+  size_t register_global(Value glob) {
+    globals.push_back(glob);
+    return globals.size() - 1;
+  }
+
+  /** Register a new type of Tuple */
+  size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size) {
+    Value tipe = gc.allocate(RECORD_TYPE, sizeof(RecordType)), name = C_FALSE;
+
+    AR_FRAME(this, tipe, name);
+
+    name = make_string(cname);
+
+    tipe.as<RecordType>()->name = name;
+    tipe.as<RecordType>()->field_count = field_count;
+    tipe.as<RecordType>()->data_size = data_size;
+
+    size_t idx = register_global(tipe);
+    return idx;
+  }
+
+  void record_set(Value rec_, unsigned field, Value value) {
+    Record* rec = rec_.as<Record>();
+
+    RecordType* rt = rec->type;
+    AR_TYPE_ASSERT(rt->field_count > field && "out of range error on record");
+
+    rec->fields[field] = value;
+  }
+
+  ///// BELOW HERE: Constructors
+
   Value make_string(const std::string& body) {
     String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + body.size()));
     heap->bytes = body.size();
@@ -1759,15 +1871,7 @@ struct State {
     return heap;
   }
 
-  Value string_copy(Value x) {
-    AR_FRAME(this, x);
-    String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + x.string_bytes()));
-    strncpy(heap->data, x.string_data(), x.string_bytes());
-    heap->bytes = x.string_bytes();
-    heap->data[x.string_bytes()] = '\0';
-    return heap;
-  }
-
+  /** Make an exception from Scheme values */
   Value make_exception(Value tag, Value message, Value irritants = C_UNSPECIFIED) {
     Value exc;
     AR_FRAME(this, tag, message, irritants, exc);
@@ -1779,6 +1883,7 @@ struct State {
     return heap;
   }
 
+  /** Make an exception with a C++ std::string message */
   Value make_exception(Value tag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
     Value message;
     AR_FRAME(this, tag, message, irritants);
@@ -1786,6 +1891,7 @@ struct State {
     return make_exception(tag, message, irritants);
   }
 
+  /** Make an exception with a C++ std::string message and tag */
   Value make_exception(const std::string& ctag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) { 
     Value tag;
     AR_FRAME(this, tag, irritants);
@@ -1806,7 +1912,27 @@ struct State {
 
     return table;
   }
-  
+
+  Value make_record(Value tipe) {
+    AR_FRAME(this, tipe);
+
+    unsigned field_count = tipe.as<RecordType>()->field_count;
+    unsigned data_size = tipe.as<RecordType>()->data_size;
+    Value record = static_cast<Record*>(
+      gc.allocate(RECORD, sizeof(Record) + 
+        ((field_count * sizeof(Value)) - sizeof(Value))
+        + data_size));
+    
+    record.as<Record>()->type = tipe.as<RecordType>();
+
+    return record;
+  }
+
+  Value make_record(size_t tag) {
+    AR_ASSERT(globals.size() > tag);
+    return make_record(globals.at(tag).as<RecordType>());
+  }
+
   Value make_c_function(Value name, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
     if(max_arity == 0)
       max_arity = min_arity;
@@ -1819,6 +1945,14 @@ struct State {
     if(variable_arity)
       cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
     return cfn;
+  }
+
+  std::ostream& print(Value obj, std::ostream& os = std::cout) {
+    if(obj.type() == RECORD) {
+
+    }
+
+    return os << obj;
   }
 
   // Print out a table's internal structure for debugging purposes
@@ -1892,7 +2026,6 @@ struct State {
         }
       }
     }
-    os << std::endl;
   }
 
   /**
@@ -1908,6 +2041,7 @@ struct State {
     if(exc.exception_tag() == globals[State::S_EVAL_ERROR]) {
       os << "Evaluation error: " << exc.exception_message().string_data() << std::endl;
       print_src_pair(os, exc.exception_irritants());
+      os << std::endl;
     } else if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]
       || exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {
 
@@ -1916,16 +2050,17 @@ struct State {
       if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]) {
         os << "Error during expansion: ";
       } else if(exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {
-        os << "Error in macro synatx: ";
+        os << "Error in macro syntax: ";
       }
 
       os << exc.exception_message().string_data() << std::endl;
 
       if(irritants.list_length() == 1) {
         print_src_pair(os, irritants.list_ref(0));
+        os << std::endl;
       } else if(irritants.list_length() == 2) {
         print_src_pair(os, irritants.list_ref(1));
-
+        os << std::endl;
       }
     } else {
       os << exc << std::endl;
@@ -2164,11 +2299,13 @@ struct State {
 
     // Comment out to disable macroexpansion
     if(expand != C_UNDEFINED) {
-      Value args, sym, mod;
-      AR_FRAME(this, expand, exp, args, sym);
+      Value args, sym, mod, saved = C_FALSE;
+      AR_FRAME(this, expand, exp, args, sym, saved);
       args = make_pair(C_FALSE, C_NIL);
       args = make_pair(exp, args);
 
+      // Save for source code info
+      saved = exp;
       exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
       if(exp.is_active_exception()) {
         stack_trace.insert(stack_trace.begin(), "Error during expansion");
@@ -2176,7 +2313,9 @@ struct State {
       }
 
       if(get_global_value(G_EXPANDER_PRINT) == C_TRUE) {
-        std::cout << "Expanded: " << exp << std::endl;
+        print_src_pair(std::cout, saved);
+        std::cout << std::endl;
+        std::cout << "Expanded to: " << exp << std::endl;
       }
     } 
 
@@ -2335,6 +2474,15 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
         case C_UNDEFINED: return os << "#<undefined>";
         default: return os << "<unknown constant " << ((ptrdiff_t) v.bits) << '>';
       }
+    case RECORD: {
+      RecordType* rt = v.as<Record>()->type;
+      return os << "#<" << rt->name.string_data() << '>';
+    }
+
+    case RECORD_TYPE: {
+      return os << "#<record-type " << v.as<RecordType>()->name.string_data() << ' ' <<
+        v.as<RecordType>()->field_count << ' ' << v.as<RecordType>()->data_size << '>';
+    }
     case FLONUM:
       return os << v.flonum_value(); 
     case SYMBOL:
@@ -2454,6 +2602,16 @@ inline void GCSemispace::copy_roots() {
   }
 }
 
+inline void GCSemispace::copy_record(Record* r) {
+  RecordType rt(*r->type);
+
+  copy((HeapValue**)&(r->type));
+
+  for(size_t i = 0; i != rt.field_count; i++) {
+    copy((HeapValue**)&(r->fields[i].bits));
+  }
+}
+
 inline Type Value::type() const {
   if(!immediatep()) {
     ARETE_ASSERT_LIVE(heap);
@@ -2487,18 +2645,6 @@ inline void Handle::initialize() {
 inline Handle::~Handle() {
   state.gc.handles.erase(it);
 }
-
-///// CLI! 
-// Command line interface
-
-/**
- * Hand over execution to the Arete CLI under the given State
- * @returns an exit code 
- */
-int enter_cli(State&, int, char*[]);
-
-///// TEST! 
-// Functionality related to builtin unit tests
 
 } // namespace arete
 

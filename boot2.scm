@@ -1,5 +1,12 @@
 ;; boot2.scm - expander, compiler, standard library
 
+;; Act II: Expander, compiler, standard library
+
+;; EXP! Expansion pass
+;; SYNTAX! Basic syntax: let, quasiquote, etc
+;; RULES! Syntax-rules
+;; COMPILER! Compiler.
+
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
 
@@ -93,10 +100,10 @@
       (raise 'expand (print-string "used syntax" x "as value") (list x)))
     (env-resolve env x)))
 
-
-(define module-id->string
-  (lambda (id)
-    (list-join id "#")))
+;; Expand and/or
+(define expand-and-or
+  (lambda (x env)
+    (cons-source x (car x) (expand-map (cdr x) env))))
 
 ;; Expand an application. Could be a special form, a macro, or a normal function application
 (define expand-apply
@@ -116,13 +123,14 @@
         ((eq? kar 'define) (expand-define x env))
         ((eq? kar 'define-syntax) (expand-define-syntax x env))
         ((or (eq? kar 'letrec-syntax) (eq? kar 'let-syntax)) (expand-let-syntax x env))
+        ((or (eq? kar 'and) (eq? kar 'or)) (expand-and-or x env))
         ((eq? kar 'lambda) (expand-lambda x env))
         ((eq? kar 'begin) (cons-source x (car x) (expand-map (cdr x) env)))
         ((eq? kar 'if) (expand-if x env))
         ((eq? kar 'set!) (expand-set x env))
         ((eq? kar 'cond) (expand-cond x env))
         ((eq? kar 'quote) x)
-        (else (begin (print x)
+        (else (begin 
                 (expand-macro x env))))
       ;; Normal function application
       ;; Needs to be annotated with src info, right?
@@ -218,7 +226,11 @@
 
     ;(set! body (caddr x))
     (set! expanded-body (expand body env))
-    (set! fn (eval-lambda expanded-body env))
+    (set! fn (eval expanded-body env))
+
+    (if (not (procedure? fn))
+      (raise 'expand "define-syntax body did not result in a function" (list x)))
+
     (set! fn-arity (function-min-arity fn))
 
     (if (fx< fn-arity 1)
@@ -227,7 +239,7 @@
     (set-function-name! fn name)
     (set-function-macro-bit! fn)
 
-    (env-define env name fn)
+    (env-define env name fn #t)
 
     unspecified))
 
@@ -353,6 +365,8 @@
 ;; Install expander
 (set-top-level-value! 'expander expand-toplevel)
 
+;;;;; SYNTAX! Basic syntax: let, quasiquote, etc
+
 (define-syntax let
   (lambda (x r c)
     (define let-fn-name #f)
@@ -378,7 +392,7 @@
       (map (lambda (binding)
              (define name #f)
              (if (not (list? binding))
-               (raise 'syntax "let binding should be a list with a name and a value" (list binding)))
+               (raise 'syntax "let binding should be a list with a name and a value" (list x)))
 
              (if (not (fx= (length binding) 2))
                (raise 'syntax "let binding should have only 2 elements (name and value)" (list binding (cddr binding))))
@@ -386,7 +400,7 @@
              (set! name (car binding))
 
              (if (not (identifier? name))
-               (raise 'syntax "let binding name should be a symbol" (list binding)))
+               (raise 'syntax "let binding name should be an identifier" (list binding)))
 
              name)
            bindings))
@@ -398,17 +412,107 @@
              ) bindings))
 
     (set! result 
-       (cons-source x (r 'lambda)
+       (cons-source x #'lambda
          (cons-source x names body)))
 
     (set! result
       (if let-fn-name
         ;; named function application
-        (cons-source x (list-source x (r 'lambda) '()
-          (list-source x (r 'define) let-fn-name result)
+        (cons-source x (list-source x #'lambda '()
+          (list-source x #'define let-fn-name result)
           (cons-source x let-fn-name vals)) '())
         ;; anonymous function application
         (cons-source x result vals)))
 
     ;; let return
     result))
+
+(define (concat-list x y)
+  (if (pair? x)
+      (cons (car x) (concat-list (cdr x) y))
+      y))
+
+(define (qq-list c lst)
+  (if (pair? lst)
+    (let ((obj (car lst)))
+      (if (and (pair? obj) (c #'unquote-splicing (car obj)))
+        (if (cdr lst)
+          (list #'concat-list (cadr obj) (qq-list c (cdr lst)))
+          (cadr obj))
+        (list #'cons (qq-object c obj) (qq-list c (cdr lst)))))
+    (list #'quote lst)))
+
+(define (qq-element c lst)
+  (if (c #'unquote (car lst))
+      (cadr lst)
+      (qq-list c lst)))
+         
+(define (qq-object c object)
+  (if (pair? object)
+      (qq-element c object)
+      (list #'quote object)))
+
+(define-syntax quasiquote
+  (lambda (x c)
+    (qq-object c (cadr x))
+    ))
+
+(define-syntax when
+  (lambda (x)
+    (if (fx< (length x) 3)
+      (raise 'syntax "when expects a condition and a body" (list x)))
+
+    `(,#'if ,(list-ref x 1)
+        (,#'begin ,@(cddr x)))))
+
+(define-syntax unless
+  (lambda (x)
+    (if (fx< (length x) 3)
+      (raise 'syntax "when expects a condition and a body" (list x)))
+
+    `(,#'if (,#'not ,(list-ref x 1))
+        (,#'begin ,@(cddr x)))))
+
+;; case
+;; TODO =>
+(define-syntax case
+  (lambda (x rename c)
+    (if (fx< (length x) 3)
+      (raise 'syntax "case expects at least three arguments (a key and a clause)" x))
+
+    (define key (cadr x))
+    (define clauses (cddr x))
+
+    (if (not (list? clauses))
+      (raise 'syntax "case expects a list of clauses" x))
+
+    (define code (let loop ((clause (car clauses))
+               (clauses clauses))
+      (unless (pair? clause)
+        (raise 'syntax "case expects clause to be a datum" x))
+
+      ;; TODO: Most Schemes seem to support a direct comparison as well e.g.
+      ;; (case 5 (5 #t))
+      (unless (or (c (car clause) #'else) (list? (car clause)))
+        (if (eq? (car clause) 'else)
+          (raise 'syntax "case expected an else clause, but it seems else has been redefined" x)
+          (raise 'syntax "case expected a list or else clause as its datum" x)))
+
+      (define condition
+        (if (c (car clause) #'else)
+          #t 
+          `(,#'memv ,#'result (,#'quote ,(car clause)))))
+
+      (if (null? (cdr clauses))
+        `(,#'if ,condition
+          (,#'begin ,(cadr clause))
+          unspecified)
+        `(,#'if ,condition
+          (,#'begin ,(cadr clause))
+          ,(loop (cadr clauses) (cdr clauses))))
+      ))
+
+    `(,#'let ((,#'result ,key))
+      ,code)))
+
+
