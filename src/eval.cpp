@@ -271,6 +271,7 @@ Value State::eval(Value env, Value exp, Value fn_name) {
 
   switch(exp.type()) {
     case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING: case CHARACTER:
+    case RECORD: case RECORD_TYPE: case FUNCTION: case CFUNCTION:
       return exp;
     case PAIR: {
       size_t length = exp.list_length();
@@ -332,19 +333,21 @@ Value State::eval(Value env, Value exp, Value fn_name) {
         return car;
       }
 
-      if(car.type() != FUNCTION && car.type() != CFUNCTION) {
+      if(!car.applicable()) {
         std::ostringstream os;
         if(car == C_UNDEFINED) {
           os << "attempt to apply undefined function " << exp.car() << std::endl;
         } else {
-          os << "attempt to apply non-procedure value " << car << std::endl;
+          os << "attempt to apply non-applicable value " << car << std::endl;
         }
         return eval_error(os.str(), exp);
       } else {
         if(car.type() == FUNCTION) {
           return apply_scheme(env, car, exp.cdr(), exp, fn_name);
-        } else {
+        } else if(car.type() == CFUNCTION) {
           return apply_c(env,  car, exp.cdr(), exp, fn_name);
+        } else if(car.type() == RECORD) {
+          return apply_record(env, car, exp.cdr(), exp, fn_name);
         }
       }
 
@@ -514,6 +517,29 @@ Value State::apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_na
   tmp = fn.c_function_addr()(*this, argc, fn_args.as<Vector>()->storage.as<VectorStorage>()->data);
   EVAL_CHECK(tmp, src_exp, fn_name);
   return tmp;
+}
+
+Value State::apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name) {
+  Value apply = fn.record_type().record_type_apply(), args2 = C_FALSE;
+  AR_FRAME(this, env, fn, args, src_exp, fn_name, apply, args, args2);
+
+  // Interesting: Reusing the args var here like this causes a GC failure.
+  // Perhaps make_pair gets inlined or something here and causes some kind of tracking issue?
+  // args = make_pair(fn, args);
+
+  // Prepend record to arguments
+  args2 = make_pair(fn, args);
+
+  if(apply.type() == FUNCTION) {
+    return apply_scheme(env, apply, args2, src_exp, fn_name, true);
+  } else if(apply.type() == CFUNCTION) {
+    return apply_c(env, apply, args2, src_exp, fn_name, true);
+  } else {
+    return type_error("record applicator must be function or cfunction");
+  }
+  gc.collect();
+  // std::cout << "HAH" << std::endl;
+  return C_UNSPECIFIED;
 }
 
 } // namespace arete

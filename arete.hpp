@@ -181,6 +181,8 @@ inline std::ostream& operator<<(std::ostream& os, Type type) {
   switch(type) {
     case FIXNUM: return os << "fixnum";
     case CONSTANT: return os << "constant";
+    case RECORD_TYPE: return os << "record-type";
+    case RECORD: return os << "record";
     case BLOCK: return os << "block";
     case FLONUM: return os << "flonum";
     case STRING: return os << "string";
@@ -268,6 +270,7 @@ struct Value {
   static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
 
   bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION; }
+  bool applicable() const;
   bool identifierp() const { return type() == RENAME || type() == SYMBOL; }
 
   bool numeric() const {
@@ -440,7 +443,11 @@ struct Value {
   Value record_ref(unsigned) const;
   void record_set(unsigned, Value);
 
+  bool record_applicable() const;
+
   Value record_type_name() const;
+  Value record_type_apply() const;
+  Value record_type_print() const;
 
   // OPERATORS
 
@@ -799,6 +806,9 @@ inline ptrdiff_t hash_value(Value x, bool& unhashable) {
 struct RecordType : HeapValue {
   /** Allow record to handle application */
   Value apply;
+  
+  /** Allow record to custom print */
+  Value print;
 
   /** String name describing the record-type */
   Value name;
@@ -813,6 +823,14 @@ struct RecordType : HeapValue {
 
 inline Value Value::record_type_name() const {
   return as<RecordType>()->name;
+}
+
+inline Value Value::record_type_print() const {
+  return as<RecordType>()->print;
+}
+
+inline Value Value::record_type_apply() const {
+  return as<RecordType>()->apply;
 }
 
 /** 
@@ -840,6 +858,15 @@ inline Value Value::record_ref(unsigned i) const {
 inline void Value::record_set(unsigned i, Value v) {
   AR_ASSERT(record_type().as<RecordType>()->field_count > i && "record out of bounds error");
   as<Record>()->fields[i] = v;
+}
+
+inline bool Value::applicable() const {
+  if(type() == FUNCTION || type() == CFUNCTION) {
+    return true;
+  } else if(type() == RECORD) {
+    return record_type().record_type_apply().applicable();
+  }
+  return false;
 }
 
 ///// GC! Garbage collection
@@ -1021,13 +1048,13 @@ struct GCSemispace : GCCommon {
           AR_COPY(Vector, storage);
           break;
         // Two pointers 
-        case RECORD_TYPE:
         case SYMBOL:
         case PAIR:
           AR_COPY(Symbol, name);
           AR_COPY(Symbol, value);
           break;
         // Three pointers
+        case RECORD_TYPE:
         case RENAME:
         case EXCEPTION:
           AR_COPY(Exception, message);
@@ -1056,6 +1083,8 @@ struct GCSemispace : GCCommon {
         }
         // Should never be encountered on heap
         case BLOCK: case CONSTANT: case FIXNUM: default:
+          std::cout << obj << std::endl; 
+          std::cout << "mystery object size: " << obj->size << std::endl; 
           AR_ASSERT(!"arete:gc: encountered bad value on heap; probably a GC bug");
           break;
 #undef AR_COPY
@@ -1843,6 +1872,8 @@ struct State {
     name = make_string(cname);
 
     tipe.as<RecordType>()->name = name;
+    tipe.as<RecordType>()->print = C_FALSE;
+    tipe.as<RecordType>()->apply = C_FALSE;
     tipe.as<RecordType>()->field_count = field_count;
     tipe.as<RecordType>()->data_size = data_size;
 
@@ -1922,8 +1953,11 @@ struct State {
       gc.allocate(RECORD, sizeof(Record) + 
         ((field_count * sizeof(Value)) - sizeof(Value))
         + data_size));
-    
+
     record.as<Record>()->type = tipe.as<RecordType>();
+    for(unsigned i = 0; i != field_count; i++) {
+      record.as<Record>()->fields[i] = C_FALSE;
+    }
 
     return record;
   }
@@ -1947,12 +1981,28 @@ struct State {
     return cfn;
   }
 
-  std::ostream& print(Value obj, std::ostream& os = std::cout) {
+  Value print(Value obj, std::ostream& os = std::cout) {
     if(obj.type() == RECORD) {
+      Value printer = obj.record_type().record_type_print();
+      if(printer.applicable()) {
+        Value arg = C_FALSE;
+        AR_FRAME(this, obj, printer, arg);
+        arg = make_pair(obj, C_NIL);
 
+        arg = apply_generic(printer, arg, true);
+        if(arg.is_active_exception()) {
+          return arg;
+        }
+
+        if(arg.type() == STRING) {
+          os << arg.string_data();
+          return C_UNSPECIFIED;
+        }
+      }
     }
 
-    return os << obj;
+    os << obj;
+    return C_UNSPECIFIED;
   }
 
   // Print out a table's internal structure for debugging purposes
@@ -2283,15 +2333,24 @@ struct State {
   /** Apply a scheme function */
   Value apply_scheme(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
   Value apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
+  Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);
   
   /** Apply a C or a Scheme function */
   Value apply_generic(Value fn, Value args, bool eval_args) {
-    AR_ASSERT(fn.procedurep());
+    AR_ASSERT(fn.applicable());
     if(fn.type() == FUNCTION) {
       return apply_scheme(C_FALSE, fn, args, C_FALSE, C_FALSE, eval_args);
-    } else {
+    } else if(fn.type() == CFUNCTION) {
       return apply_c(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
+    } else if(fn.type() == RECORD) {
+      Value fn2 = fn.record_type().record_type_apply();
+      AR_ASSERT(fn2.applicable());
+      AR_FRAME(this, fn, fn2, args);
+      args = make_pair(fn, args);
+
+      return apply_generic(fn2, args, eval_args);
     }
+    AR_ASSERT(!":(");
   }
 
   Value expand_expr(Value exp) {

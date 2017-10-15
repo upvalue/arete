@@ -240,29 +240,33 @@ Value fn_newline(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-void fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bool whitespace) {
+Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bool whitespace) {
   for(size_t i = 0; i != argc; i++) {
     if(argv[i].type() == STRING) {
       os << argv[i].string_data();
     } else {
-      (void) state.print(argv[i], os);
+      Value x = state.print(argv[i], os);
+      if(x.is_active_exception()) return x;
     }
 
     if(whitespace && i != argc - 1)  {
       os << ' ';
     }
   }
+
+  return C_UNSPECIFIED;
 }
 
 Value fn_print(State& state, size_t argc, Value* argv) {
-  fn_print_impl(state, argc, argv, std::cout, true);
+  Value chk = fn_print_impl(state, argc, argv, std::cout, true);
   std::cout << std::endl;
-  return C_UNSPECIFIED;
+  return chk;
 }
 
 Value fn_print_string(State& state, size_t argc, Value* argv) {
   std::ostringstream os;
-  fn_print_impl(state, argc, argv, os, true);
+  Value chk = fn_print_impl(state, argc, argv, os, true);
+  if(chk.is_active_exception()) return chk;
   return state.make_string(os.str());
 }
 
@@ -1046,6 +1050,32 @@ Value fn_register_record_type(State& state, size_t argc, Value* argv) {
   return state.globals[tag];
 }
 
+
+#define AR_FN_EXPECT_APPLICABLE(state, argv, arg) \
+  if(!((argv)[(arg)].applicable())) { \
+    std::ostringstream os; \
+    os << fn_name << " expected argument " << (arg) << " to be applicable but got a non-applicable " << (argv)[(arg)].type(); \
+    return state.type_error(os.str()); \
+  }
+
+Value fn_set_record_type_printer(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-record-type-printer!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
+  AR_FN_EXPECT_APPLICABLE(state, argv, 1);
+  RecordType* rt = argv[0].as<RecordType>();
+  rt->print = argv[1]; 
+  return C_UNSPECIFIED;
+}
+
+Value fn_set_record_type_applicator(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-record-type-applicator!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
+  AR_FN_EXPECT_APPLICABLE(state, argv, 1);
+  RecordType* rt = argv[0].as<RecordType>();
+  rt->apply = argv[1]; 
+  return C_UNSPECIFIED;
+}
+
 #define AR_FN_EXPECT_RECORD(state, expected_type, record) \
   if(record.record_type() != (expected_type)) { \
     std::ostringstream msg; \
@@ -1223,10 +1253,14 @@ void State::install_core_functions() {
 
   // Records
   defun_core("register-record-type", fn_register_record_type, 3);
+  defun_core("set-record-type-printer!", fn_set_record_type_printer, 2);
+  defun_core("set-record-type-applicator!", fn_set_record_type_applicator, 2);
+
   defun_core("make-record", fn_make_record, 1);
   defun_core("record-ref", fn_record_ref, 3);
   defun_core("record-set!", fn_record_set, 4);
   defun_core("record-type-descriptor", fn_record_type_descriptor, 1);
+
 
   // Garbage collector
   defun_core("gc:collect", fn_gc_collect, 0);

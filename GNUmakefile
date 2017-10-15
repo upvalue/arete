@@ -1,7 +1,7 @@
 # Variables
 CXX := clang++
 CPPFLAGS := -Wall -I. -Ivendor -Ivendor/linenoise -DARETE_DEV
-CFLAGS := $(CFLAGS) -g3 -O0
+CFLAGS := $(CFLAGS) -g3 -O1
 CXXFLAGS := $(CPPFLAGS) -std=c++11 -fno-rtti $(CFLAGS)
 LDFLAGS := $(LDFLAGS) 
 
