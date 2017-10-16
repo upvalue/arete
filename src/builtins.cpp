@@ -514,7 +514,7 @@ Value fn_list_join(State& state, size_t argc, Value* argv) {
  * Underlying implementation of for-each and map. If improper is true, it will handle dotted lists,
  * if ret is true it will allocate and return a list of the results of function application.
  */
-Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, bool improper, bool ret) {
+Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, bool improper, bool ret, bool indice) {
 
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
 
@@ -529,9 +529,14 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
 
   Value nlst_head, nlst_current = C_NIL, tmp, lst = argv[1], fn = argv[0], arg;
   AR_FRAME(state, nlst_head, nlst_current, lst, fn, arg, tmp);
+  
+  size_t i = 0;
 
   while(lst.type() == PAIR) {
     arg = state.make_pair(lst.car(), C_NIL);
+    if(indice) {
+      arg = state.make_pair(Value::make_fixnum(i), arg);
+    }
     tmp = state.apply_generic(fn, arg, false);
     if(tmp.is_active_exception()) return tmp;
     if(ret) {
@@ -550,6 +555,7 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
         nlst_current = tmp;
       }
     }
+    i++;
     lst = lst.cdr();
   }
 
@@ -572,19 +578,23 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
 }
 
 Value fn_map_proper(State& state, size_t argc, Value* argv) {
-  return fn_map_impl(state, argc, argv, "map", false, true);
+  return fn_map_impl(state, argc, argv, "map", false, true, false);
 }
 
 Value fn_map_improper(State& state, size_t argc, Value* argv) {
-  return fn_map_impl(state, argc, argv, "map-improper", true, true);
+  return fn_map_impl(state, argc, argv, "map-improper", true, true, false);
 }
 
 Value fn_foreach_proper(State& state, size_t argc, Value* argv) {
-  return fn_map_impl(state, argc, argv, "for-each", true, false);
+  return fn_map_impl(state, argc, argv, "for-each", true, false, false);
 }
 
 Value fn_foreach_improper(State& state, size_t argc, Value* argv) {
-  return fn_map_impl(state, argc, argv, "for-each-improper", true, false);
+  return fn_map_impl(state, argc, argv, "for-each-improper", true, false, false);
+}
+
+Value fn_map_proper_i(State& state, size_t argc, Value* argv) {
+  return fn_map_impl(state, argc, argv, "map-i", false, true, true);
 }
 
 enum Mem { MEMQ, MEMV, MEMBER };
@@ -1196,6 +1206,7 @@ void State::install_core_functions() {
   defun_core("length", fn_length, 1);
   defun_core("append!", fn_appendm, 2);
 
+  defun_core("map-i", fn_map_proper_i, 2);
   defun_core("map", fn_map_improper, 2);
   defun_core("map-improper", fn_map_improper, 2);
   defun_core("for-each", fn_foreach_proper, 2);

@@ -32,7 +32,6 @@
     (unless (or (symbol? parent) (not parent))
       (raise 'syntax "define-record inheritance argument should be a list with exactly one symbol" (list x (caddr x))))
 
-
     (set! accessors
       (map
         (lambda (field-name)
@@ -53,29 +52,23 @@
           `(,#'begin ,getter ,setter))
       fields))
 
-    ;; TODO: Constructor & predicate
-    #|(set! constructor
+    (set! constructor
       `(,#'define (,(string->symbol (string-append name-string "/make")) ,@(map rename fields))
-        (,#'define ,#'instance name)
-        ,@(map 
-          (lambda (i)
-            `(,#'record-set! ,name ,#'instance 
-
-                  #t))
-          |#
-
-    ;; TODO: Need to have field indices here
+        (,#'let ((,#'instance (,#'make-record ,name)))
+        ,@(map-i
+          (lambda (i x)
+            (print `(,#'record-set! ,name ,#'instance ,i ,(rename (list-ref fields i)))))
+          fields)
+        ,#'instance)))
 
     (set! predicate
       `(,#'define ,(list (string->symbol (string-append name-string "?")) #'instance)
         (,#'record-isa? ,#'instance ,name)))
-    ;; (define (,getter rec) asdf)
-    ;; (define (,setter rec) asdf
-
 
     `(,#'begin
        (,#'define ,name (,#'register-record-type ,name-string ,field-count 0))
        ,predicate
+       ,constructor
        ,@accessors
       )
     
@@ -86,10 +79,14 @@
 (define-record Box2 (Box) item2)
 
 (define box (make-record Box2))
+(set! box (Box2/make 123))
+(print box)
 
 (Box2/item2! box 123)
 (print (Box2/item2 box))
 
 (print (Box2? box))
+
+
 ;(print (record-ref Box2 box 0))
 

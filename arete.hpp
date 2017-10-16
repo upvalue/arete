@@ -2377,7 +2377,7 @@ struct State {
   Value apply_generic(Value fn, Value args, bool eval_args) {
     AR_ASSERT(fn.applicable());
     if(fn.type() == FUNCTION) {
-      return apply_scheme(C_FALSE, fn, args, C_FALSE, C_FALSE, eval_args);
+      return apply_scheme(fn.function_parent_env(), fn, args, C_FALSE, C_FALSE, eval_args);
     } else if(fn.type() == CFUNCTION) {
       return apply_c(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
     } else if(fn.type() == RECORD) {
