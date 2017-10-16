@@ -455,6 +455,7 @@ Value fn_length(State& state, size_t argc, Value* argv) {
 
 Value fn_appendm(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "append!";
+  (void) fn_name;
 
   return C_FALSE;
 }
@@ -1035,17 +1036,26 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
 ///// RECORDS
 Value fn_register_record_type(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "register-record-type";
+  Value parent = C_FALSE;
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
+  AR_FN_EXPECT_POSITIVE(state, argv, 2);
 
-  Value name = argv[0], fields = argv[1], data = argv[2];
+  Value name = argv[0], data = argv[2];
+  ptrdiff_t field_count = argv[1].fixnum_value();
+
+  if(argc == 4) {
+    parent = argv[3];
+    AR_FN_EXPECT_TYPE(state, argv, 3, RECORD_TYPE);
+    field_count += parent.as<RecordType>()->field_count;
+  }
 
   // TODO: Is it possible this doesn't copy string data and could potentially be moved?
   // Should string_data return char* ?
   std::string cname(name.string_data());
 
-  size_t tag = state.register_record_type(cname, fields.fixnum_value(), data.fixnum_value());
+  size_t tag = state.register_record_type(cname, field_count, data.fixnum_value(), parent);
 
   return state.globals[tag];
 }
@@ -1067,8 +1077,8 @@ Value fn_set_record_type_printer(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-Value fn_set_record_type_applicator(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "set-record-type-applicator!";
+Value fn_set_record_type_apply(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-record-type-apply!";
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
   AR_FN_EXPECT_APPLICABLE(state, argv, 1);
   RecordType* rt = argv[0].as<RecordType>();
@@ -1076,12 +1086,12 @@ Value fn_set_record_type_applicator(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-#define AR_FN_EXPECT_RECORD(state, expected_type, record) \
-  if(record.record_type() != (expected_type)) { \
+#define AR_FN_EXPECT_RECORD_ISA(state, expected_type, record) \
+  if(!((record).record_isa((expected_type)))) { \
     std::ostringstream msg; \
     msg << fn_name << "expected a record of type " << \
       (expected_type).record_type_name().string_data() << " but got a record of type " <<  \
-      (record).record_type().record_type_name(); \
+      (record).record_type().record_type_name().string_data(); \
     return (state).type_error(msg.str()); \
   }
 
@@ -1092,7 +1102,7 @@ Value fn_record_set(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 1, RECORD);
   AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
 
-  AR_FN_EXPECT_RECORD(state, argv[0], argv[1]);
+  AR_FN_EXPECT_RECORD_ISA(state, argv[0], argv[1]);
 
   argv[1].record_set(argv[2].fixnum_value(), argv[3]);
 
@@ -1105,7 +1115,7 @@ Value fn_record_ref(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 1, RECORD);
   AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
 
-  AR_FN_EXPECT_RECORD(state, argv[0], argv[1]);
+  AR_FN_EXPECT_RECORD_ISA(state, argv[0], argv[1]);
 
   return argv[1].record_ref(argv[2].fixnum_value());
 }
@@ -1121,6 +1131,14 @@ Value fn_record_type_descriptor(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "record-type-descriptor";
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
   return argv[0].as<Record>()->type;
+}
+
+Value fn_record_isa(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "record-isa?";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
+  Value rec = argv[0], rtd = argv[1];
+
+  return Value::make_boolean(rec.record_isa(rtd));
 }
 
 Value fn_gc_collect(State& state, size_t argc, Value* argv) {
@@ -1252,14 +1270,15 @@ void State::install_core_functions() {
   defun_core("set-top-level-value!", fn_set_top_level_value, 2);
 
   // Records
-  defun_core("register-record-type", fn_register_record_type, 3);
+  defun_core("register-record-type", fn_register_record_type, 3, 4);
   defun_core("set-record-type-printer!", fn_set_record_type_printer, 2);
-  defun_core("set-record-type-applicator!", fn_set_record_type_applicator, 2);
+  defun_core("set-record-type-apply!", fn_set_record_type_apply, 2);
 
   defun_core("make-record", fn_make_record, 1);
   defun_core("record-ref", fn_record_ref, 3);
   defun_core("record-set!", fn_record_set, 4);
   defun_core("record-type-descriptor", fn_record_type_descriptor, 1);
+  defun_core("record-isa?", fn_record_isa, 2);
 
 
   // Garbage collector

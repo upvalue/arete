@@ -444,10 +444,13 @@ struct Value {
   void record_set(unsigned, Value);
 
   bool record_applicable() const;
+  bool record_isa(Value) const;
 
+  // RECORD TYPES
   Value record_type_name() const;
   Value record_type_apply() const;
   Value record_type_print() const;
+  Value record_type_parent() const;
 
   // OPERATORS
 
@@ -813,6 +816,9 @@ struct RecordType : HeapValue {
   /** String name describing the record-type */
   Value name;
 
+  /** Optional: record type to inherit from */
+  Value parent;
+
   /** Count of garbage-collected data stored in the record */
   unsigned field_count;
   /** Size of uncollected data at the end of the record */
@@ -827,6 +833,10 @@ inline Value Value::record_type_name() const {
 
 inline Value Value::record_type_print() const {
   return as<RecordType>()->print;
+}
+
+inline Value Value::record_type_parent() const {
+  return as<RecordType>()->parent;
 }
 
 inline Value Value::record_type_apply() const {
@@ -860,11 +870,31 @@ inline void Value::record_set(unsigned i, Value v) {
   as<Record>()->fields[i] = v;
 }
 
+inline bool Value::record_applicable() const {
+  return record_type().record_type_apply().applicable();
+}
+
+inline bool Value::record_isa(Value rhs) const {
+  if(rhs.type() != RECORD_TYPE) return false;
+
+  Value lhs = record_type();
+
+
+  while(lhs != C_FALSE) {
+    if(lhs == rhs) {
+      return true;
+    }
+    lhs = lhs.record_type_parent();
+  }
+
+  return false;
+}
+
 inline bool Value::applicable() const {
   if(type() == FUNCTION || type() == CFUNCTION) {
     return true;
   } else if(type() == RECORD) {
-    return record_type().record_type_apply().applicable();
+    return record_applicable();
   }
   return false;
 }
@@ -1054,12 +1084,18 @@ struct GCSemispace : GCCommon {
           AR_COPY(Symbol, value);
           break;
         // Three pointers
-        case RECORD_TYPE:
         case RENAME:
         case EXCEPTION:
           AR_COPY(Exception, message);
           AR_COPY(Exception, tag);
           AR_COPY(Exception, irritants);
+          break;
+        // Four pointers
+        case RECORD_TYPE:
+          AR_COPY(RecordType, apply);
+          AR_COPY(RecordType, print);
+          AR_COPY(RecordType, name);
+          AR_COPY(RecordType, parent);
           break;
         // Five pointers
         case FUNCTION:
@@ -1864,16 +1900,18 @@ struct State {
   }
 
   /** Register a new type of Tuple */
-  size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size) {
-    Value tipe = gc.allocate(RECORD_TYPE, sizeof(RecordType)), name = C_FALSE;
+  size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size, Value parent = C_FALSE) {
+    Value name = C_FALSE, tipe = C_FALSE;
 
-    AR_FRAME(this, tipe, name);
+    AR_FRAME(this, tipe, name, parent);
 
+    tipe = gc.allocate(RECORD_TYPE, sizeof(RecordType));
     name = make_string(cname);
 
     tipe.as<RecordType>()->name = name;
     tipe.as<RecordType>()->print = C_FALSE;
     tipe.as<RecordType>()->apply = C_FALSE;
+    tipe.as<RecordType>()->parent = parent;
     tipe.as<RecordType>()->field_count = field_count;
     tipe.as<RecordType>()->data_size = data_size;
 

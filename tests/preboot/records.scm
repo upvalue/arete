@@ -12,6 +12,26 @@
 
 (print box-instance)
 
-(set-record-type-applicator! MyBox (lambda (b) "success"))
+(set-record-type-apply! MyBox (lambda (b) "success"))
 
 (print (box-instance))
+
+(define MyBox2 (register-record-type "box2" 1 0 MyBox))
+
+(define box2-instance (make-record MyBox2))
+
+(if (record-isa? box2-instance MyBox) (print "success"))
+
+(record-set! MyBox2 box2-instance 0 "success")
+(record-set! MyBox2 box2-instance 1 "success")
+
+(print (record-ref MyBox2 box2-instance 0))
+(print (record-ref MyBox2 box2-instance 1))
+
+(if (eq? (record-isa? box-instance MyBox2) #f) (print "success"))
+
+(if (record-isa? box2-instance MyBox2) (print "success"))
+
+;(print (record-isa? box2-instance MyBox))
+
+;(record-ref MyBox box2-instance 0)
