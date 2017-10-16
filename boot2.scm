@@ -28,7 +28,7 @@
       (raise 'expand "attempt to rename non-symbol" (list x)))
 
     (if (eq? (top-level-value '*current-rename-env*) unspecified)
-      (raise 'expand "(rename) called without environment" (list name)))
+      (raise 'expand "(rename) called without environment (did you forget to unquote a rename?)" (list name)))
     
     (make-rename env name)))
 
