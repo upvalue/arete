@@ -4,8 +4,6 @@
 
 ;; EXP! Expansion pass
 ;; SYNTAX! Basic syntax: let, quasiquote, etc
-;; RULES! Syntax-rules
-;; COMPILER! Compiler.
 
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
@@ -55,7 +53,7 @@
 
     (set! kar (cadr x))
 
-    (if (not (or (identifier? kar) (list? kar)))
+    (if (not (or (identifier? kar) (pair? kar)))
       (raise 'expand "define first argument must be a name or a list" (list x (cdr x))))
 
     (if (identifier? kar)
@@ -168,8 +166,9 @@
     ;; If bindings are renames, they should be gensym'd 
     (set! bindings
       (if (identifier? bindings)
-        (if (and (rename? bindings) (rename-gensym bindings)) (rename-gensym bindings) x)
+        (if (and (rename? bindings) (rename-gensym bindings)) (rename-gensym bindings) bindings)
         (map-improper (lambda (x) (if (and (rename? x) (rename-gensym x)) (rename-gensym x) x)) bindings)))
+
 
     (cons-source x (car x) (cons-source x bindings (expand-map (cddr x) new-env)))))
 
@@ -332,23 +331,31 @@
 
     (set! len (length clause))
 
-    (if (not (fx= len 2))
+    (if (not (fx> len 1))
       (raise 'expand "cond clause should have two members: condition and body" (list x clause)))
 
     (set! condition (car clause))
-    (set! body (cadr clause))
+    (set! body (cdr clause))
 
     ;; Handle else clause
     (if (env-compare env condition (make-rename env 'else))
       (set! condition #t))
 
+    (define result
+
     (list-source x
       (make-rename #f 'if)
       (expand condition env)
-      (expand-map (list-source x (make-rename #f 'begin) body) env)
+      (expand (cons-source x (make-rename #f 'begin) body) env)
+      ;(list-source x (make-rename #f 'begin) (expand-map body env))
       (if (null? rest)
         unspecified
-        (expand-cond-full-clause x env (car rest) (cdr rest))))))
+        (expand-cond-full-clause x env (car rest) (cdr rest))))
+
+    )
+
+    result))
+
 
 (define expand-cond-clause 
   (lambda (x env clause rest)

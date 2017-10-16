@@ -113,6 +113,8 @@ static bool do_repl(State& state, bool read_only) {
     free(line);
   }
 
+  state.print_gc_stats(std::cout);
+
   linenoiseHistorySave(hist_file.str().c_str());
   linenoiseHistoryFree();
   return true;

@@ -175,6 +175,7 @@ enum Type {
   RENAME = 16,
   RECORD = 17,
   RECORD_TYPE = 18,
+  VMFUNCTION = 19,
 };
 
 inline std::ostream& operator<<(std::ostream& os, Type type) {
@@ -710,6 +711,15 @@ inline bool Value::c_function_variable_arity() const {
   return heap->get_header_bit(CFUNCTION_VARIABLE_ARITY_BIT);
 }
 
+struct VMFunction : HeapValue {
+  Value name;
+
+  unsigned constant_count;
+  Value constants[1];
+
+  static const unsigned CLASS_TYPE = VMFUNCTION;
+};
+
 /// VECTORS
 
 struct VectorStorage : HeapValue {
@@ -1106,7 +1116,16 @@ struct GCSemispace : GCCommon {
           AR_COPY(Function, body);
           break;
         case RECORD: {
-          copy_record(static_cast<Record*>(obj));
+          RecordType rt(*static_cast<Record*>(obj)->type);
+
+          AR_COPY(Record, type);
+          // copy((HeapValue**)&(r->type));
+
+          for(size_t i = 0; i != rt.field_count; i++) {
+            AR_COPY(Record, fields[i]);
+            // copy((HeapValue**)&(r->fields[i].bits));
+          }
+          // copy_record(static_cast<Record*>(obj));
           break;
         }
         // Variable ptrs
@@ -1248,6 +1267,13 @@ struct GCIncremental : GCCommon {
         mark(static_cast<Exception*>(v)->tag.heap);
         v = static_cast<Exception*>(v)->irritants.heap;
         goto again;
+      // Four pointers
+      case RECORD_TYPE:
+        mark(static_cast<RecordType*>(v)->apply.heap);
+        mark(static_cast<RecordType*>(v)->print.heap);
+        mark(static_cast<RecordType*>(v)->name.heap);
+        v = static_cast<RecordType*>(v)->parent.heap;
+        break;
       // Five pointers
       case FUNCTION:
         mark(static_cast<Function*>(v)->name.heap);
@@ -1257,6 +1283,14 @@ struct GCIncremental : GCCommon {
         v = static_cast<Function*>(v)->body.heap;
         goto again;
       // Variable pointers
+      case RECORD: {
+        RecordType* rt = static_cast<RecordType*>(static_cast<Record*>(v)->type);
+        for(unsigned i = 0; i != rt->field_count; i++) {
+          mark(static_cast<Record*>(v)->fields[i].heap);
+        }
+        v = rt;
+        goto again;
+      }
       case VECTOR_STORAGE: {
         size_t length = static_cast<VectorStorage*>(v)->length;
         if(length == 0) return;
@@ -2063,11 +2097,13 @@ struct State {
   /**
    * Print information about an erroneous pair
    */
-  void print_src_pair(std::ostream& os, Value pair) {
+  bool print_src_pair(std::ostream& os, Value pair) {
     if(pair.type() == PAIR && pair.pair_has_source()) {
       SourceLocation src(pair.pair_src());
       print_src_line(os, src);
+      return true;
     }
+    return false;
   }
 
   /**
@@ -2143,12 +2179,18 @@ struct State {
 
       os << exc.exception_message().string_data() << std::endl;
 
+      bool source_printed = false;
+
       if(irritants.list_length() == 1) {
-        print_src_pair(os, irritants.list_ref(0));
-        os << std::endl;
+        source_printed = print_src_pair(os, irritants.list_ref(0));
       } else if(irritants.list_length() == 2) {
-        print_src_pair(os, irritants.list_ref(1));
-        os << std::endl;
+        source_printed = print_src_pair(os, irritants.list_ref(1));
+      }
+
+      os << std::endl;
+
+      if(!source_printed) {
+        os << "Offending expression: " << irritants.list_ref(0) << std::endl;
       }
     } else {
       os << exc << std::endl;
@@ -2405,7 +2447,14 @@ struct State {
       saved = exp;
       exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
       if(exp.is_active_exception()) {
-        stack_trace.insert(stack_trace.begin(), "Error during expansion");
+        std::ostringstream os1;
+        std::ostringstream os2;
+        os1 << saved;
+        os2 << "Error while expanding expression: " << std::endl << os1.str().substr(0, 120);
+        if(os1.str().size() > 120) os2 << " ... ";
+        os2 << std::endl;
+        print_src_pair(os2, saved);
+        stack_trace.insert(stack_trace.begin(), os2.str());
         return exp;
       }
 
@@ -2573,7 +2622,12 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       }
     case RECORD: {
       RecordType* rt = v.as<Record>()->type;
-      return os << "#<" << rt->name.string_data() << '>';
+      os << "#<" << rt->name.string_data() << ' ';
+      for(unsigned i = 0; i != rt->field_count; i++) {
+        os << v.record_ref(i);
+        if(i != rt->field_count - 1) os << ' ';
+      }
+      return os << '>';
     }
 
     case RECORD_TYPE: {

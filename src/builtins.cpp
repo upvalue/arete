@@ -734,6 +734,13 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
   return argv[0].vector_ref(argv[1].fixnum_value());
 }
 
+Value fn_vector_length(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "vector-length";
+  AR_FN_EXPECT_TYPE(state, argv, 0, VECTOR);
+
+  return Value::make_fixnum(argv[0].vector_length());
+}
+
 Value fn_make_table(State& state, size_t argc, Value* argv) {
   //static const char* fn_name = "make-table";
   return state.make_table();
@@ -1151,6 +1158,14 @@ Value fn_record_isa(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(rec.record_isa(rtd));
 }
 
+// Compiler
+Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
+
+}
+
+
+// Garbage collector
+
 Value fn_gc_collect(State& state, size_t argc, Value* argv) {
   state.gc.collect();
   return C_UNSPECIFIED;
@@ -1222,6 +1237,7 @@ void State::install_core_functions() {
   // Vectors
   defun_core("make-vector", fn_make_vector, 0, 2);
   defun_core("vector-ref", fn_vector_ref, 2);
+  defun_core("vector-length", fn_vector_length, 1);
   defun_core("vector-set!", fn_vector_set, 3);
   defun_core("vector-append!", fn_vector_append, 2);
 
@@ -1291,6 +1307,9 @@ void State::install_core_functions() {
   defun_core("record-type-descriptor", fn_record_type_descriptor, 1);
   defun_core("record-isa?", fn_record_isa, 2);
 
+
+  // Compiler
+  defun_core("OpenFn->procedure", fn_openfn_to_procedure, 1);
 
   // Garbage collector
   defun_core("gc:collect", fn_gc_collect, 0);

@@ -1,3 +1,4 @@
+;; struct.scm - record support syntax
 
 (define-syntax define-record
   (lambda (x)
@@ -21,13 +22,14 @@
     (set! name-string (symbol->string name))
 
     (when (fx> (length x) 2)
-      (if (list (list-ref x 2))
+      (if (list? (list-ref x 2))
         (begin
           (when (null? (list-ref x 2))
             (raise 'syntax "define-record inheritance argument must be a list with exactly one symbol but got none" (list x (cddr x))))
           (set! parent (car (list-ref x 2)))
           (set! fields (cdddr x)))
         (set! fields (cddr x))))
+
     ;(print fields)
     (unless (or (symbol? parent) (not parent))
       (raise 'syntax "define-record inheritance argument should be a list with exactly one symbol" (list x (caddr x))))
@@ -57,7 +59,7 @@
         (,#'let ((,#'instance (,#'make-record ,name)))
         ,@(map-i
           (lambda (i x)
-            (print `(,#'record-set! ,name ,#'instance ,i ,(rename (list-ref fields i)))))
+            `(,#'record-set! ,name ,#'instance ,i ,(rename (list-ref fields i))))
           fields)
         ,#'instance)))
 
@@ -74,6 +76,7 @@
     
   )) ;; lambda (x)
 
+#|
 (define Box (register-record-type "box" 1 0))
 
 (define-record Box2 (Box) item2)
@@ -86,6 +89,7 @@
 (print (Box2/item2 box))
 
 (print (Box2? box))
+|#
 
 
 ;(print (record-ref Box2 box 0))
