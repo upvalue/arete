@@ -1190,7 +1190,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   vfn->min_arity = 0;
   vfn->max_arity = 0;
   vfn->bytecode_size = bytecode_size;
-  vfn->stack_size = rec.record_ref(4).fixnum_value();
+  vfn->stack_max = rec.record_ref(6).fixnum_value();
 
   fn = vfn;
 

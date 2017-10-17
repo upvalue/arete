@@ -6,7 +6,7 @@
 
 namespace arete {
 
-VMFrame::VMFrame(State& state_): state(state_) {
+VMFrame::VMFrame(State& state_): state(state_), stack_i(0) {
   previous = state.gc.vm_frames;
   state.gc.vm_frames = this;
 }
@@ -27,21 +27,24 @@ enum {
   OP_APPLY_TAIL = 6,
 };
 
+#define AR_PRINT_STACK() \
+  std::cout << "stack " << (f.stack_i-1) << " out of " << f.fn->stack_max << " allocated " << std::endl; \
+  for(size_t i = 0; i != f.stack_i; i++) std::cout << i << ": " << f.stack[i] << std::endl;
+
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   tail:
 
   VMFrame f(*this);
   f.fn = fn.as<VMFunction>();
-  f.stack = (Value*) alloca(f.fn->stack_size * sizeof(Value));
+  f.stack = (Value*) alloca(f.fn->stack_max * sizeof(Value));
 
   // TODO: This doesn't necessarily need to be initialized; we could
   // place the stack pointer in the VMFrame structure and only
   // collect what has been set
 
-  memset(f.stack, 0, f.fn->stack_size * sizeof(Value));
+  memset(f.stack, 0, f.fn->stack_max * sizeof(Value));
 
   size_t code_offset = 0;
-  size_t stack_i = 0;
 
   while(true) {
     // TODO: This is a pretty awkward way to program.
@@ -52,7 +55,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     switch(insn) {
       case OP_PUSH_CONSTANT: {
         size_t idx = code[code_offset++];
-        f.stack[stack_i++] = fn2.vm_function_constants()->data[idx];
+        f.stack[f.stack_i++] = fn2.vm_function_constants()->data[idx];
+        AR_PRINT_STACK();
         AR_LOG_VM("push-constant idx: " << idx << "; " << fn2.vm_function_constants()->data[idx]);
         continue;
       }
@@ -62,13 +66,13 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         Value sym = fn2.vm_function_constants()->data[idx];
         AR_LOG_VM("global-get idx: " << idx << " ;; " << fn2.vm_function_constants()->data[idx]);
         AR_ASSERT(sym.type() == SYMBOL && "global-get called against non-symbol");
-        f.stack[stack_i++] = sym.symbol_value();
+        f.stack[f.stack_i++] = sym.symbol_value();
         continue;
       }
 
       case OP_RETURN: {
         AR_LOG_VM("return");
-        return f.stack[stack_i - 1];
+        return f.stack[f.stack_i - 1];
       }
 
       // Application logic.
@@ -87,13 +91,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       case OP_APPLY:
       case OP_APPLY_TAIL: {
         size_t argc = code[code_offset++];
-        Value fn = f.stack[stack_i - argc - 1];
+        Value fn = f.stack[f.stack_i - argc - 1];
         AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " argc: " << argc << " fn: " << fn);
         AR_ASSERT(fn.type() == CFUNCTION);
-        Value v = C_FALSE;
         // TODO check arity.
-        fn.c_function_addr()(*this, argc, &f.stack[stack_i - argc]);
-        return C_TRUE;
+        AR_PRINT_STACK();
+        f.stack[f.stack_i - argc - 1] = fn.c_function_addr()(*this, argc, &f.stack[f.stack_i - argc]);
+        f.stack_i -= (argc);
+        AR_PRINT_STACK();
+        continue;
       }
 
       case OP_BAD: {
@@ -108,7 +114,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   // Evaluate arguments and use them to initialize locals array
   // Figure out how to allocate locals array
   // Figure out how to allocate stack
-  return Value::make_fixnum(5678);
+  return f.stack[f.stack_i];
 }
 
 }

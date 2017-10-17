@@ -744,7 +744,7 @@ struct VMFunction : HeapValue {
   Value name;
   VectorStorage* constants;
 
-  unsigned constant_count, min_arity, max_arity, stack_size;
+  unsigned constant_count, min_arity, max_arity, stack_max;
   size_t bytecode_size;
   static const unsigned CLASS_TYPE = VMFUNCTION;
 };
@@ -1006,7 +1006,7 @@ struct VMFrame {
   VMFrame* previous;
   VMFunction* fn;
   Value* stack;
-  size_t stack_size;
+  size_t stack_i;
 
   VMFrame(State& state);
   ~VMFrame();

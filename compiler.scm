@@ -9,12 +9,13 @@
   sources  ;; 3
   stack-size ;; 4
   local-count ;; 5
+  stack-max ;; 6
   )
 
 (set! OpenFn/make
   (let ((make OpenFn/make))
     (lambda (name)
-      (make name #() #() #() 0 0))))
+      (make name #() #() #() 0 0 0))))
 
 (define-record Var
   name
@@ -53,9 +54,16 @@
       (apply-tail 6)
       (else (raise 'compile "unknown named instruction" (list insn))))))
 
+(define (max a b) (if (< a b) b a))
+
 (define (fn-adjust-stack fn size)
+  (define new-size (fx+ (OpenFn/stack-size fn) size))
   (compiler-log "stack +=" size)
-  (OpenFn/stack-size! fn (fx+ (OpenFn/stack-size fn) size)))
+  (OpenFn/stack-size! fn new-size)
+  (OpenFn/stack-max! fn (max new-size (OpenFn/stack-max fn)))
+  
+)
+
 
 ;(set-top-level-value! '*expander-print* #t)
 
@@ -64,7 +72,7 @@
     (case (car insns)
       ((push-constant global-get) 1)
       ;; Remove arguments from stack, but push a single result
-      ((apply apply-tail) (fx+ (fx- (cadr insns)) 1))
+      ((apply apply-tail) (fx- (cadr insns)))
       (return 0)
       (else (raise 'compile "unknown instruction" (list fn insns)))
     ))
@@ -105,7 +113,6 @@
 )
 
 (define (compile-expr fn env x tail?)
-  (print tail?)
   (cond
     ((self-evaluating? x) (compile-constant fn env x))
     ((identifier? x) (compile-identifier fn env x))
