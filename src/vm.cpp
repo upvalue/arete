@@ -12,6 +12,7 @@ VMFrame::VMFrame(State& state_): state(state_) {
 }
 
 VMFrame::~VMFrame() {
+  std::cout << state.gc.vm_frames << std::endl;
   AR_ASSERT(state.gc.vm_frames == this);
   state.gc.vm_frames = previous;
 }
@@ -19,10 +20,15 @@ VMFrame::~VMFrame() {
 enum {
   OP_BAD = 0,
   OP_PUSH_CONSTANT = 1,
-  OP_RETURN = 4
+  OP_GLOBAL_GET = 2,
+  OP_GLOBAL_SET = 3,
+  OP_RETURN = 4,
+  OP_APPLY = 5,
 };
 
-Value State::apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name) {
+Value State::apply_vm(Value fn, size_t argc, Value* argv) {
+  tail:
+
   VMFrame f(*this);
   f.fn = fn.as<VMFunction>();
   f.stack = (Value*) alloca(f.fn->stack_size * sizeof(Value));
@@ -46,6 +52,16 @@ Value State::apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_n
       case OP_PUSH_CONSTANT: {
         size_t idx = code[code_offset++];
         f.stack[stack_i++] = fn2.vm_function_constants()->data[idx];
+        AR_LOG_VM("push-constant idx: " << idx << "; " << fn2.vm_function_constants()->data[idx]);
+        continue;
+      }
+
+      case OP_GLOBAL_GET: {
+        size_t idx = code[code_offset++];
+        Value sym = fn2.vm_function_constants()->data[idx];
+        AR_LOG_VM("global-get idx: " << idx << " ;; " << fn2.vm_function_constants()->data[idx]);
+        AR_ASSERT(sym.type() == SYMBOL && "global-get called against non-symbol");
+        f.stack[stack_i++] = sym.symbol_value();
         continue;
       }
 
@@ -53,11 +69,23 @@ Value State::apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_n
         return f.stack[stack_i - 1];
       }
 
-      case OP_BAD: AR_ASSERT(!"bad opcode");
+      case OP_APPLY: {
+        size_t argc = code[code_offset++];
+        Value fn = f.stack[stack_i - argc - 1];
+        AR_LOG_VM("apply argc: " << argc << " fn: " << fn);
+        AR_ASSERT(fn.type() == CFUNCTION);
+        Value v = C_FALSE;
+        fn.c_function_addr()(*this, argc, &v);
+        return C_TRUE;
+      }
+
+      default:
+      case OP_BAD: {
+        warn() << "encountered bad opcode: " << insn << std::endl;
+        AR_ASSERT(!"bad opcode");
+      }
     }
   }
-
-  // std::cout << "STACK[0]: " << vmframe.stack[0] << std::endl;
 
   // Evaluate arguments and use them to initialize locals array
   // Figure out how to allocate locals array

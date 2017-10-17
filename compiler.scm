@@ -44,7 +44,10 @@
     insn
     (case insn
       ((push-constant) 1)
+      ((global-get) 2)
+      ((global-set) 3)
       ((return) 4)
+      ((apply) 5)
       (else (raise 'compile "unknown named instruction" (list insn))))))
 
 (define (fn-adjust-stack fn size)
@@ -52,8 +55,19 @@
   (OpenFn/stack-size! fn (fx+ (OpenFn/stack-size fn) size)))
 
 (define (emit fn . insns)
-  (case (car insns)
-    ('push-constant (fn-adjust-stack fn 1)))
+  (fn-adjust-stack fn 
+    (case (car insns)
+      ('push-constant 1)
+      ('global-get 1)
+      ;; Remove arguments from stack, but push a single result
+      ('apply (fx+ (fx- (cadr insns)) 1))
+      ('return 0)
+      (else (raise 'compile "unknown instruction" (list fn insns)))
+    ))
+
+  ;; Stack size sanity check
+  (when (fx< (OpenFn/stack-size fn) 0)
+    (raise 'compile "stack size went below zero" (list fn (OpenFn/stack-size fn))))
 
   ;(print insns)
   (for-each
@@ -64,15 +78,19 @@
   (emit fn 'push-constant (register-constant fn x)))
 
 (define (compile-apply fn env x)
+  ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
+  (compile-expr fn env (car x))
+  (emit fn 'apply (length (cdr x)))
   #t)
 
 (define (compile-identifier fn env x)
-  #t)
+  (emit fn 'global-get (register-constant fn x))
+)
 
 (define (compile-expr fn env x)
   (cond
     ((self-evaluating? x) (compile-constant fn env x))
-    ((eq? x 'abuja) (compile-identifier fn env x))
+    ((identifier? x) (compile-identifier fn env x))
     ((list? x)
      (compile-apply fn env x))
     (else (raise 'compile "don't know how to compile expression" (list x))))
@@ -104,7 +122,7 @@
 
 (define fn (OpenFn/make "vm-function"))
 
-(compile fn #f '(123))
+(compile fn #f '((print)))
 ;(compile fn #f '(print "Hello world"))
 
 (print fn)
@@ -116,3 +134,4 @@
 (define compiled-proc (OpenFn->procedure fn))
 (print compiled-proc)
 (print "result of execution" (compiled-proc))
+

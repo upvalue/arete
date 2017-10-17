@@ -349,7 +349,11 @@ Value State::eval(Value env, Value exp, Value fn_name) {
         } else if(car.type() == RECORD) {
           return apply_record(env, car, exp.cdr(), exp, fn_name);
         } else if(car.type() == VMFUNCTION) {
-          return apply_vm(env, car, exp.cdr(), exp, fn_name);
+          // TODO: Here, we need to gather
+          // arguments into a VectorStorage (or whatever)
+          Value v = C_FALSE;
+          return apply_vm(car, 0, &v);
+          // return apply_vm(env, car, exp.cdr(), exp, fn_name);
         }
       }
 
