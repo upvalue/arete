@@ -80,11 +80,14 @@
 # define ARETE_GC_DEBUG 0
 #endif
 
+// TODO: It's possible, though expensive and more complex, to do this with the incremental
+// collector. However, it shouldn't be necessary.
+
 #if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE && ARETE_GC_DEBUG == 1
 # ifndef ARETE_ASSERT_LIVE
-   // AR_ASSERT("debug failure" && (arete::current_state != 0));
 #  define ARETE_ASSERT_LIVE(obj) \
    AR_ASSERT("attempt to invoke method on non-live object" && (arete::current_state->gc.live((obj)) == true));
+
 # endif
 #endif
 
@@ -194,6 +197,7 @@ inline std::ostream& operator<<(std::ostream& os, Type type) {
     case PAIR: return os << "pair";
     case EXCEPTION: return os << "exception";
     case FUNCTION: return os << "function";
+    case VMFUNCTION: return os << "vmfunction";
     case CFUNCTION: return os << "cfunction";
     case TABLE: return os << "table";
     default: return os << "unknown";
@@ -336,6 +340,8 @@ struct Value {
   void vector_clear();
   size_t vector_length() const;
 
+  Value* vector_storage_data() const;
+
   // STRINGS
   const char* string_data() const {
     AR_TYPE_ASSERT(type() == STRING);
@@ -439,6 +445,16 @@ struct Value {
   Value c_function_name() const;
   bool c_function_variable_arity() const;
 
+  // VM FUNCTIONS
+
+  unsigned vm_function_constant_count() const;
+  unsigned vm_function_min_arity() const;
+  unsigned vm_function_max_arity() const;
+
+  Value vm_function_name() const;
+  size_t* vm_function_bytecode() const;
+  Value* vm_function_constants() const;
+
   // RECORD
   Value record_type() const;
   Value record_ref(unsigned) const;
@@ -517,6 +533,15 @@ struct SourceLocation {
   /** An integer that corresponds to an entry in State::source_names */
   unsigned source;
   unsigned line, begin, length;
+};
+
+/** 
+ * Virtual machine source location. When errors are encountered in the VM, an array of these is
+ * "replayed" until OFFSET is reached in the bytecode array; this is where the erroneous
+ * instructions are assumed to originate
+ */
+struct VMSourceLocation : SourceLocation {
+  unsigned offset;
 };
 
 inline std::ostream& operator<<(std::ostream& os, const SourceLocation& src) {
@@ -714,11 +739,57 @@ inline bool Value::c_function_variable_arity() const {
 struct VMFunction : HeapValue {
   Value name;
 
-  unsigned constant_count;
-  Value constants[1];
+  unsigned constant_count, min_arity, max_arity, stack_size;
+  size_t bytecode_size;
+
+  // Rest of fields are variably sized and accessed through functions which do the necessary
+  // pointer arithmetic:
+  // constants, bytecode
+
+  Value* constants() const { 
+    char* ptr = (char*) this;
+    return (Value*) ptr + sizeof(VMFunction);
+  }
 
   static const unsigned CLASS_TYPE = VMFUNCTION;
 };
+
+inline unsigned Value::vm_function_constant_count() const {
+  return as<VMFunction>()->constant_count;
+}
+
+inline unsigned Value::vm_function_min_arity() const {
+  return as<VMFunction>()->min_arity;
+}
+
+inline unsigned Value::vm_function_max_arity() const {
+  return as<VMFunction>()->max_arity;
+}
+
+inline Value Value::vm_function_name() const {
+  return as<VMFunction>()->name;
+}
+
+inline Value* Value::vm_function_constants() const {
+  // std::cout << "constant offsets" << std::endl;
+  // std::cout << (size_t) heap << std::endl;
+  // std::cout << sizeof(VMFunction) << std::endl;
+  char* ret = ((char*) heap) + (size_t)(static_cast<VMFunction*>(heap)->constant_count * sizeof(Value));
+  // std::cout << (size_t) ret << std::endl;
+  return (Value*) ret;
+}
+
+inline size_t* Value::vm_function_bytecode() const {
+  char* ptr = (char*) heap;
+
+  // std::cout << "bytecode offsets" << std::endl;
+  // std::cout << (size_t) ptr << std::endl;
+  // std::cout << sizeof(VMFunction) << std::endl;
+  // std::cout << (static_cast<VMFunction*>(heap)->constant_count * sizeof(Value)) << std::endl;
+  char* ret = (ptr + (size_t)(sizeof(VMFunction)) + (size_t)(static_cast<VMFunction*>(heap)->constant_count * sizeof(Value))); 
+  // std::cout << (size_t) ret << std::endl;
+  return (size_t*) ret;
+}
 
 /// VECTORS
 
@@ -765,6 +836,11 @@ inline size_t Value::vector_length() const {
   VectorStorage* store = static_cast<VectorStorage*>(static_cast<Vector*>(heap)->storage.heap);
   return store->length;
 }
+
+inline Value* Value::vector_storage_data() const {
+  return (Value*)(&(as<VectorStorage>()->data[0].heap));
+}
+
 
 // HASH TABLES
 
@@ -901,7 +977,7 @@ inline bool Value::record_isa(Value rhs) const {
 }
 
 inline bool Value::applicable() const {
-  if(type() == FUNCTION || type() == CFUNCTION) {
+  if(type() == FUNCTION || type() == CFUNCTION || type() == VMFUNCTION) {
     return true;
   } else if(type() == RECORD) {
     return record_applicable();
@@ -934,6 +1010,21 @@ struct Frame {
   Frame(State& state, size_t size, HeapValue*** values);
   Frame(State* state, size_t size, HeapValue*** values);
   ~Frame();
+};
+
+/**
+ * Like frames, but specifically for the virtual machine which does complex stack allocation
+ */
+struct VMFrame {
+  State& state;
+
+  VMFrame* previous;
+  VMFunction* fn;
+  Value* stack;
+  size_t stack_size;
+
+  VMFrame(State& state);
+  ~VMFrame();
 };
 
 /** An individual tracked pointer. Can be allocated on the heap. */
@@ -977,6 +1068,7 @@ struct GCCommon {
   State& state;
   std::vector<Frame*> frames;
   std::list<Handle*> handles;
+  VMFrame* vm_frames;
   // Number of total allocations
   bool collect_before_every_allocation;
   size_t allocations;
@@ -984,6 +1076,7 @@ struct GCCommon {
   size_t block_size;
 
   GCCommon(State& state_, size_t heap_size_ = ARETE_BLOCK_SIZE): state(state_), 
+    vm_frames(0),
     collect_before_every_allocation(false),
     allocations(0),
     collections(0), live_objects_after_collection(0), live_memory_after_collection(0),
@@ -1043,7 +1136,6 @@ struct GCSemispace : GCCommon {
   }
 
   void copy_roots();
-  void copy_record(Record*);
 
   void collect(size_t request = 0, bool force = false) {
     collections++;
@@ -1115,20 +1207,26 @@ struct GCSemispace : GCCommon {
           AR_COPY(Function, rest_arguments);
           AR_COPY(Function, body);
           break;
+        // Variable ptrs / more complex collection required
+        case VMFUNCTION: {
+          AR_COPY(VMFunction, name);
+          Value n(obj);
+          Value* constants = n.vm_function_constants();
+          for(unsigned i = 0; i != static_cast<VMFunction*>(obj)->constant_count; i++) {
+            copy((HeapValue**) &constants[i]);
+          }
+          break;
+        }
         case RECORD: {
           RecordType rt(*static_cast<Record*>(obj)->type);
 
           AR_COPY(Record, type);
-          // copy((HeapValue**)&(r->type));
 
           for(size_t i = 0; i != rt.field_count; i++) {
             AR_COPY(Record, fields[i]);
-            // copy((HeapValue**)&(r->fields[i].bits));
           }
-          // copy_record(static_cast<Record*>(obj));
           break;
         }
-        // Variable ptrs
         case VECTOR_STORAGE: {
           size_t length = static_cast<VectorStorage*>(obj)->length;
           for(size_t i = 0; i != length; i++) {
@@ -1479,14 +1577,16 @@ struct State {
   // Fascinating: removing this causes some kind of error with symbol_table_t.
   // Some kind of C++ initialization issue, but I'm not sure what kind.
   bool print_expansions;
-  symbol_table_t symbol_table;
+  symbol_table_t* symbol_table;
   std::vector<RecordType> record_types;
 
   State():  gc(*this), gensym_counter(0) {
+    symbol_table = new symbol_table_t();
     current_state = this;
   }
 
   ~State() {
+    delete symbol_table;
     current_state = 0;
   }
 
@@ -1644,8 +1744,8 @@ struct State {
   }
 
   Value get_symbol(const std::string& name) {
-    symbol_table_t::const_iterator x = symbol_table.find(name);
-    if(x == symbol_table.end()) {
+    symbol_table_t::const_iterator x = symbol_table->find(name);
+    if(x == symbol_table->end()) {
       Symbol* heap = static_cast<Symbol*>(gc.allocate(SYMBOL, sizeof(Symbol)));
       AR_ASSERT(heap->get_type() == SYMBOL);
 
@@ -1657,11 +1757,11 @@ struct State {
       sym.as<Symbol>()->value = C_UNDEFINED;
       sym.as<Symbol>()->name = string;
 
-      symbol_table.insert(std::make_pair(name, (Symbol*) sym.heap));
+      symbol_table->insert(std::make_pair(name, (Symbol*) sym.heap));
 
       return sym;
     } else {
-      AR_ASSERT(symbol_table.size() > 0);
+      AR_ASSERT(symbol_table->size() > 0);
       return x->second;
     }
   }
@@ -2414,6 +2514,7 @@ struct State {
   Value apply_scheme(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
   Value apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
   Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);
+  Value apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name);
   
   /** Apply a C or a Scheme function */
   Value apply_generic(Value fn, Value args, bool eval_args) {
@@ -2680,6 +2781,9 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os << '>';
     }
+    case VMFUNCTION: {
+      return os << "#<vmfunction " << (void*) v.bits << '>';
+    }
     case CFUNCTION: {
       os << "#<cfunction ";
       return os << v.c_function_name().string_data() << '>';
@@ -2720,8 +2824,8 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
 // MISC! Various inline functions 
 
 inline void GCIncremental::mark_symbol_table() {
-  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
-  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
+  ARETE_LOG_GC(state.symbol_table->size() << " live symbols");
+  for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
     mark(x->second);
   }
 }
@@ -2735,6 +2839,20 @@ inline void GCSemispace::copy_roots() {
     }
   }
 
+  VMFrame* link = vm_frames;
+  while(link != 0) {
+    VMFunction* fn = link->fn;
+
+    size_t stack_size = fn->stack_size;
+
+    // copy((HeapValue**) &link->fn);
+
+    for(size_t i = 0; i != stack_size; i++) {
+      // copy((HeapValue**) &link->stack[i]);
+    }
+    link = link->previous;
+  }
+
   for(size_t i = 0; i != state.globals.size(); i++) {
     copy(&state.globals[i].heap);
   }
@@ -2743,23 +2861,13 @@ inline void GCSemispace::copy_roots() {
     copy(&((*i)->ref.heap));
   }
 
-  ARETE_LOG_GC(state.symbol_table.size() << " live symbols");
+  ARETE_LOG_GC(state.symbol_table->size() << " live symbols");
   // TODO: To make this a weak table, simply check for RESERVED in this. If forwarded, set it up
   // otherwise delete reference
-  for(auto x = state.symbol_table.begin(); x != state.symbol_table.end(); x++) {
+  for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
     HeapValue* v = x->second;
     copy(&v);
-    state.symbol_table[x->first] = (Symbol*) v;
-  }
-}
-
-inline void GCSemispace::copy_record(Record* r) {
-  RecordType rt(*r->type);
-
-  copy((HeapValue**)&(r->type));
-
-  for(size_t i = 0; i != rt.field_count; i++) {
-    copy((HeapValue**)&(r->fields[i].bits));
+    state.symbol_table->at(x->first) = (Symbol*) v;
   }
 }
 

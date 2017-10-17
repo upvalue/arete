@@ -1,13 +1,14 @@
 ;; compiler.scm - Arete bytecode compiler
 
-;; Note: Internal structure is manipulated by C++ code and must be changed if anything is rearranged
+;; Note: Internal structure is manipulated by C++ code and must be changed if anything is rearranged here
 (define-record OpenFn
-  name
-  insns
-  constants
-  sources
-  stack-size
-  local-count)
+  name ;; 0
+  insns ;; 1
+  constants ;; 2
+  sources  ;; 3
+  stack-size ;; 4
+  local-count ;; 5
+  )
 
 ;; bad = 0
 ;; push-constant = 1
@@ -79,15 +80,13 @@
 
 (print fn)
 
+(define compiled-proc (OpenFn->procedure fn))
 
-;; So this openFN has to be passed to some kind of function so that it can then be executed
+(print compiled-proc)
 
-;; (OpenFn->real-function)
+(print "result of execution" (compiled-proc))
 
-;; 
-
-
-(print fn)
+;(print (OpenFn->procedure fn))
 
 ;(print (compile (OpenFn/make "vm-function") #f #t))
 

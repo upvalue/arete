@@ -348,6 +348,8 @@ Value State::eval(Value env, Value exp, Value fn_name) {
           return apply_c(env,  car, exp.cdr(), exp, fn_name);
         } else if(car.type() == RECORD) {
           return apply_record(env, car, exp.cdr(), exp, fn_name);
+        } else if(car.type() == VMFUNCTION) {
+          return apply_vm(env, car, exp.cdr(), exp, fn_name);
         }
       }
 

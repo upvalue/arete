@@ -1160,9 +1160,58 @@ Value fn_record_isa(State& state, size_t argc, Value* argv) {
 
 // Compiler
 Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "OpenFn->procedure";
+  AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
+  // TODO: Could type check more thoroughly here.
 
+  size_t size = sizeof(VMFunction);
+  Value name, insns, constants, sources, stack_size, rec = argv[0], fn;
+  AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn);
+
+  name = rec.record_ref(0);
+  insns = rec.record_ref(1);
+  constants = rec.record_ref(2);
+
+  size_t insn_count = insns.vector_length();
+  size_t bytecode_size = (size_t) insn_count * sizeof(size_t);
+  unsigned constant_count = (unsigned) constants.vector_length();
+
+  size += (constant_count * sizeof(Value));
+  size += (bytecode_size);
+
+  VMFunction* vfn = static_cast<VMFunction*>(state.gc.allocate(VMFUNCTION, size));
+
+  vfn->constant_count = constant_count;
+  vfn->min_arity = 0;
+  vfn->max_arity = 0;
+  vfn->bytecode_size = bytecode_size;
+  vfn->stack_size = 1;
+
+  fn = vfn;
+
+  // Copy constants
+  Value* fconstants = fn.vm_function_constants(); 
+
+  memcpy(fn.vm_function_constants(), constants.vector_storage().vector_storage_data(),
+    constant_count * sizeof(Value));
+
+  // std::cout << constants << std::endl;
+  // std::cout << fn.vm_function_constants()[0] << std::endl;
+
+  // Copy bytecode
+  size_t* bytecode_array = (size_t*) fn.vm_function_bytecode();
+
+  // std::cout << (size_t) bytecode_array << std::endl;
+
+  AR_ASSERT(((char*) bytecode_array) > ((char*) fn.vm_function_constants()));
+  
+  for(size_t i = 0; i != insn_count; i++) {
+    (*bytecode_array++) = insns.vector_ref(i).fixnum_value();
+  }
+
+  // std::cout << "VM CONSTANCE" << fn.vm_function_constants()[0] << std::endl;
+  return fn;
 }
-
 
 // Garbage collector
 
@@ -1306,7 +1355,6 @@ void State::install_core_functions() {
   defun_core("record-set!", fn_record_set, 4);
   defun_core("record-type-descriptor", fn_record_type_descriptor, 1);
   defun_core("record-isa?", fn_record_isa, 2);
-
 
   // Compiler
   defun_core("OpenFn->procedure", fn_openfn_to_procedure, 1);
