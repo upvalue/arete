@@ -40,21 +40,6 @@ tests/test-semispace: $(CXXOBJS) tests/test-semispace.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
-#arete: $(CXXOBJS) 
-#	$(call colorecho, "LD $@ ")
-#	$(CXX) $(LDFLAGS) -o $@ $^
-#test: test.o vendor/linenoise.o
-#	$(call colorecho, "LD $@ ")
-#	$(CXX) $(LDFLAGS) -o $@ $^
-
-#tests/test-semispace: tests/test-semispace.o 
-#	$(call colorecho, "LD $@ ")
-#	$(CXX) $(LDFLAGS) -o $@ $^
-
-#tests/test-incremental: tests/test-incremental.o 
-#	$(call colorecho, "LD $@ ")
-#	$(CXX) $(LDFLAGS) -o $@ $^
-
 #test-all: tests/test-incremental tests/test-semispace
 #	tests/test-incremental
 #	tests/test-semispace
@@ -63,7 +48,7 @@ tests/test-semispace: $(CXXOBJS) tests/test-semispace.o
 .PHONY: count clean
 
 count:
-	cloc arete.hpp $(wildcard src/*.cpp) boot.scm
+	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard *.scm)
 
 clean:
 	rm -f arete test $(patsubst *.o,*.d,$(CXXOBJS)) $(CXXOBJS) src/main.o tests/test-semispace tests/test-incremental

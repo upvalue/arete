@@ -24,6 +24,7 @@ enum {
   OP_GLOBAL_SET = 3,
   OP_RETURN = 4,
   OP_APPLY = 5,
+  OP_APPLY_TAIL = 6,
 };
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
@@ -66,23 +67,40 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       case OP_RETURN: {
+        AR_LOG_VM("return");
         return f.stack[stack_i - 1];
       }
 
-      case OP_APPLY: {
+      // Application logic.
+
+      // If C function, we pass it part of the stack (how to deal with tail calls? possible? 
+      // necessary?)
+
+      // If interpreted function, we build an arg-list out of the stack and apply it
+      // This may not actually be necessary if bootstrapping only goes one direction
+      // Should a VM function ever call an interpreted function?
+      // Well, don't worry about that for now.
+      
+      // If VM function, we call apply_vm with necessary args, copy args to locals at the beginning
+      // so they are collected properly, after which we don't access argv
+
+      case OP_APPLY:
+      case OP_APPLY_TAIL: {
         size_t argc = code[code_offset++];
         Value fn = f.stack[stack_i - argc - 1];
-        AR_LOG_VM("apply argc: " << argc << " fn: " << fn);
+        AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " argc: " << argc << " fn: " << fn);
         AR_ASSERT(fn.type() == CFUNCTION);
         Value v = C_FALSE;
-        fn.c_function_addr()(*this, argc, &v);
+        // TODO check arity.
+        fn.c_function_addr()(*this, argc, &f.stack[stack_i - argc]);
         return C_TRUE;
       }
 
-      default:
       case OP_BAD: {
+      default:
         warn() << "encountered bad opcode: " << insn << std::endl;
         AR_ASSERT(!"bad opcode");
+        break;
       }
     }
   }

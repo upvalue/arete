@@ -1,6 +1,7 @@
 ;; compiler.scm - Arete bytecode compiler
 
-;; Note: Internal structure is manipulated by C++ code and must be changed if anything is rearranged here
+;; Note: Internal structure is manipulated by openfn_to_procedure in builtins.cpp and that must be updated
+;; if anything is rearranged here
 (define-record OpenFn
   name ;; 0
   insns ;; 1
@@ -25,6 +26,7 @@
       (make name #f #f))))
 
 (define (compiler-log . rest)
+  (display "arete:cc: ")
   (if (or #t (top-level-value '*compiler-log*))
     (apply print rest)))
 
@@ -43,25 +45,27 @@
   (if (fixnum? insn)
     insn
     (case insn
-      ((push-constant) 1)
-      ((global-get) 2)
-      ((global-set) 3)
-      ((return) 4)
-      ((apply) 5)
+      (push-constant 1)
+      (global-get 2)
+      (global-set 3)
+      (return 4)
+      (apply 5)
+      (apply-tail 6)
       (else (raise 'compile "unknown named instruction" (list insn))))))
 
 (define (fn-adjust-stack fn size)
   (compiler-log "stack +=" size)
   (OpenFn/stack-size! fn (fx+ (OpenFn/stack-size fn) size)))
 
+;(set-top-level-value! '*expander-print* #t)
+
 (define (emit fn . insns)
   (fn-adjust-stack fn 
     (case (car insns)
-      ('push-constant 1)
-      ('global-get 1)
+      ((push-constant global-get) 1)
       ;; Remove arguments from stack, but push a single result
-      ('apply (fx+ (fx- (cadr insns)) 1))
-      ('return 0)
+      ((apply apply-tail) (fx+ (fx- (cadr insns)) 1))
+      (return 0)
       (else (raise 'compile "unknown instruction" (list fn insns)))
     ))
 
@@ -77,22 +81,36 @@
 (define (compile-constant fn env x)
   (emit fn 'push-constant (register-constant fn x)))
 
-(define (compile-apply fn env x)
+(define (compile-apply fn env x tail?)
+  (define stack-check #f)
+  (define argc (length (cdr x)))
   ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
-  (compile-expr fn env (car x))
-  (emit fn 'apply (length (cdr x)))
-  #t)
+  (compile-expr fn env (car x) tail?)
+
+  (set! stack-check (OpenFn/stack-size fn))
+
+  (for-each
+    (lambda (x)
+      (compile-expr fn env x #f))
+    (cdr x))
+
+  (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
+    (raise 'compile "stack size does not reflect function arguments" (list fn x)))
+  
+  (emit fn (if tail? 'apply-tail 'apply) (length (cdr x)))
+  )
 
 (define (compile-identifier fn env x)
   (emit fn 'global-get (register-constant fn x))
 )
 
-(define (compile-expr fn env x)
+(define (compile-expr fn env x tail?)
+  (print tail?)
   (cond
     ((self-evaluating? x) (compile-constant fn env x))
     ((identifier? x) (compile-identifier fn env x))
     ((list? x)
-     (compile-apply fn env x))
+     (compile-apply fn env x tail?))
     (else (raise 'compile "don't know how to compile expression" (list x))))
 
   fn)
@@ -105,9 +123,11 @@
 ;; apply 2
 
 (define (compile fn env body)
+  (define end (fx- (length body) 1))
   (compiler-log "compiling body" body)
-  (for-each 
-    (lambda (x) (compile-expr fn env x))
+  (for-each-i
+    (lambda (i x)
+      (compile-expr fn env x (fx= i end)))
     body)
 
   (emit fn 'return)
@@ -122,12 +142,11 @@
 
 (define fn (OpenFn/make "vm-function"))
 
-(compile fn #f '((print)))
+(compile fn #f '((print "do re mi" "fa so la" "ti do")))
+(compile-finish fn)
 ;(compile fn #f '(print "Hello world"))
 
 (print fn)
-
-(compile-finish fn)
 
 (print fn)
 

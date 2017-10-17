@@ -1223,8 +1223,6 @@ struct State {
     return source_names.size() - 1;
   }
 
-  #define AR_SYMBOLS_AUX(name) S_##name
-
   std::vector<Value> globals;
 
   // Global variables
@@ -1280,55 +1278,8 @@ struct State {
 
   /** Performs various initializations required for an instance of Arete;
     * this is separate so the uninitialized State can be unit tests in various ways */
-  void boot() {
-    source_names.push_back("unknown");
-    source_names.push_back("anonymous");
-    source_contents.push_back("");
-    source_contents.push_back("");
+  void boot();
 
-    static const char* _symbols[] = {
-      // C_SYNTAX values
-      "quote", "begin", "define", "lambda", "if", "cond", "and", "or", "set!",
-      "define-syntax", "let-syntax", "letrec-syntax", "define-library", "import",
-      // Used by interpreter
-      "else",
-      // Used by reader      
-      "quasiquote", "unquote", "unquote-splicing", "rename",
-      // Modules
-      "unqualified", "only", "except", "prefix",
-      // Tags for errors that may be thrown by the runtime
-      "file", "read", "eval", "type", "expand", "syntax",
-      // Various variables
-      "*expander-print*",
-      "expander"
-    };
-
-    AR_ASSERT((sizeof(_symbols) / sizeof(const char*)) == G_END &&
-      "did you forget to change _symbols to match enum Global?");
-
-     // TODO: This is suitably confusing and there should probably be multiple vectors:
-     // for symbols used directly, for symbols used to store values, and for other values (strings)
-    Value s;
-    for(size_t i = 0; i != G_END; i++) {
-      if(i >= G_END) {
-        s = make_string(_symbols[i]);
-      } else {
-        s = get_symbol(_symbols[i]);
-
-        if(i <= S_LETREC_SYNTAX) {
-          s.as<Symbol>()->value = C_SYNTAX;
-        } else {
-          s.as<Symbol>()->value = C_UNDEFINED;
-        }
-      }
-      globals.push_back(s);
-    }
-
-    install_core_functions();
-    // gc.allocations = 0;
-  }
-
-#undef AR_SYMBOLS
 
   // Value creation; all of these will cause allocations
   Value make_flonum(double number) {
@@ -1770,25 +1721,6 @@ struct State {
   }
 
   Value print(Value obj, std::ostream& os = std::cout) {
-    if(obj.type() == RECORD) {
-      Value printer = obj.record_type().record_type_print();
-      if(printer.applicable()) {
-        Value arg = C_FALSE;
-        AR_FRAME(this, obj, printer, arg);
-        arg = make_pair(obj, C_NIL);
-
-        arg = apply_generic(printer, arg, true);
-        if(arg.is_active_exception()) {
-          return arg;
-        }
-
-        if(arg.type() == STRING) {
-          os << arg.string_data();
-          return C_UNSPECIFIED;
-        }
-      }
-    }
-
     os << obj;
     return C_UNSPECIFIED;
   }
@@ -2126,28 +2058,14 @@ struct State {
   Value eval(Value env, Value exp, Value fn_name = C_FALSE);
 
   /** Apply a scheme function */
-  Value apply_scheme(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
-  Value apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
+  Value eval_apply_scheme(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
+  Value eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
+  // TODO: This should perhaps be removed entirely.
   Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);
   Value apply_vm(Value fn, size_t argc, Value* argv);
   
   /** Apply a C or a Scheme function */
-  Value apply_generic(Value fn, Value args, bool eval_args) {
-    AR_ASSERT(fn.applicable());
-    if(fn.type() == FUNCTION) {
-      return apply_scheme(fn.function_parent_env(), fn, args, C_FALSE, C_FALSE, eval_args);
-    } else if(fn.type() == CFUNCTION) {
-      return apply_c(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
-    } else if(fn.type() == RECORD) {
-      Value fn2 = fn.record_type().record_type_apply();
-      AR_ASSERT(fn2.applicable());
-      AR_FRAME(this, fn, fn2, args);
-      args = make_pair(fn, args);
-
-      return apply_generic(fn2, args, eval_args);
-    }
-    AR_ASSERT(!":(");
-  }
+  Value eval_apply_generic(Value fn, Value args, bool eval_args);
 
   Value expand_expr(Value exp) {
     Value expand = get_global_value(G_EXPANDER);
@@ -2161,7 +2079,7 @@ struct State {
 
       // Save for source code info
       saved = exp;
-      exp = apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
+      exp = eval_apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
       if(exp.is_active_exception()) {
         std::ostringstream os1;
         std::ostringstream os2;
@@ -2205,6 +2123,9 @@ struct State {
 
 ///// READ! S-Expression reader
 
+/** 
+ * S-expression reader.
+ */
 struct XReader {
   /** Instance of the Arete runtime */
   State& state;

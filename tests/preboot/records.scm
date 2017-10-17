@@ -6,15 +6,17 @@
 
 (print (record-ref MyBox box-instance 0))
 
+#|
 (set-record-type-printer! MyBox
   (lambda (b)
     "success"))
 
 (print box-instance)
+|#
 
-(set-record-type-apply! MyBox (lambda (b) "success"))
+;(set-record-type-apply! MyBox (lambda (b) "success"))
 
-(print (box-instance))
+;(print (box-instance))
 
 (define MyBox2 (register-record-type "box2" 1 0 MyBox))
 

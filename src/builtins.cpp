@@ -537,7 +537,7 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
     if(indice) {
       arg = state.make_pair(Value::make_fixnum(i), arg);
     }
-    tmp = state.apply_generic(fn, arg, false);
+    tmp = state.eval_apply_generic(fn, arg, false);
     if(tmp.is_active_exception()) return tmp;
     if(ret) {
       // Try to preserve source information if it's available
@@ -562,7 +562,7 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
   if(lst != C_NIL) {
     if(improper) {
       arg = state.make_pair(lst, C_NIL);
-      tmp = state.apply_generic(fn, arg, false);
+      tmp = state.eval_apply_generic(fn, arg, false);
       if(tmp.is_active_exception()) return tmp;
       if(ret) {
         nlst_current.set_cdr(tmp);
@@ -595,6 +595,10 @@ Value fn_foreach_improper(State& state, size_t argc, Value* argv) {
 
 Value fn_map_proper_i(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "map-i", false, true, true);
+}
+
+Value fn_for_each_proper_i(State& state, size_t argc, Value* argv) {
+  return fn_map_impl(state, argc, argv, "for-each-i", false, false, true);
 }
 
 enum Mem { MEMQ, MEMV, MEMBER };
@@ -646,7 +650,7 @@ Value fn_apply(State& state, size_t argc, Value* argv) {
   Value fn = argv[0], args = argv[1], tmp;
   AR_FRAME(state, fn, args, tmp);
 
-  tmp = state.apply_generic(fn, args, false);
+  tmp = state.eval_apply_generic(fn, args, false);
 
   return tmp;
 }
@@ -1264,6 +1268,7 @@ void State::install_core_functions() {
   defun_core("append!", fn_appendm, 2);
 
   defun_core("map-i", fn_map_proper_i, 2);
+  defun_core("for-each-i", fn_for_each_proper_i, 2);
   defun_core("map", fn_map_improper, 2);
   defun_core("map-improper", fn_map_improper, 2);
   defun_core("for-each", fn_foreach_proper, 2);

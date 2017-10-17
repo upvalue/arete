@@ -343,9 +343,9 @@ Value State::eval(Value env, Value exp, Value fn_name) {
         return eval_error(os.str(), exp);
       } else {
         if(car.type() == FUNCTION) {
-          return apply_scheme(env, car, exp.cdr(), exp, fn_name);
+          return eval_apply_scheme(env, car, exp.cdr(), exp, fn_name);
         } else if(car.type() == CFUNCTION) {
-          return apply_c(env,  car, exp.cdr(), exp, fn_name);
+          return eval_apply_c(env,  car, exp.cdr(), exp, fn_name);
         } else if(car.type() == RECORD) {
           return apply_record(env, car, exp.cdr(), exp, fn_name);
         } else if(car.type() == VMFUNCTION) {
@@ -414,7 +414,7 @@ Value State::eval(Value env, Value exp, Value fn_name) {
   return C_UNSPECIFIED;
 }
 
-Value State::apply_scheme(Value env, Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args) {
+Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args) {
   Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
   Value fn_name;
   AR_FRAME(this, env, fn, args, new_env, fn_args, tmp, src_exp, rest_args_name, rest_args_head,
@@ -486,7 +486,7 @@ Value State::apply_scheme(Value env, Value fn, Value args, Value src_exp, Value 
   return tmp;
 }
 
-Value State::apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
+Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
   Value fn_args, tmp;
   AR_FRAME(this, env,  fn, args, fn_args, src_exp, tmp, fn_name);
 
@@ -544,15 +544,27 @@ Value State::apply_record(Value env, Value fn, Value args, Value src_exp, Value 
   args2 = make_pair(fn, args);
 
   if(apply.type() == FUNCTION) {
-    return apply_scheme(env, apply, args2, src_exp, fn_name, true);
+    return eval_apply_scheme(env, apply, args2, src_exp, fn_name, true);
   } else if(apply.type() == CFUNCTION) {
-    return apply_c(env, apply, args2, src_exp, fn_name, true);
+    return eval_apply_c(env, apply, args2, src_exp, fn_name, true);
   } else {
     return type_error("record applicator must be function or cfunction");
   }
   gc.collect();
   // std::cout << "HAH" << std::endl;
   return C_UNSPECIFIED;
+}
+
+Value State::eval_apply_generic(Value fn, Value args, bool eval_args) {
+  AR_ASSERT(fn.applicable() && "eval_apply_generic called on non-applicable object");
+  if(fn.type() == FUNCTION) {
+    return eval_apply_scheme(fn.function_parent_env(), fn, args, C_FALSE, C_FALSE, eval_args);
+  } else if(fn.type() == CFUNCTION) {
+    return eval_apply_c(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
+  } 
+
+  std::cerr << "interpreter cannot apply object " << fn << std::endl;
+  AR_ASSERT(!"eval_apply_generic failed");
 }
 
 } // namespace arete

@@ -498,15 +498,16 @@
 
       ;; TODO: Most Schemes seem to support a direct comparison as well e.g.
       ;; (case 5 (5 #t))
-      (unless (or (c (car clause) #'else) (list? (car clause)) (self-evaluating? (car clause)))
-        (if (eq? (car clause) 'else)
+      (unless (or (symbol? (car clause)) (list? (car clause)) (self-evaluating? (car clause)))
+        (raise 'syntax "case expects an else clause, a literal, or a list of literals as its datum"))
+        #;(if (eq? (car clause) 'else)
           (raise 'syntax "case expected an else clause, but it seems else has been redefined" x)
-          (raise 'syntax "case expected a list or else clause as its datum" x)))
+          (raise 'syntax "case expected a list or else clause as its datum" x))
 
       (define condition
         (if (c (car clause) #'else)
           #t 
-          (if (self-evaluating? (car clause))
+          (if (or (symbol? (car clause)) (self-evaluating? (car clause)))
             ;; Immediate values result in an eq? call
             `(,#'eq? ,#'result (,#'quote ,(car clause)))            
             ;; Lists will be memv'd
