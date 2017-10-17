@@ -516,7 +516,14 @@ Value State::apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_na
     args = args.cdr();
   }
   
-  tmp = fn.c_function_addr()(*this, argc, fn_args.as<Vector>()->storage.as<VectorStorage>()->data);
+  /*
+  std::cout << "OK" << std::endl;
+  std::cout << fn_args << std::endl;
+  std::cout << fn_args.type() << std::endl;
+  std::cout << fn_args.vector_storage().type() << std::endl;
+  std::cout << "NOW CRASH" << std::endl;
+  */
+  tmp = fn.c_function_addr()(*this, argc, fn_args.vector_storage().vector_storage_data());
   EVAL_CHECK(tmp, src_exp, fn_name);
   return tmp;
 }

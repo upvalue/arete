@@ -75,6 +75,7 @@ TEST_CASE("constant representation") {
 TEST_CASE("gc alignment works") {
   CHECK(GCCommon::align(8, 63) == 64);
   CHECK(GCCommon::align(4096, 4095) == 4096);
+  CHECK(GCCommon::align(8, 247) == 248);
 }
 
 TEST_CASE("frames successfully save pointers to stack values") {

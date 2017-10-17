@@ -1,9 +1,4 @@
-;; boot2.scm - expander, compiler, standard library
-
-;; Act II: Expander, compiler, standard library
-
-;; EXP! Expansion pass
-;; SYNTAX! Basic syntax: let, quasiquote, etc
+;; boot.scm - expander,  basic syntax
 
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
@@ -484,11 +479,14 @@
 ;; TODO =>
 (define-syntax case
   (lambda (x rename c)
+    (define key #f)
+    (define clauses #f)
+
     (if (fx< (length x) 3)
       (raise 'syntax "case expects at least three arguments (a key and a clause)" x))
 
-    (define key (cadr x))
-    (define clauses (cddr x))
+    (set! key (cadr x))
+    (set! clauses (cddr x))
 
     (if (not (list? clauses))
       (raise 'syntax "case expects a list of clauses" x))
@@ -500,7 +498,7 @@
 
       ;; TODO: Most Schemes seem to support a direct comparison as well e.g.
       ;; (case 5 (5 #t))
-      (unless (or (c (car clause) #'else) (list? (car clause)))
+      (unless (or (c (car clause) #'else) (list? (car clause)) (self-evaluating? (car clause)))
         (if (eq? (car clause) 'else)
           (raise 'syntax "case expected an else clause, but it seems else has been redefined" x)
           (raise 'syntax "case expected a list or else clause as its datum" x)))
@@ -508,7 +506,11 @@
       (define condition
         (if (c (car clause) #'else)
           #t 
-          `(,#'memv ,#'result (,#'quote ,(car clause)))))
+          (if (self-evaluating? (car clause))
+            ;; Immediate values result in an eq? call
+            `(,#'eq? ,#'result (,#'quote ,(car clause)))            
+            ;; Lists will be memv'd
+            `(,#'memv ,#'result (,#'quote ,(car clause))))))
 
       (if (null? (cdr clauses))
         `(,#'if ,condition

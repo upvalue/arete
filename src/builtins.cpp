@@ -1176,6 +1176,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   size_t bytecode_size = (size_t) insn_count * sizeof(size_t);
   unsigned constant_count = (unsigned) constants.vector_length();
 
+  // Determine actual size of VMFunction
   size += (constant_count * sizeof(Value));
   size += (bytecode_size);
 
@@ -1185,23 +1186,14 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   vfn->min_arity = 0;
   vfn->max_arity = 0;
   vfn->bytecode_size = bytecode_size;
-  vfn->stack_size = 1;
+  vfn->stack_size = rec.record_ref(4).fixnum_value();
 
   fn = vfn;
 
-  // Copy constants
-  Value* fconstants = fn.vm_function_constants(); 
-
-  memcpy(fn.vm_function_constants(), constants.vector_storage().vector_storage_data(),
-    constant_count * sizeof(Value));
-
-  // std::cout << constants << std::endl;
-  // std::cout << fn.vm_function_constants()[0] << std::endl;
+  vfn->constants = rec.record_ref(2).vector_storage().as<VectorStorage>();
 
   // Copy bytecode
   size_t* bytecode_array = (size_t*) fn.vm_function_bytecode();
-
-  // std::cout << (size_t) bytecode_array << std::endl;
 
   AR_ASSERT(((char*) bytecode_array) > ((char*) fn.vm_function_constants()));
   
@@ -1209,7 +1201,9 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
     (*bytecode_array++) = insns.vector_ref(i).fixnum_value();
   }
 
-  // std::cout << "VM CONSTANCE" << fn.vm_function_constants()[0] << std::endl;
+  // Check we didn't go over the end of the object
+  AR_ASSERT((char*) bytecode_array <= ((char*) (vfn)) + vfn->size);
+
   return fn;
 }
 
@@ -1228,7 +1222,6 @@ void State::install_core_functions() {
   defun_core("fx<", fn_fx_lt, 2);
   defun_core("fx>", fn_fx_gt, 2);
 
-  // TODO Variadic arguments
   defun_core("+", fn_add, 1, 1, true);
   defun_core("-", fn_sub, 1, 1, true);
   defun_core("/", fn_div, 2, 2, true);

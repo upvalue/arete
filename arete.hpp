@@ -1,4 +1,4 @@
-// arete.hpp - scheme implementation
+/// arete.hpp - scheme implementation
 
 #ifndef ARETE_HPP
 #define ARETE_HPP
@@ -124,6 +124,7 @@ struct Block;
 struct Value;
 struct SourceLocation;
 struct Pair;
+struct VectorStorage;
 
 extern size_t gc_collect_timer;
 
@@ -194,6 +195,7 @@ inline std::ostream& operator<<(std::ostream& os, Type type) {
     case SYMBOL: return os << "symbol";
     case RENAME: return os << "rename";
     case VECTOR: return os << "vector";
+    case VECTOR_STORAGE: return os << "vector-storage";
     case PAIR: return os << "pair";
     case EXCEPTION: return os << "exception";
     case FUNCTION: return os << "function";
@@ -453,7 +455,7 @@ struct Value {
 
   Value vm_function_name() const;
   size_t* vm_function_bytecode() const;
-  Value* vm_function_constants() const;
+  VectorStorage* vm_function_constants() const;
 
   // RECORD
   Value record_type() const;
@@ -738,19 +740,10 @@ inline bool Value::c_function_variable_arity() const {
 
 struct VMFunction : HeapValue {
   Value name;
+  VectorStorage* constants;
 
   unsigned constant_count, min_arity, max_arity, stack_size;
   size_t bytecode_size;
-
-  // Rest of fields are variably sized and accessed through functions which do the necessary
-  // pointer arithmetic:
-  // constants, bytecode
-
-  Value* constants() const { 
-    char* ptr = (char*) this;
-    return (Value*) ptr + sizeof(VMFunction);
-  }
-
   static const unsigned CLASS_TYPE = VMFUNCTION;
 };
 
@@ -770,24 +763,14 @@ inline Value Value::vm_function_name() const {
   return as<VMFunction>()->name;
 }
 
-inline Value* Value::vm_function_constants() const {
-  // std::cout << "constant offsets" << std::endl;
-  // std::cout << (size_t) heap << std::endl;
-  // std::cout << sizeof(VMFunction) << std::endl;
-  char* ret = ((char*) heap) + (size_t)(static_cast<VMFunction*>(heap)->constant_count * sizeof(Value));
-  // std::cout << (size_t) ret << std::endl;
-  return (Value*) ret;
+inline VectorStorage* Value::vm_function_constants() const {
+  return as<VMFunction>()->constants;
 }
 
 inline size_t* Value::vm_function_bytecode() const {
   char* ptr = (char*) heap;
-
-  // std::cout << "bytecode offsets" << std::endl;
-  // std::cout << (size_t) ptr << std::endl;
-  // std::cout << sizeof(VMFunction) << std::endl;
-  // std::cout << (static_cast<VMFunction*>(heap)->constant_count * sizeof(Value)) << std::endl;
-  char* ret = (ptr + (size_t)(sizeof(VMFunction)) + (size_t)(static_cast<VMFunction*>(heap)->constant_count * sizeof(Value))); 
-  // std::cout << (size_t) ret << std::endl;
+  char* ret = (ptr + (size_t)(sizeof(VMFunction)));
+  AR_ASSERT(ret > ptr);
   return (size_t*) ret;
 }
 
@@ -1087,9 +1070,10 @@ struct GCCommon {
 
   ~GCCommon() {}
 
-  // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) == 16
+  // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) == 16,
+  // and align(8, 247) == 248 
   static size_t align(size_t boundary, size_t value) {
-    return (((((value) - 1) / (boundary)) + 1) * (boundary));
+    return (value + (boundary - 1)) & -boundary;
   }
 };
 
@@ -1210,11 +1194,7 @@ struct GCSemispace : GCCommon {
         // Variable ptrs / more complex collection required
         case VMFUNCTION: {
           AR_COPY(VMFunction, name);
-          Value n(obj);
-          Value* constants = n.vm_function_constants();
-          for(unsigned i = 0; i != static_cast<VMFunction*>(obj)->constant_count; i++) {
-            copy((HeapValue**) &constants[i]);
-          }
+          AR_COPY(VMFunction, constants);
           break;
         }
         case RECORD: {
@@ -1289,8 +1269,8 @@ struct GCSemispace : GCCommon {
       if(!has_room(size)) {
         collect(size, true);
         if(!has_room(size)) {
+          std::cerr << "arete:gc: semispace allocation of size " << size << " failed with heap of size " << heap_size << std::endl;
           AR_ASSERT(!"arete:gc: semispace allocation failed");
-          // TODO there should be some kind of error available here
         }
       }
     }
@@ -1299,6 +1279,12 @@ struct GCSemispace : GCCommon {
     HeapValue* v = (HeapValue*) (active->data + block_cursor);
     v->initialize(type, 0, size);
     block_cursor += size;
+    // Assert that pointer is aligned properly.
+    if(Value(v).immediatep()) {
+      std::cout << "SIZE: " << size << std::endl;
+      std::cout << "PTR: " << (size_t) v << std::endl;
+    }
+    AR_ASSERT(!Value(v).immediatep());
     AR_ASSERT(v->size == size);
     return v;
   }
@@ -1799,10 +1785,9 @@ struct State {
     AR_FRAME(this, pare, car, cdr);
     pare = make_pair(car, cdr, sizeof(Pair));
     pare.heap->set_header_bit(Value::PAIR_SOURCE_BIT);
-    pare.set_pair_src(loc);
-
     AR_ASSERT(pare.type() == PAIR);
     AR_ASSERT(pare.pair_has_source());
+    pare.set_pair_src(loc);
 
     return pare;
   }

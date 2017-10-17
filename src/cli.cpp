@@ -82,18 +82,6 @@ static bool do_repl(State& state, bool read_only) {
 
       if(read_only) {
         std::cout << x << std::endl;
-        /*
-        if(x.type() == PAIR) {
-          if(x.list_length() > 1) {
-            state.print_src_pair(std::cout, x.cadr());
-            state.print_src_pair(std::cout, x.cdr());
-            std::cout << std::endl;
-          }
-
-          state.print_src_pair(std::cout, x);
-          std::cout << std::endl;
-        }
-        */
         continue;
       }
 
@@ -148,6 +136,7 @@ bool do_file(State& state, std::string path, bool read_only) {
 
       if(tmp.is_active_exception()) {
         state.print_exception(std::cerr, tmp);
+        return false;
       }
     }
   }
