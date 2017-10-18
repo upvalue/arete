@@ -10,12 +10,14 @@
   stack-size ;; 4
   local-count ;; 5
   stack-max ;; 6
+  parent ;; 7
+  env ;; 8
   )
 
 (set! OpenFn/make
   (let ((make OpenFn/make))
     (lambda (name)
-      (make name #() #() #() 0 0 0))))
+      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f #f))))
 
 (define-record Var
   name
@@ -58,14 +60,10 @@
 
 (define (fn-adjust-stack fn size)
   (define new-size (fx+ (OpenFn/stack-size fn) size))
-  (compiler-log "stack +=" size)
+  (compiler-log "stack +=" size "=" new-size)
   (OpenFn/stack-size! fn new-size)
   (OpenFn/stack-max! fn (max new-size (OpenFn/stack-max fn)))
-  
 )
-
-
-;(set-top-level-value! '*expander-print* #t)
 
 (define (emit fn . insns)
   (fn-adjust-stack fn 
@@ -86,20 +84,20 @@
     (lambda (insn) (vector-append! (OpenFn/insns fn) insn))
     insns))
 
-(define (compile-constant fn env x)
+(define (compile-constant fn x)
   (emit fn 'push-constant (register-constant fn x)))
 
-(define (compile-apply fn env x tail?)
+(define (compile-apply parent fn x tail?)
   (define stack-check #f)
   (define argc (length (cdr x)))
   ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
-  (compile-expr fn env (car x) tail?)
+  (compile-expr fn  (car x) tail?)
 
   (set! stack-check (OpenFn/stack-size fn))
 
   (for-each
     (lambda (x)
-      (compile-expr fn env x #f))
+      (compile-expr fn  x #f))
     (cdr x))
 
   (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
@@ -108,16 +106,54 @@
   (emit fn (if tail? 'apply-tail 'apply) (length (cdr x)))
   )
 
-(define (compile-identifier fn env x)
+(define (compile-identifier parent fn x)
   (emit fn 'global-get (register-constant fn x))
 )
 
-(define (compile-expr fn env x tail?)
+(define-syntax aif
+  (lambda (x)
+    (unless (fx= (length x) 4)
+      (raise 'syntax "aif expects exactly four arguments" (list x)))
+
+    `(,#'let ((it ,(list-ref x 1)))
+        (,#'if it ,(list-ref x 2) ,(list-ref x 3)))))
+
+(define (special-form x)
+  (when (rename? x)
+    (if (rename-env x) 
+      (raise 'compile "compiler encountered non-toplevel rename" (list x)))
+
+    (set! x (rename-expr x)))
+
+  (if (memq x '(lambda)) x #f))
+
+(define (compile-lambda parent fn x)
+  ;; So compile lambda has to recurse into the body of the lambda;
+  ;; it creates an additional OpenFN with this as a parent
+  (define sub-fn (OpenFn/make (gensym 'lambda)))
+  (define args (cadr x))
+
+  (if (identifier? args)
+    (raise 'compile "can't handle varargs" (list x)))
+
+  (compile fn sub-fn (cddr x))
+  (compile-finish sub-fn)
+
+  (emit fn 'push-constant (register-constant fn (OpenFn->procedure sub-fn))))
+
+(define (compile-special-form parent fn x type tail?)
+  (compiler-log "compiling special form" type x)
+  (case type
+    (lambda (compile-lambda parent fn x))))
+
+(define (compile-expr parent fn x tail?)
   (cond
-    ((self-evaluating? x) (compile-constant fn env x))
-    ((identifier? x) (compile-identifier fn env x))
+    ((self-evaluating? x) (compile-constant fn  x))
+    ((identifier? x) (compile-identifier parent fn  x))
     ((list? x)
-     (compile-apply fn env x tail?))
+     (aif (special-form (car x))
+       (compile-special-form parent fn x it tail?)
+       (compile-apply parent fn x tail?)))
     (else (raise 'compile "don't know how to compile expression" (list x))))
 
   fn)
@@ -129,12 +165,12 @@
 ;; push-constant 1
 ;; apply 2
 
-(define (compile fn env body)
+(define (compile parent fn body)
   (define end (fx- (length body) 1))
   (compiler-log "compiling body" body)
   (for-each-i
     (lambda (i x)
-      (compile-expr fn env x (fx= i end)))
+      (compile-expr parent fn x (fx= i end)))
     body)
 
   (emit fn 'return)
@@ -147,17 +183,15 @@
       (vector-set! (OpenFn/insns fn) i (insn->byte (vector-ref (OpenFn/insns fn) i)))
       (loop (fx+ i 1)))))
 
+;; Do the thing.
 (define fn (OpenFn/make "vm-function"))
 
-(compile fn #f '((print "do re mi" "fa so la" "ti do")))
+(compile #f fn '((lambda () #t)))
 (compile-finish fn)
-;(compile fn #f '(print "Hello world"))
-
-(print fn)
 
 (print fn)
 
 (define compiled-proc (OpenFn->procedure fn))
 (print compiled-proc)
-(print "result of execution" (compiled-proc))
+(print "result of execution" ((compiled-proc)))
 

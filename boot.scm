@@ -478,7 +478,7 @@
 ;; case
 ;; TODO =>
 (define-syntax case
-  (lambda (x rename c)
+  (lambda (x c)
     (define key #f)
     (define clauses #f)
 
