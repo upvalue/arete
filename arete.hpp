@@ -450,14 +450,16 @@ struct Value {
   bool c_function_variable_arity() const;
 
   // VM FUNCTIONS
-
   unsigned vm_function_constant_count() const;
   unsigned vm_function_min_arity() const;
   unsigned vm_function_max_arity() const;
+  bool vm_function_variable_arity() const { return heap->get_header_bit(VMFUNCTION_VARIABLE_ARITY_BIT); }
 
   Value vm_function_name() const;
   size_t* vm_function_bytecode() const;
   VectorStorage* vm_function_constants() const;
+
+  static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
 
   // RECORD
   Value record_type() const;
@@ -2318,7 +2320,10 @@ inline std::ostream& operator<<(std::ostream& os, Value v) {
       return os << '>';
     }
     case VMFUNCTION: {
-      return os << "#<vmfunction " << (void*) v.bits << '>';
+      os << "#<vmfunction " << v.vm_function_name() << ' ' << (void*) v.bits;
+      os << ' ' << v.vm_function_min_arity() << '-' << v.vm_function_max_arity();
+      os << ' ' << (v.vm_function_variable_arity() ? "#t" : "#f") << '>';
+      return os;
     }
     case CFUNCTION: {
       os << "#<cfunction ";

@@ -100,7 +100,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         size_t argc = code[code_offset++];
         Value fn = f.stack[f.stack_i - argc - 1];
         AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " argc: " << argc << " fn: " << fn);
-        AR_ASSERT(fn.type() == CFUNCTION);
 
         if(fn.type() == CFUNCTION) {
           size_t min_arity = fn.as<CFunction>()->min_arity;
@@ -110,16 +109,38 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           f.stack[f.stack_i - argc - 1] =
             fn.c_function_addr()(*this, argc, &f.stack[f.stack_i - argc]);
 
+          f.stack_i -= (argc);
         } else if(fn.type() == FUNCTION) {
           std::cerr << "cannot call interpreted function from VM code" << std::endl;
           AR_ASSERT(!"cannot call interpreted function from VM code");
         } else if(fn.type() == VMFUNCTION) {
-          std::cerr << "cannot call VM function from VM code" << std::endl;
-          AR_ASSERT(!"cannot call VM function from VM code");
+          size_t min_arity = fn.vm_function_min_arity(), max_arity = fn.vm_function_max_arity();
+          bool var_arity = fn.vm_function_variable_arity();
+
+          if(argc < min_arity) {
+            std::ostringstream os;
+            os << "function " << fn << " expected at least " << min_arity << " arguments " <<
+              "but only got " << argc;
+            return eval_error(os.str());
+          } else if(argc > max_arity && !var_arity) {
+            std::ostringstream os;
+            os << "function " << fn << " expected at most " << max_arity << " arguments " <<
+              "but only got " << argc;
+            return eval_error(os.str());
+          }
+
+          Value result = apply_vm(fn, argc, &f.stack[f.stack_i - argc]);
+
+          AR_PRINT_STACK();
+
+          // Pop arguments, replace function with results
+          f.stack_i -= (argc);
+          f.stack[f.stack_i - 1] = result;
+
+          AR_PRINT_STACK();
         }
         // TODO check arity.
         // AR_PRINT_STACK();
-        f.stack_i -= (argc);
         // AR_PRINT_STACK();
         continue;
       }

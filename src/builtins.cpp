@@ -453,13 +453,6 @@ Value fn_length(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(length);
 }
 
-Value fn_appendm(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "append!";
-  (void) fn_name;
-
-  return C_FALSE;
-}
-
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
   if(argv[0] == C_NIL) return C_TRUE;
@@ -1187,10 +1180,14 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   VMFunction* vfn = static_cast<VMFunction*>(state.gc.allocate(VMFUNCTION, size));
 
   vfn->constant_count = constant_count;
-  vfn->min_arity = 0;
-  vfn->max_arity = 0;
+  vfn->min_arity = rec.record_ref(9).fixnum_value();
+  vfn->max_arity = rec.record_ref(10).fixnum_value();
   vfn->bytecode_size = bytecode_size;
   vfn->stack_max = rec.record_ref(6).fixnum_value();
+  vfn->name = C_FALSE;
+  if(rec.record_ref(11) == C_TRUE) {
+    vfn->set_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT);
+  }
 
   fn = vfn;
 
@@ -1265,7 +1262,6 @@ void State::install_core_functions() {
   defun_core("list-ref", fn_list_ref, 2);
   defun_core("list-join", fn_list_join, 2);
   defun_core("length", fn_length, 1);
-  defun_core("append!", fn_appendm, 2);
 
   defun_core("map-i", fn_map_proper_i, 2);
   defun_core("for-each-i", fn_for_each_proper_i, 2);

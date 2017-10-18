@@ -12,12 +12,15 @@
   stack-max ;; 6
   parent ;; 7
   env ;; 8
+  min-arity ;; 9
+  max-arity ;; 10
+  var-arity ;; 11
   )
 
 (set! OpenFn/make
   (let ((make OpenFn/make))
     (lambda (name)
-      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f #f))))
+      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f #f 0 0 0))))
 
 (define-record Var
   name
@@ -91,13 +94,13 @@
   (define stack-check #f)
   (define argc (length (cdr x)))
   ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
-  (compile-expr fn  (car x) tail?)
+  (compile-expr parent fn (car x) tail?)
 
   (set! stack-check (OpenFn/stack-size fn))
 
   (for-each
     (lambda (x)
-      (compile-expr fn  x #f))
+      (compile-expr parent fn  x #f))
     (cdr x))
 
   (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
@@ -127,11 +130,29 @@
 
   (if (memq x '(lambda)) x #f))
 
+
+;; This gives us the number of proper arguments to a function
+(define (args-length x)
+  (if (or (identifier? x) (null? x))
+    0
+    (let loop ((rest (cdr x))
+               (i 1))
+      (if (or (null? rest) (not (pair? rest)))
+        i
+        (loop (cdr rest) (fx+ i 1))))))
+
 (define (compile-lambda parent fn x)
   ;; So compile lambda has to recurse into the body of the lambda;
   ;; it creates an additional OpenFN with this as a parent
   (define sub-fn (OpenFn/make (gensym 'lambda)))
   (define args (cadr x))
+  (define arg-len (args-length args))
+  (define varargs (or (not (list? args)) (identifier? args)))
+
+  (OpenFn/min-arity! sub-fn arg-len)
+  ;; TODO optional arguments
+  (OpenFn/max-arity! sub-fn arg-len)
+  (OpenFn/var-arity! sub-fn (or (not (list? args)) (identifier? args)))
 
   (if (identifier? args)
     (raise 'compile "can't handle varargs" (list x)))
@@ -186,12 +207,18 @@
 ;; Do the thing.
 (define fn (OpenFn/make "vm-function"))
 
-(compile #f fn '((lambda () #t)))
+
+(compile #f fn '(
+  ((lambda (a) 5343) #t))
+)
+(print fn)
 (compile-finish fn)
 
 (print fn)
 
 (define compiled-proc (OpenFn->procedure fn))
 (print compiled-proc)
-(print "result of execution" ((compiled-proc)))
+(define subproc (compiled-proc))
+(print subproc)
+;(print "result of execution" ((compiled-proc) 1))
 
