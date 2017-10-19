@@ -20,16 +20,17 @@
 (set! OpenFn/make
   (let ((make OpenFn/make))
     (lambda (name)
-      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f #f 0 0 0))))
+      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0))))
 
 (define-record Var
+  id
   name
   upvalue?)
 
 (set! Var/make
   (let ((make Var/make))
-    (lambda (name)
-      (make name #f #f))))
+    (lambda (id name)
+      (make id name #f))))
 
 (define (compiler-log . rest)
   (display "arete:cc: ")
@@ -57,6 +58,8 @@
       (return 4)
       (apply 5)
       (apply-tail 6)
+      (local-get 7)
+      (local-set 8)
       (else (raise 'compile "unknown named instruction" (list insn))))))
 
 (define (max a b) (if (< a b) b a))
@@ -109,6 +112,18 @@
   (emit fn (if tail? 'apply-tail 'apply) (length (cdr x)))
   )
 
+#|
+(define (fn-lookup fn x)
+  (let loop ((search-fn fn))
+    (aif (table-ref (OpenFn/env fn x))
+      (cons
+        (if (eq? fn search-fn) 'local 'global)
+        (if (eq? fn search-fn) (Var/id it) x))
+
+    (if (table-ref (OpenFn/env fn)
+                   |#
+             
+
 (define (compile-identifier parent fn x)
   (emit fn 'global-get (register-constant fn x))
 )
@@ -153,11 +168,21 @@
   ;; TODO optional arguments
   (OpenFn/max-arity! sub-fn arg-len)
   (OpenFn/var-arity! sub-fn (or (not (list? args)) (identifier? args)))
+  ;; (lambda rest 3)
+  ;; Calculate local count
+  (OpenFn/local-count! sub-fn (if (identifier? args) 1 (fx+ arg-len (if (OpenFn/var-arity sub-fn) 1 0))))
 
   (if (identifier? args)
     (raise 'compile "can't handle varargs" (list x)))
 
+  (for-each-i
+    (lambda (i x)
+      (table-set! (OpenFn/env sub-fn) x (Var/make i x)))
+    args)
+
+
   (compile fn sub-fn (cddr x))
+  (compiler-log "subfunction" sub-fn)
   (compile-finish sub-fn)
 
   (emit fn 'push-constant (register-constant fn (OpenFn->procedure sub-fn))))
@@ -178,13 +203,6 @@
     (else (raise 'compile "don't know how to compile expression" (list x))))
 
   fn)
-
-; (print "123")
-;; constants: #(print "123")
-;; push-constant 0
-;; get-global
-;; push-constant 1
-;; apply 2
 
 (define (compile parent fn body)
   (define end (fx- (length body) 1))
@@ -207,9 +225,8 @@
 ;; Do the thing.
 (define fn (OpenFn/make "vm-function"))
 
-
 (compile #f fn '(
-  ((lambda (a) 5343) #t))
+  ((lambda (a) a) 5438))
 )
 (print fn)
 (compile-finish fn)

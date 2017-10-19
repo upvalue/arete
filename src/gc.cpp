@@ -165,11 +165,16 @@ void GCSemispace::copy_roots() {
     VMFunction* fn = link->fn;
 
     size_t stack_i = link->stack_i;
+    unsigned local_count = fn->local_count;
 
     copy((HeapValue**) &link->fn);
 
     for(size_t i = 0; i != stack_i; i++) {
       copy((HeapValue**) &link->stack[i]);
+    }
+
+    for(unsigned i = 0 ; i != local_count; i++) {
+      copy((HeapValue**) &link->locals[i]);
     }
     link = link->previous;
   }

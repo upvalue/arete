@@ -245,7 +245,7 @@ Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bo
     if(argv[i].type() == STRING) {
       os << argv[i].string_data();
     } else {
-      Value x = state.print(argv[i], os);
+      Value x = state.pretty_print(os, argv[i]);
       if(x.is_active_exception()) return x;
     }
 
@@ -660,6 +660,20 @@ Value fn_cdr(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "cdr";
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   return argv[0].cdr();
+}
+
+Value fn_set_car(State& state, size_t argc, Value* argv) {
+  static const char *fn_name = "set-car!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
+  argv[0].set_car(argv[1]);
+  return C_UNSPECIFIED;
+}
+
+Value fn_set_cdr(State& state, size_t argc, Value* argv) {
+  static const char *fn_name = "set-cdr!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
+  argv[0].set_cdr(argv[1]);
+  return C_UNSPECIFIED;
 }
 
 ///// VECTORS
@@ -1184,6 +1198,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   vfn->max_arity = rec.record_ref(10).fixnum_value();
   vfn->bytecode_size = bytecode_size;
   vfn->stack_max = rec.record_ref(6).fixnum_value();
+  vfn->local_count = rec.record_ref(5).fixnum_value();
   vfn->name = C_FALSE;
   if(rec.record_ref(11) == C_TRUE) {
     vfn->set_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT);
@@ -1306,6 +1321,8 @@ void State::install_core_functions() {
   // Pairs
   defun_core("car", fn_car, 1, 1);
   defun_core("cdr", fn_cdr, 1, 1);
+  defun_core("set-car!", fn_set_car, 2, 2);
+  defun_core("set-cdr!", fn_set_car, 2, 2);
 
   // Exceptions
   defun_core("raise", fn_raise, 3);

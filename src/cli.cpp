@@ -92,8 +92,10 @@ static bool do_repl(State& state, bool read_only) {
         continue;
       }
 
-      if(tmp != C_UNSPECIFIED)
-        std::cout << tmp << std::endl;
+      if(tmp != C_UNSPECIFIED) {
+        state.pretty_print(std::cout, tmp);
+        std::cout << std::endl;
+      }
 
     }
 

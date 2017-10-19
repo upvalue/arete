@@ -103,6 +103,9 @@
 #define ARETE_LOG_TAG_READER (1 << 1)
 #define ARETE_LOG_TAG_VM (1 << 2)
 
+#define ARETE_COLOR_BLUE "\033[1;34m"
+#define ARETE_COLOR_YELLOW "\33[1;33m"
+#define ARETE_COLOR_GREEN "\033[1;32m"
 #define ARETE_COLOR_RED "\033[1;31m"
 #define ARETE_COLOR_RESET "\033[0m"
 
@@ -184,29 +187,7 @@ enum Type {
   VMFUNCTION = 19,
 };
 
-inline std::ostream& operator<<(std::ostream& os, Type type) {
-  switch(type) {
-    case FIXNUM: return os << "fixnum";
-    case CONSTANT: return os << "constant";
-    case RECORD_TYPE: return os << "record-type";
-    case RECORD: return os << "record";
-    case BLOCK: return os << "block";
-    case FLONUM: return os << "flonum";
-    case STRING: return os << "string";
-    case CHARACTER: return os << "character";
-    case SYMBOL: return os << "symbol";
-    case RENAME: return os << "rename";
-    case VECTOR: return os << "vector";
-    case VECTOR_STORAGE: return os << "vector-storage";
-    case PAIR: return os << "pair";
-    case EXCEPTION: return os << "exception";
-    case FUNCTION: return os << "function";
-    case VMFUNCTION: return os << "vmfunction";
-    case CFUNCTION: return os << "cfunction";
-    case TABLE: return os << "table";
-    default: return os << "unknown";
-  }
-}
+std::ostream& operator<<(std::ostream& os, Type type);
 
 // Constants:
 
@@ -243,6 +224,18 @@ struct HeapValue {
   unsigned char get_mark_bit() const { return (header >> 8) & 1; }
   unsigned get_header_bit(unsigned bit) const { return header & bit; }
   void set_header_bit(unsigned bit) { header += bit; }
+
+  unsigned get_shared_count() const {
+    return header >> 32;
+  }
+
+  void set_shared_count(unsigned count) {
+    // Extract header only
+    header = header & ((size_t)((size_t)1 << 32) - 1);
+    header += ((size_t)count << 32);
+    // header = header & 255;
+  }
+
 
   void flip_mark_bit() { header += get_mark_bit() ? -256 : 256; }
 };
@@ -746,7 +739,7 @@ struct VMFunction : HeapValue {
   Value name;
   VectorStorage* constants;
 
-  unsigned constant_count, min_arity, max_arity, stack_max;
+  unsigned constant_count, min_arity, max_arity, stack_max, local_count;
   size_t bytecode_size;
   static const unsigned CLASS_TYPE = VMFUNCTION;
 };
@@ -1008,6 +1001,7 @@ struct VMFrame {
   VMFrame* previous;
   VMFunction* fn;
   Value* stack;
+  Value* locals;
   size_t stack_i;
 
   VMFrame(State& state);
@@ -1199,7 +1193,7 @@ struct State {
   symbol_table_t* symbol_table;
   std::vector<RecordType> record_types;
 
-  State():  gc(*this), gensym_counter(0) {
+  State():  gc(*this), gensym_counter(0), shared_objects_begin(0), shared_objects_i(0) {
     symbol_table = new symbol_table_t();
     current_state = this;
   }
@@ -1722,10 +1716,7 @@ struct State {
     return cfn;
   }
 
-  Value print(Value obj, std::ostream& os = std::cout) {
-    os << obj;
-    return C_UNSPECIFIED;
-  }
+  // WRITE! Output
 
   // Print out a table's internal structure for debugging purposes
   void print_table_verbose(Value tbl) {
@@ -1744,6 +1735,11 @@ struct State {
     std::cout << '>' << std::endl;
   }
 
+  unsigned shared_objects_begin;
+  unsigned shared_objects_i;
+  Value pretty_print(std::ostream& os, Value v);
+  Value pretty_print_sub(std::ostream& os, Value v, unsigned&, std::vector<int>&);
+
   /**
    * Print information about an erroneous pair
    */
@@ -1759,117 +1755,20 @@ struct State {
   /**
    * Print an erroneous line of source code with offending information highlighted
    */
-  void print_src_line(std::ostream& os, const SourceLocation& src) {
-    unsigned seek_line = 1;
-    std::string source_line;
-    char c;
-    
-    if(src.source > 0 && source_contents[src.source].size() > 0) {
-      std::stringstream ss;
-
-      ss >> std::noskipws;
-      ss << source_contents[src.source];
-      os << "At " << source_name(src.source) << " line " << src.line << std::endl;
-
-      while(!ss.eof()) {
-        if(seek_line == src.line) {
-          unsigned line_position = ss.tellg();
-          std::getline(ss, source_line);
-          os << ARETE_COLOR_RED << source_line << ARETE_COLOR_RESET << std::endl;
-
-          size_t i, j;
-          // Print whitespace for each char in source line until the beginning of this element
-          for(i = line_position, j = 0; i < src.begin; i++, j++) {
-            os << ' ';
-          }
-
-          unsigned limit = j + src.length;
-          // If end_position is 0, we'll highlight the whole line this error occurred on.
-          // Otherwise, try to highlight specific errors eg.
-          // (hello #bad)
-          //         ^
-          for(; j != source_line.size() && ((src.length == 0) || j != limit); j++) {
-            os << '^';
-          }
-          break;
-        }
-
-        ss >> c;
-        if(c == '\n') {
-          seek_line++;
-        }
-      }
-    }
-  }
-
+  void print_src_line(std::ostream& os, const SourceLocation& src);
+  
   /**
    * Special-cased exception printing: this pretty-prints an exception, but also handles 
    * printing erroneous source code for certain builtin exceptions which can communicate this
    * information (eg errors generated by the macro expander)
    */
-  void print_exception(std::ostream& os, Value exc) {
-    AR_TYPE_ASSERT(exc.type() == EXCEPTION);
+  void print_exception(std::ostream& os, Value exc);
 
-    print_stack_trace(os);
+  /** Print GC stats, including time spent if compile flag is enabled */
+  void print_gc_stats(std::ostream& os);
 
-    if(exc.exception_tag() == globals[State::S_EVAL_ERROR]) {
-      os << "Evaluation error: " << exc.exception_message().string_data() << std::endl;
-      print_src_pair(os, exc.exception_irritants());
-      os << std::endl;
-    } else if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]
-      || exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {
-
-      Value irritants = exc.exception_irritants();
-
-      if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]) {
-        os << "Error during expansion: ";
-      } else if(exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {
-        os << "Error in macro syntax: ";
-      }
-
-      os << exc.exception_message().string_data() << std::endl;
-
-      bool source_printed = false;
-
-      if(irritants.list_length() == 1) {
-        source_printed = print_src_pair(os, irritants.list_ref(0));
-      } else if(irritants.list_length() == 2) {
-        source_printed = print_src_pair(os, irritants.list_ref(1));
-      }
-
-      os << std::endl;
-
-      if(!source_printed) {
-        os << "Offending expression: " << irritants.list_ref(0) << std::endl;
-      }
-    } else {
-      os << exc << std::endl;
-    }
-  }
-
-  void print_gc_stats(std::ostream& os) {
-    os << (gc.heap_size / 1024) << "kb in use after " << gc.collections << " collections and "
-      << gc.allocations << " allocations " << std::endl;
-
-#ifdef ARETE_BENCH_GC
-    std::cout << (gc_collect_timer / 1000) << "ms in collection" << std::endl;
-#endif
-  }
-
-  std::string source_name(unsigned source) {
-    return source_names.at(source);
-  }
-
-  void print_stack_trace(std::ostream& os = std::cerr, bool clear = true) {
-    if(stack_trace.size() > 0)
-      os << "Stack trace: " << std::endl;
-    for(size_t i = 0; i != stack_trace.size(); i++)
-      os << stack_trace.at(i) << std::endl;
-
-
-    if(clear)
-      stack_trace.clear();
-  }
+  /** Print a stack trace. */
+  void print_stack_trace(std::ostream& os = std::cerr, bool clear = true);
 
   /** Return a description of a source location */
   std::string source_info(const SourceLocation loc, Value fn_name = C_FALSE) {
@@ -1892,6 +1791,11 @@ struct State {
     } else {
       return "unknown";
     }
+  }
+
+  /** Return the name of a source */
+  std::string source_name(unsigned source) {
+    return source_names.at(source);
   }
 
   ///// (EVAL) Interpreter
@@ -2242,125 +2146,7 @@ struct XReader {
   Value read();
 };
 
-/** Output Arete values */
-inline std::ostream& operator<<(std::ostream& os, Value v) {
-  switch(v.type()) {
-    case FIXNUM:  {
-      return os << v.fixnum_value();
-    }
-    case CONSTANT: 
-      switch(v.constant_value()) {
-        case C_TRUE: return os << "#t";
-        case C_NIL: return os << "()";
-        case C_FALSE: return os << "#f";
-        case C_EOF: return os << "#<eof>";
-        case C_UNSPECIFIED: return os << "#<unspecified>";
-        case C_SYNTAX: return os << "#<syntax>";
-        case C_UNDEFINED: return os << "#<undefined>";
-        default: return os << "<unknown constant " << ((ptrdiff_t) v.bits) << '>';
-      }
-    case RECORD: {
-      RecordType* rt = v.as<Record>()->type;
-      os << "#<" << rt->name.string_data() << ' ';
-      for(unsigned i = 0; i != rt->field_count; i++) {
-        os << v.record_ref(i);
-        if(i != rt->field_count - 1) os << ' ';
-      }
-      return os << '>';
-    }
-
-    case RECORD_TYPE: {
-      return os << "#<record-type " << v.as<RecordType>()->name.string_data() << ' ' <<
-        v.as<RecordType>()->field_count << ' ' << v.as<RecordType>()->data_size << '>';
-    }
-    case FLONUM:
-      return os << v.flonum_value(); 
-    case SYMBOL:
-      return os << v.symbol_name_data();
-    case STRING: {
-      const char* data = v.string_data();
-      os << '"';
-      for(size_t i = 0; i != v.string_bytes(); i++) {
-        switch(data[i]) { 
-          case '"': os << "\\\""; break;
-          case '\\': os << "\\\\"; break;
-          default: os << data[i]; break;
-        }
-      }
-      return os << '"';;
-    }
-    case PAIR: {
-      // if(v.pair_has_source()) os << '&';
-      os << '(' << v.car();
-      for(v = v.cdr(); v.type() == PAIR; v = v.cdr())  {
-        os << ' ' << v.car();
-      }
-      if(v != C_NIL) {
-        os << " . " << v;
-      }
-      return os << ')';
-    }
-    case CHARACTER: {
-      os << "#\\";
-      switch(v.character()) {
-        case '\n': return os << "newline";
-        case ' ': return os << "space";
-      }
-      return os << v.character();
-    }
-    case FUNCTION: {
-      // TODO this should include source information
-      os << "#<" << (v.function_is_macro() ? "macro" : "function") << ' ';
-      Value name = v.function_name();
-      if(name == C_FALSE) {
-        os << (void*) v.bits;
-      } else {
-        os << name;
-      }
-      return os << '>';
-    }
-    case VMFUNCTION: {
-      os << "#<vmfunction " << v.vm_function_name() << ' ' << (void*) v.bits;
-      os << ' ' << v.vm_function_min_arity() << '-' << v.vm_function_max_arity();
-      os << ' ' << (v.vm_function_variable_arity() ? "#t" : "#f") << '>';
-      return os;
-    }
-    case CFUNCTION: {
-      os << "#<cfunction ";
-      return os << v.c_function_name().string_data() << '>';
-    }
-    case VECTOR:
-      os << "#(";
-      for(size_t i = 0; i != v.vector_length(); i++) {
-        os << v.vector_ref(i);
-        if(i != v.vector_length() - 1) os << ' ';
-      }
-      return os << ')';
-    case RENAME: {
-      Value env = v.rename_env(),
-        sym = v.rename_gensym() == C_FALSE ? v.rename_expr() : v.rename_gensym();
-
-      if(env == C_FALSE) {
-        return os << "#R:" << sym;
-      } else if(env.type() == TABLE) {
-        return os << "#R:module:" << sym;
-      } else {
-        return os << "#R:local:" << sym;
-      }
-    }
-    case TABLE:
-      return os << "#<table entries: " << v.as<Table>()->entries << '>';
-    case EXCEPTION:
-      os << "#<exception '" << v.exception_tag() << " " << v.exception_message();
-      if(v.exception_irritants() != C_UNSPECIFIED) {
-        os << ' ' << v.exception_irritants();
-      }
-      return os << '>';
-    default: 
-      return os << "<unknown>";
-  }
-  return os;
-}
+std::ostream& operator<<(std::ostream& os, Value v);
 
 // MISC! Various inline functions 
 

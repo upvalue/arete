@@ -27,6 +27,8 @@ enum {
   OP_RETURN = 4,
   OP_APPLY = 5,
   OP_APPLY_TAIL = 6,
+  OP_LOCAL_GET = 7,
+  OP_LOCAL_SET = 8,
 };
 
 #define AR_PRINT_STACK() \
@@ -39,12 +41,17 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   VMFrame f(*this);
   f.fn = fn.as<VMFunction>();
   f.stack = (Value*) alloca(f.fn->stack_max * sizeof(Value));
+  f.locals = (Value*) alloca(f.fn->local_count * sizeof(Value));
+
+  for(unsigned i = 0; i != argc; i++) {
+    f.locals[i] = argv[i];
+  }
 
   // TODO: This doesn't necessarily need to be initialized; we could
   // place the stack pointer in the VMFrame structure and only
   // collect what has been set
 
-  memset(f.stack, 0, f.fn->stack_max * sizeof(Value));
+  // memset(f.locals, 0, f.fn->local_count * sizeof(Value));
 
   size_t code_offset = 0;
    
@@ -136,6 +143,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           // Pop arguments, replace function with results
           f.stack_i -= (argc);
           f.stack[f.stack_i - 1] = result;
+
+          std::cout << "RESULT OF APPLYING YE FUNCTION " << result << std::endl;
 
           AR_PRINT_STACK();
         }
