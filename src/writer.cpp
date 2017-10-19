@@ -250,17 +250,68 @@ void State::print_stack_trace(std::ostream& os, bool clear) {
     stack_trace.clear();
 }
 
-Value State::pretty_print_sub(std::ostream& os, Value v, unsigned& printed_count, std::vector<int>& printed) {
-  // This is the initial call to pretty print
-  if(shared_objects_i < shared_objects_begin) {
-    shared_objects_i = shared_objects_begin;
+Value State::pretty_print_sub(std::ostream& os, Value v, 
+    std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
+
+
+  if(v.atomic() || v.type() == SYMBOL) {
+    os << v;
+  } else if(v.type() == PAIR) {
+    unsigned cyc = v.heap->get_shared_count();
+
+    std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator it = printed->find(cyc);
+    if(it != printed->end()) {
+      if(it->second.second) {
+        os << "#" << it->second.first << "#";
+        return C_UNSPECIFIED;
+      }
+      os << "#" << it->second.first << "=";
+      it->second.second = true;
+    }
+
+    os << '(';
+    Value v2;
+    for(v2 = v; v2.type() == PAIR; v2 = v2.cdr()) {
+      pretty_print_sub(os, v2.car(), printed);
+      if(v2.cdr() != C_NIL) os << ' ';
+    }
+    os << ')';
   }
 
-  // TODO Detect integer overflows and handle them gracefully.
+  return C_UNSPECIFIED;
+}
 
-  // (define x )
+Value State::pretty_print_mark(Value v, unsigned& printed_count,
+    std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
+  if(v.atomic() || v.type() == SYMBOL) {
+    return C_UNSPECIFIED;
+  }
+
+  unsigned cyc = v.heap->get_shared_count();
+
+  if(cyc > shared_objects_begin) {
+    if(printed->find(cyc) == printed->end()) {
+      // This object has already been marked, so it's being printed circularly as well
+      // std::cout << "SAVED OBJECT " << cyc << " AT " << printed_count << std::endl;
+      printed->insert(std::make_pair(cyc, std::make_pair(printed_count++, false)));
+    }
+    return C_UNSPECIFIED;
+  }
+
+  v.heap->set_shared_count(shared_objects_i++);
+
+  if(v.type() == PAIR) {
+    (void) pretty_print_mark(v.car(), printed_count, printed);
+    (void) pretty_print_mark(v.cdr(), printed_count, printed);
+  } else {
+    std::cerr << "pretty printer doesn't know how to mark object of type " << v.type() << std::endl;
+    AR_ASSERT(!"pretty printer doesn't know how to mark object");
+  }
+
+  #if 0
+
   if(v.type() == CONSTANT || v.type() == FIXNUM) {
-    os << ARETE_COLOR_BLUE << v << ARETE_COLOR_RESET;
+    return C_UNSPECIFIED;
   } else if(v.type() == PAIR) {
     unsigned cyc = v.heap->get_shared_count();
 
@@ -290,8 +341,19 @@ Value State::pretty_print_sub(std::ostream& os, Value v, unsigned& printed_count
     // print x
     // shared_count x => 1
     // shared_count y => 2
-    // We want to print x as #0=, print y, and print its car as #0# indicating that it is a circular
-    // reference.
+    // We want to print x as #0=, print y, and print its car as #0# indicating that it refers to
+    // x, which is printed with #0=
+
+    // z = (list x y)
+
+    // shared_count z = 1
+    // shared_count x = 2
+    // shared_count y = 3
+    // we encounter x first, then y
+    // then y, then x
+    // we want to print out 
+
+    // we don't know X is a shared object when we first encounter it.
 
     // To do that, we'll push back 1 here.
     // When we encounter cyc object 1 above
@@ -303,15 +365,26 @@ Value State::pretty_print_sub(std::ostream& os, Value v, unsigned& printed_count
     // if we encounter a shared object in a subcall we push to printed array
     // then we print 
 
-
     // printed.push_back(shared_objects_i);
+    for(size_t i = 0; i != printed.size(); i++) {
+      //std::cout << "checking whether object " << v.heap->get_shared_count() << " was printed as printed-object " << i << " which is object " << printed[i] << std::endl;
+      // std::cout << "printed[" << i << "] = " << printed[i] <<  " cyc " << v.heap->get_shared_count() << std::endl;
+      if(printed[i] == v.heap->get_shared_count()) {
+        os << "#" << i << "=";
+      }
+    }
     
-    std::ostringstream oss;
+    std::ostream& oss = os;
 
     v.heap->set_shared_count(++shared_objects_i);
+
+    if(shared_objects_i < shared_objects_begin) {
+      shared_objects_i = shared_objects_begin = 0;
+      return eval_error("arete:pp: printer encountered integer overflow");
+    }
     AR_ASSERT(v.type() == PAIR);
 
-    // os << v.heap->get_shared_count() << "=(";
+    // oss << v.heap->get_shared_count() << "=(";
     oss << '(';
     Value v2, exc = pretty_print_sub(oss, v.car(), printed_count, printed);
     if(exc.is_active_exception()) return exc;
@@ -331,24 +404,24 @@ Value State::pretty_print_sub(std::ostream& os, Value v, unsigned& printed_count
 
     oss << ')';
 
-    if(printed.size() != printed_count) {
-      os << "#" << printed_count << "=";
-      printed_count++;
-    }
 
-    os << oss.str();
+    //os << oss.str();
   } else {
     os << v;
   }
+#endif
   return C_UNSPECIFIED;
 }
 
 Value State::pretty_print(std::ostream& os, Value v) {
-  std::vector<int> printed;
-  unsigned printed_count = 0;
-  Value ret =  pretty_print_sub(os, v, printed_count, printed);
-  shared_objects_begin = shared_objects_i;
-  return ret;
+  std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed = new std::unordered_map<unsigned, std::pair<unsigned, bool> >();
+  shared_objects_i = shared_objects_begin;
+  unsigned mark_count = 0;
+  Value _ = pretty_print_mark(v, mark_count, printed);
+   _ = pretty_print_sub(os, v, printed);
+  shared_objects_begin = shared_objects_i + 1;
+  delete printed;
+  return _;
 
 }
 

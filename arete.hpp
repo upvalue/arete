@@ -271,6 +271,14 @@ struct Value {
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
   static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
 
+  /** Returns true if the value contains no pointers */
+  bool atomic() const {
+    switch(type()) {
+      case FIXNUM: case FLONUM: case CONSTANT: case STRING: return true;
+      default: return false;
+    }
+  }
+
   bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION; }
   bool applicable() const;
   bool identifierp() const { return type() == RENAME || type() == SYMBOL; }
@@ -279,6 +287,7 @@ struct Value {
     Type tipe = type();
     return tipe == FLONUM || tipe == FIXNUM;
   }
+
   inline bool eqv(const Value &rhs) const {
     if (bits == rhs.bits)
       return true;
@@ -1737,8 +1746,10 @@ struct State {
 
   unsigned shared_objects_begin;
   unsigned shared_objects_i;
+
   Value pretty_print(std::ostream& os, Value v);
-  Value pretty_print_sub(std::ostream& os, Value v, unsigned&, std::vector<int>&);
+  Value pretty_print_mark(Value v, unsigned&, std::unordered_map<unsigned, std::pair<unsigned, bool> >*);
+  Value pretty_print_sub(std::ostream& os, Value v, std::unordered_map<unsigned, std::pair<unsigned, bool> >*);
 
   /**
    * Print information about an erroneous pair
