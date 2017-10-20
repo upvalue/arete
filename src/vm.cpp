@@ -84,6 +84,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         continue;
       }
 
+      case OP_LOCAL_GET: {
+        size_t idx = code[code_offset++];
+        f.stack[f.stack_i++] = f.locals[idx];
+        continue;
+      }
+
       case OP_RETURN: {
         AR_LOG_VM("return");
         return f.stack[f.stack_i - 1];

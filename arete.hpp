@@ -1624,7 +1624,7 @@ struct State {
     return globals.size() - 1;
   }
 
-  /** Register a new type of Tuple */
+  /** Register a new type of record */
   size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
       Value field_names = C_FALSE, Value parent = C_FALSE) {
     Value name = C_FALSE, tipe = C_FALSE;

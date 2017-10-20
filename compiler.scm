@@ -35,7 +35,7 @@
 (define (compiler-log . rest)
   (display "arete:cc: ")
   (if (or #t (top-level-value '*compiler-log*))
-    (apply print rest)))
+    (apply pretty-print rest)))
 
 (define (register-constant fn const)
   ;; todo duplicates
@@ -74,7 +74,7 @@
 (define (emit fn . insns)
   (fn-adjust-stack fn 
     (case (car insns)
-      ((push-constant global-get) 1)
+      ((push-constant global-get local-get) 1)
       ;; Remove arguments from stack, but push a single result
       ((apply apply-tail) (fx- (cadr insns)))
       (return 0)
@@ -112,29 +112,38 @@
   (emit fn (if tail? 'apply-tail 'apply) (length (cdr x)))
   )
 
-#|
-(define (fn-lookup fn x)
-  (let loop ((search-fn fn))
-    (aif (table-ref (OpenFn/env fn x))
-      (cons
-        (if (eq? fn search-fn) 'local 'global)
-        (if (eq? fn search-fn) (Var/id it) x))
 
-    (if (table-ref (OpenFn/env fn)
-                   |#
-             
-
-(define (compile-identifier parent fn x)
-  (emit fn 'global-get (register-constant fn x))
-)
+;; TODO> Cannot use a macro defined in advance. Toplevel needs to behave like letrec-syntax, I think.
 
 (define-syntax aif
   (lambda (x)
-    (unless (fx= (length x) 4)
-      (raise 'syntax "aif expects exactly four arguments" (list x)))
+    (unless (or (fx= (length x) 4) (fx= (length x) 3))
+      (raise 'syntax "aif expects three or four arguments" (list x)))
 
     `(,#'let ((it ,(list-ref x 1)))
-        (,#'if it ,(list-ref x 2) ,(list-ref x 3)))))
+        (,#'if it ,(list-ref x 2) ,(if (fx= (length x) 4) (list-ref x 3) unspecified)))))
+
+(aif #f #t (print "AIF"))
+
+(define (fn-lookup fn x)
+  (let loop ((search-fn fn))
+    (if (eq? search-fn #f)
+      (cons 'global x)
+      (aif (table-ref (OpenFn/env fn) x)
+        (cons
+          (if (eq? fn search-fn) 'local 'upvalue)
+          (Var/id it))))))
+
+(define (compile-identifier parent fn x)
+  (define result (fn-lookup fn x))
+
+  (compiler-log "compile ye identifier" result)
+
+  (case (car result)
+    (local (emit fn 'local-get (cdr result)))
+    (global (emit fn 'global-get (register-constant fn x)))
+    (else (raise 'compiler ":(" (list x))))
+)
 
 (define (special-form x)
   (when (rename? x)
@@ -164,6 +173,7 @@
   (define arg-len (args-length args))
   (define varargs (or (not (list? args)) (identifier? args)))
 
+  (OpenFn/parent! sub-fn fn)
   (OpenFn/min-arity! sub-fn arg-len)
   ;; TODO optional arguments
   (OpenFn/max-arity! sub-fn arg-len)
@@ -171,18 +181,21 @@
   ;; (lambda rest 3)
   ;; Calculate local count
   (OpenFn/local-count! sub-fn (if (identifier? args) 1 (fx+ arg-len (if (OpenFn/var-arity sub-fn) 1 0))))
+  (print "hello")
 
   (if (identifier? args)
     (raise 'compile "can't handle varargs" (list x)))
 
   (for-each-i
     (lambda (i x)
-      (table-set! (OpenFn/env sub-fn) x (Var/make i x)))
+      (table-set! (OpenFn/env sub-fn) x (Var/make i x))
+      (OpenFn/local-count! sub-fn i))
     args)
 
+  ;(pretty-print "subfun" sub-fn)
 
   (compile fn sub-fn (cddr x))
-  (compiler-log "subfunction" sub-fn)
+  ;(compiler-log "subfunction" sub-fn)
   (compile-finish sub-fn)
 
   (emit fn 'push-constant (register-constant fn (OpenFn->procedure sub-fn))))
@@ -193,6 +206,7 @@
     (lambda (compile-lambda parent fn x))))
 
 (define (compile-expr parent fn x tail?)
+  (compiler-log "compiling expr" x)
   (cond
     ((self-evaluating? x) (compile-constant fn  x))
     ((identifier? x) (compile-identifier parent fn  x))
@@ -223,19 +237,25 @@
       (loop (fx+ i 1)))))
 
 ;; Do the thing.
-(define fn (OpenFn/make "vm-function"))
+(define fn (OpenFn/make 'vm-toplevel))
 
 (compile #f fn '(
-  ((lambda (a) a) 5438))
+  ((lambda (a) a) 12345))
 )
-(print fn)
+
+(pretty-print fn)
+;(print fn)
 (compile-finish fn)
 
-(print fn)
+;(pretty-print fn)
+
+;(print fn)
 
 (define compiled-proc (OpenFn->procedure fn))
-(print compiled-proc)
-(define subproc (compiled-proc))
-(print subproc)
+(pretty-print fn)
+(print (vector-ref (OpenFn/constants fn) 0))
+(print (compiled-proc))
+;(define subproc (compiled-proc))
+;(print subproc)
 ;(print "result of execution" ((compiled-proc) 1))
 

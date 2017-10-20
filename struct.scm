@@ -85,16 +85,21 @@
           ,(map 
              (lambda (field-name)|#
 
+;(define-record Thing name field)
 
-               #|
+;(define thing1 (Thing/make "one" (make-vector)))
+;(pretty-print thing1)
 
-(define-record Thing name field2)
 
-(define thing1 (Thing/make "one" #f))
+
+#|
+(define-record Thing name field2 field3)
+
+(define thing1 (Thing/make "one" #f (make-vector)))
 
 (pretty-print thing1)
 
-(define thing2 (Thing/make "two" thing1))
+(define thing2 (Thing/make "two" thing1 (make-vector)))
 
 (pretty-print thing2)
 
@@ -104,11 +109,21 @@
 
 (pretty-print thing1)
 
+(define vec (make-vector))
+(vector-append! vec thing1)
+(Thing/field2! thing1 vec)
+(pretty-print thing1)
 ;(Thing/field2! thing1 #f)
 
 ;(define thing3 (list thing1 thing2))
 
-(pretty-print (Thing/make "three" thing1))
+(define vec3 (make-vector))
+(vector-append! vec3 thing1)
+(vector-append! vec3 thing2)
+
+(pretty-print vec3)
+
+;(pretty-print (Thing/make "three" thing1))
 
 
 |#

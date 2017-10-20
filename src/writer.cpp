@@ -254,7 +254,7 @@ void State::print_stack_trace(std::ostream& os, bool clear) {
 bool State::pretty_print_shared_obj(std::ostream& os, Value v,
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
 
-  if(v.atomic() || v.type() == SYMBOL) {
+  if(v.atomic() || v.type() == SYMBOL || v.type() == TABLE || v.type() == VMFUNCTION) {
     os << v;
     return true;
   }
@@ -264,7 +264,7 @@ bool State::pretty_print_shared_obj(std::ostream& os, Value v,
   //std::cout << "CHECKING fOR SHARED OBJECT " << cyc << std::endl;
 
   // std::cout << cyc << ' ' << shared_objects_begin << std::endl;
-  std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator it = printed->find(cyc);
+  print_table_t::iterator it = printed->find(cyc);
 
   if(it != printed->end()) {
     if(it->second.second) {
@@ -305,6 +305,14 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
       (void) pretty_print_sub(os, v.record_ref(i), printed);
     }
     os << '>';
+  } else if(v.type() == VECTOR) {
+    os << "#(";
+    for(size_t i = 0; i != v.vector_length(); i++) {
+      (void) pretty_print_sub(os, v.vector_ref(i), printed);
+      if(i != v.vector_length() - 1)
+        os << ' ';
+    }
+    os << ')';
   }
 
   return C_UNSPECIFIED;
@@ -313,23 +321,27 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
 Value State::pretty_print_mark(Value v, unsigned& printed_count,
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
 
-  if(v.atomic() || v.type() == SYMBOL) {
+  if(v.atomic() || v.type() == SYMBOL || v.type() == TABLE || v.type() == VMFUNCTION
+    || v.type() == FUNCTION || v.type() == CFUNCTION) {
+
+    AR_ASSERT(v.type() != VECTOR);
     return C_UNSPECIFIED;
   }
 
   unsigned cyc = v.heap->get_shared_count();
+  // std::cout << v << ' ' << v.heap->get_shared_count() << std::endl;
 
   // TODO Check for initial shared object
-  if(cyc >= shared_objects_begin) {
+  if(cyc > shared_objects_begin) {
     print_table_t::iterator it = printed->find(cyc);
 
     if(it != printed->end()) {
+      // std::cout << "marking " << cyc << "as seen twice" << std::endl;
       // This object has been seen twice and therefore is a cyclic object
       it->second.second = true;
     } else {
       printed->insert(std::make_pair(cyc, std::make_pair(printed_count++, false)));
     }
-
 
     /*
     if(printed->find(cyc) == printed->end()) {
@@ -339,9 +351,11 @@ Value State::pretty_print_mark(Value v, unsigned& printed_count,
     }
     */
     return C_UNSPECIFIED;
+  } else {
+    v.heap->set_shared_count(shared_objects_i++);
+    AR_ASSERT(v.heap->get_shared_count() == shared_objects_i - 1);
   }
 
-  v.heap->set_shared_count(shared_objects_i++);
 
   if(v.type() == PAIR) {
     (void) pretty_print_mark(v.car(), printed_count, printed);
@@ -349,6 +363,11 @@ Value State::pretty_print_mark(Value v, unsigned& printed_count,
   } else if(v.type() == RECORD) {
     for(size_t i = 0; i != v.record_field_count(); i++) {
       (void) pretty_print_mark(v.record_ref(i), printed_count, printed);
+    }
+  } else if(v.type() == VECTOR) {
+    // std::cout << "marking a vector" << std::endl;
+    for(size_t i = 0; i != v.vector_length(); i++) {
+      (void) pretty_print_mark(v.vector_ref(i), printed_count, printed);
     }
   } else {
     std::cerr << "pretty printer doesn't know how to mark object of type " << v.type() << std::endl;
@@ -364,7 +383,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
   unsigned mark_count = 0;
   Value _ = pretty_print_mark(v, mark_count, printed);
 
-  if(!(v.atomic() || v.type() == SYMBOL)) {
+  if(!(v.atomic() || v.type() == SYMBOL || v.type() == TABLE)) {
     unsigned cyc = v.heap->get_shared_count();
     /*
     if(cyc > shared_objects_begin) {
