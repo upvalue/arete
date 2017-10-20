@@ -245,30 +245,48 @@ void State::print_stack_trace(std::ostream& os, bool clear) {
   for(size_t i = 0; i != stack_trace.size(); i++)
     os << stack_trace.at(i) << std::endl;
 
-
   if(clear)
     stack_trace.clear();
 }
 
-Value State::pretty_print_sub(std::ostream& os, Value v, 
+/** Print simple objects, print already-printed shared references, print the opening part of
+ * a structure that refers to some shared object */
+bool State::pretty_print_shared_obj(std::ostream& os, Value v,
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
-
 
   if(v.atomic() || v.type() == SYMBOL) {
     os << v;
-  } else if(v.type() == PAIR) {
-    unsigned cyc = v.heap->get_shared_count();
+    return true;
+  }
 
-    std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator it = printed->find(cyc);
-    if(it != printed->end()) {
-      if(it->second.second) {
-        os << "#" << it->second.first << "#";
-        return C_UNSPECIFIED;
-      }
-      os << "#" << it->second.first << "=";
-      it->second.second = true;
+  unsigned cyc = v.heap->get_shared_count();
+
+  //std::cout << "CHECKING fOR SHARED OBJECT " << cyc << std::endl;
+
+  // std::cout << cyc << ' ' << shared_objects_begin << std::endl;
+  std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator it = printed->find(cyc);
+
+  if(it != printed->end()) {
+    if(it->second.second) {
+      os << "#" << it->second.first << "#";
+      return true;
     }
+    os << "#" << it->second.first << "=";
+    it->second.second = true;
+  }
+  return false;
+}
 
+
+Value State::pretty_print_sub(std::ostream& os, Value v, 
+    std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
+
+  if(pretty_print_shared_obj(os, v, printed)) {
+    return C_UNSPECIFIED;
+  }
+  // AR_ASSERT(cyc >= shared_objects_begin);
+
+  if(v.type() == PAIR) {
     os << '(';
     Value v2;
     for(v2 = v; v2.type() == PAIR; v2 = v2.cdr()) {
@@ -276,6 +294,17 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
       if(v2.cdr() != C_NIL) os << ' ';
     }
     os << ')';
+  } else if(v.type() == RECORD) {
+    os << "#<";
+    Value type = v.record_type();
+    os << type.record_type_name().string_data();
+    for(unsigned i = 0; i != v.record_field_count(); i++) {
+      os << ' ';
+
+      os << type.record_type_field_names().list_ref(i) << ": ";
+      (void) pretty_print_sub(os, v.record_ref(i), printed);
+    }
+    os << '>';
   }
 
   return C_UNSPECIFIED;
@@ -283,18 +312,32 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
 
 Value State::pretty_print_mark(Value v, unsigned& printed_count,
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
+
   if(v.atomic() || v.type() == SYMBOL) {
     return C_UNSPECIFIED;
   }
 
   unsigned cyc = v.heap->get_shared_count();
 
-  if(cyc > shared_objects_begin) {
-    if(printed->find(cyc) == printed->end()) {
-      // This object has already been marked, so it's being printed circularly as well
-      // std::cout << "SAVED OBJECT " << cyc << " AT " << printed_count << std::endl;
+  // TODO Check for initial shared object
+  if(cyc >= shared_objects_begin) {
+    print_table_t::iterator it = printed->find(cyc);
+
+    if(it != printed->end()) {
+      // This object has been seen twice and therefore is a cyclic object
+      it->second.second = true;
+    } else {
       printed->insert(std::make_pair(cyc, std::make_pair(printed_count++, false)));
     }
+
+
+    /*
+    if(printed->find(cyc) == printed->end()) {
+      std::cout << "INSERTING SHARED OBJECT " << cyc << std::endl;
+      // This object has already been marked, so it's being printed circularly as well
+      printed->insert(std::make_pair(cyc, std::make_pair(printed_count++, false)));
+    }
+    */
     return C_UNSPECIFIED;
   }
 
@@ -303,113 +346,15 @@ Value State::pretty_print_mark(Value v, unsigned& printed_count,
   if(v.type() == PAIR) {
     (void) pretty_print_mark(v.car(), printed_count, printed);
     (void) pretty_print_mark(v.cdr(), printed_count, printed);
+  } else if(v.type() == RECORD) {
+    for(size_t i = 0; i != v.record_field_count(); i++) {
+      (void) pretty_print_mark(v.record_ref(i), printed_count, printed);
+    }
   } else {
     std::cerr << "pretty printer doesn't know how to mark object of type " << v.type() << std::endl;
     AR_ASSERT(!"pretty printer doesn't know how to mark object");
   }
 
-  #if 0
-
-  if(v.type() == CONSTANT || v.type() == FIXNUM) {
-    return C_UNSPECIFIED;
-  } else if(v.type() == PAIR) {
-    unsigned cyc = v.heap->get_shared_count();
-
-    // std::cout << "encountered object with cycle count: " << v.heap->get_shared_count() << std::endl;
-    // This object has already been printed
-    if(cyc > shared_objects_begin) {
-      for(size_t i = 0; i != printed.size(); i++) {
-        if(printed[i] == cyc) {
-          os << "#" << i << "#";
-          return C_UNSPECIFIED;
-        }
-      }
-
-      printed.push_back(cyc);
-      os << "#" << (printed.size() - 1) << "#";
-
-      // os << "#" << (cyc - 1) << "#";
-      return C_UNSPECIFIED;
-    } 
-
-    // When an object is first printed,
-    // #0=((#0#))
-
-    // (list x #f)
-    // (list y x)
-    // (set-car! x y)
-    // print x
-    // shared_count x => 1
-    // shared_count y => 2
-    // We want to print x as #0=, print y, and print its car as #0# indicating that it refers to
-    // x, which is printed with #0=
-
-    // z = (list x y)
-
-    // shared_count z = 1
-    // shared_count x = 2
-    // shared_count y = 3
-    // we encounter x first, then y
-    // then y, then x
-    // we want to print out 
-
-    // we don't know X is a shared object when we first encounter it.
-
-    // To do that, we'll push back 1 here.
-    // When we encounter cyc object 1 above
-    // we'll search through the printed vector, and print its indice
-    // right?
-    // but this prints every object, not just cyclic objects, so that doesn't work.
-
-    // What if we save the size of the printed array here.
-    // if we encounter a shared object in a subcall we push to printed array
-    // then we print 
-
-    // printed.push_back(shared_objects_i);
-    for(size_t i = 0; i != printed.size(); i++) {
-      //std::cout << "checking whether object " << v.heap->get_shared_count() << " was printed as printed-object " << i << " which is object " << printed[i] << std::endl;
-      // std::cout << "printed[" << i << "] = " << printed[i] <<  " cyc " << v.heap->get_shared_count() << std::endl;
-      if(printed[i] == v.heap->get_shared_count()) {
-        os << "#" << i << "=";
-      }
-    }
-    
-    std::ostream& oss = os;
-
-    v.heap->set_shared_count(++shared_objects_i);
-
-    if(shared_objects_i < shared_objects_begin) {
-      shared_objects_i = shared_objects_begin = 0;
-      return eval_error("arete:pp: printer encountered integer overflow");
-    }
-    AR_ASSERT(v.type() == PAIR);
-
-    // oss << v.heap->get_shared_count() << "=(";
-    oss << '(';
-    Value v2, exc = pretty_print_sub(oss, v.car(), printed_count, printed);
-    if(exc.is_active_exception()) return exc;
-    for(v2 = v.cdr(); v2.type() == PAIR; v2 = v2.cdr()) {
-      oss << ' ';
-      exc = pretty_print_sub(oss, v2.car(), printed_count, printed);
-    }
-
-    if(exc.is_active_exception()) return exc;
-
-    if(v2 != C_NIL) {
-      oss << " . ";
-      exc = pretty_print_sub(oss, v2, printed_count, printed);
-    }
-    
-    if(exc.is_active_exception()) return exc;
-
-    oss << ')';
-
-
-    //os << oss.str();
-  } else {
-    os << v;
-  }
-#endif
   return C_UNSPECIFIED;
 }
 
@@ -418,7 +363,34 @@ Value State::pretty_print(std::ostream& os, Value v) {
   shared_objects_i = shared_objects_begin;
   unsigned mark_count = 0;
   Value _ = pretty_print_mark(v, mark_count, printed);
-   _ = pretty_print_sub(os, v, printed);
+
+  if(!(v.atomic() || v.type() == SYMBOL)) {
+    unsigned cyc = v.heap->get_shared_count();
+    /*
+    if(cyc > shared_objects_begin) {
+      os << "#" << cyc << '=';
+    }
+
+    std::cout << "CYC: " << cyc << std::endl;
+    for(std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator ig = printed->begin(); ig != printed->end(); ig++) {
+      std::cout << ig->first << std::endl;
+    }
+    */
+
+    std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator it = printed->find(cyc);
+
+    if(it != printed->end() && it->second.second == true) {
+      os << "#" << it->second.first << "=";
+      it->second.second = true;
+    }
+  }
+
+  for(print_table_t::iterator i = printed->begin(); i != printed->end(); i++) {
+    i->second.second = false;
+  }
+
+  _ = pretty_print_sub(os, v, printed);
+
   shared_objects_begin = shared_objects_i + 1;
   delete printed;
   return _;

@@ -467,6 +467,7 @@ struct Value {
   Value record_type() const;
   Value record_ref(unsigned) const;
   void record_set(unsigned, Value);
+  unsigned record_field_count() const;
 
   bool record_applicable() const;
   bool record_isa(Value) const;
@@ -476,6 +477,8 @@ struct Value {
   Value record_type_apply() const;
   Value record_type_print() const;
   Value record_type_parent() const;
+  unsigned record_type_field_count() const;
+  Value record_type_field_names() const;
 
   // OPERATORS
 
@@ -894,6 +897,9 @@ struct RecordType : HeapValue {
   /** Optional: record type to inherit from */
   Value parent;
 
+  /** Field names */
+  Value field_names;
+
   /** Count of garbage-collected data stored in the record */
   unsigned field_count;
   /** Size of uncollected data at the end of the record */
@@ -912,6 +918,15 @@ inline Value Value::record_type_print() const {
 
 inline Value Value::record_type_parent() const {
   return as<RecordType>()->parent;
+}
+
+inline unsigned Value::record_type_field_count() const {
+  return as<RecordType>()->field_count;
+}
+
+inline Value Value::record_type_field_names() const {
+  return as<RecordType>()->field_names;
+
 }
 
 inline Value Value::record_type_apply() const {
@@ -938,6 +953,10 @@ inline Value Value::record_type() const {
 inline Value Value::record_ref(unsigned i) const {
   AR_ASSERT(record_type().as<RecordType>()->field_count > i && "record out of bounds error");
   return as<Record>()->fields[i];
+}
+
+inline unsigned Value::record_field_count() const {
+  return record_type().as<RecordType>()->field_count;
 }
 
 inline void Value::record_set(unsigned i, Value v) {
@@ -1606,10 +1625,11 @@ struct State {
   }
 
   /** Register a new type of Tuple */
-  size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size, Value parent = C_FALSE) {
+  size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
+      Value field_names = C_FALSE, Value parent = C_FALSE) {
     Value name = C_FALSE, tipe = C_FALSE;
 
-    AR_FRAME(this, tipe, name, parent);
+    AR_FRAME(this, tipe, name, field_names, parent);
 
     tipe = gc.allocate(RECORD_TYPE, sizeof(RecordType));
     name = make_string(cname);
@@ -1619,6 +1639,7 @@ struct State {
     tipe.as<RecordType>()->apply = C_FALSE;
     tipe.as<RecordType>()->parent = parent;
     tipe.as<RecordType>()->field_count = field_count;
+    tipe.as<RecordType>()->field_names = field_names;
     tipe.as<RecordType>()->data_size = data_size;
 
     size_t idx = register_global(tipe);
@@ -1747,9 +1768,13 @@ struct State {
   unsigned shared_objects_begin;
   unsigned shared_objects_i;
 
+  typedef std::pair<unsigned, bool> print_info_t;
+  typedef std::unordered_map<unsigned, print_info_t> print_table_t;
+
   Value pretty_print(std::ostream& os, Value v);
-  Value pretty_print_mark(Value v, unsigned&, std::unordered_map<unsigned, std::pair<unsigned, bool> >*);
-  Value pretty_print_sub(std::ostream& os, Value v, std::unordered_map<unsigned, std::pair<unsigned, bool> >*);
+  bool pretty_print_shared_obj(std::ostream& os, Value v, print_table_t* printed);
+  Value pretty_print_mark(Value v, unsigned&, print_table_t* printed);
+  Value pretty_print_sub(std::ostream& os, Value v, print_table_t*);
 
   /**
    * Print information about an erroneous pair

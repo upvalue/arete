@@ -240,13 +240,16 @@ Value fn_newline(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bool whitespace) {
+Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bool whitespace, bool pretty) {
   for(size_t i = 0; i != argc; i++) {
     if(argv[i].type() == STRING) {
       os << argv[i].string_data();
     } else {
-      Value x = state.pretty_print(os, argv[i]);
-      if(x.is_active_exception()) return x;
+      if(pretty) {
+        state.pretty_print(os, argv[i]);
+      } else {
+        os << argv[i];
+      }
     }
 
     if(whitespace && i != argc - 1)  {
@@ -258,16 +261,22 @@ Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bo
 }
 
 Value fn_print(State& state, size_t argc, Value* argv) {
-  Value chk = fn_print_impl(state, argc, argv, std::cout, true);
+  Value chk = fn_print_impl(state, argc, argv, std::cout, true, false);
   std::cout << std::endl;
   return chk;
 }
 
 Value fn_print_string(State& state, size_t argc, Value* argv) {
   std::ostringstream os;
-  Value chk = fn_print_impl(state, argc, argv, os, true);
+  Value chk = fn_print_impl(state, argc, argv, os, true, false);
   if(chk.is_active_exception()) return chk;
   return state.make_string(os.str());
+}
+
+static Value fn_pretty_print(State& state, size_t argc, Value* argv) {
+  Value chk = fn_print_impl(state, argc, argv, std::cout, true, true);
+  std::cout << std::endl;
+  return chk;
 }
 
 Value fn_string_append(State& state, size_t argc, Value* argv) {
@@ -276,7 +285,7 @@ Value fn_string_append(State& state, size_t argc, Value* argv) {
     AR_FN_EXPECT_TYPE(state, argv, i, STRING);
   }
   std::ostringstream os;
-  fn_print_impl(state, argc, argv, os, false);
+  fn_print_impl(state, argc, argv, os, false, false);
   return state.make_string(os.str());
 }
 
@@ -1064,18 +1073,15 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
 ///// RECORDS
 Value fn_register_record_type(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "register-record-type";
-  Value parent = C_FALSE;
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  AR_FN_EXPECT_POSITIVE(state, argv, 1);
   AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
-  AR_FN_EXPECT_POSITIVE(state, argv, 2);
 
-  Value name = argv[0], data = argv[2];
+  Value name = argv[0], data = argv[2], fields = argv[3], parent = argv[4];
   ptrdiff_t field_count = argv[1].fixnum_value();
 
-  if(argc == 4) {
-    parent = argv[3];
-    AR_FN_EXPECT_TYPE(state, argv, 3, RECORD_TYPE);
+  if(parent != C_FALSE) {
     field_count += parent.as<RecordType>()->field_count;
   }
 
@@ -1083,7 +1089,7 @@ Value fn_register_record_type(State& state, size_t argc, Value* argv) {
   // Should string_data return char* ?
   std::string cname(name.string_data());
 
-  size_t tag = state.register_record_type(cname, field_count, data.fixnum_value(), parent);
+  size_t tag = state.register_record_type(cname, field_count, data.fixnum_value(), fields, parent);
 
   return state.globals[tag];
 }
@@ -1315,6 +1321,7 @@ void State::install_core_functions() {
   defun_core("newline", fn_newline, 0);
   defun_core("print", fn_print, 0, 0, true);
   defun_core("print-string", fn_print_string, 0, 0, true);
+  defun_core("pretty-print", fn_pretty_print, 0, 0, true);
   defun_core("string-append", fn_string_append, 0, 0, true);
   defun_core("print-table-verbose", fn_print_table_verbose, 1);
 
@@ -1357,7 +1364,7 @@ void State::install_core_functions() {
   defun_core("set-top-level-value!", fn_set_top_level_value, 2);
 
   // Records
-  defun_core("register-record-type", fn_register_record_type, 3, 4);
+  defun_core("register-record-type", fn_register_record_type, 5);
   defun_core("set-record-type-printer!", fn_set_record_type_printer, 2);
   defun_core("set-record-type-apply!", fn_set_record_type_apply, 2);
 

@@ -68,7 +68,11 @@
         (,#'record-isa? ,#'instance ,name)))
 
     `(,#'begin
-       (,#'define ,name (,#'register-record-type ,name-string ,field-count 0))
+       (,#'define ,name
+        (,#'let ((,#'fields (list ,@(map (lambda (x) `(,#'quote ,x)) fields))))
+          (begin
+            ;(print ,#'fields)
+            (,#'register-record-type ,name-string ,field-count 0 ,#'fields ,parent))))
        ,predicate
        ,constructor
        ,@accessors
@@ -76,21 +80,35 @@
     
   )) ;; lambda (x)
 
-#|
-(define Box (register-record-type "box" 1 0))
+#|(define-syntax (define-record name (? parent (of 1 List Symbol)) (? fields Symbol ...))
+  (let ((accessors
+          ,(map 
+             (lambda (field-name)|#
 
-(define-record Box2 (Box) item2)
 
-(define box (make-record Box2))
-(set! box (Box2/make 123))
-(print box)
+               #|
 
-(Box2/item2! box 123)
-(print (Box2/item2 box))
+(define-record Thing name field2)
 
-(print (Box2? box))
+(define thing1 (Thing/make "one" #f))
+
+(pretty-print thing1)
+
+(define thing2 (Thing/make "two" thing1))
+
+(pretty-print thing2)
+
+(Thing/field2! thing1 thing2)
+
+(pretty-print thing2)
+
+(pretty-print thing1)
+
+;(Thing/field2! thing1 #f)
+
+;(define thing3 (list thing1 thing2))
+
+(pretty-print (Thing/make "three" thing1))
+
+
 |#
-
-
-;(print (record-ref Box2 box 0))
-

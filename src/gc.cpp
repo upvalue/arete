@@ -92,6 +92,7 @@ void GCSemispace::collect(size_t request, bool force) {
         AR_COPY(RecordType, print);
         AR_COPY(RecordType, name);
         AR_COPY(RecordType, parent);
+        AR_COPY(RecordType, field_names);
         break;
       // Five pointers
       case FUNCTION:
