@@ -228,7 +228,6 @@ Value fn_eqv(State& state, size_t argc, Value* argv) {
   return fn_eq(state, argc, argv);
 }
 
-
 Value fn_equal(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(state.equals(argv[0], argv[1]));
 }
@@ -796,7 +795,31 @@ Value fn_table_set(State& state, size_t argc, Value* argv) {
   AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
 
   return state.table_set(argv[0], argv[1], argv[2]);
+}
 
+Value fn_table_for_each(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "table-for-each";
+
+  AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
+  AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
+
+
+  Value table = argv[1], fn = argv[0], chain, arg;
+  AR_FRAME(state, table, fn, chain, arg);
+
+  for(size_t i = 0; i != table.as<Table>()->chains->length; i++) {
+    chain = table.as<Table>()->chains->data[i];
+    if(chain != C_FALSE) {
+      while(chain != C_NIL) {
+        arg = state.make_pair(chain.cdar(), C_NIL);
+        arg = state.make_pair(chain.caar(), arg);
+        state.eval_apply_generic(fn, arg, false);
+        chain = chain.cdr();
+      }
+    }
+  }
+
+  return C_UNSPECIFIED;
 }
 
 ///// STRINGS
@@ -1340,6 +1363,7 @@ void State::install_core_functions() {
   defun_core("make-table", fn_make_table, 0);
   defun_core("table-ref", fn_table_ref, 2);
   defun_core("table-set!", fn_table_set, 3);
+  defun_core("table-for-each", fn_table_for_each, 2);
 
   // Equality
   defun_core("eq?", fn_eq, 2);

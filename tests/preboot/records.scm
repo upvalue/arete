@@ -1,4 +1,4 @@
-(define MyBox (register-record-type "box" 1 0))
+(define MyBox (register-record-type "box" 1 0 '(field) #f))
 
 (define box-instance (make-record MyBox))
 
@@ -18,7 +18,7 @@
 
 ;(print (box-instance))
 
-(define MyBox2 (register-record-type "box2" 1 0 MyBox))
+(define MyBox2 (register-record-type "box2" 1 0 '(field) MyBox))
 
 (define box2-instance (make-record MyBox2))
 

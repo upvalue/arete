@@ -5,6 +5,7 @@
 ;; TODO set!
 ;; TODO if
 ;; TODO and/or
+;; TODO Check lambda body
 
 ;; Note: Internal structure is manipulated by openfn_to_procedure in builtins.cpp and that must be updated
 ;; if anything is rearranged here
@@ -38,7 +39,7 @@
   ;; If this is a closure, this will be a vector of upvalue locations e.g.
   ;; #(#t 0 #f 0) = capture local variable 0 from the calling function, capture enclosed value 0 from the calling
   ;; functions closure
-  closure
+  closure ;; 13
   )
 
 (define (list-ref-cell lst i)
@@ -69,6 +70,9 @@
   (let ((make OpenFn/make))
     (lambda (name)
       (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f))))
+
+;; Add free-variable? thing here
+;; This creates the thing
 
 (define-record Var
   idx
@@ -261,14 +265,10 @@
   (let ((parent-fn (OpenFn/parent fn))
         (closure (OpenFn/closure fn)))
 
-    ;(pretty-print parent-fn)
-    ;(print "parent of " (OpenFn/name fn) "is " (OpenFn/name parent-fn))
-    ;(print-table-verbose (OpenFn/env parent-fn))
-    ;(print x (OpenFn/env parent-fn) (table-ref (OpenFn/env parent-fn) x))
-
     (aif (table-ref (OpenFn/env parent-fn) x)
       ;; Found it
       (let ((var (Var/make 0 x)))
+        (compiler-log fn (OpenFn/name fn) "registered free variable" x)
         ;; Calculate index in closure from closure length
         (Var/idx! var (fx/ (vector-length closure) 2))
         ;; This is an upvalue
@@ -372,9 +372,6 @@
           (loop (fx+ i 2))))))
 
   (pretty-print fn)
-
-
-  
 )
 
 (define (compile-special-form fn x type tail?)
@@ -424,8 +421,31 @@
 ;; Do the thing.
 (define fn (OpenFn/make 'vm-toplevel))
 
+
+#|
 (compile fn
-  '((lambda (a) (lambda (b) (lambda (c) (fx+ a b a b c)) 2 2))))
+  '((lambda (a b c)
+      (lambda ()
+        (lambda (d) (fx+ a b a b d)))
+
+      ;; close-over 2 0 0 0 1
+      (lambda ()
+        (lambda () (fx+ a b c))))
+      ;; close-over 3 0 0 0 1 0 2
+    ))
+#|      (lambda (d)
+        (lambda () (fx+ a d)))) 2 2))|#
+|#
+
+#|
+(compile fn 
+  '((lambda (a)
+     (lambda (b)
+       (lambda () (fx+ a b))) 2)))
+|#
+(compile fn
+  '((lambda (a)
+      (lambda () a)) #t))
 
 (pretty-print fn)
 (compile-finish fn)

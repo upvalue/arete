@@ -73,9 +73,11 @@ void GCSemispace::collect(size_t request, bool force) {
       case VECTOR:
       case CFUNCTION:
       case TABLE:
+      case UPVALUE:
         AR_COPY(Vector, storage);
         break;
       // Two pointers 
+      case CLOSURE:
       case SYMBOL:
       case PAIR:
         AR_COPY(Symbol, name);

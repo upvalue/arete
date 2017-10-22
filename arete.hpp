@@ -130,6 +130,7 @@ struct Value;
 struct SourceLocation;
 struct Pair;
 struct VectorStorage;
+struct VMFunction;
 
 extern size_t gc_collect_timer;
 
@@ -465,6 +466,25 @@ struct Value {
 
   static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
 
+  // UPVALUES
+  
+  /** Determine whether an upvalue has been closed-over or not */
+  bool upvalue_closed() const;
+  /** Dereference an upvalue */
+  Value upvalue() const;
+
+  void upvalue_close();
+
+  // CLOSURES
+  VMFunction* closure_function() const;
+
+
+  static const unsigned UPVALUE_CLOSED_BIT = 1 << 9;
+
+  // CLOSURES
+
+
+
   // RECORD
   Value record_type() const;
   Value record_ref(unsigned) const;
@@ -780,13 +800,32 @@ inline VectorStorage* Value::vm_function_constants() const {
 
 struct Upvalue : HeapValue {
   union {
-    Value** local;
-    Value* converted;
+    Value* local;
+    Value converted;
   };
 
   static const unsigned CLASS_TYPE = UPVALUE;
 };
 
+inline bool Value::upvalue_closed() const {
+  AR_TYPE_ASSERT(type() == UPVALUE);
+  return heap->get_header_bit(UPVALUE_CLOSED_BIT);
+}
+
+inline Value Value::upvalue() const {
+  if(upvalue_closed()) {
+    return as<Upvalue>()->converted;
+  } else {
+    return *(as<Upvalue>()->local);
+  }
+}
+
+inline void Value::upvalue_close() {
+  AR_TYPE_ASSERT(type() == UPVALUE);
+  AR_TYPE_ASSERT(!upvalue_closed());
+  heap->set_header_bit(UPVALUE_CLOSED_BIT);
+  AR_ASSERT(upvalue_closed());
+}
 
 struct Closure : HeapValue {
   Value function;
@@ -794,6 +833,10 @@ struct Closure : HeapValue {
 
   static const unsigned CLASS_TYPE = CLOSURE;
 };
+
+inline VMFunction* Value::closure_function() const {
+  return as<Closure>()->function.as<VMFunction>();
+}
 
 inline size_t* Value::vm_function_bytecode() const {
   char* ptr = (char*) heap;
@@ -1002,7 +1045,7 @@ inline bool Value::record_isa(Value rhs) const {
 }
 
 inline bool Value::applicable() const {
-  if(type() == FUNCTION || type() == CFUNCTION || type() == VMFUNCTION) {
+  if(type() == FUNCTION || type() == CFUNCTION || type() == VMFUNCTION || type() == CLOSURE) {
     return true;
   } else if(type() == RECORD) {
     return record_applicable();
@@ -1045,6 +1088,7 @@ struct VMFrame {
 
   VMFrame* previous;
   VMFunction* fn;
+  Closure* closure;
   Value* stack;
   Value* locals;
   size_t stack_i;

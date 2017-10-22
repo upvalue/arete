@@ -35,6 +35,9 @@ enum {
   OP_APPLY_TAIL = 6,
   OP_LOCAL_GET = 7,
   OP_LOCAL_SET = 8,
+  OP_UPVALUE_GET = 9,
+  OP_UPVALUE_SET = 10,
+  OP_CLOSE_OVER = 11,
 };
 
 #define AR_PRINT_STACK() \
@@ -42,18 +45,25 @@ enum {
   for(size_t i = 0; i != f.stack_i; i++) std::cout << i << ": " << f.stack[i] << std::endl;
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
-  tail:
-
+  
+tail:
 
   VMFrame f(*this);
-  f.fn = fn.as<VMFunction>();
+
+  if(fn.type() == CLOSURE) {
+    f.closure = fn.as<Closure>();
+    f.fn = fn.closure_function();
+  } else {
+    f.closure = 0;
+    f.fn = fn.as<VMFunction>();
+  }
+
   
   // Allocate storage
   f.stack = (Value*) alloca(f.fn->stack_max * sizeof(Value));
   f.locals = (Value*) alloca(f.fn->local_count * sizeof(Value));
 
   // Initialize local variables
-
 
   for(unsigned i = 0; i != argc; i++) {
     AR_LOG_VM("LOCAL " << i << ' ' << argv[i]);
@@ -179,6 +189,35 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         // AR_PRINT_STACK();
         // AR_PRINT_STACK();
         continue;
+      }
+
+      case OP_UPVALUE_GET: {
+        AR_ASSERT(f.closure);
+
+        size_t idx = code[code_offset++];
+        f.stack[f.stack_i++] = f.closure->upvalues->data->upvalue();
+        break;
+      }
+
+      case OP_CLOSE_OVER: {
+        size_t upvalues = code[code_offset++];
+
+        AR_ASSERT(upvalues > 0);
+
+        Value closure, vec;
+        AR_FRAME(*this, closure, vec);
+
+        for(size_t i = 0; i != upvalues; i++) {
+          size_t is_upvalue = code[code_offset++];
+          size_t idx = code[code_offset++];
+
+          //if(is_upvalue) {
+            // vector_append()
+          //} else {
+          //}
+
+        }
+        closure = gc.allocate(CLOSURE, sizeof(Closure));
       }
 
       case OP_BAD: {
