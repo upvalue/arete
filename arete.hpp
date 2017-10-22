@@ -47,6 +47,10 @@
 # define AR_TYPE_ASSERT assert
 #endif 
 
+#ifndef AR_LINENOISE
+# define AR_LINENOISE 0
+#endif
+
 #define AR_FRAME(state, ...)  \
   arete::FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
   arete::Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
@@ -116,10 +120,6 @@
   }
 #endif 
 
-#define ARETE_LOG_GC(msg) ARETE_LOG((ARETE_LOG_TAG_GC), "gc", msg)
-#define ARETE_LOG_READ(msg) ARETE_LOG((ARETE_LOG_TAG_READER), "read", msg)
-#define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", msg)
-
 namespace arete {
 
 // FWD! Forward declarations
@@ -185,6 +185,8 @@ enum Type {
   RECORD = 17,
   RECORD_TYPE = 18,
   VMFUNCTION = 19,
+  CLOSURE = 20,
+  UPVALUE = 21,
 };
 
 std::ostream& operator<<(std::ostream& os, Type type);
@@ -776,6 +778,23 @@ inline VectorStorage* Value::vm_function_constants() const {
   return as<VMFunction>()->constants;
 }
 
+struct Upvalue : HeapValue {
+  union {
+    Value** local;
+    Value* converted;
+  };
+
+  static const unsigned CLASS_TYPE = UPVALUE;
+};
+
+
+struct Closure : HeapValue {
+  Value function;
+  VectorStorage* upvalues;
+
+  static const unsigned CLASS_TYPE = CLOSURE;
+};
+
 inline size_t* Value::vm_function_bytecode() const {
   char* ptr = (char*) heap;
   char* ret = (ptr + (size_t)(sizeof(VMFunction)));
@@ -936,8 +955,6 @@ inline Value Value::record_type_apply() const {
 /** 
  * A record is a fixed size array with some type information included; it is used internally 
  * to implement records, multiple return values, and user-extended data types. The underlying
- * pointer arithmetic
- * is therefore somewhat tricky.
  */
 struct Record : HeapValue {
   RecordType* type;
@@ -1235,17 +1252,7 @@ struct State {
   std::vector<std::string> source_contents;
 
   // Source code location tracking
-  unsigned register_source(const std::string& path, std::istream& is) {
-    ARETE_LOG_READ("registering source " << path);
-    std::ostringstream contents;
-    contents << is.rdbuf();
-    is.seekg(0, std::ios::beg);
-
-    source_names.push_back(path);
-    source_contents.push_back(contents.str());
-
-    return source_names.size() - 1;
-  }
+  unsigned register_source(const std::string& path, std::istream& is);
 
   std::vector<Value> globals;
 
@@ -1376,7 +1383,7 @@ struct State {
 
   /** cons */
   Value make_pair(Value car = C_FALSE, Value cdr = C_FALSE,
-      size_t size = sizeof(Pair) - sizeof(Pair::src)) {
+      size_t size = sizeof(Pair) - sizeof(SourceLocation)) {
     AR_FRAME(this, car, cdr);
     Pair* heap = (Pair*) gc.allocate(PAIR, size);
 
@@ -2185,7 +2192,6 @@ struct XReader {
 std::ostream& operator<<(std::ostream& os, Value v);
 
 // MISC! Various inline functions 
-
 
 inline Type Value::type() const {
   if(!immediatep()) {

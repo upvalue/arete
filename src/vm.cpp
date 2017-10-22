@@ -1,8 +1,14 @@
 // vm.cpp - Virtual machine
 
+// TODO Computed goto
+
 #include <alloca.h>
 
 #include "arete.hpp"
+
+#define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", msg)
+
+// #define AR_LOG_VM_INSN(msg) ARETE_LOG(())
 
 // A simple portable alternative to alloca would be just using a giant malloc'd or stack-allocated array.
 
@@ -38,12 +44,19 @@ enum {
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   tail:
 
+
   VMFrame f(*this);
   f.fn = fn.as<VMFunction>();
+  
+  // Allocate storage
   f.stack = (Value*) alloca(f.fn->stack_max * sizeof(Value));
   f.locals = (Value*) alloca(f.fn->local_count * sizeof(Value));
 
+  // Initialize local variables
+
+
   for(unsigned i = 0; i != argc; i++) {
+    AR_LOG_VM("LOCAL " << i << ' ' << argv[i]);
     f.locals[i] = argv[i];
   }
 
@@ -57,6 +70,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
    
   gc.collect();
 
+  // VM main loop
   while(true) {
     gc.collect();
     // We have to account for things moving.
@@ -86,6 +100,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       case OP_LOCAL_GET: {
         size_t idx = code[code_offset++];
+        AR_LOG_VM("local-get idx: " << idx << " = " << f.locals[idx]);
         f.stack[f.stack_i++] = f.locals[idx];
         continue;
       }
@@ -119,8 +134,14 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           size_t max_arity = fn.as<CFunction>()->max_arity;
           bool varargs = fn.c_function_variable_arity();
 
+          AR_PRINT_STACK();
+
+          // Replace function on stack with its result
           f.stack[f.stack_i - argc - 1] =
             fn.c_function_addr()(*this, argc, &f.stack[f.stack_i - argc]);
+
+          AR_PRINT_STACK();
+
 
           f.stack_i -= (argc);
         } else if(fn.type() == FUNCTION) {

@@ -3,10 +3,14 @@
 #include <fstream>
 #include <iostream>
 #include <stdlib.h>
+#include <stdio.h>
 
-#include "linenoise.h"
+#if AR_LINENOISE
+# include "linenoise.h"
+#endif
 
 #include "arete.hpp"
+
 
 using namespace arete;
 using namespace std;
@@ -44,32 +48,54 @@ static void  print_help() {
   arg2 = argv[++i];
 
 static bool do_repl(State& state, bool read_only) {
-  char* line = 0;
   Value x = C_FALSE, tmp;
   AR_FRAME(state, x, tmp);
+
+  std::cout << ";; arete 0.1" << std::endl;
+  std::cout << ";; Arms and the man, I sing" << std::endl;
 
   std::ostringstream hist_file;
 
   hist_file << getenv("HOME") << "/.arete_history";
   size_t i = 0;
 
+#if AR_LINENOISE
   linenoiseHistorySetMaxLen(1024);
   linenoiseHistoryLoad(hist_file.str().c_str());
+#endif
 
   static const char* prompt = "> ";
 
   while(++i) {
-    line = linenoise(prompt);
-
-    if(!line) {
-      break;
-    }
-
     std::ostringstream line_name;
     line_name << "repl-line-" << i;
 
     std::stringstream liness;
     liness >> std::noskipws;
+#if AR_LINENOISE
+    char *line = linenoise(prompt);
+
+    if(!line) {
+      break;
+    }
+
+#else
+    std::cout << prompt;
+    size_t size = 0;
+    char* line = 0;
+    size = getline(&line, &size, stdin);
+
+
+    if(!line || feof(stdin)) break;
+
+    
+    // std::cout << prompt;
+    // std::string line;
+
+    //std::getline(std::cin, line);
+    // if(std::cin.eof())
+    //  break;
+#endif
     liness << line;
 
     XReader reader(state, liness, line_name.str());
@@ -99,14 +125,18 @@ static bool do_repl(State& state, bool read_only) {
 
     }
 
+#if AR_LINENOISE
     linenoiseHistoryAdd(line);
     free(line);
+#endif
   }
 
   state.print_gc_stats(std::cout);
 
+#if AR_LINENOISE
   linenoiseHistorySave(hist_file.str().c_str());
   linenoiseHistoryFree();
+#endif
   return true;
 }
 
@@ -155,6 +185,11 @@ int State::enter_cli(int argc, char* argv[]) {
   static std::string debug_gc("--debug-gc");
   static std::string set("--set");
 
+  if(argc == 1) {
+    if(do_repl(*this, false) == false) {
+      return EXIT_FAILURE;
+    }
+  }
 
   for(size_t i = 1; i != argc; i++) {
     const char* arg = argv[i];

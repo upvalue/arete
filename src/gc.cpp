@@ -2,6 +2,8 @@
 
 #include "arete.hpp"
 
+#define ARETE_LOG_GC(msg) ARETE_LOG((ARETE_LOG_TAG_GC), "gc", msg)
+
 namespace arete {
 
 void GCSemispace::copy(HeapValue** ref) {

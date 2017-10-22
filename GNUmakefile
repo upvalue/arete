@@ -1,11 +1,18 @@
 # Variables
 CXX := clang++
-CPPFLAGS := -Wall -I. -Ivendor -Ivendor/linenoise -DARETE_DEV
+CPPFLAGS := $(CPPFLAGS) -Wall -I. -Ivendor -Ivendor/linenoise -DARETE_DEV
 CFLAGS := $(CFLAGS) -g3 -O3
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti $(CFLAGS)
+
 LDFLAGS := $(LDFLAGS) 
 
-CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp vendor/linenoise/*.cpp)))
+ECXX := em++
+ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
+ECXXFLAGS := $(ECPPFLAGS)
+
+CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
+ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
+CXXOBJS := $(CXXOBJS) $(patsubst %.cpp,%.o,$(wildcard vendor/linenoise/*.cpp))
 DEPS := $(CXXOBJS:.o=.d)
 
 # site.mk allows the user to override settings
@@ -23,11 +30,16 @@ endef
 	$(call colorecho, "CC $< ")
 	$(CXX) $(CXXFLAGS) -MMD -MF $(patsubst %.o,%.d,$@) -c -o $@ $<
 
+%.em.o: %.cpp
+	$(call colorecho, "CC $< ")
+	$(ECXX) $(ECXXFLAGS) -MMD -MF $(patsubst %.o,%.d,$@) -c -o $@ $<
+
 %.o: %.c
 	$(call colorecho, "CC $< ")
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-all: arete 
+#all: arete.html
+all: arete
 
 -include $(DEPS)
 
@@ -35,6 +47,10 @@ all: arete
 arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
+
+arete.html: $(ECXXOBJS) src/main.em.o
+	$(call colorecho, "LD $@ ")
+	$(ECXX) $(LDFLAGS) -o $@ $^
 
 tests/test-semispace: $(CXXOBJS) tests/test-semispace.o
 	$(call colorecho, "LD $@ ")
@@ -51,4 +67,7 @@ count:
 	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard *.scm)
 
 clean:
-	rm -f arete test $(patsubst *.o,*.d,$(CXXOBJS)) $(CXXOBJS) src/main.o tests/test-semispace tests/test-incremental
+	rm -f arete test $(patsubst %.o,%.d,$(CXXOBJS)) $(wildcard $(CXXOBJS)) $(wildcard $(ECXXOBJS)) $(wildcard $(CXXOBJS)) $(wildcard src/main.o tests/test-semispace tests/test-incremental)
+
+cleaner:
+	rm -f $(wildcard vendor/linenoise/*.d vendor/linenoise/*.o)

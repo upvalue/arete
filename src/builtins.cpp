@@ -190,6 +190,17 @@ Value fn_fx_gt(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].fixnum_value() > argv[1].fixnum_value());
 }
 
+Value fn_fx_div(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "fx/";
+
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  
+  if(argv[1].fixnum_value() == 0) return state.type_error("divide by zero"); \
+  
+  return Value::make_fixnum(argv[0].fixnum_value() / argv[1].fixnum_value());
+}
+
 // Conversions
 Value fn_string_to_symbol(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string->symbol";
@@ -1176,6 +1187,25 @@ Value fn_record_isa(State& state, size_t argc, Value* argv) {
 }
 
 // Compiler
+Value fn_list_get_source(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "list-get-source";
+  Value vec, lst = argv[0];
+  if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
+    AR_FRAME(state, lst, vec);
+
+    SourceLocation src(lst.pair_src());
+
+    state.vector_append(vec, Value::make_fixnum(src.source));
+    state.vector_append(vec, Value::make_fixnum(src.line));
+    state.vector_append(vec, Value::make_fixnum(src.begin));
+    state.vector_append(vec, Value::make_fixnum(src.length));
+
+    return vec;
+  }
+  return C_FALSE;
+}
+
+
 Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "OpenFn->procedure";
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
@@ -1243,6 +1273,7 @@ void State::install_core_functions() {
   defun_core("fx-", fn_fx_sub, 1, 1, true);
   defun_core("fx<", fn_fx_lt, 2);
   defun_core("fx>", fn_fx_gt, 2);
+  defun_core("fx/", fn_fx_div, 2, 2);
 
   defun_core("+", fn_add, 1, 1, true);
   defun_core("-", fn_sub, 1, 1, true);
@@ -1375,6 +1406,7 @@ void State::install_core_functions() {
   defun_core("record-isa?", fn_record_isa, 2);
 
   // Compiler
+  defun_core("list-get-source", fn_list_get_source, 1);
   defun_core("OpenFn->procedure", fn_openfn_to_procedure, 1);
 
   // Garbage collector

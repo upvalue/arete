@@ -106,9 +106,13 @@ std::ostream& operator<<(std::ostream& os, Value v) {
     }
     case VMFUNCTION: {
       os << "#<vmfunction " << v.vm_function_name() << ' ' << (void*) v.bits;
-      os << ' ' << v.vm_function_min_arity() << '-' << v.vm_function_max_arity();
-      os << ' ' << (v.vm_function_variable_arity() ? "#t" : "#f") << '>';
-      return os;
+      os << ' ' << v.vm_function_min_arity() << '-';
+      if(v.vm_function_variable_arity()) {
+        os << "rest";
+      } else {
+        os << v.vm_function_max_arity();
+      }
+      return os << '>';
     }
     case CFUNCTION: {
       os << "#<cfunction ";
@@ -292,6 +296,10 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
     for(v2 = v; v2.type() == PAIR; v2 = v2.cdr()) {
       pretty_print_sub(os, v2.car(), printed);
       if(v2.cdr() != C_NIL) os << ' ';
+    }
+    if(v2 != C_NIL) {
+      os << " . ";
+      (void) pretty_print_sub(os, v2, printed);
     }
     os << ')';
   } else if(v.type() == RECORD) {
