@@ -56,7 +56,7 @@
   name
   ;; If #t, this is a reference to a free variable
   upvalue?
-  ;; If not #f, index in f.fn->upvalues
+  ;; If not #f, index in f.fn->upvalues. Mutually exclusive with upvalue?
   free-variable-id)
 
 (set! Var/make
@@ -373,26 +373,22 @@
     ; this should not result in a tail-call twice (((lambda (a) (lambda () a)) #t))
 (define fn-body
   '(
-    (lambda (a)
-      (lambda (d c) (lambda () (fx+ a c))))
+    ((lambda (a e g y)
+      (lambda (d c) (lambda () (fx+ a c y)))) 2 0 0 2)
     #;(lambda (a) (lambda (b) (lambda () (fx+ a b))))
   )
-  )
+)
 
 
 (print fn-body)
 (compile fn fn-body)
 
-;; ((lambda (a) (lambda () a)) #t)
-
 (pretty-print fn)
 (compile-finish fn)
 
 (define compiled-proc (OpenFn->procedure fn))
+
+(print "compiled prok" compiled-proc)
 (define make-adder (compiled-proc))
-
-(define add-two (make-adder 2))
-
-;(print "result" ((add-two 2)))
-;(print (add-two 4))
-
+(define make-adder2 (make-adder 2 6))
+(print (make-adder2))

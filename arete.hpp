@@ -387,11 +387,11 @@ struct Value {
 
   // BLOBS
   template <class T> void blob_set(size_t idx, const T val) {
-    as<Blob>()->data[idx] = val;
+    ((T*)(as<Blob>()->data))[idx] = val;
   }
 
   template <class T> T blob_get(size_t idx) const {
-    return as<Blob>()->data[idx];
+    return (T*) as<Blob>()->data[idx];
   }
 
   size_t blob_length() const { return as<Blob>()->length; }
@@ -496,7 +496,7 @@ struct Value {
   /** Determine whether an upvalue has been closed-over or not */
   bool upvalue_closed() const;
   /** Dereference an upvalue */
-  Value upvalue() const;
+  Value upvalue();
 
   void upvalue_close();
 
@@ -845,10 +845,13 @@ inline bool Value::upvalue_closed() const {
   return heap->get_header_bit(UPVALUE_CLOSED_BIT);
 }
 
-inline Value Value::upvalue() const {
-  if(upvalue_closed()) {
+inline Value Value::upvalue() {
+  AR_TYPE_ASSERT(type() == UPVALUE);
+  if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
+    //return static_cast<Upvalue*>(heap)->converted;
     return as<Upvalue>()->converted;
   } else {
+    // return *(static_cast<Upvalue*>(heap)->local);
     return *(as<Upvalue>()->local);
   }
 }
@@ -1127,6 +1130,7 @@ struct VMFrame {
   Value* locals;
   Value* upvalues;
   size_t stack_i;
+  size_t depth;
 
   VMFrame(State& state);
   ~VMFrame();
@@ -1284,6 +1288,10 @@ struct GCIncremental : GCCommon {
       delete blocks[i];
     }
   }
+
+  /** This doesn't do anything, but is here so GCSemispace::live calls can be used in normal
+   * source code */
+  bool live(const Value v) { return true; }
 
   bool marked(HeapValue* v) const {
     return v->get_mark_bit() == mark_bit;

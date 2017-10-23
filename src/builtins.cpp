@@ -1271,11 +1271,12 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   free_vars = rec.record_ref(15);
 
   if(free_vars.type() == VECTOR && free_vars.vector_length() > 0) {
-    std::cout << "!!!OPENFN->PROCEDURE: " << free_vars << std::endl;
     size_t length = free_vars.vector_length();
     free_vars_blob = state.make_blob<size_t>(length);
     for(size_t i = 0; i != length; i++) {
       free_vars_blob.blob_set<size_t>(i, free_vars.vector_ref(i).fixnum_value());
+      AR_ASSERT(((size_t*) free_vars_blob.as<Blob>()->data)[i] ==
+        free_vars.vector_ref(i).fixnum_value());
     }
 
     vfn->free_variables = free_vars_blob.as<Blob>();

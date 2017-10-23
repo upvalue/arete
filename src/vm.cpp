@@ -6,7 +6,7 @@
 
 #include "arete.hpp"
 
-#define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", msg)
+#define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg)
 
 // #define AR_LOG_VM_INSN(msg) ARETE_LOG(())
 
@@ -17,16 +17,29 @@
 
 namespace arete {
 
+static std::string depth_to_string(const VMFrame& f) {
+  std::string str;
+  size_t d = f.depth;
+  while(d--) {
+    str += '>';
+  }
+  return str;
+}
 
-VMFrame::VMFrame(State& state_): state(state_), stack_i(0) {
+VMFrame::VMFrame(State& state_): state(state_), stack_i(0), depth(0) {
   previous = state.gc.vm_frames;
+  if(previous) {
+    depth = previous->depth+1;
+    std::cout << "!!!!! DEPTH: " << depth << std::endl;
+  }
   state.gc.vm_frames = this;
+  AR_ASSERT(state.gc.vm_frames == this);
 }
 
 VMFrame::~VMFrame() {
   // Close over upvalues
   if(fn->free_variables) {
-    AR_LOG_VM("closing over " << fn->free_variables->length << " free variables");
+    // AR_LOG_VM("closing over " << fn->free_variables->length << " free variables");
     for(size_t i = 0; i != fn->free_variables->length; i++) {
       Value saved_local = upvalues[i].upvalue();
       upvalues[i].upvalue_close();
@@ -99,7 +112,7 @@ tail:
     // Allocate upvalues as needed
     // TODO: Is GC allocating here dangerous? We can copy the blob locally as well.
     // If necessary
-    AR_LOG_VM("Allocating space for " << f.fn->free_variables << " upvalues");
+    AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
     f.upvalues = (Value*) alloca(f.fn->free_variables->length);
 
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
@@ -108,7 +121,6 @@ tail:
 
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
       f.upvalues[i] = gc.allocate(UPVALUE, sizeof(Upvalue));
-      AR_LOG_VM("ALLOCATED UPVALUE AT " << i);
       size_t idx = ((size_t*) f.fn->free_variables->data)[i];
       f.upvalues[i].as<Upvalue>()->local = &f.locals[idx];
       AR_ASSERT(f.upvalues[i].type() == UPVALUE);
@@ -128,7 +140,7 @@ tail:
 
   // VM main loop
   while(true) {
-    // gc.collect();
+    gc.collect();
     // We have to account for things moving.
 
     size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
@@ -219,14 +231,13 @@ tail:
             return eval_error(os.str());
           }
 
-          f.stack[f.stack_i - 1] = apply_vm(fn, argc, &f.stack[f.stack_i - argc]);
+          f.stack[f.stack_i - argc - 1] = apply_vm(fn, argc, &f.stack[f.stack_i - argc]);
 
           AR_PRINT_STACK();
 
           // Pop arguments, replace function with results
           f.stack_i -= (argc);
 
-          std::cout << "RESULT OF APPLYING YE FUNCTION " << f.stack[f.stack_i - 1] << std::endl;
 
           AR_PRINT_STACK();
         }
@@ -239,20 +250,21 @@ tail:
 
         AR_ASSERT(upvalues > 0);
 
-        Value klosure, vec;
-        AR_FRAME(*this, klosure, vec);
+        Value klosure, vec, tmp;
+        AR_FRAME(*this, klosure, vec, tmp);
 
         vec = make_vector(upvalues);
 
         for(size_t i = 0; i != upvalues; i++) {
           size_t is_enclosed = code[code_offset++];
           size_t idx = code[code_offset++];
-          AR_LOG_VM("enclosing " << (is_enclosed ? "free" : "local") << " variable at " << idx);
 
           if(is_enclosed) {
+            AR_LOG_VM("enclosing free variable " << i << " from closure idx " << idx);
             AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
             vector_append(vec, f.closure->upvalues->data[idx]);
           } else {
+            AR_LOG_VM("enclosing local variable " << i << " from f.upvalues idx " << idx);
             // Problem: Upvalue array does not necessarily correlate 1:1 with locals.
 
             // In other words, something like (lambda (c d) (lambda () d))
@@ -269,18 +281,21 @@ tail:
             // 0 = location in upvalues array, for initialization
             // 1 = location in locals
 
-
-            std::cout << idx << std::endl;
-            std::cout << f.fn->free_variables->length << std::endl;
+            //std::cout << idx << std::endl;
+            //std::cout << f.fn->free_variables->length << std::endl;
             AR_ASSERT(!f.fn->free_variables || idx < f.fn->free_variables->length);
-            std::cout << f.upvalues[idx].type() << std::endl;
-            std::cout << (ptrdiff_t) f.upvalues[idx].bits << std::endl;
+            // std::cout << f.upvalues[idx].type() << std::endl;
+            // std::cout << (ptrdiff_t) f.upvalues[idx].bits << std::endl;
+            AR_ASSERT(gc.live(f.upvalues[idx]));
             AR_ASSERT(f.upvalues[idx].type() == UPVALUE);
+            AR_ASSERT(!f.upvalues[idx].upvalue_closed());
             vector_append(vec, f.upvalues[idx]);
           }
 
+          //std::cout << vec.vector_ref(i) << std::endl;
+          // AR_ASSERT("AUGH" && gc.live(vec.vector_ref(i)));
+          //std::cout << vec.vector_ref(i).upvalue_closed() << std::endl;
           AR_LOG_VM("ENCLOSING VALUE " << i << " = " << vec.vector_ref(i) << " " << vec.vector_ref(i).upvalue());
-
         }
         klosure = gc.allocate(CLOSURE, sizeof(Closure));
         klosure.as<Closure>()->upvalues = vec.vector_storage().as<VectorStorage>();
