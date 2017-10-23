@@ -99,6 +99,7 @@ tail:
     // Allocate upvalues as needed
     // TODO: Is GC allocating here dangerous? We can copy the blob locally as well.
     // If necessary
+    AR_LOG_VM("Allocating space for " << f.fn->free_variables << " upvalues");
     f.upvalues = (Value*) alloca(f.fn->free_variables->length);
 
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
@@ -110,10 +111,10 @@ tail:
       AR_LOG_VM("ALLOCATED UPVALUE AT " << i);
       size_t idx = ((size_t*) f.fn->free_variables->data)[i];
       f.upvalues[i].as<Upvalue>()->local = &f.locals[idx];
+      AR_ASSERT(f.upvalues[i].type() == UPVALUE);
       AR_ASSERT(f.upvalues[i].upvalue() == f.locals[idx]);
     }
   }
-
 
   // TODO: This doesn't necessarily need to be initialized; we could
   // place the stack pointer in the VMFrame structure and only
@@ -244,14 +245,36 @@ tail:
         vec = make_vector(upvalues);
 
         for(size_t i = 0; i != upvalues; i++) {
-          size_t is_upvalue = code[code_offset++];
+          size_t is_enclosed = code[code_offset++];
           size_t idx = code[code_offset++];
-          AR_LOG_VM("enclosing " << (is_upvalue ? "free" : "local") << " variable at " << idx);
+          AR_LOG_VM("enclosing " << (is_enclosed ? "free" : "local") << " variable at " << idx);
 
-          if(is_upvalue) {
+          if(is_enclosed) {
             AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
             vector_append(vec, f.closure->upvalues->data[idx]);
           } else {
+            // Problem: Upvalue array does not necessarily correlate 1:1 with locals.
+
+            // In other words, something like (lambda (c d) (lambda () d))
+            // Will cause this to fail.
+            
+            // So we need to track a variable's location in the upvalue array,
+            // as well as its location in the locals index
+            // How to do this?
+
+            // close-over 0 0 1 0 1
+
+            // emit close-over 0 0 1
+            // 0 = this is a local
+            // 0 = location in upvalues array, for initialization
+            // 1 = location in locals
+
+
+            std::cout << idx << std::endl;
+            std::cout << f.fn->free_variables->length << std::endl;
+            AR_ASSERT(!f.fn->free_variables || idx < f.fn->free_variables->length);
+            std::cout << f.upvalues[idx].type() << std::endl;
+            std::cout << (ptrdiff_t) f.upvalues[idx].bits << std::endl;
             AR_ASSERT(f.upvalues[idx].type() == UPVALUE);
             vector_append(vec, f.upvalues[idx]);
           }

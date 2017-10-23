@@ -30,7 +30,6 @@
           (set! fields (cdddr x)))
         (set! fields (cddr x))))
 
-    ;(print fields)
     (unless (or (symbol? parent) (not parent))
       (raise 'syntax "define-record inheritance argument should be a list with exactly one symbol" (list x (caddr x))))
 

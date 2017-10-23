@@ -51,7 +51,7 @@ static bool do_repl(State& state, bool read_only) {
   AR_FRAME(state, x, tmp);
 
   std::cout << ";; arete 0.1" << std::endl;
-  std::cout << ";; Arms and the man, I sing" << std::endl;
+  std::cout << ";; Of arms and a man, I sing" << std::endl;
 
   std::ostringstream hist_file;
 

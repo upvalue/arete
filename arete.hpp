@@ -1334,6 +1334,7 @@ struct State {
   unsigned register_source(const std::string& path, std::istream& is);
 
   std::vector<Value> globals;
+  /** A GC-tracked array of temporary values. May be cleared by function calls. */
   std::vector<Value> temps;
 
   // Global variables

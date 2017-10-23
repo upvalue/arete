@@ -14,7 +14,6 @@
     return (exp); \
   }
 
-
 namespace arete {
 
 /** Return an eval error with source code information */

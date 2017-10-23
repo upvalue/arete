@@ -1268,9 +1268,10 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   }
 
   // Convert free variables vector to size_ts
-  free_vars = rec.record_ref(14);
+  free_vars = rec.record_ref(15);
 
-  if(free_vars.type() == VECTOR) {
+  if(free_vars.type() == VECTOR && free_vars.vector_length() > 0) {
+    std::cout << "!!!OPENFN->PROCEDURE: " << free_vars << std::endl;
     size_t length = free_vars.vector_length();
     free_vars_blob = state.make_blob<size_t>(length);
     for(size_t i = 0; i != length; i++) {

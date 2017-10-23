@@ -40,46 +40,24 @@
   ;; #(#t 0 #f 0) = capture local variable 0 from the calling function, capture enclosed value 0 from the calling
   ;; functions closure
   closure ;; 13
-  ;; Local free variables
-  free-variables ;; 14
+  ;; Free variable count
+  free-variable-count ;; 14
+  ;; Vector of free variables
+  free-variables ;; 15
   )
-
-(define (list-ref-cell lst i)
-  (if (or (null? lst) (not (pair? lst)))
-    (raise 'type "list-ref-cell expects a list with at least one element as its argument" (list lst)))
-  (if (fx= i 0)
-    lst
-    (let loop ((rest lst)
-               (ii 0))
-      (if (null? rest)
-        (raise 'type "list-ref-cell bounds error" (list lst (length lst) i)))
-      (if (fx= ii i)
-        rest
-        (loop (cdr rest) (fx+ ii 1))))))
-
-(define (reduce fn lst)
-  (if (null? lst)
-    '()
-    (let ((len (length lst)))
-      (let loop ((i 0)
-                 (result (car lst)))
-        (if (fx= i (fx- len 1))
-          result
-          (begin
-            (loop (fx+ i 1) (fn result (list-ref lst (fx+ i 1))))))))))
 
 (set! OpenFn/make
   (let ((make OpenFn/make))
     (lambda (name)
-      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f #f))))
+      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f))))
 
 (define-record Var
   idx
   name
   ;; If #t, this is a reference to a free variable
   upvalue?
-  ;; If #t, this is a free variable. Mutually exclusive with upvalue?
-  free-variable?)
+  ;; If not #f, index in f.fn->upvalues
+  free-variable-id)
 
 (set! Var/make
   (let ((make Var/make))
@@ -214,10 +192,11 @@
         ;; Add to function environment
         (table-set! (OpenFn/env fn) x var)
         ;; Append to closure
-        (vector-append! closure (Var/upvalue? it))
         (unless (Var/upvalue? it)
-          (Var/free-variable?! it #t))
-        (vector-append! closure (Var/idx it)))
+          (OpenFn/free-variable-count! parent-fn (fx+ (OpenFn/free-variable-count parent-fn) 1))
+          (Var/free-variable-id! it (fx- (OpenFn/free-variable-count parent-fn) 1)))
+        (vector-append! closure it)
+        #;(vector-append! closure (Var/idx it)))
       (register-free-variable parent-fn x))))
 
 
@@ -289,7 +268,6 @@
       #;(OpenFn/local-count! sub-fn (fx+ i 1)))
     args)
 
-  ;(pretty-print "subfun" sub-fn)
   (compile sub-fn (cddr x))
   (pretty-print sub-fn)
   (compile-finish sub-fn)
@@ -300,16 +278,36 @@
   ;; That will create a closure at runtime out of the compiled function
   (aif (OpenFn/closure sub-fn)
     (begin
+      (emit fn 'close-over (vector-length it))
+      (print "!!!" it)
+      (let loop ((i 0))
+        (unless (eq? i (vector-length it))
+          (let ((var (vector-ref it i)))
+            (if (Var/upvalue? var)
+              (emit fn 'words 1 (Var/idx var))
+              ;; (assert free-variable)
+              ;; This needs to be the index in the upvalues array, not the locals array, right?
+              ;; Where do we get that number from?
+              ;; free-variables vector?
+              (emit fn 'words 0 (Var/free-variable-id var))))
+          (loop (fx+ i 1))))))
+      #|
       (emit fn 'close-over (fx/ (vector-length it) 2))
       (let loop ((i 0))
         (unless (eq? i (vector-length it))
+          (let ((upvalue? (vector-ref it i))
+                 var (vector-ref it (fx+ i 1)))
+
+
+          (print "ADDING VARIABLE" (vector-ref it i))
+          (print "ADDING VARIABLE 2" (vector-ref it (fx+ i 1)))
           (emit fn 'words
-            ;; This is an upvalue
+            ;; 1 = upvalue, 0 = local
             (if (vector-ref it i) 1 0)
-            ;; This is not an upvalue          
             (vector-ref it (fx+ i 1)))
           
           (loop (fx+ i 2))))))
+    |#
 
   (pretty-print fn)
 )
@@ -355,7 +353,7 @@
 (define (compile-finish fn)
   (table-for-each 
     (lambda (_ var)
-      (when (Var/free-variable? var)
+      (when (Var/free-variable-id var)
         (unless (OpenFn/free-variables fn)
           (OpenFn/free-variables! fn (make-vector)))
 
@@ -372,31 +370,12 @@
 ;; Do the thing.
 (define fn (OpenFn/make 'vm-toplevel))
 
-#|
-(compile fn
-  '((lambda (a b c)
-      (lambda ()
-        (lambda (d) (fx+ a b a b d)))
-
-      ;; close-over 2 0 0 0 1
-      (lambda ()
-        (lambda () (fx+ a b c))))
-      ;; close-over 3 0 0 0 1 0 2
-    ))
-#|      (lambda (d)
-        (lambda () (fx+ a d)))) 2 2))|#
-|#
-
-#|
-(compile fn 
-  '((lambda (a)
-     (lambda (b)
-       (lambda () (fx+ a b))) 2)))
-|#
     ; this should not result in a tail-call twice (((lambda (a) (lambda () a)) #t))
 (define fn-body
   '(
-    (lambda (a) (lambda (b) (fx+ a b)))
+    (lambda (a)
+      (lambda (d c) (lambda () (fx+ a c))))
+    #;(lambda (a) (lambda (b) (lambda () (fx+ a b))))
   )
   )
 
@@ -414,6 +393,6 @@
 
 (define add-two (make-adder 2))
 
-(print "result" (add-two 2))
-(print (add-two 4))
+;(print "result" ((add-two 2)))
+;(print (add-two 4))
 
