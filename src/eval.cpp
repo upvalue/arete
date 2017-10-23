@@ -348,11 +348,11 @@ Value State::eval(Value env, Value exp, Value fn_name) {
           return eval_apply_c(env,  car, exp.cdr(), exp, fn_name);
         } else if(car.type() == RECORD) {
           return apply_record(env, car, exp.cdr(), exp, fn_name);
-        } else if(car.type() == VMFUNCTION) {
-          // TODO: Here, we need to gather
+        } else if(car.type() == VMFUNCTION || car.type()) {
+          return eval_apply_vm(env, car, exp.cdr(), exp, fn_name);
           // arguments into a VectorStorage (or whatever)
-          Value v = C_FALSE;
-          return apply_vm(car, 0, &v);
+          // Value v = C_FALSE;
+          //return apply_vm(car, 0, &v);
           // return apply_vm(env, car, exp.cdr(), exp, fn_name);
         }
       }
@@ -486,6 +486,52 @@ Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, V
   return tmp;
 }
 
+Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
+  Value tmp,closure = C_FALSE;
+  AR_FRAME(this, env, closure, fn, args, src_exp, tmp, fn_name);
+
+  if(fn.type() == CLOSURE) {
+    closure = fn;
+    fn = fn.closure_function();
+  }
+
+  size_t given_args = args.list_length();
+  size_t min_arity = fn.as<VMFunction>()->min_arity;
+  size_t max_arity = fn.as<VMFunction>()->max_arity;
+
+  if(given_args < min_arity) {
+    std::ostringstream os;
+    os << "function " << fn << " expected at least " << min_arity << " arguments but got " << given_args;
+    return eval_error(os.str(), src_exp);
+  }
+
+  if(!fn.vm_function_variable_arity() && given_args > max_arity) {
+    std::ostringstream os;
+    os << " function " << fn << " expected at most " << max_arity << " arguments but got " << given_args;
+    return eval_error(os.str(), src_exp);
+  }
+
+  size_t argc = 0;
+  temps.clear();
+  while(args.type() == PAIR) {
+    if(eval_args) {
+      tmp = eval(env,  args.car());
+      EVAL_CHECK(tmp, src_exp, fn_name);
+    } else {
+      tmp = args.car();
+    }
+    temps.push_back(tmp);
+    argc++;
+    args = args.cdr();
+  }
+
+  tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &temps[0]);
+
+  EVAL_CHECK(tmp, src_exp, fn_name);
+  return tmp;
+}
+
+
 Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
   Value fn_args, tmp;
   AR_FRAME(this, env,  fn, args, fn_args, src_exp, tmp, fn_name);
@@ -520,13 +566,6 @@ Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value 
     args = args.cdr();
   }
   
-  /*
-  std::cout << "OK" << std::endl;
-  std::cout << fn_args << std::endl;
-  std::cout << fn_args.type() << std::endl;
-  std::cout << fn_args.vector_storage().type() << std::endl;
-  std::cout << "NOW CRASH" << std::endl;
-  */
   tmp = fn.c_function_addr()(*this, argc, fn_args.vector_storage().vector_storage_data());
   EVAL_CHECK(tmp, src_exp, fn_name);
   return tmp;

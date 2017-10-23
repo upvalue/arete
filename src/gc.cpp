@@ -32,8 +32,11 @@ void GCSemispace::copy(HeapValue** ref) {
   (*ref) = cpy;
 }
 
+extern bool thing;
+
 // Semispace collector
 void GCSemispace::collect(size_t request, bool force) {
+
   collections++;
 
 #ifdef ARETE_BENCH_GC
@@ -68,12 +71,16 @@ void GCSemispace::collect(size_t request, bool force) {
     switch(obj->get_type()) {
 #define AR_COPY(type, field) copy((HeapValue**) &(((type*)obj)->field))
       // No pointers
-      case FLONUM: case CHARACTER: case STRING: break;
+      case FLONUM: case CHARACTER: case STRING: case BLOB: break;
       // One pointer
+      case UPVALUE:
+        if(!obj->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
+          // There is no need to do anything here as the local will be updated by copy_roots
+          break;
+        } 
       case VECTOR:
       case CFUNCTION:
       case TABLE:
-      case UPVALUE:
         AR_COPY(Vector, storage);
         break;
       // Two pointers 
@@ -110,6 +117,7 @@ void GCSemispace::collect(size_t request, bool force) {
       case VMFUNCTION: {
         AR_COPY(VMFunction, name);
         AR_COPY(VMFunction, constants);
+        AR_COPY(VMFunction, free_variables);
         break;
       }
       case RECORD: {
@@ -156,6 +164,8 @@ void GCSemispace::collect(size_t request, bool force) {
 #endif 
 }
 
+extern bool thing;
+
 void GCSemispace::copy_roots() {
   // std::cout << state.symbol_table.size() << " live symbols" << std::endl;
   for(size_t i = 0; i != frames.size(); i++) {
@@ -171,8 +181,17 @@ void GCSemispace::copy_roots() {
 
     size_t stack_i = link->stack_i;
     unsigned local_count = fn->local_count;
+    size_t free_vars = fn->free_variables ? fn->free_variables->length : 0;
 
     copy((HeapValue**) &link->fn);
+
+    for(size_t i = 0; i != free_vars; i++) {
+      copy((HeapValue**) &link->upvalues[i]);
+    }
+
+    if(link->closure != 0) {
+      copy((HeapValue**) &link->closure);
+    }
 
     for(size_t i = 0; i != stack_i; i++) {
       copy((HeapValue**) &link->stack[i]);
@@ -181,11 +200,16 @@ void GCSemispace::copy_roots() {
     for(unsigned i = 0 ; i != local_count; i++) {
       copy((HeapValue**) &link->locals[i]);
     }
+
     link = link->previous;
   }
 
   for(size_t i = 0; i != state.globals.size(); i++) {
     copy(&state.globals[i].heap);
+  }
+
+  for(size_t i = 0; i != state.temps.size(); i++) {
+    copy(&state.temps[i].heap);
   }
 
   for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {

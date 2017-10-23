@@ -40,6 +40,8 @@
   ;; #(#t 0 #f 0) = capture local variable 0 from the calling function, capture enclosed value 0 from the calling
   ;; functions closure
   closure ;; 13
+  ;; Local free variables
+  free-variables ;; 14
   )
 
 (define (list-ref-cell lst i)
@@ -69,7 +71,7 @@
 (set! OpenFn/make
   (let ((make OpenFn/make))
     (lambda (name)
-      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f))))
+      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f #f))))
 
 ;; Add free-variable? thing here
 ;; This creates the thing
@@ -77,12 +79,15 @@
 (define-record Var
   idx
   name
-  upvalue?)
+  ;; If #t, this is a reference to a free variable
+  upvalue?
+  ;; If #t, this is a free variable. Mutually exclusive with upvalue?
+  free-variable?)
 
 (set! Var/make
   (let ((make Var/make))
     (lambda (id name)
-      (make id name #f))))
+      (make id name #f #f))))
 
 (define (compiler-log fn . rest)
   (display "arete:cc: ")
@@ -192,70 +197,6 @@
     `(,#'let ((it ,(list-ref x 1)))
         (,#'if it ,(list-ref x 2) ,(if (fx= (length x) 4) (list-ref x 3) unspecified)))))
 
-#|
-
-(lambda (a) (lambda (b) (lambda () (fx+ a b))))
-
-;; lookup A = 
-;; register with both preceding lambdas CLOSURES
-;; if its part of the env with upvalue? set, it has already been appended to closure
-;; and we merely need return the var's idx
-;; if its part of the env without upvalue? set, it's a local
-
-
-|#
-
-#|
-
-(define (register-free-variable fn x)
-  (let loop ((search-fn (OpenFn/parent fn))
-             (last-fn fn))
-    ;; Add a closure to this function
-    (unless (OpenFn/closure last-fn)
-      (OpenFn/closure! last-fn (make-vector)))
-
-    (aif (table-ref (OpenFn/env search-fn) x)
-      ;; This variable is part of search-fn; since this function was called that means it needs to be added
-      ;; to each closure as we go along
-      (begin
-        (let ((var (Var/make 0 x)))
-          (Var/idx! var (fx/ (vector-length (OpenFn/closure last-fn)) 2))
-
-          (table-set! (OpenFn/env last-fn) x var))
-
-        ;; If this is an upvalue, we append #t so it will be retrieved from the closure by index,
-        ;; if not, we append #f so it will be retrieved from the locals array
-        (vector-append! (OpenFn/closure last-fn) (Var/upvalue? it))
-        (vector-append! (OpenFn/closure last-fn) (Var/idx it))
-
-
-        (compiler-log last-fn "adding var to closure" it)
-        (cons 'upvalue (fx/ (vector-length (OpenFn/closure last-fn)) 2))
-      )
-      ;; This variable has not been registered as part of this function's env, and needs to be added to it,
-      ;; as well as appended to the closure
-      (let ((var (Var/make 0 x)))
-
-        (unless (OpenFn/closure search-fn)
-          (OpenFn/closure! search-fn (make-vector)))
-
-
-        (Var/upvalue?! var #t)
-        (Var/idx! var (fx/ (vector-length (OpenFn/closure search-fn)) 2))
-
-        (vector-append! (OpenFn/closure search-fn) #t)
-        (vector-append! (OpenFn/closure search-fn) (Var/idx var))
-        (compiler-log last-fn "adding newly enclosed var" x var)
-        (table-set! (OpenFn/env search-fn) x var)
-        ;; Add to parents
-        (loop (OpenFn/parent search-fn) search-fn)
-        ; (cons 'upvalue (Var/idx var))
-        
-        )) ; aif
-  ) ;let loop
-)
-|#
-
 (define (register-free-variable fn x)
   ;; Go up through function stack,
   ;; capturing X as necessary
@@ -277,6 +218,8 @@
         (table-set! (OpenFn/env fn) x var)
         ;; Append to closure
         (vector-append! closure (Var/upvalue? it))
+        (unless (Var/upvalue? it)
+          (Var/free-variable?! it #t))
         (vector-append! closure (Var/idx it)))
       (register-free-variable parent-fn x))))
 
@@ -413,6 +356,17 @@
   fn)
 
 (define (compile-finish fn)
+  (table-for-each 
+    (lambda (_ var)
+      (when (Var/free-variable? var)
+        (unless (OpenFn/free-variables fn)
+          (OpenFn/free-variables! fn (make-vector)))
+
+        (compiler-log fn "has free variable" (Var/name var) " at local idx " (Var/idx var))
+
+        (vector-append! (OpenFn/free-variables fn) (Var/idx var))))
+    (OpenFn/env fn))
+
   (let loop ((i 0))
     (unless (fx= i (vector-length (OpenFn/insns fn)))
       (vector-set! (OpenFn/insns fn) i (insn->byte (vector-ref (OpenFn/insns fn) i)))
@@ -420,7 +374,6 @@
 
 ;; Do the thing.
 (define fn (OpenFn/make 'vm-toplevel))
-
 
 #|
 (compile fn
@@ -443,16 +396,27 @@
      (lambda (b)
        (lambda () (fx+ a b))) 2)))
 |#
-(compile fn
-  '((lambda (a)
-      (lambda () a)) #t))
+    ; this should not result in a tail-call twice (((lambda (a) (lambda () a)) #t))
+(define fn-body
+  '(
+    (lambda (a) (lambda (b) (fx+ a b)))
+  )
+  )
+
+
+(print fn-body)
+(compile fn fn-body)
+
+;; ((lambda (a) (lambda () a)) #t)
 
 (pretty-print fn)
 (compile-finish fn)
 
 (define compiled-proc (OpenFn->procedure fn))
-(print compiled-proc)
+(define make-adder (compiled-proc))
 
-(print (compiled-proc))
+(define add-two (make-adder 2))
 
+(print "result" (add-two 2))
+(print (add-two 4))
 

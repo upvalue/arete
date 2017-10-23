@@ -21,8 +21,11 @@ std::ostream& operator<<(std::ostream& os, Type type) {
     case PAIR: return os << "pair";
     case EXCEPTION: return os << "exception";
     case FUNCTION: return os << "function";
+    case BLOB: return os << "blob";
+    case UPVALUE: return os << "upvalue";
     case VMFUNCTION: return os << "vmfunction";
     case CFUNCTION: return os << "cfunction";
+    case CLOSURE: return os << "closure";
     case TABLE: return os << "table";
     default: return os << "unknown";
   }
@@ -125,6 +128,12 @@ std::ostream& operator<<(std::ostream& os, Value v) {
         if(i != v.vector_length() - 1) os << ' ';
       }
       return os << ')';
+    case CLOSURE:
+      return os << "#<closure " << v.bits << ">";
+    case UPVALUE:
+      return os << "#<upvalue " << v.bits << '>';
+    case BLOB:
+      return os << "#<blob " << v.bits << ">";
     case RENAME: {
       Value env = v.rename_env(),
         sym = v.rename_gensym() == C_FALSE ? v.rename_expr() : v.rename_gensym();
@@ -258,7 +267,8 @@ void State::print_stack_trace(std::ostream& os, bool clear) {
 bool State::pretty_print_shared_obj(std::ostream& os, Value v,
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
 
-  if(v.atomic() || v.type() == SYMBOL || v.type() == TABLE || v.type() == VMFUNCTION) {
+  if(v.atomic() || v.type() == SYMBOL || v.type() == TABLE || v.type() == VMFUNCTION
+     || v.type() == FUNCTION) {
     os << v;
     return true;
   }

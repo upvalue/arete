@@ -10,9 +10,13 @@
 
 // #define AR_LOG_VM_INSN(msg) ARETE_LOG(())
 
-// A simple portable alternative to alloca would be just using a giant malloc'd or stack-allocated array.
+// A simple portable alternative to alloca would be just using a giant malloc'd or
+// stack-allocated array.
+
+// It could be free'd by VMFrame, or something
 
 namespace arete {
+
 
 VMFrame::VMFrame(State& state_): state(state_), stack_i(0) {
   previous = state.gc.vm_frames;
@@ -20,7 +24,18 @@ VMFrame::VMFrame(State& state_): state(state_), stack_i(0) {
 }
 
 VMFrame::~VMFrame() {
-  std::cout << state.gc.vm_frames << std::endl;
+  // Close over upvalues
+  if(fn->free_variables) {
+    AR_LOG_VM("closing over " << fn->free_variables->length << " free variables");
+    for(size_t i = 0; i != fn->free_variables->length; i++) {
+      Value saved_local = upvalues[i].upvalue();
+      upvalues[i].upvalue_close();
+      AR_ASSERT(upvalues[i].upvalue_closed());
+      AR_ASSERT(upvalues[i].upvalue() == saved_local);
+    }
+  }
+
+  // Pop frame
   AR_ASSERT(state.gc.vm_frames == this);
   state.gc.vm_frames = previous;
 }
@@ -41,14 +56,19 @@ enum {
 };
 
 #define AR_PRINT_STACK() \
-  std::cout << "stack " << (f.stack_i-1) << " out of " << f.fn->stack_max << " allocated " << std::endl; \
-  for(size_t i = 0; i != f.stack_i; i++) std::cout << i << ": " << f.stack[i] << std::endl;
+  AR_LOG_VM("stack " << (f.stack_i-1) << " out of " << f.fn->stack_max << " allocated "); \
+  for(size_t i = 0; i != f.stack_i; i++) AR_LOG_VM(i << ": " << f.stack[i]);
 
+  bool thing = false;
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   
 tail:
 
   VMFrame f(*this);
+
+  AR_ASSERT(gc.vm_frames == &f);
+
+  thing = true;
 
   if(fn.type() == CLOSURE) {
     f.closure = fn.as<Closure>();
@@ -58,17 +78,42 @@ tail:
     f.fn = fn.as<VMFunction>();
   }
 
+  AR_LOG_VM("ENTERING FUNCTION " << f.fn->name << " closure: " << (f.closure == 0 ? "#f" : "#t")
+     << " free_variables: " << f.fn->free_variables);
   
   // Allocate storage
   f.stack = (Value*) alloca(f.fn->stack_max * sizeof(Value));
   f.locals = (Value*) alloca(f.fn->local_count * sizeof(Value));
 
   // Initialize local variables
-
   for(unsigned i = 0; i != argc; i++) {
     AR_LOG_VM("LOCAL " << i << ' ' << argv[i]);
     f.locals[i] = argv[i];
   }
+
+  for(unsigned i = argc; i != f.fn->local_count; i++) { 
+    f.locals[i] = C_UNSPECIFIED;
+  }
+
+  if(f.fn->free_variables != 0) {
+    // Allocate upvalues as needed
+    // TODO: Is GC allocating here dangerous? We can copy the blob locally as well.
+    // If necessary
+    f.upvalues = (Value*) alloca(f.fn->free_variables->length);
+
+    for(size_t i = 0; i != f.fn->free_variables->length; i++) {
+      f.upvalues[i].bits = 0;
+    }
+
+    for(size_t i = 0; i != f.fn->free_variables->length; i++) {
+      f.upvalues[i] = gc.allocate(UPVALUE, sizeof(Upvalue));
+      AR_LOG_VM("ALLOCATED UPVALUE AT " << i);
+      size_t idx = ((size_t*) f.fn->free_variables->data)[i];
+      f.upvalues[i].as<Upvalue>()->local = &f.locals[idx];
+      AR_ASSERT(f.upvalues[i].upvalue() == f.locals[idx]);
+    }
+  }
+
 
   // TODO: This doesn't necessarily need to be initialized; we could
   // place the stack pointer in the VMFrame structure and only
@@ -82,7 +127,7 @@ tail:
 
   // VM main loop
   while(true) {
-    gc.collect();
+    // gc.collect();
     // We have to account for things moving.
 
     size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
@@ -173,21 +218,51 @@ tail:
             return eval_error(os.str());
           }
 
-          Value result = apply_vm(fn, argc, &f.stack[f.stack_i - argc]);
+          f.stack[f.stack_i - 1] = apply_vm(fn, argc, &f.stack[f.stack_i - argc]);
 
           AR_PRINT_STACK();
 
           // Pop arguments, replace function with results
           f.stack_i -= (argc);
-          f.stack[f.stack_i - 1] = result;
 
-          std::cout << "RESULT OF APPLYING YE FUNCTION " << result << std::endl;
+          std::cout << "RESULT OF APPLYING YE FUNCTION " << f.stack[f.stack_i - 1] << std::endl;
 
           AR_PRINT_STACK();
         }
-        // TODO check arity.
-        // AR_PRINT_STACK();
-        // AR_PRINT_STACK();
+        continue;
+      }
+
+      case OP_CLOSE_OVER: {
+        size_t upvalues = code[code_offset++];
+        AR_LOG_VM("close-over " << upvalues);
+
+        AR_ASSERT(upvalues > 0);
+
+        Value klosure, vec;
+        AR_FRAME(*this, klosure, vec);
+
+        vec = make_vector(upvalues);
+
+        for(size_t i = 0; i != upvalues; i++) {
+          size_t is_upvalue = code[code_offset++];
+          size_t idx = code[code_offset++];
+          AR_LOG_VM("enclosing " << (is_upvalue ? "free" : "local") << " variable at " << idx);
+
+          if(is_upvalue) {
+            AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
+            vector_append(vec, f.closure->upvalues->data[idx]);
+          } else {
+            AR_ASSERT(f.upvalues[idx].type() == UPVALUE);
+            vector_append(vec, f.upvalues[idx]);
+          }
+
+          AR_LOG_VM("ENCLOSING VALUE " << i << " = " << vec.vector_ref(i) << " " << vec.vector_ref(i).upvalue());
+
+        }
+        klosure = gc.allocate(CLOSURE, sizeof(Closure));
+        klosure.as<Closure>()->upvalues = vec.vector_storage().as<VectorStorage>();
+        klosure.as<Closure>()->function = f.stack[f.stack_i-1];
+        f.stack[f.stack_i-1] = klosure;
         continue;
       }
 
@@ -195,29 +270,11 @@ tail:
         AR_ASSERT(f.closure);
 
         size_t idx = code[code_offset++];
-        f.stack[f.stack_i++] = f.closure->upvalues->data->upvalue();
-        break;
-      }
-
-      case OP_CLOSE_OVER: {
-        size_t upvalues = code[code_offset++];
-
-        AR_ASSERT(upvalues > 0);
-
-        Value closure, vec;
-        AR_FRAME(*this, closure, vec);
-
-        for(size_t i = 0; i != upvalues; i++) {
-          size_t is_upvalue = code[code_offset++];
-          size_t idx = code[code_offset++];
-
-          //if(is_upvalue) {
-            // vector_append()
-          //} else {
-          //}
-
-        }
-        closure = gc.allocate(CLOSURE, sizeof(Closure));
+        AR_LOG_VM("upvalue-get " << idx);
+        AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
+        AR_ASSERT(gc.live(f.closure->upvalues->data[idx].upvalue()));
+        f.stack[f.stack_i++] = f.closure->upvalues->data[idx].upvalue();
+        continue;
       }
 
       case OP_BAD: {

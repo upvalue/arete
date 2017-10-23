@@ -804,7 +804,7 @@ Value fn_table_for_each(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
 
 
-  Value table = argv[1], fn = argv[0], chain, arg;
+  Value table = argv[1], fn = argv[0], chain, arg, tmp;
   AR_FRAME(state, table, fn, chain, arg);
 
   for(size_t i = 0; i != table.as<Table>()->chains->length; i++) {
@@ -813,7 +813,8 @@ Value fn_table_for_each(State& state, size_t argc, Value* argv) {
       while(chain != C_NIL) {
         arg = state.make_pair(chain.cdar(), C_NIL);
         arg = state.make_pair(chain.caar(), arg);
-        state.eval_apply_generic(fn, arg, false);
+        tmp = state.eval_apply_generic(fn, arg, false);
+        if(tmp.is_active_exception()) return tmp;
         chain = chain.cdr();
       }
     }
@@ -1235,8 +1236,8 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   // TODO: Could type check more thoroughly here.
 
   size_t size = sizeof(VMFunction);
-  Value name, insns, constants, sources, stack_size, rec = argv[0], fn;
-  AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn);
+  Value name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob;
+  AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn, free_vars, free_vars_blob);
 
   name = rec.record_ref(0);
   insns = rec.record_ref(1);
@@ -1258,9 +1259,26 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   vfn->bytecode_size = bytecode_size;
   vfn->stack_max = rec.record_ref(6).fixnum_value();
   vfn->local_count = rec.record_ref(5).fixnum_value();
-  vfn->name = C_FALSE;
+  vfn->name = rec.record_ref(0);
+  vfn->free_variables = 0;
+
+  // Check for variable arity
   if(rec.record_ref(11) == C_TRUE) {
     vfn->set_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT);
+  }
+
+  // Convert free variables vector to size_ts
+  free_vars = rec.record_ref(14);
+
+  if(free_vars.type() == VECTOR) {
+    size_t length = free_vars.vector_length();
+    free_vars_blob = state.make_blob<size_t>(length);
+    for(size_t i = 0; i != length; i++) {
+      free_vars_blob.blob_set<size_t>(i, free_vars.vector_ref(i).fixnum_value());
+    }
+
+    vfn->free_variables = free_vars_blob.as<Blob>();
+    AR_ASSERT(free_vars_blob.blob_length() == length);
   }
 
   fn = vfn;

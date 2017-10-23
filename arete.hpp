@@ -48,7 +48,7 @@
 #endif 
 
 #ifndef AR_LINENOISE
-# define AR_LINENOISE 0
+# define AR_LINENOISE 1
 #endif
 
 #define AR_FRAME(state, ...)  \
@@ -188,6 +188,7 @@ enum Type {
   VMFUNCTION = 19,
   CLOSURE = 20,
   UPVALUE = 21,
+  BLOB = 22,
 };
 
 std::ostream& operator<<(std::ostream& os, Type type);
@@ -260,6 +261,19 @@ struct Char : HeapValue {
   char datum;
 };
 
+/**
+ * A Blob is a heap-allocated value with no pointers,
+ * intended to store binary data.
+ */
+struct Blob : HeapValue {
+  size_t length;
+
+  char data[1];
+
+  static const unsigned CLASS_TYPE = BLOB;
+};
+
+
 struct Value {
   union {
     HeapValue* heap;
@@ -274,10 +288,10 @@ struct Value {
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
   static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
 
-  /** Returns true if the value contains no pointers */
+  /** Returns true if the value contains no pointers. */
   bool atomic() const {
     switch(type()) {
-      case FIXNUM: case FLONUM: case CONSTANT: case STRING: return true;
+      case FIXNUM: case FLONUM: case CONSTANT: case STRING: case BLOB: return true;
       default: return false;
     }
   }
@@ -370,6 +384,17 @@ struct Value {
     std::string cmp(s);
     return string_equals(cmp);
   }
+
+  // BLOBS
+  template <class T> void blob_set(size_t idx, const T val) {
+    as<Blob>()->data[idx] = val;
+  }
+
+  template <class T> T blob_get(size_t idx) const {
+    return as<Blob>()->data[idx];
+  }
+
+  size_t blob_length() const { return as<Blob>()->length; }
 
   // CHARACTERS
   char character() const {
@@ -476,6 +501,8 @@ struct Value {
   void upvalue_close();
 
   // CLOSURES
+
+  /** Retrieve a Closure's function*/
   VMFunction* closure_function() const;
 
 
@@ -495,6 +522,7 @@ struct Value {
   bool record_isa(Value) const;
 
   // RECORD TYPES
+
   Value record_type_name() const;
   Value record_type_apply() const;
   Value record_type_print() const;
@@ -504,7 +532,7 @@ struct Value {
 
   // OPERATORS
 
-  // Identity comparison
+  /** Identity comparison */
   inline bool operator==(const Value& other) const {
     return bits == other.bits;
   }
@@ -746,6 +774,10 @@ inline bool Value::function_is_macro() const {
   return heap->get_header_bit(FUNCTION_MACRO_BIT);
 }
 
+/**
+ * A pointer to a C++ function, callable from
+ * Scheme. 
+ */
 struct CFunction : HeapValue {
   Value name;
   c_function_t addr;
@@ -772,6 +804,7 @@ inline bool Value::c_function_variable_arity() const {
 struct VMFunction : HeapValue {
   Value name;
   VectorStorage* constants;
+  Blob* free_variables;
 
   unsigned constant_count, min_arity, max_arity, stack_max, local_count;
   size_t bytecode_size;
@@ -824,6 +857,7 @@ inline void Value::upvalue_close() {
   AR_TYPE_ASSERT(type() == UPVALUE);
   AR_TYPE_ASSERT(!upvalue_closed());
   heap->set_header_bit(UPVALUE_CLOSED_BIT);
+  as<Upvalue>()->converted = (*as<Upvalue>()->local);
   AR_ASSERT(upvalue_closed());
 }
 
@@ -1091,6 +1125,7 @@ struct VMFrame {
   Closure* closure;
   Value* stack;
   Value* locals;
+  Value* upvalues;
   size_t stack_i;
 
   VMFrame(State& state);
@@ -1299,6 +1334,7 @@ struct State {
   unsigned register_source(const std::string& path, std::istream& is);
 
   std::vector<Value> globals;
+  std::vector<Value> temps;
 
   // Global variables
   
@@ -1718,6 +1754,13 @@ struct State {
     return heap;
   }
 
+  template <class T>
+  Value make_blob(size_t count) {
+    Blob* heap = static_cast<Blob*>(gc.allocate(BLOB, sizeof(Blob) + (count * sizeof(T))));
+    heap->length = count;
+    return heap;
+  }
+
   /** Make an exception from Scheme values */
   Value make_exception(Value tag, Value message, Value irritants = C_UNSPECIFIED) {
     Value exc;
@@ -2052,6 +2095,7 @@ struct State {
 
   /** Apply a scheme function */
   Value eval_apply_scheme(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
+  Value eval_apply_vm(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
   Value eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
   // TODO: This should perhaps be removed entirely.
   Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);

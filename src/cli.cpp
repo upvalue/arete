@@ -5,12 +5,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "arete.hpp"
+
 #if AR_LINENOISE
 # include "linenoise.h"
 #endif
-
-#include "arete.hpp"
-
 
 using namespace arete;
 using namespace std;
