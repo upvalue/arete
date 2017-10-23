@@ -2,9 +2,7 @@
 CXX := clang++
 CPPFLAGS := $(CPPFLAGS) -Wall -I. -Ivendor -Ivendor/linenoise -DARETE_DEV
 CFLAGS := $(CFLAGS) -g3 -O3
-CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti $(CFLAGS)
-
-LDFLAGS := $(LDFLAGS) 
+CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti $(CFLAGS) 
 
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
@@ -46,7 +44,7 @@ all: arete
 # Link 
 arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
-	$(CXX) $(LDFLAGS) -o $@ $^
+	$(CXX)  -o $@ $^ $(LDFLAGS)
 
 arete.html: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")

@@ -73,9 +73,6 @@
     (lambda (name)
       (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f #f))))
 
-;; Add free-variable? thing here
-;; This creates the thing
-
 (define-record Var
   idx
   name
