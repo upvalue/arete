@@ -51,12 +51,14 @@
   free-variables ;; 15
   ;; Labels
   labels ;; 16
+  ;; #t if this is top-level code and variables are therefore global
+  toplevel? ;; 17
   )
 
 (set! OpenFn/make
   (let ((make OpenFn/make))
     (lambda (name)
-      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f (make-table)))))
+      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f (make-table) #f))))
 
 (define-record Var
   idx
@@ -203,6 +205,9 @@
   (let ((parent-fn (OpenFn/parent fn))
         (closure (OpenFn/closure fn)))
 
+    (if (OpenFn/toplevel? parent-fn)
+      (raise 'compile "register-free-variable reached toplevel somehow" (list parent-fn)))
+
     (aif (table-ref (OpenFn/env parent-fn) x)
       ;; If this was successful, we've found either a function that has already captured this free variable or the
       ;; function where it was defined
@@ -330,17 +335,19 @@
 
 (define (compile-define fn x tail?)
   (define name (cadr x))
-  (define result (fn-lookup fn name))
-
-  (compiler-log fn "compiling define" x result)
 
   (compile-expr fn (list-ref x 2) tail?)
+  ;(print name)
+  ;(print (list-ref x 2))
 
-  (case (car result)
-    (global
-      (begin
-        (emit fn 'push-constant (register-constant fn name))
-        (emit fn 'global-set 0))))
+  (if (OpenFn/toplevel? fn)
+    (begin
+      (emit fn 'push-constant (register-constant fn name))
+      (emit fn 'global-set 0))
+    (let ((var (Var/make (OpenFn/local-count fn) name)))
+      (table-set! (OpenFn/env fn) name var)
+      (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))
+      (emit fn 'local-set (Var/idx var))))
 )
 
 (define (compile-set! fn x tail?)
@@ -440,6 +447,9 @@
   )
 )
 
+(define (compile-quote fn x)
+  (emit fn 'push-constant (register-constant fn (cadr x))))
+
 
 (define (compile-special-form fn x type tail?)
   (compiler-log fn "compiling special form" type x)
@@ -450,6 +460,7 @@
     (if (compile-if fn x tail?))
     (and (compile-and fn x tail?))
     (or (compile-or fn x tail?))
+    (quote (compile-quote fn x))
     (else (raise 'compile "unknown special form" (list x)))))
 
 
@@ -460,7 +471,7 @@
 
     (set! x (rename-expr x)))
 
-  (if (memq x '(lambda define set! if begin and or)) x #f))
+  (if (memq x '(lambda define set! if begin and or quote)) x #f))
 
 (define (compile-expr fn x tail?)
   (compiler-log fn "compiling expr" x)
@@ -506,11 +517,23 @@
       (vector-set! (OpenFn/insns fn) i (insn->byte fn (vector-ref (OpenFn/insns fn) i)))
       (loop (fx+ i 1)))))
 
+(define (compile-toplevel body)
+  (define fn (OpenFn/make 'vm-toplevel))
+
+  (OpenFn/toplevel?! fn #t)
+
+  (compile fn body)
+  (compile-finish fn)
+
+  (OpenFn->procedure fn))
+
 ;; Do the thing.
 
 (define (main)
   (define fn (OpenFn/make 'vm-toplevel))
 
+
+  (OpenFn/toplevel?! fn #t)
   (define fn-body
     '(
       #;(define fn
@@ -519,7 +542,9 @@
             (set! a 5)
             (set! b 5)
             (fx+ a b))))
-    ((lambda (a b c)
+    (define hello 'hello!!!)
+    hello
+    #;((lambda (a b c)
        (lambda (d) (fx+ d c b a)
          (set! a 5))
        (set! b 10)
@@ -538,6 +563,7 @@
   (pretty-print fn)
 
   (define compiled-proc (OpenFn->procedure fn))
+  (print (compiled-proc))
   ;(print ((compiled-proc) 2))
 
   ;(print (((compiled-proc) 2 2)))
