@@ -66,7 +66,7 @@
       (make id name #f #f))))
 
 (define (compiler-log fn . rest)
-  (when (eq? (top-level-value '*compiler-log*) #t)
+  (when (or #t (eq? (top-level-value 'compiler-log) #t))
     (display "arete:cc: ")
     (let loop ((i 0))
       (unless (fx= i (OpenFn/depth fn))
@@ -146,6 +146,8 @@
 (define (compile-apply fn x tail?)
   (define stack-check #f)
   (define argc (length (cdr x)))
+
+  (compiler-log fn "compiling application" x)
   ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
   (compile-expr fn (car x) (and (eq? argc 1) tail?))
 
@@ -158,7 +160,7 @@
 
   (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
     (raise 'compile "stack size does not reflect function arguments" (list fn x)))
-  
+
   (emit fn (if tail? 'apply-tail 'apply) (length (cdr x)))
   )
 
@@ -355,34 +357,39 @@
         (vector-append! (OpenFn/free-variables fn) (Var/idx var))))
     (OpenFn/env fn))
 
+
+  (compiler-log fn fn)
+
   (let loop ((i 0))
     (unless (fx= i (vector-length (OpenFn/insns fn)))
       (vector-set! (OpenFn/insns fn) i (insn->byte (vector-ref (OpenFn/insns fn) i)))
       (loop (fx+ i 1)))))
 
 ;; Do the thing.
-(define fn (OpenFn/make 'vm-toplevel))
 
-    ; this should not result in a tail-call twice (((lambda (a) (lambda () a)) #t))
-#;(define fn-body
-  '(
-    ((lambda (a e g y)
-      (lambda (d c) (lambda () (fx+ a c y)))) 2 0 0 2)
-    #;(lambda (a) (lambda (b) (lambda () (fx+ a b))))
+(define (main)
+  (define fn (OpenFn/make 'vm-toplevel))
+
+      ; this should not result in a tail-call twice (((lambda (a) (lambda () a)) #t))
+  #;(define fn-body
+    '(
+      ((lambda (a e g y)
+        (lambda (d c) (lambda () (fx+ a c y)))) 2 0 0 2)
+      #;(lambda (a) (lambda (b) (lambda () (fx+ a b))))
+    )
   )
+
+  (define fn-body
+    '(
+      (((lambda (a) (lambda () a)) #t))
+    ))
+
+
+  (compile fn fn-body)
+
+  (compile-finish fn)
+
+  (define compiled-proc (OpenFn->procedure fn))
+  (print (compiled-proc))
 )
-
-(define fn-body
-  '(
-    (((lambda (a) (lambda () a)) #t))
-  ))
-
-
-;(print fn-body)
-(compile fn fn-body)
-
-;(pretty-print fn)
-(compile-finish fn)
-
-(define compiled-proc (OpenFn->procedure fn))
 

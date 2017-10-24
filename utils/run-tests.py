@@ -82,7 +82,7 @@ suites = (
     ('reader', ['--read', '{}']),
     ('preboot',  ['{}']),
     ('expander', ['boot.scm', '{}']),
-    ('compiler',  ['--set', '*compiler-test-file*', '"{}"', 'tests/compiler-test.scm'])
+    ('compiler',  ['--set', 'compiler-test-file', '"{}"', 'tests/compiler-test.scm'])
 #    ('modules', ['boot.scm', '--push-load-path=tests/modules'])
 )
 

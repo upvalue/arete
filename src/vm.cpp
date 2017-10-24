@@ -30,7 +30,7 @@ VMFrame::VMFrame(State& state_): state(state_), stack_i(0), depth(0) {
   previous = state.gc.vm_frames;
   if(previous) {
     depth = previous->depth+1;
-    std::cout << "!!!!! DEPTH: " << depth << std::endl;
+    //std::cout << "!!!!! DEPTH: " << depth << std::endl;
   }
   state.gc.vm_frames = this;
   AR_ASSERT(state.gc.vm_frames == this);
@@ -224,7 +224,17 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         } else if(fn.type() == FUNCTION) {
           std::cerr << "cannot call interpreted function from VM code" << std::endl;
           AR_ASSERT(!"cannot call interpreted function from VM code");
-        } else if(fn.type() == VMFUNCTION) {
+        } else if(fn.type() == VMFUNCTION || fn.type() == CLOSURE) {
+
+          // Check for a closure and extract function from it if necessary,
+          // so we can inspect the actual function
+          Value to_apply = fn;
+
+          if(fn.type() == CLOSURE) {
+            fn = fn.closure_function();
+          }
+
+          // Check argument arity
           size_t min_arity = fn.vm_function_min_arity(), max_arity = fn.vm_function_max_arity();
           bool var_arity = fn.vm_function_variable_arity();
 
@@ -240,11 +250,13 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             return eval_error(os.str());
           }
 
-          f.stack[f.stack_i - argc - 1] = apply_vm(fn, argc, &f.stack[f.stack_i - argc]);
+          // Replace function on stack with result of function
+          f.stack[f.stack_i - argc - 1] = apply_vm(to_apply, argc, &f.stack[f.stack_i - argc]);
 
-          // Pop arguments, replace function with results
+          // Pop arguments
           f.stack_i -= (argc);
 
+          // Finally, check for an exception
           if(f.stack[f.stack_i - 1].is_active_exception()) 
             return f.stack[f.stack_i - 1];
         }
