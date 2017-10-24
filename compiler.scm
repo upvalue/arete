@@ -113,6 +113,7 @@
         (close-over 11)
         (jump 12)
         (jump-if-false 13)
+        (pop 14)
         (else (raise 'compile "unknown named instruction" (list insn)))))))
 
 ;; Adjust the stack size while recalculating the stack max if necessary
@@ -127,10 +128,14 @@
 (define (emit fn . insns)
   (fn-adjust-stack fn 
     (case (car insns)
-      ((jump-if-false jump) -1)
+      ;; A note: jump does not actually pop the stack, but because it's always generated after a jump-if-false
+      ;; expression and conditionally evaluated, saying it does makes it simpler to check the stack size
+      ((jump pop) -1)
       ((words close-over return) 0)
       ((push-constant global-get local-get upvalue-get) 1)
       ((upvalue-set local-set global-set) 2)
+      ;; Only pops stack if argument is 1
+      ((jump-if-false) (if (fx= (list-ref insns 2) 1) -1 0))
       ;; Remove arguments from stack, but push a single result
       ((apply apply-tail) (fx- (cadr insns)))
       (else (raise 'compile (print-string "unknown instruction" (car insns)) (list fn (car insns) insns)))
@@ -138,7 +143,7 @@
 
   ;; Stack size sanity check
   (when (fx< (OpenFn/stack-size fn) 0)
-    (raise 'compile "stack underflow" (list fn (OpenFn/stack-size fn))))
+    (raise 'compile "stack underflow" (list fn insns (OpenFn/stack-size fn))))
 
   (for-each
     (lambda (insn) 
@@ -214,10 +219,8 @@
         (unless (Var/upvalue? it)
           (OpenFn/free-variable-count! parent-fn (fx+ (OpenFn/free-variable-count parent-fn) 1))
           (Var/free-variable-id! it (fx- (OpenFn/free-variable-count parent-fn) 1)))
-        (vector-append! closure it)
-        #;(vector-append! closure (Var/idx it)))
+        (vector-append! closure it))
       (register-free-variable parent-fn x))))
-
 
 (define (fn-lookup fn x)
   (let loop ((search-fn fn))
@@ -295,7 +298,7 @@
   ;; Compile the lambda's body
   (compile sub-fn (cddr x))
 
-  (pretty-print sub-fn)
+  ;(when (top-level-value '*compiler-log*) (pretty-print sub-fn))
   ;; And it's finally done
   (compile-finish sub-fn)
 
@@ -372,7 +375,7 @@
   (compile-expr fn condition #f)
 
   (print 'jump-if-false then-branch-end)
-  (emit fn 'jump-if-false then-branch-end)
+  (emit fn 'jump-if-false then-branch-end 1)
   (compile-expr fn then-branch tail?)
   (pretty-print fn)
 
@@ -381,11 +384,52 @@
 
   (compile-expr fn else-branch tail?)
 
-  (register-label fn else-branch-end)
-  
-  (print condition then-branch else-branch)
+  (register-label fn else-branch-end))
 
-  #t)
+;; With ands, we generate a push-constant #f at the end of the expression, then a series of jump-if-falses that jump
+;; to that push-constant if evaluation fails. The final jump-if-false has an argument of 0, meaning that the successful
+;; (true) condition will be left on the stack.
+
+(define (compile-and fn x tail?)
+  (define and-fail-pop (gensym 'and-fail-pop))
+  (define and-fail (gensym 'and-fail))
+  (define and-end (gensym 'and-end))
+  (define x-len (length x))
+  (define argc (fx- x-len 2))
+
+  ;; (and 1 2 3)
+  ;; jump-if-false needs to drop all conditions except for the last one
+  ;; then we need a pop instruction
+
+  (if (fx= x-len 1)
+    (emit fn 'push-constant (register-constant fn #t))
+    (begin
+      (for-each-i 
+        (lambda (i x)
+          ;; Emit a jump-if-false for each expression
+          ;; If it's at the expression
+          (print i argc)
+          (compile-expr fn x (and tail? (fx= i argc)))
+          (emit fn 'jump-if-false (if (fx= i argc) and-fail-pop and-fail) (if (fx= i argc) 0 1)))
+        (cdr x))
+
+      (emit fn 'jump and-end)
+      (register-label fn and-fail-pop)
+
+      ;; Manually adjust stack size: and will always result in one value being pushed on the stack
+      (OpenFn/stack-size! fn (fx+ (OpenFn/stack-size fn) 1))
+
+      (emit fn 'pop)
+      (register-label fn and-fail)
+
+      (emit fn 'push-constant (register-constant fn #f))
+      (register-label fn and-end)
+
+
+    )
+  )
+)
+
 
 (define (compile-special-form fn x type tail?)
   (compiler-log fn "compiling special form" type x)
@@ -394,6 +438,8 @@
     (define (compile-define fn x tail?))
     (set! (compile-set! fn x tail?))
     (if (compile-if fn x tail?))
+    (and (compile-and fn x tail?))
+    (or (compile-or fn x tail?))
     (else (raise 'compile "unknown special form" (list x)))))
 
 
@@ -463,7 +509,8 @@
             (set! a 5)
             (set! b 5)
             (fx+ a b))))
-      (print (if #t (if #t "true" "false") "false"))
+    (and 1 2 3 4 5)
+      ;(print (if #t (if #t "true" "false") "false"))
       ;fn
     ))
 
@@ -475,7 +522,8 @@
   (pretty-print fn)
 
   (define compiled-proc (OpenFn->procedure fn))
-  (compiled-proc)
+  (print (compiled-proc))
+
   ;(print (((compiled-proc) 2 2)))
 )
 

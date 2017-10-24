@@ -67,6 +67,7 @@ enum {
   OP_CLOSE_OVER = 11,
   OP_JUMP = 12,
   OP_JUMP_IF_FALSE = 13,
+  OP_POP = 14,
 };
 
 #define AR_PRINT_STACK() \
@@ -219,6 +220,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         upval.upvalue_set(val);
         AR_LOG_VM("upvalue-set " << idx << " = " << val);
       }
+
       case OP_RETURN: {
         AR_LOG_VM("return");
         AR_PRINT_STACK();
@@ -376,8 +378,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       case OP_JUMP: {
         // Drop condition from stack
-        std::cout << "DROPPING CONDITION " << f.stack[f.stack_i - 2] << std::endl;
-        std::cout << "REPLACED WITH " << f.stack[f.stack_i - 1] << std::endl;
+        // std::cout << "DROPPING CONDITION " << f.stack[f.stack_i - 2] << std::endl;
+        // std::cout << "REPLACED WITH " << f.stack[f.stack_i - 1] << std::endl;
         //f.stack[f.stack_i - 1] = f.stack[f.stack_i - 2];
         //f.stack_i--;
 
@@ -389,20 +391,31 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         continue;
       }
 
+
       case OP_JUMP_IF_FALSE: {
         size_t jmp_offset = code[code_offset++];
         Value val = f.stack[f.stack_i-1];
+        size_t pop = code[code_offset++];
+
         AR_LOG_VM("jump-if-false " << jmp_offset);
-        f.stack_i--;
         if(val == C_FALSE) {
           AR_LOG_VM("jump-if-false jumping");
           code_offset = jmp_offset;
         } else {
           AR_LOG_VM("jump-if-false not jumping");
         }
+
+        if(pop) {
+          f.stack_i--;
+        }
         continue;
       }
 
+      case OP_POP: {
+        AR_LOG_VM("pop");
+        f.stack_i--;
+        continue;
+      }
 
       case OP_BAD: {
       default:
