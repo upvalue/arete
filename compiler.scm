@@ -1,11 +1,12 @@
 ;; compiler.scm - Arete bytecode compiler
 
-;; TODO Closures (via upvalues)
+;; DONE Closures (via upvalues)
 ;; TODO define
 ;; TODO set!
 ;; TODO if
 ;; TODO and/or
 ;; TODO Check lambda body
+;; TODO Error reporting
 
 ;; Note: Internal structure is manipulated by openfn_to_procedure in builtins.cpp and that must be updated
 ;; if anything is rearranged here
@@ -65,14 +66,13 @@
       (make id name #f #f))))
 
 (define (compiler-log fn . rest)
-  (display "arete:cc: ")
+  (when (eq? (top-level-value '*compiler-log*) #t)
+    (display "arete:cc: ")
+    (let loop ((i 0))
+      (unless (fx= i (OpenFn/depth fn))
+        (display ">")
+        (loop (fx+ i 1))))
 
-  (let loop ((i 0))
-    (unless (fx= i (OpenFn/depth fn))
-      (display ">")
-      (loop (fx+ i 1))))
-
-  (if (or #t (top-level-value '*compiler-log*))
     (apply pretty-print rest)))
 
 (define (register-constant fn const)
@@ -147,13 +147,13 @@
   (define stack-check #f)
   (define argc (length (cdr x)))
   ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
-  (compile-expr fn (car x) tail?)
+  (compile-expr fn (car x) (and (eq? argc 1) tail?))
 
   (set! stack-check (OpenFn/stack-size fn))
 
-  (for-each
-    (lambda (x)
-      (compile-expr fn  x #f))
+  (for-each-i
+    (lambda (i x)
+      (compile-expr fn x (and (eq? argc (fx- i 1)) tail?)))
     (cdr x))
 
   (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
@@ -220,7 +220,7 @@
 (define (compile-identifier fn x)
   (define result (fn-lookup fn x))
 
-  (compiler-log fn "compile ye identifier" result)
+  (compiler-log fn "compiling identifier" result)
 
   (case (car result)
     (local (emit fn 'local-get (cdr result)))
@@ -250,7 +250,7 @@
   (OpenFn/depth! sub-fn (fx+ (OpenFn/depth fn) 1))
   (compiler-log sub-fn (OpenFn/name sub-fn))
   (OpenFn/parent! sub-fn fn)
-  (print "parent of " (OpenFn/name sub-fn) " is " (OpenFn/name fn))
+  (compiler-log fn "parent of " (OpenFn/name sub-fn) " is " (OpenFn/name fn))
 
   (OpenFn/min-arity! sub-fn arg-len)
   ;; TODO optional arguments
@@ -269,7 +269,7 @@
     args)
 
   (compile sub-fn (cddr x))
-  (pretty-print sub-fn)
+  ;(pretty-print sub-fn)
   (compile-finish sub-fn)
 
   (emit fn 'push-constant (register-constant fn (OpenFn->procedure sub-fn)))
@@ -279,43 +279,36 @@
   (aif (OpenFn/closure sub-fn)
     (begin
       (emit fn 'close-over (vector-length it))
-      (print "!!!" it)
       (let loop ((i 0))
         (unless (eq? i (vector-length it))
           (let ((var (vector-ref it i)))
             (if (Var/upvalue? var)
               (emit fn 'words 1 (Var/idx var))
-              ;; (assert free-variable)
-              ;; This needs to be the index in the upvalues array, not the locals array, right?
-              ;; Where do we get that number from?
-              ;; free-variables vector?
               (emit fn 'words 0 (Var/free-variable-id var))))
           (loop (fx+ i 1))))))
-      #|
-      (emit fn 'close-over (fx/ (vector-length it) 2))
-      (let loop ((i 0))
-        (unless (eq? i (vector-length it))
-          (let ((upvalue? (vector-ref it i))
-                 var (vector-ref it (fx+ i 1)))
 
 
-          (print "ADDING VARIABLE" (vector-ref it i))
-          (print "ADDING VARIABLE 2" (vector-ref it (fx+ i 1)))
-          (emit fn 'words
-            ;; 1 = upvalue, 0 = local
-            (if (vector-ref it i) 1 0)
-            (vector-ref it (fx+ i 1)))
-          
-          (loop (fx+ i 2))))))
-    |#
+  ;(pretty-print fn)
+)
 
-  (pretty-print fn)
+(define (compile-define fn x)
+  (define name (cadr x))
+  (define result (fn-lookup fn name))
+
+  (compiler-log fn "compiling define" result)
+
+  (compile (list-ref x 2))
+
+  (case (car result)
+    (global (emit fn 'global-set (register-constant fn x))))
+
 )
 
 (define (compile-special-form fn x type tail?)
   (compiler-log fn "compiling special form" type x)
   (case type
-    (lambda (compile-lambda fn x))))
+    (lambda (compile-lambda fn x))
+    (define (compile-define fn x))))
 
 (define (special-form x)
   (when (rename? x)
@@ -371,7 +364,7 @@
 (define fn (OpenFn/make 'vm-toplevel))
 
     ; this should not result in a tail-call twice (((lambda (a) (lambda () a)) #t))
-(define fn-body
+#;(define fn-body
   '(
     ((lambda (a e g y)
       (lambda (d c) (lambda () (fx+ a c y)))) 2 0 0 2)
@@ -379,16 +372,17 @@
   )
 )
 
+(define fn-body
+  '(
+    (((lambda (a) (lambda () a)) #t))
+  ))
 
-(print fn-body)
+
+;(print fn-body)
 (compile fn fn-body)
 
-(pretty-print fn)
+;(pretty-print fn)
 (compile-finish fn)
 
 (define compiled-proc (OpenFn->procedure fn))
 
-(print "compiled prok" compiled-proc)
-(define make-adder (compiled-proc))
-(define make-adder2 (make-adder 2 6))
-(print (make-adder2))

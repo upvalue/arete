@@ -267,8 +267,7 @@ void State::print_stack_trace(std::ostream& os, bool clear) {
 bool State::pretty_print_shared_obj(std::ostream& os, Value v,
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
 
-  if(v.atomic() || v.type() == SYMBOL || v.type() == TABLE || v.type() == VMFUNCTION
-     || v.type() == FUNCTION) {
+  if(!v.print_recursive()) {
     os << v;
     return true;
   }
@@ -339,9 +338,7 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
 Value State::pretty_print_mark(Value v, unsigned& printed_count,
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
 
-  if(v.atomic() || v.type() == SYMBOL || v.type() == TABLE || v.type() == VMFUNCTION
-    || v.type() == FUNCTION || v.type() == CFUNCTION) {
-
+  if(!v.print_recursive()) {
     AR_ASSERT(v.type() != VECTOR);
     return C_UNSPECIFIED;
   }

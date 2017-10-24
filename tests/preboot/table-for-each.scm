@@ -5,10 +5,11 @@
 (table-set! x 'c 3)
 (table-set! x 'd 4)
 (table-set! x 'e 5)
-(table-set! x 'g 6)
-(table-set! x 'h 7)
-(table-set! x 'i 8)
-(table-set! x 'j 9)
+(table-set! x 'f 6)
+(table-set! x 'g 7)
+(table-set! x 'h 8)
+(table-set! x 'i 9)
+(table-set! x 'j 10)
 
 (table-for-each
   (lambda (key value)

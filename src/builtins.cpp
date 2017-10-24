@@ -1,5 +1,6 @@
 // builtins.cpp - builtin functionality
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 
@@ -306,6 +307,78 @@ Value fn_print_table_verbose(State& state, size_t argc, Value* argv) {
   state.print_table_verbose(argv[0]);
   
   return C_UNSPECIFIED;
+}
+
+Value fn_slurp_file(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "slurp-file";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+
+  std::string path(argv[0].string_data());
+  std::ifstream fs(path);
+  
+  if(!fs.good()) {
+    std::ostringstream os;
+    os << "could not open file " << argv[0].string_data();
+    return state.make_exception(state.globals[State::S_READ_ERROR], os.str());
+  }
+
+  Value x, lst = C_NIL;
+
+  AR_FRAME(state, x, lst);
+
+  XReader reader(state, fs, path);
+  while(true) {
+    x = reader.read();
+
+    if(x.is_active_exception()) {
+      return x;
+    }
+
+    if(x == C_EOF) break;
+
+    state.temps.push_back(x);
+  }
+
+  std::reverse(state.temps.begin(), state.temps.end());
+
+  for(size_t i = 0; i != state.temps.size(); i++) {
+    lst = state.make_pair(state.temps[i], lst);
+  }
+
+  return lst;
+}
+
+static Value fn_load_file(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "load";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+
+  std::string path(argv[0].string_data());
+  std::ifstream fs(path);
+  
+  if(!fs.good()) {
+    std::ostringstream os;
+    os << "could not open file " << argv[0].string_data();
+    return state.make_exception(state.globals[State::S_READ_ERROR], os.str());
+  }
+
+  Value x, last;
+
+  AR_FRAME(state, x, last);
+
+  XReader reader(state, fs, path);
+  while(true) {
+    x = reader.read();
+
+    if(x.is_active_exception()) {
+      return x;
+    }
+
+    if(x == C_EOF) break;
+
+    last = state.eval_toplevel(x);
+  }
+
+  return last;
 }
 
 ///// PREDICATES
@@ -1243,6 +1316,23 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   insns = rec.record_ref(1);
   constants = rec.record_ref(2);
 
+  // Convert free variables vector to size_ts
+  // This is done above the creation of the actual function
+  // because it allocates
+  free_vars = rec.record_ref(15);
+
+  if(free_vars.type() == VECTOR && free_vars.vector_length() > 0) {
+    size_t length = free_vars.vector_length();
+    free_vars_blob = state.make_blob<size_t>(length);
+    for(size_t i = 0; i != length; i++) {
+      free_vars_blob.blob_set<size_t>(i, free_vars.vector_ref(i).fixnum_value());
+      AR_ASSERT(((size_t*) free_vars_blob.as<Blob>()->data)[i] ==
+        free_vars.vector_ref(i).fixnum_value());
+    }
+
+    AR_ASSERT(free_vars_blob.blob_length() == length);
+  }
+
   size_t insn_count = insns.vector_length();
   size_t bytecode_size = (size_t) insn_count * sizeof(size_t);
   unsigned constant_count = (unsigned) constants.vector_length();
@@ -1260,28 +1350,14 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   vfn->stack_max = rec.record_ref(6).fixnum_value();
   vfn->local_count = rec.record_ref(5).fixnum_value();
   vfn->name = rec.record_ref(0);
-  vfn->free_variables = 0;
+  vfn->free_variables = static_cast<Blob*>(free_vars_blob.heap);
+
 
   // Check for variable arity
   if(rec.record_ref(11) == C_TRUE) {
     vfn->set_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT);
   }
 
-  // Convert free variables vector to size_ts
-  free_vars = rec.record_ref(15);
-
-  if(free_vars.type() == VECTOR && free_vars.vector_length() > 0) {
-    size_t length = free_vars.vector_length();
-    free_vars_blob = state.make_blob<size_t>(length);
-    for(size_t i = 0; i != length; i++) {
-      free_vars_blob.blob_set<size_t>(i, free_vars.vector_ref(i).fixnum_value());
-      AR_ASSERT(((size_t*) free_vars_blob.as<Blob>()->data)[i] ==
-        free_vars.vector_ref(i).fixnum_value());
-    }
-
-    vfn->free_variables = free_vars_blob.as<Blob>();
-    AR_ASSERT(free_vars_blob.blob_length() == length);
-  }
 
   fn = vfn;
 
@@ -1399,6 +1475,8 @@ void State::install_core_functions() {
   defun_core("pretty-print", fn_pretty_print, 0, 0, true);
   defun_core("string-append", fn_string_append, 0, 0, true);
   defun_core("print-table-verbose", fn_print_table_verbose, 1);
+  defun_core("slurp-file", fn_slurp_file, 1);
+  defun_core("load", fn_load_file, 1);
 
   // Pairs
   defun_core("car", fn_car, 1, 1);

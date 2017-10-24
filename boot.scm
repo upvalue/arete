@@ -397,7 +397,7 @@
                (raise 'syntax "let binding should be a list with a name and a value" (list x)))
 
              (if (not (fx= (length binding) 2))
-               (raise 'syntax "let binding should have only 2 elements (name and value)" (list binding (cddr binding))))
+               (raise 'syntax "let binding should have exactly 2 elements (name and value)" (list binding)))
 
              (set! name (car binding))
 

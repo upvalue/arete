@@ -161,6 +161,8 @@ std::ostream& operator<<(std::ostream& os,  Value);
 //= - `..10` - Constant
 //= - `..00` - Pointer to heap value
 
+// TODO: Rearrange according to pointer count 
+
 enum Type {
   // Should never be encountered
   RESERVED = 0,
@@ -294,6 +296,19 @@ struct Value {
       case FIXNUM: case FLONUM: case CONSTANT: case STRING: case BLOB: return true;
       default: return false;
     }
+  }
+
+  /** Returns true if object's visible representation may have shared structure */
+  bool print_recursive() const {
+    switch(type()) {
+      case PAIR:
+      case RECORD:
+      case VECTOR:
+        return true;
+      default:
+        return false;
+    }
+
   }
 
   bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION; }
@@ -1245,6 +1260,9 @@ struct GCSemispace : GCCommon {
 
   HeapValue* allocate(Type type, size_t size) {
     size = align(8, size);
+
+    // TODO: The collect_before_every_allocation stuff should be disabled in production builds;
+    // care should be taken to make sure this function is very small and inlinable
 
     // Bump allocation possible
     if(!has_room(size) || collect_before_every_allocation) {

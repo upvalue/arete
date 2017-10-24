@@ -72,16 +72,13 @@ enum {
   AR_LOG_VM("stack " << (f.stack_i-1) << " out of " << f.fn->stack_max << " allocated "); \
   for(size_t i = 0; i != f.stack_i; i++) AR_LOG_VM(i << ": " << f.stack[i]);
 
-  bool thing = false;
+
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
-  
-tail:
+// tail:
 
   VMFrame f(*this);
 
   AR_ASSERT(gc.vm_frames == &f);
-
-  thing = true;
 
   if(fn.type() == CLOSURE) {
     f.closure = fn.as<Closure>();
@@ -200,7 +197,19 @@ tail:
         if(fn.type() == CFUNCTION) {
           size_t min_arity = fn.as<CFunction>()->min_arity;
           size_t max_arity = fn.as<CFunction>()->max_arity;
-          bool varargs = fn.c_function_variable_arity();
+          bool var_arity = fn.c_function_variable_arity();
+
+          if(argc < min_arity) {
+            std::ostringstream os;
+            os << "function " << fn << " expected at least " << min_arity << " arguments " <<
+              "but only got " << argc;
+            return eval_error(os.str());
+          } else if(argc > max_arity && !var_arity) {
+            std::ostringstream os;
+            os << "function " << fn << " expected at most " << max_arity << " arguments " <<
+              "but only got " << argc;
+            return eval_error(os.str());
+          }
 
           AR_PRINT_STACK();
 
@@ -233,13 +242,11 @@ tail:
 
           f.stack[f.stack_i - argc - 1] = apply_vm(fn, argc, &f.stack[f.stack_i - argc]);
 
-          AR_PRINT_STACK();
-
           // Pop arguments, replace function with results
           f.stack_i -= (argc);
 
-
-          AR_PRINT_STACK();
+          if(f.stack[f.stack_i - 1].is_active_exception()) 
+            return f.stack[f.stack_i - 1];
         }
         continue;
       }

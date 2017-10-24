@@ -176,6 +176,12 @@ bool do_file(State& state, std::string path, bool read_only) {
   return true;
 }
 
+static int cli_exception(State* state, Value exc, const std::string& desc) {
+  state->print_exception(std::cerr, exc);
+  std::cerr << desc << std::endl;
+  return EXIT_FAILURE;
+}
+
 int State::enter_cli(int argc, char* argv[]) {
   static std::string read("--read");
   static std::string help("--help");
@@ -183,6 +189,7 @@ int State::enter_cli(int argc, char* argv[]) {
   static std::string bad("--");
   static std::string debug_gc("--debug-gc");
   static std::string set("--set");
+  static std::string eval("--eval");
 
   if(argc == 1) {
     if(do_repl(*this, false) == false) {
@@ -205,6 +212,38 @@ int State::enter_cli(int argc, char* argv[]) {
         if(!do_file(*this, arg2, true))
           return EXIT_FAILURE;
       }
+    } else if(eval.compare(arg) == 0) {
+      // Evaluate following string
+      if((i + 1) >= argc) {
+        std::cerr << "Expected at least one argument after --eval" << std::endl;
+        return EXIT_FAILURE;
+      }
+
+      std::stringstream ss;
+      ss >> std::noskipws;
+      ss << argv[i+1] << std::endl;
+
+      i += 1;
+
+      XReader reader(*this, ss, "eval argument");
+
+      Value x;
+
+      AR_FRAME(this, x);
+
+      while(true) {
+        x = reader.read();
+        if(x.is_active_exception()) 
+          return cli_exception(this, x, "--eval argument resulted in a reader error");
+
+        if(x == C_EOF) break;
+
+        x = eval_toplevel(x);
+
+        if(x.is_active_exception()) 
+          return cli_exception(this, x, "--eval argument resulted in an eval exception");
+      }
+
     } else if(set.compare(arg) == 0) {
 
       if((i + 2) >= argc) {
@@ -253,7 +292,7 @@ int State::enter_cli(int argc, char* argv[]) {
       std::string badc(cxxarg.substr(0, bad.size()));
 
       if(badc.compare(bad) == 0) {
-        std::cerr << "Unknown -- option " << cxxarg << std::endl << std::endl;
+        std::cerr << "Unknown -- option \"" << cxxarg << "\"" << std::endl << std::endl;
         print_help();
         return EXIT_FAILURE;
       } else {
