@@ -93,6 +93,7 @@ void GCSemispace::collect(size_t request, bool force) {
       // Three pointers
       case RENAME:
       case EXCEPTION:
+      case VMFUNCTION:
         AR_COPY(Exception, message);
         AR_COPY(Exception, tag);
         AR_COPY(Exception, irritants);
@@ -114,12 +115,6 @@ void GCSemispace::collect(size_t request, bool force) {
         AR_COPY(Function, body);
         break;
       // Variable ptrs / more complex collection required
-      case VMFUNCTION: {
-        AR_COPY(VMFunction, name);
-        AR_COPY(VMFunction, constants);
-        AR_COPY(VMFunction, free_variables);
-        break;
-      }
       case RECORD: {
         RecordType rt(*static_cast<Record*>(obj)->type);
 
@@ -243,8 +238,14 @@ void GCIncremental::mark(HeapValue* v) {
   AR_ASSERT(marked(v));
 
   switch(v->get_type()) {
-    case FLONUM: case STRING: case CHARACTER:
+    case FLONUM: case STRING: case CHARACTER: case BLOB:
       break;
+      // One pointer
+      case UPVALUE:
+        if(!v->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
+          // There is no need to do anything here as the local will be updated by copy_roots
+          break;
+        } 
     // One pointer
     case VECTOR:
     case CFUNCTION:
@@ -253,6 +254,7 @@ void GCIncremental::mark(HeapValue* v) {
       goto again;
     // Two pointers
     case SYMBOL:
+    case CLOSURE:
     case PAIR:
       mark(static_cast<Symbol*>(v)->name.heap);
       v = static_cast<Symbol*>(v)->value.heap;

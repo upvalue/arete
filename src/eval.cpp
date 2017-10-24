@@ -179,7 +179,11 @@ Value State::eval_define(Value env,  Value exp, Value fn_name) {
   }
 
   if(env_defined(env, name)) {
-    warn() << source_info(exp.pair_src()) << ' ' <<  name << " shadows existing definition of " << name << std::endl;;
+    if(exp.pair_has_source()) {
+      warn() << source_info(exp.pair_src()) << ' ' <<  name << " shadows existing definition of " << name << std::endl;;
+    } else {
+      warn() << name << "shadows existing definition" << std::endl;
+    }
   }
 
   tmp = eval(env,  body, fn_name);

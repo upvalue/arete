@@ -479,39 +479,42 @@ Value fn_cons_source(State& state, size_t argc, Value* argv) {
   return pare;
 }
 
-Value fn_list_impl(State& state, size_t argc, Value* _argv, bool copy_source) {
-  // static const char* fn_name = "list";
-  AR_FRAME_ARRAY(state, argc, _argv, argv);
+/** Create a list from arguments. Somewhat complex due to the need to GC track
+ * variables, and handle the transfer of source code information for the macroexpander. */
+static Value fn_list_impl(State& state, size_t argc, Value* argv, bool copy_source) {
+  Value lst = C_NIL;
+  AR_FRAME(state, lst);
+  state.temps.clear();
 
-  Value head = C_NIL, current, tmp;
+  size_t list_begin = copy_source ? 1 : 0;
   SourceLocation loc;
 
-  AR_FRAME(state, head, current, tmp);
-
   if(copy_source) {
-    if(_argv[0].type() == PAIR && _argv[0].pair_has_source()) {
-      loc = _argv[0].pair_src();
-    }
-  }
-
-  for(size_t i = copy_source ? 1 : 0; i < argc; i++) {
-    Value v = argv[i];
-    if(head == C_NIL) {
-      if(copy_source) {
-        head = current = state.make_src_pair(v, C_NIL, loc);
-      } else {
-        head = current = state.make_pair(v, C_NIL);
-      }
+    if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
+      loc = argv[0].pair_src();
     } else {
-      tmp = state.make_pair(v, C_NIL);
-      current.set_cdr(tmp);
-      current = tmp;
+      copy_source = false;
     }
   }
 
-  delete[] argv;
-  delete[] __ar_roots;
-  return head;
+
+  for(size_t i = list_begin; i < argc; i++) {
+    state.temps.push_back(argv[i]);
+  }
+
+  while(argc > list_begin) {
+    lst = state.make_pair(state.temps[--argc - list_begin], lst);
+  }
+
+  if(argc > list_begin) {
+    if(copy_source) {
+      lst = state.make_pair(state.temps[0], lst);//, loc);
+    } else {
+      lst = state.make_pair(state.temps[0], lst);
+    }
+  }
+
+  return lst;
 }
 
 Value fn_list(State& state, size_t argc, Value* argv) {
@@ -870,6 +873,12 @@ Value fn_table_set(State& state, size_t argc, Value* argv) {
   return state.table_set(argv[0], argv[1], argv[2]);
 }
 
+Value fn_table_entries(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "table-entries";
+  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
+  return Value::make_fixnum(argv[0].as<Table>()->entries);
+}
+
 Value fn_table_for_each(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "table-for-each";
 
@@ -919,6 +928,13 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
   }
 
   return state.gensym(state.get_symbol(prefix));
+}
+
+Value fn_gensymp(State& state, size_t argc, Value* argv) {
+  // static const char* fn_name = "gensym?";
+
+  return Value::make_boolean(argv[0].type() == SYMBOL &&
+    argv[0].heap->get_header_bit(Value::SYMBOL_GENSYM_BIT));
 }
 
 /** Macro that asserts an argument is a valid environment */
@@ -1285,7 +1301,7 @@ Value fn_record_isa(State& state, size_t argc, Value* argv) {
 
 // Compiler
 Value fn_list_get_source(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "list-get-source";
+ //  static const char* fn_name = "list-get-source";
   Value vec, lst = argv[0];
   if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
     AR_FRAME(state, lst, vec);
@@ -1460,6 +1476,7 @@ void State::install_core_functions() {
   defun_core("table-ref", fn_table_ref, 2);
   defun_core("table-set!", fn_table_set, 3);
   defun_core("table-for-each", fn_table_for_each, 2);
+  defun_core("table-entries", fn_table_entries, 1);
 
   // Equality
   defun_core("eq?", fn_eq, 2);
@@ -1506,6 +1523,7 @@ void State::install_core_functions() {
   defun_core("rename-expr", fn_rename_expr, 1);
   defun_core("rename-gensym", fn_rename_gensym, 1);
   defun_core("gensym", fn_gensym, 0, 1);
+  defun_core("gensym?", fn_gensymp, 1);
 
   // Function modification
   defun_core("set-function-name!", fn_set_function_name, 2);

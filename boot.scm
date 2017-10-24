@@ -3,6 +3,8 @@
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
 
+;; TODO> Cannot use a macro defined in advance. Toplevel needs to behave like letrec-syntax, I think.
+
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
 (define cddr (lambda (x) (cdr (cdr x))))
@@ -525,4 +527,13 @@
     `(,#'let ((,#'result ,key))
       ,code)))
 
+(define-syntax aif
+  (lambda (x)
+    (unless (or (fx= (length x) 4) (fx= (length x) 3))
+      (raise 'syntax "aif expects three or four arguments" (list x)))
+
+    `(,#'let ((it ,(list-ref x 1)))
+        (,#'if it ,(list-ref x 2) ,(if (fx= (length x) 4) (list-ref x 3) unspecified)))))
+
+(define (max a b) (if (< a b) b a))
 

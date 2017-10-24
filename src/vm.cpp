@@ -30,7 +30,6 @@ VMFrame::VMFrame(State& state_): state(state_), stack_i(0), depth(0) {
   previous = state.gc.vm_frames;
   if(previous) {
     depth = previous->depth+1;
-    //std::cout << "!!!!! DEPTH: " << depth << std::endl;
   }
   state.gc.vm_frames = this;
   AR_ASSERT(state.gc.vm_frames == this);
@@ -66,6 +65,8 @@ enum {
   OP_UPVALUE_GET = 9,
   OP_UPVALUE_SET = 10,
   OP_CLOSE_OVER = 11,
+  OP_JUMP = 12,
+  OP_JUMP_IF_FALSE = 13,
 };
 
 #define AR_PRINT_STACK() \
@@ -164,10 +165,19 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       case OP_GLOBAL_SET: {
+        size_t err_on_undefined = code[code_offset++];
         AR_ASSERT(f.stack_i >= 2);
+
         Value val = f.stack[f.stack_i - 2], key = f.stack[f.stack_i - 1];
         AR_ASSERT(key.type() == SYMBOL);
-        AR_LOG_VM("global-set " << key << " = " << val);
+        AR_LOG_VM("global-set (" << (err_on_undefined ? "set!" : "define") << ") " << key << " = " << val);
+        if(err_on_undefined) {
+          if(key.symbol_value() == C_UNDEFINED) {
+            std::ostringstream os;
+            os << "attempt to set! undefined variable " << key;
+            return eval_error(os.str());
+          }
+        }
         f.stack_i -= 2;
         key.set_symbol_value(val);
         continue;
@@ -180,8 +190,38 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         continue;
       }
 
+      case OP_LOCAL_SET: {
+        size_t idx = code[code_offset++];
+        AR_ASSERT("stack underflow" && f.stack_i >= 1);
+        Value val = f.stack[f.stack_i - 1];
+        AR_LOG_VM("local-set idx: " << idx << " = " << val);
+        f.locals[idx] = val;
+        continue;
+      }
+
+      case OP_UPVALUE_GET: {
+        AR_ASSERT(f.closure);
+
+        size_t idx = code[code_offset++];
+        AR_LOG_VM("upvalue-get " << idx);
+        AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
+        AR_ASSERT(gc.live(f.closure->upvalues->data[idx].upvalue()));
+        f.stack[f.stack_i++] = f.closure->upvalues->data[idx].upvalue();
+        continue;
+      }
+
+      case OP_UPVALUE_SET: {
+        AR_ASSERT(f.closure);
+        size_t idx = code[code_offset++];
+        AR_ASSERT(f.stack_i >= 1);
+        Value val = f.stack[--f.stack_i];
+        Value upval = f.closure->upvalues->data[idx];
+        upval.upvalue_set(val);
+        AR_LOG_VM("upvalue-set " << idx << " = " << val);
+      }
       case OP_RETURN: {
         AR_LOG_VM("return");
+        AR_PRINT_STACK();
         if(f.stack_i == 0) return C_UNSPECIFIED;
         return f.stack[f.stack_i - 1];
       }
@@ -334,16 +374,35 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         continue;
       }
 
-      case OP_UPVALUE_GET: {
-        AR_ASSERT(f.closure);
+      case OP_JUMP: {
+        // Drop condition from stack
+        std::cout << "DROPPING CONDITION " << f.stack[f.stack_i - 2] << std::endl;
+        std::cout << "REPLACED WITH " << f.stack[f.stack_i - 1] << std::endl;
+        //f.stack[f.stack_i - 1] = f.stack[f.stack_i - 2];
+        //f.stack_i--;
 
-        size_t idx = code[code_offset++];
-        AR_LOG_VM("upvalue-get " << idx);
-        AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
-        AR_ASSERT(gc.live(f.closure->upvalues->data[idx].upvalue()));
-        f.stack[f.stack_i++] = f.closure->upvalues->data[idx].upvalue();
+        //std::cout << f.stack[f.stack_i] << std::endl;
+        //std::cout << f.stack[f.stack_i - 1] << std::endl;
+
+        code_offset = code[code_offset];
+        AR_LOG_VM("jump " << code_offset);
         continue;
       }
+
+      case OP_JUMP_IF_FALSE: {
+        size_t jmp_offset = code[code_offset++];
+        Value val = f.stack[f.stack_i-1];
+        AR_LOG_VM("jump-if-false " << jmp_offset);
+        f.stack_i--;
+        if(val == C_FALSE) {
+          AR_LOG_VM("jump-if-false jumping");
+          code_offset = jmp_offset;
+        } else {
+          AR_LOG_VM("jump-if-false not jumping");
+        }
+        continue;
+      }
+
 
       case OP_BAD: {
       default:

@@ -8,8 +8,11 @@
 ;; TODO Check lambda body
 ;; TODO Error reporting
 
+;; OpenFn is a record representing a function in the process of being compiled.
+
 ;; Note: Internal structure is manipulated by openfn_to_procedure in builtins.cpp and that must be updated
 ;; if anything is rearranged here
+
 (define-record OpenFn
   ;; A name or description for a function
   name ;; 0
@@ -45,12 +48,14 @@
   free-variable-count ;; 14
   ;; Vector of free variables
   free-variables ;; 15
+  ;; Labels
+  labels ;; 16
   )
 
 (set! OpenFn/make
   (let ((make OpenFn/make))
     (lambda (name)
-      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f))))
+      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f (make-table)))))
 
 (define-record Var
   idx
@@ -76,35 +81,41 @@
     (apply pretty-print rest)))
 
 (define (register-constant fn const)
-  ;; todo duplicates
-  (vector-append! (OpenFn/constants fn) const)
-  (fx- (vector-length (OpenFn/constants fn)) 1))
+  ;; Extreme optimization: linear search for duplicate constants
+  (let ((constants (OpenFn/constants fn)))
+    (let loop ((i 0))
+      (if (eq? i (vector-length constants))
+        (begin
+          (vector-append! constants const)
+          (fx- (vector-length constants) 1))
+        (if (eq? (vector-ref constants i) const)
+          i
+          (loop (fx+ i 1)))))))
 
-;; bad = 0
-;; push-constant = 1
-;; local-get = 2
-;; local-set = 3
-;; return = 4
+;; This converts symbols into their equivalent fixnums
+(define (insn->byte fn insn)
+  (cond
+    ((fixnum? insn) insn)
+    ;; Replace labels with their location
+    ((gensym? insn) (table-ref (OpenFn/labels fn) insn))
+    (else 
+      (case insn
+        (push-constant 1)
+        (global-get 2)
+        (global-set 3)
+        (return 4)
+        (apply 5)
+        (apply-tail 6)
+        (local-get 7)
+        (local-set 8)
+        (upvalue-get 9)
+        (upvalue-set 10)
+        (close-over 11)
+        (jump 12)
+        (jump-if-false 13)
+        (else (raise 'compile "unknown named instruction" (list insn)))))))
 
-(define (insn->byte insn)
-  (if (fixnum? insn)
-    insn
-    (case insn
-      (push-constant 1)
-      (global-get 2)
-      (global-set 3)
-      (return 4)
-      (apply 5)
-      (apply-tail 6)
-      (local-get 7)
-      (local-set 8)
-      (upvalue-get 9)
-      (upvalue-set 10)
-      (close-over 11)
-      (else (raise 'compile "unknown named instruction" (list insn))))))
-
-(define (max a b) (if (< a b) b a))
-
+;; Adjust the stack size while recalculating the stack max if necessary
 (define (fn-adjust-stack fn size)
   (define new-size (fx+ (OpenFn/stack-size fn) size))
   (compiler-log fn "stack +=" size "=" new-size)
@@ -112,26 +123,27 @@
   (OpenFn/stack-max! fn (max new-size (OpenFn/stack-max fn)))
 )
 
+;; emit takes a named instruction and determines the stack effect of it based on its argument
 (define (emit fn . insns)
   (fn-adjust-stack fn 
     (case (car insns)
+      ((jump-if-false jump) -1)
+      ((words close-over return) 0)
       ((push-constant global-get local-get upvalue-get) 1)
       ((upvalue-set local-set global-set) 2)
       ;; Remove arguments from stack, but push a single result
       ((apply apply-tail) (fx- (cadr insns)))
-      ((words close-over return) 0)
       (else (raise 'compile (print-string "unknown instruction" (car insns)) (list fn (car insns) insns)))
     ))
 
   ;; Stack size sanity check
   (when (fx< (OpenFn/stack-size fn) 0)
-    (raise 'compile "stack size went below zero" (list fn (OpenFn/stack-size fn))))
+    (raise 'compile "stack underflow" (list fn (OpenFn/stack-size fn))))
 
-  ;(print insns)
   (for-each
     (lambda (insn) 
       ;; Words isn't a real instruction, just an argument to emit that means we don't need to check
-      ;; stack invariants
+      ;; stack size
       (unless (eq? insn 'words)
         (vector-append! (OpenFn/insns fn) insn)))
     insns))
@@ -164,19 +176,21 @@
   (emit fn (if tail? 'apply-tail 'apply) (length (cdr x)))
   )
 
-;; TODO> Cannot use a macro defined in advance. Toplevel needs to behave like letrec-syntax, I think.
+;; This is the free-variable handling, it's necessarily somewhat complex
 
-(define-syntax aif
-  (lambda (x)
-    (unless (or (fx= (length x) 4) (fx= (length x) 3))
-      (raise 'syntax "aif expects three or four arguments" (list x)))
+;; It works like this: when a reference to a free-variable is encountered, this free variable is copied into the
+;; "closure" vector of each function in the call chain between the function where the variable was defined (and where
+;; it is a local variable). This "closure" field is used to generate the close-over instruction, whose arguments tell
+;; the virtual machine to save these free variables either from its locals array (if it was where the free variable
+;; occurred, or from its closure (and so on up the line).
 
-    `(,#'let ((it ,(list-ref x 1)))
-        (,#'if it ,(list-ref x 2) ,(if (fx= (length x) 4) (list-ref x 3) unspecified)))))
+;; These free variables are saved in the form of Upvalues, heap-allocated values which point at the locals array of a 
+;; function until it returns, at which point they are "converted" and function essentially as pointers. 
 
+;; We also have to keep track of the amount of free variables in each function, because a special array is allocated on
+;; the stack to store these Upvalues during function execution.
 (define (register-free-variable fn x)
-  ;; Go up through function stack,
-  ;; capturing X as necessary
+  ;; Go up through function stack, adding variable X to environment as necessary
   (unless (OpenFn/closure fn)
     (OpenFn/closure! fn (make-vector)))
 
@@ -184,15 +198,18 @@
         (closure (OpenFn/closure fn)))
 
     (aif (table-ref (OpenFn/env parent-fn) x)
-      ;; Found it
+      ;; If this was successful, we've found either a function that has already captured this free variable or the
+      ;; function where it was defined
       (let ((var (Var/make 0 x)))
         (compiler-log fn (OpenFn/name fn) "registered free variable" x)
         ;; Calculate index in closure from closure length
+        ;(Var/idx! var (fx/ (vector-length closure) 2))
         (Var/idx! var (fx/ (vector-length closure) 2))
         ;; This is an upvalue
         (Var/upvalue?! var #t)
         ;; Add to function environment
         (table-set! (OpenFn/env fn) x var)
+
         ;; Append to closure
         (unless (Var/upvalue? it)
           (OpenFn/free-variable-count! parent-fn (fx+ (OpenFn/free-variable-count parent-fn) 1))
@@ -231,7 +248,7 @@
     (else (raise 'compiler ":(" (list x))))
 )
 
-;; This gives us the number of proper arguments to a function
+;; This function gives us the number of proper arguments to a function
 (define (args-length x)
   (if (or (identifier? x) (null? x))
     0
@@ -242,41 +259,50 @@
         (loop (cdr rest) (fx+ i 1))))))
 
 (define (compile-lambda fn x)
-  ;; So compile lambda has to recurse into the body of the lambda;
-  ;; it creates an additional OpenFN with this as a parent
+  ;; Create a new OpenFn with fn as a parent
   (define sub-fn (OpenFn/make (gensym 'lambda)))
   (define args (cadr x))
   (define arg-len (args-length args))
   (define varargs (or (not (list? args)) (identifier? args)))
 
-  (OpenFn/depth! sub-fn (fx+ (OpenFn/depth fn) 1))
   (compiler-log sub-fn (OpenFn/name sub-fn))
-  (OpenFn/parent! sub-fn fn)
   (compiler-log fn "parent of " (OpenFn/name sub-fn) " is " (OpenFn/name fn))
 
+  ;; Most of the complexity of this function is just setting up the fields of OpenFn
+  (OpenFn/parent! sub-fn fn)
+  ;; Note the depth of the function
+  (OpenFn/depth! sub-fn (fx+ (OpenFn/depth fn) 1))
+
+
+  ;; Calculate arity
   (OpenFn/min-arity! sub-fn arg-len)
-  ;; TODO optional arguments
   (OpenFn/max-arity! sub-fn arg-len)
   (OpenFn/var-arity! sub-fn (or (not (list? args)) (identifier? args)))
+
   ;; Calculate local count
   (OpenFn/local-count! sub-fn (if (identifier? args) 1 (fx+ arg-len (if (OpenFn/var-arity sub-fn) 1 0))))
 
   (if (identifier? args)
     (raise 'compile "can't handle varargs" (list x)))
 
+  ;; Here we seed the environment with the lambda's arguments
   (for-each-i
     (lambda (i x)
       (table-set! (OpenFn/env sub-fn) x (Var/make i x))
       #;(OpenFn/local-count! sub-fn (fx+ i 1)))
     args)
 
+  ;; Compile the lambda's body
   (compile sub-fn (cddr x))
-  ;(pretty-print sub-fn)
+
+  (pretty-print sub-fn)
+  ;; And it's finally done
   (compile-finish sub-fn)
 
+  ;; Now emit an argument to push this function onto the stack
   (emit fn 'push-constant (register-constant fn (OpenFn->procedure sub-fn)))
 
-  ;; If this is a closure, we emit an instruction
+  ;; Finally, if this function encloses free variables, we emit an instruction
   ;; That will create a closure at runtime out of the compiled function
   (aif (OpenFn/closure sub-fn)
     (begin
@@ -288,9 +314,6 @@
               (emit fn 'words 1 (Var/idx var))
               (emit fn 'words 0 (Var/free-variable-id var))))
           (loop (fx+ i 1))))))
-
-
-  ;(pretty-print fn)
 )
 
 (define (compile-define fn x tail?)
@@ -301,18 +324,78 @@
 
   (compile-expr fn (list-ref x 2) tail?)
 
-  (emit fn 'push-constant (register-constant fn name))
+  (case (car result)
+    (global
+      (begin
+        (emit fn 'push-constant (register-constant fn name))
+        (emit fn 'global-set 0))))
+)
+
+(define (compile-set! fn x tail?)
+  (define name (cadr x))
+  (define result (fn-lookup fn name))
+
+  (compile-expr fn (list-ref x 2) tail?)
 
   (case (car result)
-    (global (emit fn 'global-set)))
-
+    (global
+      (begin
+        (emit fn 'push-constant (register-constant fn name))
+        (emit fn 'global-set 1)))
+    (local
+      (emit fn 'local-set (cdr result)))
+    (upvalue
+      (emit fn 'upvalue-set (cdr result))))
 )
+
+;; Compiling expressions with conditional evaluation is a little tricky, because we need to jump to a location in the
+;; bytecode, but we don't know where it is yet.
+
+;; To deal with this, we emit labels in the form of gensym'd symbols
+;; So something like (if #t "true" "false")
+;; Might become something like
+
+;; push-constant #t jump-if-false #:label0 push-constant "true" jump #:label1 push-constant "false" #:label0
+
+(define (register-label fn label)
+  (let ((labels (OpenFn/labels fn)))
+    (compiler-log fn "added label" label "@" (vector-length (OpenFn/insns fn)))
+    (table-set! labels label (vector-length (OpenFn/insns fn)))))
+
+(define (compile-if fn x tail?)
+  (define condition (cadr x))
+  (define then-branch (list-ref x 2))
+  (define else-branch (and (fx= (length x) 4) (list-ref x 3)))
+  (define then-branch-end (gensym 'if-else))
+  (define else-branch-end (gensym 'if-end))
+
+  (compile-expr fn condition #f)
+
+  (print 'jump-if-false then-branch-end)
+  (emit fn 'jump-if-false then-branch-end)
+  (compile-expr fn then-branch tail?)
+  (pretty-print fn)
+
+  (emit fn 'jump else-branch-end)
+  (register-label fn then-branch-end)
+
+  (compile-expr fn else-branch tail?)
+
+  (register-label fn else-branch-end)
+  
+  (print condition then-branch else-branch)
+
+  #t)
 
 (define (compile-special-form fn x type tail?)
   (compiler-log fn "compiling special form" type x)
   (case type
     (lambda (compile-lambda fn x))
-    (define (compile-define fn x tail?))))
+    (define (compile-define fn x tail?))
+    (set! (compile-set! fn x tail?))
+    (if (compile-if fn x tail?))
+    (else (raise 'compile "unknown special form" (list x)))))
+
 
 (define (special-form x)
   (when (rename? x)
@@ -321,7 +404,7 @@
 
     (set! x (rename-expr x)))
 
-  (if (memq x '(lambda define)) x #f))
+  (if (memq x '(lambda define set! if begin and or)) x #f))
 
 (define (compile-expr fn x tail?)
   (compiler-log fn "compiling expr" x)
@@ -364,7 +447,7 @@
 
   (let loop ((i 0))
     (unless (fx= i (vector-length (OpenFn/insns fn)))
-      (vector-set! (OpenFn/insns fn) i (insn->byte (vector-ref (OpenFn/insns fn) i)))
+      (vector-set! (OpenFn/insns fn) i (insn->byte fn (vector-ref (OpenFn/insns fn) i)))
       (loop (fx+ i 1)))))
 
 ;; Do the thing.
@@ -372,18 +455,16 @@
 (define (main)
   (define fn (OpenFn/make 'vm-toplevel))
 
-      ; this should not result in a tail-call twice (((lambda (a) (lambda () a)) #t))
-  #;(define fn-body
-    '(
-      ((lambda (a e g y)
-        (lambda (d c) (lambda () (fx+ a c y)))) 2 0 0 2)
-      #;(lambda (a) (lambda (b) (lambda () (fx+ a b))))
-    )
-  )
-
   (define fn-body
     '(
-      (define hello #t)
+      #;(define fn
+        (lambda (a b)
+          (lambda ()
+            (set! a 5)
+            (set! b 5)
+            (fx+ a b))))
+      (print (if #t (if #t "true" "false") "false"))
+      ;fn
     ))
 
 
@@ -391,8 +472,22 @@
 
   (compile-finish fn)
 
+  (pretty-print fn)
+
   (define compiled-proc (OpenFn->procedure fn))
-  (print (compiled-proc))
+  (compiled-proc)
+  ;(print (((compiled-proc) 2 2)))
 )
 
-;(main)
+;; compiling if
+
+;; (compile-if (if #t asdf asdf2))
+
+;; this becomes
+;; OP_JUMP_IF_FALSE
+;; OP_JUMP
+;; asdf2
+;; main thing is, we need to emit labels somehow, which are turned into JUMP statements pointing at the appropriate
+;; offset
+
+(main)

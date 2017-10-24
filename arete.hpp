@@ -1,5 +1,4 @@
-/// arete.hpp - scheme implementation
-
+// arete.hpp - Arete scheme header
 #ifndef ARETE_HPP
 #define ARETE_HPP
 
@@ -54,12 +53,6 @@
 #define AR_FRAME(state, ...)  \
   arete::FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
   arete::Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
-
-#define AR_FRAME_ARRAY(state, size, array, var) \
-  HeapValue** var = new HeapValue*[(size)]; \
-  HeapValue*** __ar_roots = new HeapValue**[(size)]; \
-  for(size_t i = 0; i != (size); i++) { var[i] = (HeapValue*) array[i].heap; __ar_roots[i] = & var [i]; } \
-  arete::Frame __arete_array_frame((state), (size), (HeapValue***) __ar_roots );
 
 #ifndef ARETE_BLOCK_SIZE
 # define ARETE_BLOCK_SIZE 4096
@@ -423,11 +416,19 @@ struct Value {
   Value symbol_value() const;
   void set_symbol_value(Value);
 
+  bool symbol_gensym() const {
+    AR_TYPE_ASSERT(type() == SYMBOL);
+    return heap->get_header_bit(SYMBOL_GENSYM_BIT);
+  }
+
   /** Quickly compare symbol to string */
   bool symbol_equals(const char* s) const {
     std::string cmp(s);
     return cmp.compare(symbol_name_data()) == 0;
   }
+
+  static const unsigned SYMBOL_IMMUTABLE_BIT = 1 << 9;
+  static const unsigned SYMBOL_GENSYM_BIT = 1 << 10;
 
   // Syntactic closures
   Value rename_expr() const;
@@ -512,6 +513,9 @@ struct Value {
   bool upvalue_closed() const;
   /** Dereference an upvalue */
   Value upvalue();
+
+  /** Set an upvalue */
+  void upvalue_set(const Value);
 
   void upvalue_close();
 
@@ -860,6 +864,15 @@ inline bool Value::upvalue_closed() const {
   return heap->get_header_bit(UPVALUE_CLOSED_BIT);
 }
 
+inline void Value::upvalue_set(const Value rhs) {
+  AR_TYPE_ASSERT(type() == UPVALUE);
+  if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
+    static_cast<Upvalue*>(heap)->converted = rhs;
+  } else {
+    (*static_cast<Upvalue*>(heap)->local) = rhs;
+  }
+}
+
 inline Value Value::upvalue() {
   AR_TYPE_ASSERT(type() == UPVALUE);
   if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
@@ -1120,7 +1133,7 @@ struct FrameHack {
 
 /** 
  * Frames are stack-allocated structures that save pointers to stack Values, allowing the garbage
- * collector to move objects and update pointers to them if necessary 
+ * collector to move objects and update pointers to them if necessary.
  */
 struct Frame {
   State& state;
@@ -1199,7 +1212,7 @@ struct GCCommon {
   size_t collections, live_objects_after_collection, live_memory_after_collection, heap_size;
   size_t block_size;
 
-  GCCommon(State& state_, size_t heap_size_ = ARETE_BLOCK_SIZE): state(state_), 
+  GCCommon(State& state_, size_t heap_size_ = ARETE_HEAP_SIZE): state(state_), 
     vm_frames(0),
     collect_before_every_allocation(false),
     allocations(0),
@@ -1336,14 +1349,45 @@ struct State {
 
   typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
 
+  /** Counts how many times gensym has been called; appended to the end of gensyms to ensure
+   * their uniqueness */ 
   size_t gensym_counter;
+
   // Fascinating: removing this causes some kind of error with symbol_table_t.
   // Some kind of C++ initialization issue, but I'm not sure what kind.
   bool print_expansions;
-  symbol_table_t* symbol_table;
-  std::vector<RecordType> record_types;
 
-  State():  gc(*this), gensym_counter(0), shared_objects_begin(0), shared_objects_i(0) {
+  /** The symbol table */
+  symbol_table_t* symbol_table;
+
+  std::vector<RecordType> what;
+
+  /** A list of the names of various sources; mostly filenames but these can also be descriptors
+   * of C++ strings and REPL lines */
+  std::vector<std::string> source_names;
+
+  /** Contents of all sources, for verbose error messages. */
+  std::vector<std::string> source_contents;
+
+  /** An array of permanently live values */
+  std::vector<Value> globals;
+
+  /** A GC-tracked array of temporary values. May be cleared by function calls. */
+  std::vector<Value> temps;
+
+  State():
+      gc(*this),
+      gensym_counter(0),
+      symbol_table(),
+      source_names(),
+      source_contents(),
+      globals(),
+      temps(),
+
+      shared_objects_begin(0),
+      shared_objects_i(0) 
+      
+      {
     symbol_table = new symbol_table_t();
     current_state = this;
   }
@@ -1353,24 +1397,17 @@ struct State {
     current_state = 0;
   }
 
-  std::vector<std::string> source_names;
-  std::vector<std::string> source_contents;
 
   // Source code location tracking
   unsigned register_source(const std::string& path, std::istream& is);
 
-  std::vector<Value> globals;
-  /** A GC-tracked array of temporary values. May be cleared by function calls. */
-  std::vector<Value> temps;
 
-  // Global variables
   
   // Note that order is important here. Everything from S_QUOTE to S_LETREC_SYNTAX
   // will be set to C_SYNTAX meaning that its values can't be handled directly
   // by Scheme code. 
 
-  // All the symbols here will be allocated on boot so that using them doesn't cause an allocation
-  // eg in the reader. And are defined in the State::boot procedure.
+  /** Builtin global variables */
   enum Global {
     // C_SYNTAX values
     S_QUOTE,
@@ -1415,18 +1452,21 @@ struct State {
   };
 
   /** Performs various initializations required for an instance of Arete;
-    * this is separate so the uninitialized State can be unit tests in various ways */
+    * this is separate so the uninitialized State can be unit tested in various ways */
   void boot();
 
 
   // Value creation; all of these will cause allocations
+
+  /** Create a Flonum */
   Value make_flonum(double number) {
     Flonum* heap = (Flonum*) gc.allocate(FLONUM, sizeof(Flonum));
     heap->number = number;
     Value v(heap);
     return v;
   }
-
+  
+  /** Get a Global symbol */
   Value get_symbol(Global sym) {
     Value sym2 =  (globals.at((size_t) sym));
     // std::cout << sym2 << std::endl;
@@ -1434,11 +1474,13 @@ struct State {
     return sym2;
   }
 
+  /** Get the value of a Global symbol */
   Value get_global_value(Global sym) {
     Value s = globals.at((size_t) sym);
     return s.as<Symbol>()->value;
   }
-
+  
+  /** Set the value of a Global symbol */
   void set_global_value(Global sym, Value v) {
     globals.at((size_t) sym).as<Symbol>()->value = v;
   }
@@ -1449,6 +1491,10 @@ struct State {
     return get_symbol(cname);
   }
 
+  /** 
+   * Given a C++ string, retrieve a symbol. May cause allocation if the symbol has not already been
+   * interned
+   */
   Value get_symbol(const std::string& name) {
     symbol_table_t::const_iterator x = symbol_table->find(name);
     if(x == symbol_table->end()) {
@@ -1472,11 +1518,14 @@ struct State {
     }
   }
 
+  /** Generate a unique symbol. */
   Value gensym(Value sym) {
     std::ostringstream os;
     os << "#:" << sym.symbol_name_data() << gensym_counter;
     gensym_counter++;
-    return get_symbol(os.str());
+    Value sym2 = get_symbol(os.str());
+    sym2.heap->set_header_bit(Value::SYMBOL_GENSYM_BIT);
+    return sym2;
   }
 
   Value make_rename(Value expr, Value env) {
@@ -2229,7 +2278,8 @@ struct XReader {
     TK_EOF
   };
 
-  XReader(State& state_, std::istream& is_, const std::string& desc = "anonymous"): state(state_), is(is_), source(0), position(0),
+  XReader(State& state_, std::istream& is_, const std::string& desc = "anonymous"):
+      state(state_), is(is_), source(0), position(0),
       line(1), column(1), active_error(C_FALSE) {
     
     is >> std::noskipws;
@@ -2291,15 +2341,27 @@ struct XReader {
   /** Set active_error to a message describing an unexpected end-of-file. Same params as read_error */
   Value unexpected_eof(const std::string& message, unsigned start_line, unsigned start_position, unsigned end_position);
 
+  /** Reads a number into the buffer */
   TokenType tokenize_number(bool negative = false);
+
+  /** Reads a symbol into the buffer */
   void tokenize_symbol();
+
+  /** Reads a string into the buffer */
   void tokenize_string();
 
+  /** Look at the next token */
   TokenType next_token();
+
+  /** Read auxiliary syntax (e.g. quote, quasiquote, etc) */
   Value read_aux(const std::string&, unsigned, Value);
-  // #'asdf => (rename (quote asdf))
+
+  /** Read rename auxiliary syntax */
   Value read_aux2(const std::string&, unsigned, Value, Value);
+
+  /** Read the next expression */
   Value read_expr(TokenType);
+
   /** The entry point for reading an expression */
   Value read();
 };
