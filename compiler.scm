@@ -3,10 +3,11 @@
 ;; DONE Closures (via upvalues)
 ;; TODO define
 ;; TODO set!
-;; TODO if
-;; TODO and/or
+;; DONE if
+;; DONE and/or
 ;; TODO Check lambda body
 ;; TODO Error reporting
+;; TODO 
 
 ;; OpenFn is a record representing a function in the process of being compiled.
 
@@ -209,16 +210,24 @@
         (compiler-log fn (OpenFn/name fn) "registered free variable" x)
         ;; Calculate index in closure from closure length
         ;(Var/idx! var (fx/ (vector-length closure) 2))
-        (Var/idx! var (fx/ (vector-length closure) 2))
+        ;(print closure)
+
+        (Var/idx! var (vector-length closure))
+        ;(Var/idx! var (fx/ (vector-length closure) 2))
         ;; This is an upvalue
         (Var/upvalue?! var #t)
         ;; Add to function environment
         (table-set! (OpenFn/env fn) x var)
 
-        ;; Append to closure
-        (unless (Var/upvalue? it)
+        #;(when (Var/free-variable-id it)
+          (raise 'compile "duplicate free variable" (list it)))
+
+
+        ;; If this is a free variable and it hasn't been noted as such, do so now
+        (unless (or (Var/upvalue? it) (Var/free-variable-id it))
           (OpenFn/free-variable-count! parent-fn (fx+ (OpenFn/free-variable-count parent-fn) 1))
           (Var/free-variable-id! it (fx- (OpenFn/free-variable-count parent-fn) 1)))
+        ;; Append to closure
         (vector-append! closure it))
       (register-free-variable parent-fn x))))
 
@@ -374,10 +383,10 @@
 
   (compile-expr fn condition #f)
 
-  (print 'jump-if-false then-branch-end)
+  ;(print 'jump-if-false then-branch-end)
   (emit fn 'jump-if-false then-branch-end 1)
   (compile-expr fn then-branch tail?)
-  (pretty-print fn)
+  ;(pretty-print fn)
 
   (emit fn 'jump else-branch-end)
   (register-label fn then-branch-end)
@@ -408,7 +417,7 @@
         (lambda (i x)
           ;; Emit a jump-if-false for each expression
           ;; If it's at the expression
-          (print i argc)
+          ;(print i argc)
           (compile-expr fn x (and tail? (fx= i argc)))
           (emit fn 'jump-if-false (if (fx= i argc) and-fail-pop and-fail) (if (fx= i argc) 0 1)))
         (cdr x))
@@ -416,7 +425,8 @@
       (emit fn 'jump and-end)
       (register-label fn and-fail-pop)
 
-      ;; Manually adjust stack size: and will always result in one value being pushed on the stack
+      ;; Manually adjust stack size: and will always result in one value being pushed on the stack after it's 
+      ;; evaluated, whether successful or not.
       (OpenFn/stack-size! fn (fx+ (OpenFn/stack-size fn) 1))
 
       (emit fn 'pop)
@@ -509,7 +519,13 @@
             (set! a 5)
             (set! b 5)
             (fx+ a b))))
-    (and 1 2 3 4 5)
+    ((lambda (a b c)
+       (lambda (d) (fx+ d c b a)
+         (set! a 5))
+       (set! b 10)
+       (lambda (d) (fx+ a b c d)) 
+         
+         ) 2 2 2)
       ;(print (if #t (if #t "true" "false") "false"))
       ;fn
     ))
@@ -522,20 +538,9 @@
   (pretty-print fn)
 
   (define compiled-proc (OpenFn->procedure fn))
-  (print (compiled-proc))
+  ;(print ((compiled-proc) 2))
 
   ;(print (((compiled-proc) 2 2)))
 )
 
-;; compiling if
-
-;; (compile-if (if #t asdf asdf2))
-
-;; this becomes
-;; OP_JUMP_IF_FALSE
-;; OP_JUMP
-;; asdf2
-;; main thing is, we need to emit labels somehow, which are turned into JUMP statements pointing at the appropriate
-;; offset
-
-(main)
+;(main)

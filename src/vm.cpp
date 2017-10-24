@@ -71,7 +71,7 @@ enum {
 };
 
 #define AR_PRINT_STACK() \
-  AR_LOG_VM("stack " << (f.stack_i-1) << " out of " << f.fn->stack_max << " allocated "); \
+  AR_LOG_VM("stack " << (f.stack_i) << " out of " << f.fn->stack_max << " allocated "); \
   for(size_t i = 0; i != f.stack_i; i++) AR_LOG_VM(i << ": " << f.stack[i]);
 
 
@@ -104,6 +104,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   }
 
   for(unsigned i = argc; i != f.fn->local_count; i++) { 
+    AR_LOG_VM("LOCAL " << i << " = unspecified");
     f.locals[i] = C_UNSPECIFIED;
   }
 
@@ -112,18 +113,18 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     // TODO: Is GC allocating here dangerous? We can copy the blob locally as well.
     // If necessary
     AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
-    f.upvalues = (Value*) alloca(f.fn->free_variables->length);
+    f.upvalues = (Value*) alloca(f.fn->free_variables->length * sizeof(Value));
 
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
       f.upvalues[i].bits = 0;
     }
 
+
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
       f.upvalues[i] = gc.allocate(UPVALUE, sizeof(Upvalue));
       size_t idx = ((size_t*) f.fn->free_variables->data)[i];
       f.upvalues[i].as<Upvalue>()->local = &f.locals[idx];
-      AR_ASSERT(f.upvalues[i].type() == UPVALUE);
-      AR_ASSERT(f.upvalues[i].upvalue() == f.locals[idx]);
+
     }
   }
 
@@ -135,11 +136,11 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   size_t code_offset = 0;
    
-  gc.collect();
+  //gc.collect();
 
   // VM main loop
   while(true) {
-    gc.collect();
+    //gc.collect();
     // We have to account for things moving.
 
     size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
@@ -194,7 +195,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       case OP_LOCAL_SET: {
         size_t idx = code[code_offset++];
         AR_ASSERT("stack underflow" && f.stack_i >= 1);
-        Value val = f.stack[f.stack_i - 1];
+        Value val = f.stack[--f.stack_i];
         AR_LOG_VM("local-set idx: " << idx << " = " << val);
         f.locals[idx] = val;
         continue;
@@ -304,10 +305,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           }
 
           // Replace function on stack with result of function
+          AR_ASSERT(((ptrdiff_t) f.stack_i - argc - 1) >= 0);
           f.stack[f.stack_i - argc - 1] = apply_vm(to_apply, argc, &f.stack[f.stack_i - argc]);
 
           // Pop arguments
           f.stack_i -= (argc);
+          AR_ASSERT(f.stack_i > 0);
 
           // Finally, check for an exception
           if(f.stack[f.stack_i - 1].is_active_exception()) 
@@ -361,6 +364,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             AR_ASSERT(gc.live(f.upvalues[idx]));
             AR_ASSERT(f.upvalues[idx].type() == UPVALUE);
             AR_ASSERT(!f.upvalues[idx].upvalue_closed());
+            AR_ASSERT(f.upvalues[idx].upvalue().type() != UPVALUE);
             vector_append(vec, f.upvalues[idx]);
           }
 
@@ -368,6 +372,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           // AR_ASSERT("AUGH" && gc.live(vec.vector_ref(i)));
           //std::cout << vec.vector_ref(i).upvalue_closed() << std::endl;
           AR_LOG_VM("ENCLOSING VALUE " << i << " = " << vec.vector_ref(i) << " " << vec.vector_ref(i).upvalue());
+          AR_ASSERT(vec.vector_ref(i).type() == UPVALUE);
+          AR_ASSERT(vec.vector_ref(i).upvalue().type() != UPVALUE);
         }
         klosure = gc.allocate(CLOSURE, sizeof(Closure));
         klosure.as<Closure>()->upvalues = vec.vector_storage().as<VectorStorage>();

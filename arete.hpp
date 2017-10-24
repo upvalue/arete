@@ -421,6 +421,11 @@ struct Value {
     return heap->get_header_bit(SYMBOL_GENSYM_BIT);
   }
 
+  bool symbol_immutable() const {
+    AR_TYPE_ASSERT(type() == SYMBOL);
+    return heap->get_header_bit(SYMBOL_IMMUTABLE_BIT);
+  }
+
   /** Quickly compare symbol to string */
   bool symbol_equals(const char* s) const {
     std::string cmp(s);
@@ -870,6 +875,7 @@ inline void Value::upvalue_set(const Value rhs) {
     static_cast<Upvalue*>(heap)->converted = rhs;
   } else {
     (*static_cast<Upvalue*>(heap)->local) = rhs;
+    AR_ASSERT(rhs.type() != UPVALUE);
   }
 }
 

@@ -182,7 +182,7 @@ Value State::eval_define(Value env,  Value exp, Value fn_name) {
     if(exp.pair_has_source()) {
       warn() << source_info(exp.pair_src()) << ' ' <<  name << " shadows existing definition of " << name << std::endl;;
     } else {
-      warn() << name << "shadows existing definition" << std::endl;
+      warn() << name << " shadows existing definition" << std::endl;
     }
   }
 
@@ -218,6 +218,15 @@ Value State::eval_set(Value env, Value exp, Value fn_name) {
 
   if(name.type() != SYMBOL) {
     return eval_error("first argument to set! must be a symbol", exp.cdr());
+  }
+
+  if(name.symbol_immutable()) {
+    if(exp.pair_has_source()) {
+      warn() << source_info(exp.pair_src()) << " setting immutable symbol " << name << " may not have expected effects";
+    } else {
+      warn() << "setting immutable symbol " << name << " may not have expected effects";
+
+    }
   }
 
   body = exp.caddr();

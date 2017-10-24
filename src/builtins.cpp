@@ -315,6 +315,7 @@ Value fn_slurp_file(State& state, size_t argc, Value* argv) {
 
   std::string path(argv[0].string_data());
   std::ifstream fs(path);
+
   
   if(!fs.good()) {
     std::ostringstream os;
@@ -327,6 +328,7 @@ Value fn_slurp_file(State& state, size_t argc, Value* argv) {
   AR_FRAME(state, x, lst);
 
   XReader reader(state, fs, path);
+  state.temps.clear();
   while(true) {
     x = reader.read();
 
