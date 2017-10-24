@@ -163,6 +163,16 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         continue;
       }
 
+      case OP_GLOBAL_SET: {
+        AR_ASSERT(f.stack_i >= 2);
+        Value val = f.stack[f.stack_i - 2], key = f.stack[f.stack_i - 1];
+        AR_ASSERT(key.type() == SYMBOL);
+        AR_LOG_VM("global-set " << key << " = " << val);
+        f.stack_i -= 2;
+        key.set_symbol_value(val);
+        continue;
+      }
+
       case OP_LOCAL_GET: {
         size_t idx = code[code_offset++];
         AR_LOG_VM("local-get idx: " << idx << " = " << f.locals[idx]);
@@ -172,6 +182,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       case OP_RETURN: {
         AR_LOG_VM("return");
+        if(f.stack_i == 0) return C_UNSPECIFIED;
         return f.stack[f.stack_i - 1];
       }
 

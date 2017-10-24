@@ -293,16 +293,18 @@
   ;(pretty-print fn)
 )
 
-(define (compile-define fn x)
+(define (compile-define fn x tail?)
   (define name (cadr x))
   (define result (fn-lookup fn name))
 
-  (compiler-log fn "compiling define" result)
+  (compiler-log fn "compiling define" x result)
 
-  (compile (list-ref x 2))
+  (compile-expr fn (list-ref x 2) tail?)
+
+  (emit fn 'push-constant (register-constant fn name))
 
   (case (car result)
-    (global (emit fn 'global-set (register-constant fn x))))
+    (global (emit fn 'global-set)))
 
 )
 
@@ -310,7 +312,7 @@
   (compiler-log fn "compiling special form" type x)
   (case type
     (lambda (compile-lambda fn x))
-    (define (compile-define fn x))))
+    (define (compile-define fn x tail?))))
 
 (define (special-form x)
   (when (rename? x)
@@ -319,7 +321,7 @@
 
     (set! x (rename-expr x)))
 
-  (if (memq x '(lambda)) x #f))
+  (if (memq x '(lambda define)) x #f))
 
 (define (compile-expr fn x tail?)
   (compiler-log fn "compiling expr" x)
@@ -381,7 +383,7 @@
 
   (define fn-body
     '(
-      (((lambda (a) (lambda () a)) #t))
+      (define hello #t)
     ))
 
 
@@ -393,3 +395,4 @@
   (print (compiled-proc))
 )
 
+;(main)
