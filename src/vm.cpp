@@ -9,8 +9,8 @@
 
 #include "arete.hpp"
 
-//#define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg)
-#define AR_LOG_VM(msg)
+#define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg)
+// #define AR_LOG_VM(msg)
 // #define AR_LOG_VM_INSN(msg) ARETE_LOG(())
 
 // A simple portable alternative to alloca would be just using a giant malloc'd or
@@ -74,8 +74,8 @@ enum {
 };
 
 #define AR_PRINT_STACK() \
-  AR_LOG_VM("stack " << (stack_i) << " out of " << f.fn->stack_max << " allocated "); \
-  for(size_t i = 0; i != stack_i; i++) AR_LOG_VM(i << ": " << stack[i]);
+  AR_LOG_VM("stack " << (f.stack_i) << " out of " << f.fn->stack_max << " allocated "); \
+  for(size_t i = 0; i != f.stack_i; i++) AR_LOG_VM(i << ": " << f.stack[i]);
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   // Frames lost  due to tail call optimization
@@ -98,9 +98,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
      << " free_variables: " << f.fn->free_variables);
   
   // Allocate storage
-  size_t stack_i = 0;
-  Value* stack = (Value*) alloca(f.fn->stack_max * sizeof(Value));
-  f.stack = stack;
+  f.stack = (Value*) alloca(f.fn->stack_max * sizeof(Value));
   f.locals = (Value*) alloca(f.fn->local_count * sizeof(Value));
 
   // Initialize local variables
@@ -159,7 +157,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     switch(insn) {
       case OP_PUSH_CONSTANT: {
         size_t idx = code[code_offset++];
-        stack[stack_i++] = f.fn->constants->data[idx];
+        f.stack[f.stack_i++] = f.fn->constants->data[idx];
         AR_PRINT_STACK();
         AR_LOG_VM("push-constant idx: " << idx << "; " << f.fn->constants->data[idx]);
         break;
@@ -170,15 +168,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         Value sym = f.fn->constants->data[idx];
         AR_LOG_VM("global-get idx: " << idx << " ;; " << f.fn->constants->data[idx]);
         AR_ASSERT(sym.type() == SYMBOL && "global-get called against non-symbol");
-        stack[stack_i++] = sym.symbol_value();
+        f.stack[f.stack_i++] = sym.symbol_value();
         break;
       }
 
       case OP_GLOBAL_SET: {
         size_t err_on_undefined = code[code_offset++];
-        AR_ASSERT(stack_i >= 2);
+        AR_ASSERT(f.stack_i >= 2);
 
-        Value val = stack[stack_i - 2], key = stack[stack_i - 1];
+        Value val = f.stack[f.stack_i - 2], key = f.stack[f.stack_i - 1];
         AR_ASSERT(key.type() == SYMBOL);
         AR_LOG_VM("global-set (" << (err_on_undefined ? "set!" : "define") << ") " << key << " = " << val);
         if(err_on_undefined) {
@@ -193,7 +191,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           os << "attempt to set! immutable symbol " << key;
           return eval_error(os.str());
         }
-        stack_i -= 2;
+        f.stack_i -= 2;
         key.set_symbol_value(val);
         break;
       }
@@ -201,14 +199,14 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       case OP_LOCAL_GET: {
         size_t idx = code[code_offset++];
         AR_LOG_VM("local-get idx: " << idx << " = " << f.locals[idx]);
-        stack[stack_i++] = f.locals[idx];
+        f.stack[f.stack_i++] = f.locals[idx];
         break;
       }
 
       case OP_LOCAL_SET: {
         size_t idx = code[code_offset++];
-        AR_ASSERT("stack underflow" && stack_i >= 1);
-        Value val = stack[--stack_i];
+        AR_ASSERT("stack underflow" && f.stack_i >= 1);
+        Value val = f.stack[--f.stack_i];
         AR_LOG_VM("local-set idx: " << idx << " = " << val);
         f.locals[idx] = val;
         break;
@@ -221,15 +219,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         AR_LOG_VM("upvalue-get " << idx);
         AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
         AR_ASSERT(gc.live(f.closure->upvalues->data[idx].upvalue()));
-        stack[stack_i++] = f.closure->upvalues->data[idx].upvalue();
+        f.stack[f.stack_i++] = f.closure->upvalues->data[idx].upvalue();
         break;
       }
 
       case OP_UPVALUE_SET: {
         AR_ASSERT(f.closure);
         size_t idx = code[code_offset++];
-        AR_ASSERT(stack_i >= 1);
-        Value val = stack[--stack_i];
+        AR_ASSERT(f.stack_i >= 1);
+        Value val = f.stack[--f.stack_i];
         Value upval = f.closure->upvalues->data[idx];
         upval.upvalue_set(val);
         AR_LOG_VM("upvalue-set " << idx << " = " << val);
@@ -238,8 +236,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       case OP_RETURN: {
         AR_LOG_VM("return");
         AR_PRINT_STACK();
-        if(stack_i == 0) return C_UNSPECIFIED;
-        return stack[stack_i - 1];
+        if(f.stack_i == 0) return C_UNSPECIFIED;
+        return f.stack[f.stack_i - 1];
       }
 
       // Application logic.
@@ -257,37 +255,36 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       case OP_APPLY:
       case OP_APPLY_TAIL: {
-        size_t argc = code[code_offset++];
-        Value afn = stack[stack_i - argc - 1];
-        AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " argc: " << argc << " fn: " << afn);
+        size_t fargc = code[code_offset++];
+        Value afn = f.stack[f.stack_i - fargc - 1];
+        AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " fargc: " << fargc << " fn: " << afn);
 
         if(afn.type() == CFUNCTION) {
           size_t min_arity = afn.as<CFunction>()->min_arity;
           size_t max_arity = afn.as<CFunction>()->max_arity;
           bool var_arity = afn.c_function_variable_arity();
 
-          if(argc < min_arity) {
+          if(fargc < min_arity) {
             std::ostringstream os;
             os << "function " << afn << " expected at least " << min_arity << " arguments " <<
-              "but only got " << argc;
+              "but only got " << fargc;
             return eval_error(os.str());
-          } else if(argc > max_arity && !var_arity) {
+          } else if(fargc > max_arity && !var_arity) {
             std::ostringstream os;
             os << "function " << afn << " expected at most " << max_arity << " arguments " <<
-              "but only got " << argc;
+              "but only got " << fargc;
             return eval_error(os.str());
           }
 
           AR_PRINT_STACK();
 
           // Replace function on stack with its result
-          stack[stack_i - argc - 1] =
-            afn.c_function_addr()(*this, argc, &stack[stack_i - argc]);
+          f.stack[f.stack_i - fargc - 1] =
+            afn.c_function_addr()(*this, fargc, &f.stack[f.stack_i - fargc]);
 
           AR_PRINT_STACK();
 
-
-          stack_i -= (argc);
+          f.stack_i -= (fargc);
         } else if(afn.type() == FUNCTION) {
           std::cerr << "cannot call interpreted function from VM code" << std::endl;
           AR_ASSERT(!"cannot call interpreted function from VM code");
@@ -305,46 +302,41 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           size_t min_arity = afn.vm_function_min_arity(), max_arity = afn.vm_function_max_arity();
           bool var_arity = afn.vm_function_variable_arity();
 
-          if(argc < min_arity) {
+          if(fargc < min_arity) {
             std::ostringstream os;
             os << "function " << afn << " expected at least " << min_arity << " arguments " <<
-              "but only got " << argc;
+              "but only got " << fargc;
             return eval_error(os.str());
-          } else if(argc > max_arity && !var_arity) {
+          } else if(fargc > max_arity && !var_arity) {
             std::ostringstream os;
             os << "function " << afn << " expected at most " << max_arity << " arguments " <<
-              "but only got " << argc;
+              "but only got " << fargc;
             return eval_error(os.str());
           }
 
           if(insn == OP_APPLY_TAIL) {
             frames_lost++;
 
-            // PROBLEM: How do we set up the frame of the next call properly?
-            // Specifically, we can re-assign *argv to point to the stack values
-            // we want, but it might be alloca'd over this...
-
-            // We could probably guess where the new locals array will be right?
-            // I think this might be part of why this is so dag slow.
-
             temps.clear();
-            temps.insert(temps.end(), &stack[stack_i - argc], &stack[stack_i]);
+            temps.insert(temps.end(), &f.stack[f.stack_i - fargc], &f.stack[f.stack_i]);
+
+            argc = fargc;
             argv = &temps[0];
-            fn = afn;
+            fn = to_apply;
 
             goto tail;
           } else {
             // Replace function on stack with result of function
-            AR_ASSERT(((ptrdiff_t) stack_i - argc - 1) >= 0);
-            stack[stack_i - argc - 1] = apply_vm(to_apply, argc, &stack[stack_i - argc]);
+            AR_ASSERT(((ptrdiff_t) f.stack_i - fargc - 1) >= 0);
+            f.stack[f.stack_i - fargc - 1] = apply_vm(to_apply, fargc, &f.stack[f.stack_i - fargc]);
 
             // Pop arguments
-            stack_i -= (argc);
-            AR_ASSERT(stack_i > 0);
+            f.stack_i -= (fargc);
+            AR_ASSERT(f.stack_i > 0);
 
             // Finally, check for an exception
-            if(stack[stack_i - 1].is_active_exception()) 
-              return stack[stack_i - 1];
+            if(f.stack[f.stack_i - 1].is_active_exception()) 
+              return f.stack[f.stack_i - 1];
           }
         }
         break;
@@ -408,20 +400,20 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         }
         klosure = gc.allocate(CLOSURE, sizeof(Closure));
         klosure.as<Closure>()->upvalues = vec.vector_storage().as<VectorStorage>();
-        klosure.as<Closure>()->function = stack[stack_i-1];
-        stack[stack_i-1] = klosure;
+        klosure.as<Closure>()->function = f.stack[f.stack_i-1];
+        f.stack[f.stack_i-1] = klosure;
         break;
       }
 
       case OP_JUMP: {
         // Drop condition from stack
-        // std::cout << "DROPPING CONDITION " << stack[stack_i - 2] << std::endl;
-        // std::cout << "REPLACED WITH " << stack[stack_i - 1] << std::endl;
-        //stack[stack_i - 1] = stack[stack_i - 2];
-        //stack_i--;
+        // std::cout << "DROPPING CONDITION " << stack[f.stack_i - 2] << std::endl;
+        // std::cout << "REPLACED WITH " << stack[f.stack_i - 1] << std::endl;
+        //stack[f.stack_i - 1] = stack[f.stack_i - 2];
+        //f.stack_i--;
 
-        //std::cout << stack[stack_i] << std::endl;
-        //std::cout << stack[stack_i - 1] << std::endl;
+        //std::cout << stack[f.stack_i] << std::endl;
+        //std::cout << stack[f.stack_i - 1] << std::endl;
 
         code_offset = code[code_offset];
         AR_LOG_VM("jump " << code_offset);
@@ -431,7 +423,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       case OP_JUMP_IF_FALSE: {
         size_t jmp_offset = code[code_offset++];
-        Value val = stack[stack_i-1];
+        Value val = f.stack[f.stack_i-1];
         size_t pop = code[code_offset++];
 
         AR_LOG_VM("jump-if-false " << jmp_offset);
@@ -443,14 +435,14 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         }
 
         if(pop) {
-          stack_i--;
+          f.stack_i--;
         }
         break;
       }
 
       case OP_POP: {
         AR_LOG_VM("pop");
-        stack_i--;
+        f.stack_i--;
         break;
       }
 
@@ -463,7 +455,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     }
   }
 
-  return stack[stack_i];
+  return f.stack[f.stack_i];
 }
 
 }

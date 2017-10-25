@@ -1,1 +1,1 @@
-(((lambda (a b) (lambda () (fx+ a b))) 2 2))
+(((lambda (a b) (lambda () (+ a b))) 2 2))

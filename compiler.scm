@@ -74,12 +74,14 @@
       (make id name #f #f))))
 
 (define (compiler-log fn . rest)
-  (when (or (eq? (top-level-value 'compiler-log) #t))
-    (display "arete:cc: ")
+  (when (or (top-level-value 'COMPILER-LOG) #t)
+    (display "arete:cc:")
     (let loop ((i 0))
       (unless (fx= i (OpenFn/depth fn))
         (display ">")
         (loop (fx+ i 1))))
+
+    (display " ")
 
     (apply pretty-print rest)))
 
@@ -169,13 +171,15 @@
 
   (compiler-log fn "compiling application" x)
   ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
-  (compile-expr fn (car x) (and (eq? argc 1) tail?))
+  ;(compile-expr fn (car x) (and (eq? argc 0) #f))
+  (compile-expr fn (car x) #f)
 
   (set! stack-check (OpenFn/stack-size fn))
 
   (for-each-i
     (lambda (i x)
-      (compile-expr fn x (and (eq? argc (fx- i 1)) tail?)))
+      (compile-expr fn x #f))
+      ;(compile-expr fn x (and (eq? argc (fx- i 1)) tail?)))
     (cdr x))
 
   (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
@@ -482,8 +486,8 @@
 (define (compile-expr fn x tail?)
   (compiler-log fn "compiling expr" x)
   (cond
-    ((self-evaluating? x) (compile-constant fn  x))
-    ((identifier? x) (compile-identifier fn  x))
+    ((self-evaluating? x) (compile-constant fn x))
+    ((identifier? x) (compile-identifier fn x))
     ((list? x)
      (aif (special-form (car x))
        (compile-special-form fn x it tail?)
@@ -530,7 +534,6 @@
 
   (compile fn body)
   (compile-finish fn)
-
 
   (OpenFn->procedure fn))
 

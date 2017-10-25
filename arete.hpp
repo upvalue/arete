@@ -39,11 +39,11 @@
 #endif
 
 #ifndef AR_ASSERT
-# define AR_ASSERT(x) // assert
+# define AR_ASSERT assert
 #endif
 
 #ifndef AR_TYPE_ASSERT
-# define AR_TYPE_ASSERT(x) // assert
+# define AR_TYPE_ASSERT assert
 #endif 
 
 #ifndef AR_LINENOISE
@@ -1673,7 +1673,7 @@ struct State {
         return equals(a, b);
       }
 
-      return C_TRUE;
+      return true;
     } else if(a.type() == STRING && b.type() == STRING) {
       if(a.string_bytes() != b.string_bytes()) return false;
       return strncmp(a.string_data(), b.string_data(), a.string_bytes()) == 0;

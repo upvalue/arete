@@ -27,7 +27,7 @@ void State::table_setup(Value table, size_t size_log2) {
 
 ptrdiff_t State::hash_index(Value table, Value key, bool& unhashable) {
   ptrdiff_t hash = hash_value(key, unhashable);
-  return hash & table.as<Table>()->chains->length - 1;
+  return hash & (table.as<Table>()->chains->length - 1);
 }
   
 void State::table_grow(Value table) {
