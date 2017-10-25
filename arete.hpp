@@ -39,11 +39,11 @@
 #endif
 
 #ifndef AR_ASSERT
-# define AR_ASSERT assert
+# define AR_ASSERT(x) // assert
 #endif
 
 #ifndef AR_TYPE_ASSERT
-# define AR_TYPE_ASSERT assert
+# define AR_TYPE_ASSERT(x) // assert
 #endif 
 
 #ifndef AR_LINENOISE
@@ -1362,10 +1362,6 @@ struct State {
    * their uniqueness */ 
   size_t gensym_counter;
 
-  // Fascinating: removing this causes some kind of error with symbol_table_t.
-  // Some kind of C++ initialization issue, but I'm not sure what kind.
-  bool print_expansions;
-
   /** The symbol table */
   symbol_table_t* symbol_table;
 
@@ -1409,8 +1405,6 @@ struct State {
     delete symbol_table;
     current_state = 0;
   }
-
-
   
   // Note that order is important here. Everything from S_QUOTE to S_LETREC_SYNTAX
   // will be set to C_SYNTAX meaning that its values can't be handled directly

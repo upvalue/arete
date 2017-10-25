@@ -1,8 +1,9 @@
 # Variables
-CXX := clang++
+CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -I. -Ivendor -Ivendor/linenoise -DARETE_DEV
 CFLAGS := $(CFLAGS) -g3 -O3
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti $(CFLAGS) 
+LDFLAGS := 
 
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
@@ -26,7 +27,7 @@ endef
 # Compile .cpp files
 %.o: %.cpp
 	$(call colorecho, "CC $< ")
-	$(CXX) $(CXXFLAGS) -MMD -MF $(patsubst %.o,%.d,$@) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) -MMD -MF $(patsubst %.o,%.d,$@) -c -o $@ $< 
 
 %.em.o: %.cpp
 	$(call colorecho, "CC $< ")

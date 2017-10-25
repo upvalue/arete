@@ -74,7 +74,7 @@
       (make id name #f #f))))
 
 (define (compiler-log fn . rest)
-  (when (or #t (eq? (top-level-value 'compiler-log) #t))
+  (when (or (eq? (top-level-value 'compiler-log) #t))
     (display "arete:cc: ")
     (let loop ((i 0))
       (unless (fx= i (OpenFn/depth fn))
@@ -343,6 +343,7 @@
       (emit fn 'push-constant (register-constant fn name))
       (emit fn 'global-set 0))
     (let ((var (Var/make (OpenFn/local-count fn) name)))
+      ;; Register this variable as part of the environment
       (table-set! (OpenFn/env fn) name var)
       (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))
       (emit fn 'local-set (Var/idx var))))
@@ -448,6 +449,12 @@
 (define (compile-quote fn x)
   (emit fn 'push-constant (register-constant fn (cadr x))))
 
+(define (compile-begin fn x tail?)
+  (define x-len (fx- (length x) 2))
+  (for-each-i 
+    (lambda (i x)
+      (compile-expr fn x (and tail? (fx= i x-len))))
+    (cdr x)))
 
 (define (compile-special-form fn x type tail?)
   (compiler-log fn "compiling special form" type x)
@@ -459,6 +466,7 @@
     (and (compile-and fn x tail?))
     (or (compile-or fn x tail?))
     (quote (compile-quote fn x))
+    (begin (compile-begin fn x tail?))
     (else (raise 'compile "unknown special form" (list x)))))
 
 
@@ -523,33 +531,6 @@
   (compile fn body)
   (compile-finish fn)
 
+
   (OpenFn->procedure fn))
 
-;; Do the thing.
-
-(define (main)
-  (define fn (OpenFn/make 'vm-toplevel))
-
-
-  (OpenFn/toplevel?! fn #t)
-  (define fn-body
-    '(
-      (define x #t)
-      x
-    ))
-
-
-  (compile fn fn-body)
-
-  (compile-finish fn)
-
-  (pretty-print fn)
-
-  (define compiled-proc (OpenFn->procedure fn))
-  (print (compiled-proc))
-  ;(print ((compiled-proc) 2))
-
-  ;(print (((compiled-proc) 2 2)))
-)
-
-;(main)

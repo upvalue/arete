@@ -537,4 +537,19 @@
 
 (define (max a b) (if (< a b) b a))
 
+(define-syntax let*
+  (lambda (x)
+    (unless (fx= (length x) 3)
+      (raise 'syntax "let* expects exactly two arguments (bindings and body)" (list x)))
 
+    (let ((bindings (list-ref x 1))
+          (body (list-ref x 2)))
+      (for-each
+        (lambda (binding)
+          (unless (and (list? binding) (fx= (length binding) 2))
+            (raise 'syntax "let* binding must be a list with two elements" (list x binding))))
+        bindings)
+
+    `(,#'let (,@(map (lambda (b) (list-source b (car b) #'unspecified)) bindings))
+      ,@(map (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
+      ,body))))
