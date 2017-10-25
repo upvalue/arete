@@ -431,4 +431,29 @@ Value State::pretty_print(std::ostream& os, Value v) {
 
 }
 
+void State::print_table_verbose(Value tbl) {
+  Table* table = tbl.as<Table>();
+  std::cout << "#<table size_log2: " << (size_t) table->size_log2 << " entries: " << table->entries << 
+    " max_entries: " << table->max_entries << std::endl;
+
+  for(size_t i = 0; i != table->chains->length; i++) {
+    Value chain = table->chains->data[i];
+    if(chain != C_FALSE) {
+      std::cout << "  chain " << i << ": ";
+      std::cout << chain << std::endl;
+    }
+  }
+
+  std::cout << '>' << std::endl;
+}
+
+bool State::print_src_pair(std::ostream& os, Value pair) {
+  if(pair.type() == PAIR && pair.pair_has_source()) {
+    SourceLocation src(pair.pair_src());
+    print_src_line(os, src);
+    return true;
+  }
+  return false;
+}
+
 }

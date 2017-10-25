@@ -16,6 +16,54 @@
 
 namespace arete {
 
+bool State::env_defined(Value env, Value name) {
+  if(name.type() != SYMBOL) return false;
+
+  if(env.type() == VECTOR) {
+    for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
+      if(identifier_equal(env.vector_ref(i-1), name)) {
+        return true;
+      }
+    }
+  } else if(env == C_FALSE) {
+    return name.symbol_value() != C_UNDEFINED;
+  }
+  return false;
+}
+
+Value State::env_lookup_impl(Value& env, Value name, Value& rename_key, bool& reached_toplevel) {
+  rename_key = C_FALSE;
+  reached_toplevel = false;
+
+  // First we search through vectors with identifier_equal, which only
+  // returns true if symbols are the same or if renames have the same env and expr
+  while(env.type() == VECTOR) {
+    for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
+      // Here we check for function-level renames in the environment.
+      // This is necessary because the expansion pass will replace them
+      // with gensyms before returning the full expression
+      if(identifier_equal(env.vector_ref(i-1), name)) {
+        rename_key = env.vector_ref(i-1);
+        return env.vector_ref(i);
+      }
+    }
+    env = env.vector_ref(0); // check parent environment
+  }
+
+  // If we've reached here, this is a module or toplevel rename and thus we can resolve it
+  // the same as a symbol
+  if(name.type() == RENAME) {
+    env = name.rename_env();
+    name = name.rename_expr();
+  }
+
+  reached_toplevel = true;
+
+  AR_ASSERT(name.type() == SYMBOL);
+
+  return name.as<Symbol>()->value;
+}
+
 /** Return an eval error with source code information */
 Value State::eval_error(const std::string& msg, Value exp) {
   std::ostringstream os;

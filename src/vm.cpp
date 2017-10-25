@@ -136,11 +136,11 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   size_t code_offset = 0;
    
-  //gc.collect();
+  gc.collect();
 
   // VM main loop
   while(true) {
-    //gc.collect();
+    gc.collect();
     // We have to account for things moving.
 
     size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
@@ -179,6 +179,11 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             os << "attempt to set! undefined variable " << key;
             return eval_error(os.str());
           }
+        }
+        if(key.symbol_immutable()) {
+          std::ostringstream os;
+          os << "attempt to set! immutable symbol " << key;
+          return eval_error(os.str());
         }
         f.stack_i -= 2;
         key.set_symbol_value(val);

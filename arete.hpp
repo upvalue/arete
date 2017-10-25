@@ -1,4 +1,4 @@
-// arete.hpp - Arete scheme header
+// arete.hpp - Arete scheme header pair
 #ifndef ARETE_HPP
 #define ARETE_HPP
 
@@ -59,7 +59,7 @@
 #endif
 
 #ifndef ARETE_HEAP_SIZE 
-# define ARETE_HEAP_SIZE (512000)
+# define ARETE_HEAP_SIZE (1024 * 1024)
 #endif 
 
 #ifndef ARETE_GC_LOAD_FACTOR
@@ -1246,6 +1246,7 @@ struct GCSemispace : GCCommon {
 
   GCSemispace(State& state_): GCCommon(state_), active(0), other(0), block_cursor(0),
       collect_before_every_allocation(false) {
+
     active = new Block(heap_size, 0);
   }
 
@@ -1354,6 +1355,8 @@ struct State {
 #endif 
 
   typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
+  typedef std::pair<unsigned, bool> print_info_t;
+  typedef std::unordered_map<unsigned, print_info_t> print_table_t;
 
   /** Counts how many times gensym has been called; appended to the end of gensyms to ensure
    * their uniqueness */ 
@@ -1381,6 +1384,10 @@ struct State {
   /** A GC-tracked array of temporary values. May be cleared by function calls. */
   std::vector<Value> temps;
 
+  /** Used to mark objects when printing shared structure */
+  unsigned shared_objects_begin;
+  unsigned shared_objects_i;
+
   State():
       gc(*this),
       gensym_counter(0),
@@ -1402,10 +1409,6 @@ struct State {
     delete symbol_table;
     current_state = 0;
   }
-
-
-  // Source code location tracking
-  unsigned register_source(const std::string& path, std::istream& is);
 
 
   
@@ -1460,7 +1463,6 @@ struct State {
   /** Performs various initializations required for an instance of Arete;
     * this is separate so the uninitialized State can be unit tested in various ways */
   void boot();
-
 
   // Value creation; all of these will cause allocations
 
@@ -1616,55 +1618,43 @@ struct State {
     }
   }
 
-  void table_setup(Value table, size_t size_log2) {
-    VectorStorage* chains = 0;
+  // Hash table functionality
 
-    AR_FRAME(this, table);
+  void table_setup(Value table, size_t size_log2);
+  ptrdiff_t hash_index(Value table, Value key, bool& unhashable);
+  void table_grow(Value table);
+  Value unhashable_error(Value irritant);
 
-    size_t size = 1 << size_log2;
-    chains = static_cast<VectorStorage*>(make_vector_storage(size).heap);
-    // In case of GC move
-    Table *heap = table.as<Table>();
-    heap->entries = 0;
-    heap->size_log2 = size_log2;
-    // Fill entries with #f
-    chains->length = size;
-    for(size_t i = 0; i != chains->length; i++) {
-      chains->data[i] = C_FALSE;
-    } 
-    heap->chains = chains;
-    // Pre-calculate max entries
-    heap->max_entries = (Table::LOAD_FACTOR * size) / 100;
-  }
+  /** Set a hash table value */
+  Value table_set(Value table, Value key, Value value);
+  
+  /** Get a hash table value
+   * @param found false if table_get failed
+   * @return The value, C_FALSE, or an exception if value was unhashable
+   */
+  Value table_get(Value table, Value key, bool& found);
 
-  ptrdiff_t hash_index(Value table, Value key, bool& unhashable) {
-    ptrdiff_t hash = hash_value(key, unhashable);
-    return hash & table.as<Table>()->chains->length - 1;
-  }
+  /** Get the storage cell of a hash table key
+   * @return C_FALSE or a (key . value) pair
+   */
+  Value table_get_cell(Value table, Value key);
 
-  void table_grow(Value table) {
-    Value old_chains_ref, chain;
-    AR_FRAME(this, table, old_chains_ref, chain);
-    old_chains_ref = table.as<Table>()->chains;
-    table_setup(table, table.as<Table>()->size_log2 + 1);
-    // Insert all old values
-    VectorStorage* old_chains = old_chains_ref.as<VectorStorage>();
-    for(size_t i = 0; i != old_chains->length; i++) {
-      chain = old_chains->data[i];
-      while(chain.type() == PAIR) {
-        table_insert(table, chain.caar(), chain.cdar());
-        old_chains = old_chains_ref.as<VectorStorage>();
-        chain = chain.cdr();
-      }
-    }
-  }
+  /**
+   * Insert a new value into a hash table
+   * @param key A key
+   * @returns An exception if the value was unhashable, or unspecified
+   */
+  Value table_insert(Value table, Value key, Value value);
 
-  Value unhashable_error(Value irritant) {
-    std::ostringstream os;
-    os << " value " << irritant << " is unhashable";
-    return type_error(os.str());
-  }
+  /**
+   * Allocate a new hash table
+   * @param size_log2 log2(size_log2) = memory usage of the hash table
+   */
+  Value make_table(size_t size_log2 = 4);
 
+  /**
+   * Deep equality comparison. Will not terminate on shared structure.
+   */
   bool equals(Value a, Value b) const {
     if(a.bits == b.bits) return true;
 
@@ -1697,86 +1687,12 @@ struct State {
 
     return a.bits == b.bits;
   }
-
-  Value table_get_cell(Value table, Value key) {
-    bool unhashable;
-    ptrdiff_t index = hash_index(table, key, unhashable);
-    if(unhashable) return unhashable_error(key);
-    Value chain = C_FALSE;
-    chain = table.as<Table>()->chains->data[index];
-    while(chain.type() == PAIR) {
-      if(equals(chain.caar(), key)) {
-        return chain.car();
-      }
-      chain = chain.cdr();
-    }
-    return C_FALSE;
-  }
-
-  Value table_set(Value table, Value key, Value value) {
-    Value cell = table_get_cell(table, key);
-    if(cell.is_active_exception()) return cell;
-    if(cell != C_FALSE) {
-      cell.set_cdr(value);
-      return C_TRUE;
-    } else {
-      return table_insert(table, key, value);
-    }
-    return C_FALSE;
-  }
-
-  Value table_get(Value table, Value key, bool& found) {
-    Value cell = table_get_cell(table, key);
-    if(cell != C_FALSE) {
-      found = true;
-      return cell.cdr();
-    } else {
-      found = false;
-      return C_FALSE;
-    }
-  }
-
-  Value table_insert(Value table, Value key, Value value) {
-    AR_TYPE_ASSERT(table.type() == TABLE);
-    Value chain;
-    AR_FRAME(this, table, key, value, chain);
-
-    Table* htable = table.as<Table>();
-
-    if(htable->entries >= htable->max_entries) {
-      table_grow(table);
-    }
-
-    bool unhashable;
-    ptrdiff_t index = hash_index(table, key, unhashable);
-    if(unhashable) return unhashable_error(value);
-
-    // Build chain
-    chain = make_pair(key, value);
-
-    if(key.type() == STRING) {
-      key = string_copy(key);
-    }
-
-    htable = table.as<Table>();
-
-    // Handle collision
-    if(htable->chains->data[index] != C_FALSE) {
-      chain = make_pair(chain, htable->chains->data[index]);
-    } else {
-      chain = make_pair(chain, C_NIL);
-    }
-
-    // Insert chain
-    htable = table.as<Table>();
-    htable->chains->data[index] = chain;
-    htable->entries++;
-
-    return C_UNSPECIFIED;
-  }
-
   // Strings
   
+  /**
+   * Create a copy of a string
+   * @param x A STRING Value
+   */
   Value string_copy(Value x) {
     AR_FRAME(this, x);
     String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + x.string_bytes()));
@@ -1788,6 +1704,10 @@ struct State {
 
   // Records
 
+  /**
+   * Register a value as a permanent global
+   * @return Its index in the State::globals array
+   */
   size_t register_global(Value glob) {
     globals.push_back(glob);
     return globals.size() - 1;
@@ -1876,14 +1796,6 @@ struct State {
     return make_exception(get_symbol(s), cmessage, irritants);
   }
 
-  Value make_table(size_t size_log2 = 4) {
-    Value table = static_cast<Table*>(gc.allocate(TABLE, sizeof(Table)));
-    AR_FRAME(this, table);
-
-    table_setup(table, size_log2);
-
-    return table;
-  }
 
   Value make_record(Value tipe) {
     AR_FRAME(this, tipe);
@@ -1925,46 +1837,25 @@ struct State {
   // WRITE! Output
 
   // Print out a table's internal structure for debugging purposes
-  void print_table_verbose(Value tbl) {
-    Table* table = tbl.as<Table>();
-    std::cout << "#<table size_log2: " << (size_t) table->size_log2 << " entries: " << table->entries << 
-      " max_entries: " << table->max_entries << std::endl;
+  void print_table_verbose(Value tbl);
 
-    for(size_t i = 0; i != table->chains->length; i++) {
-      Value chain = table->chains->data[i];
-      if(chain != C_FALSE) {
-        std::cout << "  chain " << i << ": ";
-        std::cout << chain << std::endl;
-      }
-    }
 
-    std::cout << '>' << std::endl;
-  }
-
-  unsigned shared_objects_begin;
-  unsigned shared_objects_i;
-
-  typedef std::pair<unsigned, bool> print_info_t;
-  typedef std::unordered_map<unsigned, print_info_t> print_table_t;
 
   Value pretty_print(std::ostream& os, Value v);
   bool pretty_print_shared_obj(std::ostream& os, Value v, print_table_t* printed);
   Value pretty_print_mark(Value v, unsigned&, print_table_t* printed);
   Value pretty_print_sub(std::ostream& os, Value v, print_table_t*);
 
-  /**
-   * Print information about an erroneous pair
-   */
-  bool print_src_pair(std::ostream& os, Value pair) {
-    if(pair.type() == PAIR && pair.pair_has_source()) {
-      SourceLocation src(pair.pair_src());
-      print_src_line(os, src);
-      return true;
-    }
-    return false;
-  }
+  // Source code location tracking
+  unsigned register_source(const std::string& path, std::istream& is);
 
   /**
+   * Print information about an erroneous pair
+   * @return true if argument's source was successfully printed
+   */
+  bool print_src_pair(std::ostream& os, Value pair);
+
+   /**
    * Print an erroneous line of source code with offending information highlighted
    */
   void print_src_line(std::ostream& os, const SourceLocation& src);
@@ -2010,46 +1901,15 @@ struct State {
     return source_names.at(source);
   }
 
-  ///// (EVAL) Interpreter
+  ///// EVAL! Interpreter
 
   // Functions for interacting with the Scheme environment
-
-#define AR_FN_EXPECT_POSITIVE(state, argv, i) \
-  if((argv[(i)]).fixnum_value() < 0) { \
-    std::ostringstream __os; \
-    __os << "function " << (fn_name) << " expected argument " << (i) << " to be a positive fixnum but got " << (argv)[(i)];  \
-    return (state).eval_error(__os.str()); \
-  }
-
-#define AR_FN_EXPECT_TYPE(state, argv, i, expect) \
-  if((argv)[(i)].type() != (expect)) { \
-    std::ostringstream __os; \
-    __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (Type)(argv[i].type()); \
-    return (state).type_error(__os.str()); \
-  } 
-
-#define AR_FN_ASSERT_ARG(state, i, msg, expr) \
-  if(!(expr)) { \
-    std::ostringstream __os; \
-    __os << "function " << (fn_name) << " expected argument " << (i) << ' ' << msg ; \
-    return (state).type_error(__os.str()); \
-  }
-
   std::vector<std::string> stack_trace;
 
   void install_core_functions();
 
-  /** Defines a function both in the core module and as a top-level value; used during booting */
-  void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false) {
-    Value cfn, sym, name;
-
-    AR_FRAME(this, cfn, sym, name);
-    name = make_string(cname);
-    cfn = make_c_function(name, addr, min_arity, max_arity, variable_arity);
-
-    sym = get_symbol(name);
-    sym.set_symbol_value(cfn);
-  }
+  /** Defines a built-in function */
+  void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
  
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
 
@@ -2100,59 +1960,14 @@ struct State {
     return false;
   }
 
-  bool env_defined(Value env, Value name) {
-    if(name.type() != SYMBOL) return false;
-
-    if(env.type() == VECTOR) {
-      for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
-        if(identifier_equal(env.vector_ref(i-1), name)) {
-          return true;
-        }
-      }
-    } else if(env == C_FALSE) {
-      return name.symbol_value() != C_UNDEFINED;
-    }
-    return false;
-  }
-
+  bool env_defined(Value env, Value name);
 
   /**
    * This is the env_lookup backend. It is necessarily complex because it handles lookups for the
    * interpreter and for the hygienic macro expander. See fn_env_compare and fn_env_resolve in
    * arete.cpp.
    */
-  Value env_lookup_impl(Value& env, Value name, Value& rename_key, bool& reached_toplevel) {
-    rename_key = C_FALSE;
-    reached_toplevel = false;
-
-    // First we search through vectors with identifier_equal, which only
-    // returns true if symbols are the same or if renames have the same env and expr
-    while(env.type() == VECTOR) {
-      for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
-        // Here we check for function-level renames in the environment.
-        // This is necessary because the expansion pass will replace them
-        // with gensyms before returning the full expression
-        if(identifier_equal(env.vector_ref(i-1), name)) {
-          rename_key = env.vector_ref(i-1);
-          return env.vector_ref(i);
-        }
-      }
-      env = env.vector_ref(0); // check parent environment
-    }
-
-    // If we've reached here, this is a module or toplevel rename and thus we can resolve it
-    // the same as a symbol
-    if(name.type() == RENAME) {
-      env = name.rename_env();
-      name = name.rename_expr();
-    }
-
-    reached_toplevel = true;
-
-    AR_ASSERT(name.type() == SYMBOL);
-
-    return name.as<Symbol>()->value;
-  }
+  Value env_lookup_impl(Value& env, Value name, Value& rename_key, bool& reached_toplevel);
 
   Value env_lookup(Value env, Value name) {
     Value rename_key;
@@ -2411,5 +2226,26 @@ inline Handle::~Handle() {
 }
 
 } // namespace arete
+
+#define AR_FN_EXPECT_POSITIVE(state, argv, i) \
+  if((argv[(i)]).fixnum_value() < 0) { \
+    std::ostringstream __os; \
+    __os << "function " << (fn_name) << " expected argument " << (i) << " to be a positive fixnum but got " << (argv)[(i)];  \
+    return (state).eval_error(__os.str()); \
+  }
+
+#define AR_FN_EXPECT_TYPE(state, argv, i, expect) \
+  if((argv)[(i)].type() != (expect)) { \
+    std::ostringstream __os; \
+    __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (Type)(argv[i].type()); \
+    return (state).type_error(__os.str()); \
+  } 
+
+#define AR_FN_ASSERT_ARG(state, i, msg, expr) \
+  if(!(expr)) { \
+    std::ostringstream __os; \
+    __os << "function " << (fn_name) << " expected argument " << (i) << ' ' << msg ; \
+    return (state).type_error(__os.str()); \
+  }
 
 #endif // ARETE_HPP

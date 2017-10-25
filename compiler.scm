@@ -337,8 +337,6 @@
   (define name (cadr x))
 
   (compile-expr fn (list-ref x 2) tail?)
-  ;(print name)
-  ;(print (list-ref x 2))
 
   (if (OpenFn/toplevel? fn)
     (begin
@@ -536,23 +534,8 @@
   (OpenFn/toplevel?! fn #t)
   (define fn-body
     '(
-      #;(define fn
-        (lambda (a b)
-          (lambda ()
-            (set! a 5)
-            (set! b 5)
-            (fx+ a b))))
-    (define hello 'hello!!!)
-    hello
-    #;((lambda (a b c)
-       (lambda (d) (fx+ d c b a)
-         (set! a 5))
-       (set! b 10)
-       (lambda (d) (fx+ a b c d)) 
-         
-         ) 2 2 2)
-      ;(print (if #t (if #t "true" "false") "false"))
-      ;fn
+      (define x #t)
+      x
     ))
 
 

@@ -11,7 +11,7 @@ ECXXFLAGS := $(ECPPFLAGS)
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
 CXXOBJS := $(CXXOBJS) $(patsubst %.cpp,%.o,$(wildcard vendor/linenoise/*.cpp))
-DEPS := $(CXXOBJS:.o=.d)
+DEPS := $(CXXOBJS:.o=.d) src/main.d
 
 # site.mk allows the user to override settings
 -include site.mk

@@ -1403,6 +1403,18 @@ Value fn_gc_collect(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+void State::defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
+  Value cfn, sym, name;
+
+  AR_FRAME(this, cfn, sym, name);
+  name = make_string(cname);
+  cfn = make_c_function(name, addr, min_arity, max_arity, variable_arity);
+
+  sym = get_symbol(name);
+  sym.set_symbol_value(cfn);
+  sym.heap->set_header_bit(Value::SYMBOL_IMMUTABLE_BIT);
+}
+
 void State::install_core_functions() {
   // Numbers
   defun_core("fx+", fn_fx_add, 1, 1, true);
