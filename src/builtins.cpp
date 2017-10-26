@@ -174,7 +174,7 @@ Value fn_fx_equals(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx=";
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  return Value::make_boolean(argv[0].fixnum_value() == argv[1].fixnum_value());
+  return Value::make_boolean(argv[0].bits == argv[1].bits);
 }
 
 Value fn_fx_lt(State& state, size_t argc, Value* argv) {
@@ -1125,6 +1125,20 @@ Value fn_function_min_arity(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(argv[0].function_arguments().list_length());
 }
 
+Value fn_function_body(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "function-body";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+
+  return argv[0].as<Function>()->body;
+}
+
+Value fn_function_name(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "function-name";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+
+  return argv[0].as<Function>()->name;
+}
+
 Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-value";
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
@@ -1412,7 +1426,7 @@ void State::defun_core(const std::string& cname, c_function_t addr, size_t min_a
 
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);
-  sym.heap->set_header_bit(Value::SYMBOL_IMMUTABLE_BIT);
+  //sym.heap->set_header_bit(Value::SYMBOL_IMMUTABLE_BIT);
 }
 
 void State::install_core_functions() {
@@ -1544,6 +1558,8 @@ void State::install_core_functions() {
   defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun_core("function-min-arity", fn_function_min_arity, 1);
   defun_core("function-env", fn_function_env, 1);
+  defun_core("function-body", fn_function_body, 1);
+  defun_core("function-name", fn_function_name, 1);
 
   defun_core("top-level-value", fn_top_level_value, 1);
   defun_core("set-top-level-value!", fn_set_top_level_value, 2);

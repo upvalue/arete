@@ -129,4 +129,3 @@ TEST_CASE_FIXTURE(AS, "tables") {
   // state.print_table_verbose(table);
 }
 
-#endif

@@ -2,8 +2,8 @@
 CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -I. -Ivendor -Ivendor/linenoise -DARETE_DEV
 CFLAGS := $(CFLAGS) -g3 -O3
-CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti $(CFLAGS) 
-LDFLAGS := 
+CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
+LDFLAGS :=  
 
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
@@ -55,18 +55,18 @@ tests/test-semispace: $(CXXOBJS) tests/test-semispace.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
-#test-all: tests/test-incremental tests/test-semispace
-#	tests/test-incremental
-#	tests/test-semispace
-#	python utils/run-tests.py
+test-all: tests/test-semispace
+	#tests/test-incremental
+	tests/test-semispace
+	python utils/run-tests.py
 
-.PHONY: count clean
+.PHONY: count clean cleaner
 
 count:
 	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard *.scm)
 
 clean:
-	rm -f arete test $(patsubst %.o,%.d,$(CXXOBJS)) $(wildcard $(CXXOBJS)) $(wildcard $(ECXXOBJS)) $(wildcard $(CXXOBJS)) $(wildcard src/main.o tests/test-semispace tests/test-incremental)
+	rm -f arete test $(wildcard src/*.o tests/*.o)
 
-cleaner:
+cleaner: clean
 	rm -f $(wildcard vendor/linenoise/*.d vendor/linenoise/*.o)

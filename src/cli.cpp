@@ -182,7 +182,8 @@ static int cli_exception(State* state, Value exc, const std::string& desc) {
   return EXIT_FAILURE;
 }
 
-int State::enter_cli(int argc, char* argv[]) {
+int State::enter_cli(int argc_, char* argv[]) {
+  unsigned argc = (unsigned) argc_;
   static std::string read("--read");
   static std::string help("--help");
   static std::string repl("--repl");

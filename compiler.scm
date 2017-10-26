@@ -1,13 +1,12 @@
 ;; compiler.scm - Arete bytecode compiler
 
 ;; DONE Closures (via upvalues)
-;; TODO define
-;; TODO set!
+;; DONE define
+;; DONE set!
 ;; DONE if
 ;; DONE and/or
 ;; TODO Check lambda body
-;; TODO Error reporting
-;; TODO 
+;; TODO Proper error reporting
 
 ;; OpenFn is a record representing a function in the process of being compiled.
 
@@ -74,7 +73,7 @@
       (make id name #f #f))))
 
 (define (compiler-log fn . rest)
-  (when (or (top-level-value 'COMPILER-LOG) #t)
+  (when (not (eq? (top-level-value 'COMPILER-LOG) unspecified))
     (display "arete:cc:")
     (let loop ((i 0))
       (unless (fx= i (OpenFn/depth fn))
@@ -537,3 +536,17 @@
 
   (OpenFn->procedure fn))
 
+#;(define (recompile-function name)
+  (let* ((oldfn (top-level-value name))
+         (fn-name (function-name oldfn))
+         (fn-body (function-body oldfn))
+         (fn (OpenFn/make fn-name)))
+
+    (compile fn fn-body)
+    (compile-finish fn)
+    (print "welcome to itok")
+
+    (let ((result (OpenFn->procedure fn)))
+      (set-top-level-value! name result)
+      (print result)
+      result)))

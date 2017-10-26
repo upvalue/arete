@@ -14,6 +14,7 @@
 
 #include <assert.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <stddef.h>
 #include <list>
@@ -34,17 +35,19 @@
 # define ARETE_ASSERTION_LEVEL 2
 #endif
 
-#ifndef ARETE_ASSERTION_LEVEL 
-# define ARETE_ASSERTION_LEVEL 2
-#endif
+#undef ARETE_ASSERTION_LEVEL
+#define ARETE_ASSERTION_LEVEL 0
 
-#ifndef AR_ASSERT
+#if ARETE_ASSERTION_LEVEL == 2
 # define AR_ASSERT assert
-#endif
-
-#ifndef AR_TYPE_ASSERT
 # define AR_TYPE_ASSERT assert
-#endif 
+#elif ARETE_ASSERTION_LEVEL == 1
+# define AR_ASSERT(x) 
+# define AR_TYPE_ASSERT assert
+#else
+# define AR_ASSERT(x)
+# define AR_TYPE_ASSERT(x)
+#endif
 
 #ifndef AR_LINENOISE
 # define AR_LINENOISE 1
@@ -184,6 +187,7 @@ enum Type {
   CLOSURE = 20,
   UPVALUE = 21,
   BLOB = 22,
+  FILE_PORT = 23,
 };
 
 std::ostream& operator<<(std::ostream& os, Type type);
@@ -268,6 +272,11 @@ struct Blob : HeapValue {
   static const unsigned CLASS_TYPE = BLOB;
 };
 
+struct FilePort {
+  FILE* handle;
+
+  static const unsigned CLASS_TYPE = FILE_PORT;
+};
 
 struct Value {
   union {
@@ -328,7 +337,12 @@ struct Value {
   }
 
   /** Safely retrieve the type of an object */
-  Type type() const;
+  Type type() const 
+#ifdef __GNUC__
+  __attribute__((always_inline))
+#endif
+  
+  ;
   Type type_unsafe() const {
     if(bits & 1) return FIXNUM;
     else if(bits & 2 || bits == 0) return CONSTANT;    
@@ -553,6 +567,13 @@ struct Value {
   Value record_type_parent() const;
   unsigned record_type_field_count() const;
   Value record_type_field_names() const;
+
+  // PORTS
+
+  FILE* file_port_handle() const;
+
+  static const unsigned FILE_PORT_INPUT_BIT = 1 << 9;
+  static const unsigned FILE_PORT_OUTPUT_BIT = 1 << 10;
 
   // OPERATORS
 
@@ -1732,8 +1753,7 @@ struct State {
   void record_set(Value rec_, unsigned field, Value value) {
     Record* rec = rec_.as<Record>();
 
-    RecordType* rt = rec->type;
-    AR_TYPE_ASSERT(rt->field_count > field && "out of range error on record");
+    AR_TYPE_ASSERT(rec->type->field_count > field && "out of range error on record");
 
     rec->fields[field] = value;
   }
@@ -1790,7 +1810,6 @@ struct State {
     return make_exception(get_symbol(s), cmessage, irritants);
   }
 
-
   Value make_record(Value tipe) {
     AR_FRAME(this, tipe);
 
@@ -1827,6 +1846,8 @@ struct State {
       cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
     return cfn;
   }
+
+  Value make_file_port(const std::string& path);
 
   // WRITE! Output
 
@@ -2029,6 +2050,8 @@ struct State {
 
     return exp;
   }
+
+  Value apply_toplevel(Value fn, size_t argc, Value* argv);
 
   Value eval_toplevel(Value exp) {
     exp = expand_expr(exp);
