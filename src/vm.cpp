@@ -394,10 +394,13 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
         AR_ASSERT(upvalues > 0);
 
-        Value klosure, vec, tmp;
-        AR_FRAME(*this, klosure, vec, tmp);
+        temps.clear();
+        // NOTE: Using AR_FRAME here with COMPUTED_GOTO causes issues. Seems the frame is not
+        // destroyed correctly on goto *
 
-        vec = make_vector(upvalues);
+        // More investigation required.
+
+        temps.push_back(make_vector(upvalues));
 
         for(size_t i = 0; i != upvalues; i++) {
           size_t is_enclosed = code[code_offset++];
@@ -406,7 +409,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           if(is_enclosed) {
             AR_LOG_VM("enclosing free variable " << i << " from closure idx " << idx);
             AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
-            vector_append(vec, f.closure->upvalues->data[idx]);
+            vector_append(temps[0], f.closure->upvalues->data[idx]);
           } else {
             AR_LOG_VM("enclosing local variable " << i << " from f.upvalues idx " << idx);
             // Problem: Upvalue array does not necessarily correlate 1:1 with locals.
@@ -434,20 +437,20 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             AR_ASSERT(f.upvalues[idx].type() == UPVALUE);
             AR_ASSERT(!f.upvalues[idx].upvalue_closed());
             AR_ASSERT(f.upvalues[idx].upvalue().type() != UPVALUE);
-            vector_append(vec, f.upvalues[idx]);
+            vector_append(temps[0], f.upvalues[idx]);
           }
 
           //std::cout << vec.vector_ref(i) << std::endl;
           // AR_ASSERT("AUGH" && gc.live(vec.vector_ref(i)));
           //std::cout << vec.vector_ref(i).upvalue_closed() << std::endl;
-          AR_LOG_VM("ENCLOSING VALUE " << i << " = " << vec.vector_ref(i) << " " << vec.vector_ref(i).upvalue());
-          AR_ASSERT(vec.vector_ref(i).type() == UPVALUE);
-          AR_ASSERT(vec.vector_ref(i).upvalue().type() != UPVALUE);
+          AR_LOG_VM("ENCLOSING VALUE " << i << " = " << temps[0].vector_ref(i) << " " << temps[0].vector_ref(i).upvalue());
+          AR_ASSERT(temps[0].vector_ref(i).type() == UPVALUE);
+          AR_ASSERT(temps[0].vector_ref(i).upvalue().type() != UPVALUE);
         }
-        klosure = gc.allocate(CLOSURE, sizeof(Closure));
-        klosure.as<Closure>()->upvalues = vec.vector_storage().as<VectorStorage>();
-        klosure.as<Closure>()->function = f.stack[f.stack_i-1];
-        f.stack[f.stack_i-1] = klosure;
+        temps.push_back(gc.allocate(CLOSURE, sizeof(Closure)));
+        temps[1].as<Closure>()->upvalues = temps[0].vector_storage().as<VectorStorage>();
+        temps[1].as<Closure>()->function = f.stack[f.stack_i-1];
+        f.stack[f.stack_i-1] = temps[1];
         VM_DISPATCH();
       }
 

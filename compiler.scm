@@ -203,13 +203,13 @@
   (compiler-log fn "compiling application" x)
   ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
   ;(compile-expr fn (car x) (and (eq? argc 0) #f))
-  (compile-expr fn (car x) #f)
+  (compile-expr fn (car x) x #f)
 
   (set! stack-check (OpenFn/stack-size fn))
 
   (for-each-i
     (lambda (i x)
-      (compile-expr fn x #f))
+      (compile-expr fn x #f #f))
       ;(compile-expr fn x (and (eq? argc (fx- i 1)) tail?)))
     (cdr x))
 
@@ -370,7 +370,7 @@
 (define (compile-define fn x tail?)
   (define name (cadr x))
 
-  (compile-expr fn (list-ref x 2) tail?)
+  (compile-expr fn (list-ref x 2) #f tail?)
 
   (if (OpenFn/toplevel? fn)
     (begin
@@ -387,7 +387,7 @@
   (define name (cadr x))
   (define result (fn-lookup fn name))
 
-  (compile-expr fn (list-ref x 2) tail?)
+  (compile-expr fn (list-ref x 2) #f tail?)
 
   (case (car result)
     (global
@@ -421,17 +421,17 @@
   (define then-branch-end (gensym 'if-else))
   (define else-branch-end (gensym 'if-end))
 
-  (compile-expr fn condition #f)
+  (compile-expr fn condition #f #f)
 
   ;(print 'jump-if-false then-branch-end)
   (emit fn 'jump-if-false then-branch-end 1)
-  (compile-expr fn then-branch tail?)
+  (compile-expr fn then-branch #f tail?)
   ;(pretty-print fn)
 
   (emit fn 'jump else-branch-end)
   (register-label fn then-branch-end)
 
-  (compile-expr fn else-branch tail?)
+  (compile-expr fn else-branch #f tail?)
 
   (register-label fn else-branch-end))
 
@@ -458,7 +458,7 @@
           ;; Emit a jump-if-false for each expression
           ;; If it's at the expression
           ;(print i argc)
-          (compile-expr fn x (and tail? (fx= i argc)))
+          (compile-expr fn x #f (and tail? (fx= i argc)))
           (emit fn 'jump-if-false (if (fx= i argc) and-fail-pop and-fail) (if (fx= i argc) 0 1)))
         (cdr x))
 
@@ -487,7 +487,7 @@
   (define x-len (fx- (length x) 2))
   (for-each-i 
     (lambda (i x)
-      (compile-expr fn x (and tail? (fx= i x-len))))
+      (compile-expr fn x #f (and tail? (fx= i x-len))))
     (cdr x)))
 
 (define (compile-special-form fn x type tail?)
@@ -513,8 +513,13 @@
 
   (if (memq x '(lambda define set! if begin and or quote)) x #f))
 
-(define (compile-expr fn x tail?)
+(define (compile-expr fn x src tail?)
   (compiler-log fn "compiling expr" x)
+  (aif (and src (list-get-source src))
+    (begin
+      (compiler-log fn "expr source:" it)
+      (register-source fn src))
+  )
   (cond
     ((self-evaluating? x) (compile-constant fn x))
     ((identifier? x) (compile-identifier fn x))
@@ -532,7 +537,7 @@
     (lambda (i x)
       (register-source fn (list-ref-cell body i))
       ;(print "CELL" (list-ref-cell body i))
-      (compile-expr fn x (fx= i end)))
+      (compile-expr fn x #f (fx= i end)))
     body)
 
   (emit fn 'return)
