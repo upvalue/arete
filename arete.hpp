@@ -33,17 +33,15 @@
 #ifdef ARETE_DEV
 # define ARETE_GC_DEBUG 1
 # define ARETE_ASSERTION_LEVEL 2
+# define ARETE_BENCH_GC 1
 #endif
-
-#undef ARETE_ASSERTION_LEVEL
-#define ARETE_ASSERTION_LEVEL 0
 
 #if ARETE_ASSERTION_LEVEL == 2
 # define AR_ASSERT assert
 # define AR_TYPE_ASSERT assert
 #elif ARETE_ASSERTION_LEVEL == 1
-# define AR_ASSERT(x) 
-# define AR_TYPE_ASSERT assert
+# define AR_ASSERT(x) if(!(x)) { std::cerr << "arete:assert: " << #x << " at " << __FILE__ << ':' << __LINE__ << " failed" << std::endl; }
+# define AR_TYPE_ASSERT(x) AR_ASSERT(x)
 #else
 # define AR_ASSERT(x)
 # define AR_TYPE_ASSERT(x)
@@ -412,8 +410,8 @@ struct Value {
     ((T*)(as<Blob>()->data))[idx] = val;
   }
 
-  template <class T> T blob_get(size_t idx) const {
-    return (T*) as<Blob>()->data[idx];
+  template <class T> T blob_ref(size_t idx) const {
+    return ((T*) as<Blob>()->data)[idx];
   }
 
   size_t blob_length() const { return as<Blob>()->length; }
@@ -521,7 +519,7 @@ struct Value {
   bool vm_function_variable_arity() const { return heap->get_header_bit(VMFUNCTION_VARIABLE_ARITY_BIT); }
 
   Value vm_function_name() const;
-  size_t* vm_function_bytecode() const;
+  size_t* vm_function_code() const;
   VectorStorage* vm_function_constants() const;
 
   static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
@@ -545,10 +543,6 @@ struct Value {
 
 
   static const unsigned UPVALUE_CLOSED_BIT = 1 << 9;
-
-  // CLOSURES
-
-
 
   // RECORD
   Value record_type() const;
@@ -641,14 +635,6 @@ struct SourceLocation {
   unsigned line, begin, length;
 };
 
-/** 
- * Virtual machine source location. When errors are encountered in the VM, an array of these is
- * "replayed" until OFFSET is reached in the bytecode array; this is where the erroneous
- * instructions are assumed to originate
- */
-struct VMSourceLocation : SourceLocation {
-  unsigned offset;
-};
 
 inline std::ostream& operator<<(std::ostream& os, const SourceLocation& src) {
   os << "SRC " << src.source << " line: " << src.line << " begin: " << src.begin <<
@@ -850,6 +836,7 @@ struct VMFunction : HeapValue {
   Value name;
   VectorStorage* constants;
   Blob* free_variables;
+  Blob* sources;
 
   unsigned constant_count, min_arity, max_arity, stack_max, local_count;
   size_t bytecode_size;
@@ -870,6 +857,11 @@ inline unsigned Value::vm_function_max_arity() const {
 
 inline Value Value::vm_function_name() const {
   return as<VMFunction>()->name;
+}
+
+inline size_t* Value::vm_function_code() const {
+  // No type check because this will be invoked by the GC on a not-yet-live object.
+  return (size_t*)(((char*) heap) + sizeof(VMFunction));
 }
 
 inline VectorStorage* Value::vm_function_constants() const {
@@ -930,12 +922,6 @@ inline VMFunction* Value::closure_function() const {
   return as<Closure>()->function.as<VMFunction>();
 }
 
-inline size_t* Value::vm_function_bytecode() const {
-  char* ptr = (char*) heap;
-  char* ret = (ptr + (size_t)(sizeof(VMFunction)));
-  AR_ASSERT(ret > ptr);
-  return (size_t*) ret;
-}
 
 /// VECTORS
 
@@ -1184,6 +1170,9 @@ struct VMFrame {
   Value* stack;
   Value* locals;
   Value* upvalues;
+  /** Pointer to wordcode, updated by the GC */
+  size_t *code;
+  Value exception;
   size_t stack_i;
   size_t depth;
 

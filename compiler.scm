@@ -72,6 +72,34 @@
     (lambda (id name)
       (make id name #f #f))))
 
+;; This function returns the "cell" at a given I.
+;; For example, (list-ref-cell '(1 2 3) 1) returns (2 3)
+;; This is useful for getting source code information attached to lists.
+(define (list-ref-cell lst i)
+  (if (or (null? lst) (not (pair? lst)))
+    (raise 'type "list-ref-cell expects a list with at least one element as its argument" (list lst)))
+  (if (fx= i 0)
+    lst
+    (let loop ((rest lst)
+               (ii 0))
+      (if (null? rest)
+        (raise 'type "list-ref-cell bounds error" (list lst (length lst) i)))
+      (if (fx= ii i)
+        rest
+        (loop (cdr rest) (fx+ ii 1))))))
+
+(define (register-source fn cell)
+  (aif (list-get-source cell)
+    (begin
+      (vector-append! (OpenFn/sources fn) (vector-length (OpenFn/insns fn)))
+      (let loop ((i 0)
+                 (sources (OpenFn/sources fn)))
+        (if (fx= i (vector-length it))
+          #t
+          (begin
+            (vector-append! sources (vector-ref it i))
+            (loop (fx+ i 1) sources)))))))
+
 (define (compiler-log fn . rest)
   (when (not (eq? (top-level-value 'COMPILER-LOG) unspecified))
     (display "arete:cc:")
@@ -118,6 +146,7 @@
         (jump 12)
         (jump-if-false 13)
         (pop 14)
+        (push-immediate 15)
         (else (raise 'compile "unknown named instruction" (list insn)))))))
 
 ;; Adjust the stack size while recalculating the stack max if necessary
@@ -136,7 +165,7 @@
       ;; expression and conditionally evaluated, saying it does makes it simpler to check the stack size
       ((jump pop) -1)
       ((words close-over return) 0)
-      ((push-constant global-get local-get upvalue-get) 1)
+      ((push-immediate push-constant global-get local-get upvalue-get) 1)
       ((upvalue-set local-set global-set) 2)
       ;; Only pops stack if argument is 1
       ((jump-if-false) (if (fx= (list-ref insns 2) 1) -1 0))
@@ -158,7 +187,10 @@
     insns))
 
 (define (compile-constant fn x)
-  (emit fn 'push-constant (register-constant fn x)))
+  (if (or (fixnum? x) (boolean? x))
+    (emit fn 'push-immediate (object-bits x))
+    (emit fn 'push-constant (register-constant fn x)))
+)
 
 (define (fn-push-source fn x)
   (aif (list-get-source x)
@@ -229,7 +261,6 @@
 
         #;(when (Var/free-variable-id it)
           (raise 'compile "duplicate free variable" (list it)))
-
 
         ;; If this is a free variable and it hasn't been noted as such, do so now
         (unless (or (Var/upvalue? it) (Var/free-variable-id it))
@@ -420,7 +451,7 @@
   ;; then we need a pop instruction
 
   (if (fx= x-len 1)
-    (emit fn 'push-constant (register-constant fn #t))
+    (compile-constant fn #t) #;(emit fn 'push-constant (register-constant fn #t))
     (begin
       (for-each-i 
         (lambda (i x)
@@ -499,6 +530,8 @@
   (compiler-log fn "compiling body" body)
   (for-each-i
     (lambda (i x)
+      (register-source fn (list-ref-cell body i))
+      ;(print "CELL" (list-ref-cell body i))
       (compile-expr fn x (fx= i end)))
     body)
 

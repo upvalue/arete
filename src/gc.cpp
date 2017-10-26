@@ -93,12 +93,12 @@ void GCSemispace::collect(size_t request, bool force) {
       // Three pointers
       case RENAME:
       case EXCEPTION:
-      case VMFUNCTION:
         AR_COPY(Exception, message);
         AR_COPY(Exception, tag);
         AR_COPY(Exception, irritants);
         break;
       // Four pointers
+      case VMFUNCTION:
       case RECORD_TYPE:
         AR_COPY(RecordType, apply);
         AR_COPY(RecordType, print);
@@ -134,8 +134,8 @@ void GCSemispace::collect(size_t request, bool force) {
       }
       // Should never be encountered on heap
       case BLOCK: case CONSTANT: case FIXNUM: default:
-        std::cout << obj << std::endl; 
-        std::cout << "mystery object size: " << obj->size << std::endl; 
+        std::cerr << obj << std::endl; 
+        std::cerr << "mystery object size: " << obj->size << std::endl; 
         AR_ASSERT(!"arete:gc: encountered bad value on heap; probably a GC bug");
         break;
 #undef AR_COPY
@@ -179,6 +179,10 @@ void GCSemispace::copy_roots() {
     size_t free_vars = fn->free_variables ? fn->free_variables->length : 0;
 
     copy((HeapValue**) &link->fn);
+
+    Value updated_fn((VMFunction*) link->fn->size);
+    // link->code = updated_fn.vm_function_code();
+    // link->code = updated_fn->code;
 
     for(size_t i = 0; i != free_vars; i++) {
       copy((HeapValue**) &link->upvalues[i]);

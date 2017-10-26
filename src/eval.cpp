@@ -664,6 +664,7 @@ Value State::eval_apply_generic(Value fn, Value args, bool eval_args) {
 
   std::cerr << "interpreter cannot apply object " << fn << std::endl;
   AR_ASSERT(!"eval_apply_generic failed");
+  return C_UNSPECIFIED;
 }
 
 } // namespace arete

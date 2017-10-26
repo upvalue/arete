@@ -425,6 +425,10 @@ Value fn_stringp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == STRING);
 }
 
+Value fn_value_type(State& state, size_t argc, Value* argv) {
+  return Value::make_fixnum(argv[0].type());
+}
+
 Value fn_macrop(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == FUNCTION && argv[0].function_is_macro());
 }
@@ -1322,6 +1326,8 @@ Value fn_list_get_source(State& state, size_t argc, Value* argv) {
   if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
     AR_FRAME(state, lst, vec);
 
+    vec = state.make_vector();
+
     SourceLocation src(lst.pair_src());
 
     state.vector_append(vec, Value::make_fixnum(src.source));
@@ -1341,7 +1347,8 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   // TODO: Could type check more thoroughly here.
 
   size_t size = sizeof(VMFunction);
-  Value name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob;
+  Value name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob,
+     sources_blob;
   AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn, free_vars, free_vars_blob);
 
   name = rec.record_ref(0);
@@ -1353,6 +1360,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   // because it allocates
   free_vars = rec.record_ref(15);
 
+
   if(free_vars.type() == VECTOR && free_vars.vector_length() > 0) {
     size_t length = free_vars.vector_length();
     free_vars_blob = state.make_blob<size_t>(length);
@@ -1363,6 +1371,15 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
     }
 
     AR_ASSERT(free_vars_blob.blob_length() == length);
+  }
+
+  sources = rec.record_ref(3);
+  if(sources.type() == VECTOR && sources.vector_length() > 0) {
+    size_t length = sources.vector_length();
+    sources_blob = state.make_blob<size_t>(length);
+    for(size_t i = 0; i != length; i++) {
+      sources_blob.blob_set<size_t>(i, sources.vector_ref(i).fixnum_value());
+    }
   }
 
   size_t insn_count = insns.vector_length();
@@ -1383,7 +1400,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   vfn->local_count = rec.record_ref(5).fixnum_value();
   vfn->name = rec.record_ref(0);
   vfn->free_variables = static_cast<Blob*>(free_vars_blob.heap);
-
+  vfn->sources = static_cast<Blob*>(sources_blob.heap);
 
   // Check for variable arity
   if(rec.record_ref(11) == C_TRUE) {
@@ -1396,18 +1413,22 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   vfn->constants = rec.record_ref(2).vector_storage().as<VectorStorage>();
 
   // Copy bytecode
-  size_t* bytecode_array = (size_t*) fn.vm_function_bytecode();
+  size_t* code_array = (size_t*) fn.vm_function_code();
 
-  AR_ASSERT(((char*) bytecode_array) > ((char*) fn.vm_function_constants()));
+  AR_ASSERT(((char*) code_array) > ((char*) fn.vm_function_constants()));
   
   for(size_t i = 0; i != insn_count; i++) {
-    (*bytecode_array++) = insns.vector_ref(i).fixnum_value();
+    (*code_array++) = insns.vector_ref(i).fixnum_value();
   }
 
   // Check we didn't go over the end of the object
-  AR_ASSERT((char*) bytecode_array <= ((char*) (vfn)) + vfn->size);
+  AR_ASSERT((char*) code_array <= ((char*) (vfn)) + vfn->size);
 
   return fn;
+}
+
+Value fn_object_bits(State& state, size_t argc, Value* argv) {
+  return Value::make_fixnum(argv[0].bits);
 }
 
 // Garbage collector
@@ -1466,6 +1487,7 @@ void State::install_core_functions() {
   defun_core("flonum?", fn_flonump, 1);
   defun_core("table?", fn_tablep, 1);
   defun_core("string?", fn_stringp, 1);
+  defun_core("value-type", fn_value_type, 1);
 
   // Strings
   defun_core("string-copy", fn_string_copy, 1);
@@ -1578,6 +1600,7 @@ void State::install_core_functions() {
   // Compiler
   defun_core("list-get-source", fn_list_get_source, 1);
   defun_core("OpenFn->procedure", fn_openfn_to_procedure, 1);
+  defun_core("object-bits", fn_object_bits, 1);
 
   // Garbage collector
   defun_core("gc:collect", fn_gc_collect, 0);

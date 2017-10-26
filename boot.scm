@@ -13,6 +13,16 @@
 
 (define not (lambda (x) (eq? x #f)))
 
+(define boolean? (lambda (v) (or (eq? v #t) (eq? v #f))))
+#|
+(define fixnum? (lambda (v) (eq? (value-type v) 1)))
+(define string? (lambda (v) (eq? (value-type v) 5)))
+(define symbol? (lambda (v) (eq? (value-type v) 7)))
+(define vector? (lambda (v) (eq? (value-type v) 9)))
+(define table? (lambda (v) (eq? (value-type v) 15)))
+(define rename? (lambda (v) (eq? (value-type v) 16)))
+|#
+
 (define unspecified (if #f #f))
 
 (define rename

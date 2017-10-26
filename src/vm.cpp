@@ -1,6 +1,6 @@
 // vm.cpp - Virtual machine
 
-// TODO Computed goto
+// DONE Computed goto
 // TODO alloca alternative?
 // TODO Disassembler
 // TODO Fix *code pointer
@@ -33,6 +33,20 @@
 
 namespace arete {
 
+/**
+ * Like SourceLocation, but includes a code offset
+ */
+struct VMSourceLocation {
+  size_t code, source, line, begin, length;
+};
+
+std::ostream& operator<<(std::ostream& os, const VMSourceLocation& loc) {
+  os << "#<VMSourceLocation code-position: " << loc.code << ' ' <<
+    "source: " << loc.source << " line: " << loc.line << " begin: " << loc.begin <<
+    " length: " << loc.length << '>';
+}
+
+
 static std::string depth_to_string(const VMFrame& f) {
   std::string str;
   size_t d = f.depth;
@@ -42,7 +56,7 @@ static std::string depth_to_string(const VMFrame& f) {
   return str;
 }
 
-VMFrame::VMFrame(State& state_): state(state_), stack_i(0), depth(0) {
+VMFrame::VMFrame(State& state_): state(state_), exception(C_FALSE), stack_i(0), depth(0) {
   previous = state.gc.vm_frames;
   if(previous) {
     depth = previous->depth+1;
@@ -84,6 +98,7 @@ enum {
   OP_JUMP = 12,
   OP_JUMP_IF_FALSE = 13,
   OP_POP = 14,
+  OP_PUSH_IMMEDIATE = 15,
 };
 
 #define AR_PRINT_STACK() \
@@ -96,7 +111,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_GLOBAL_GET, &&LABEL_OP_GLOBAL_SET
     , &&LABEL_OP_RETURN, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL, &&LABEL_OP_LOCAL_GET,
     &&LABEL_OP_LOCAL_SET, &&LABEL_OP_UPVALUE_GET, &&LABEL_OP_UPVALUE_SET, &&LABEL_OP_CLOSE_OVER,
-   &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_POP
+   &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_POP, &&LABEL_OP_PUSH_IMMEDIATE
   };
 #endif
   // Frames lost  due to tail call optimization
@@ -159,22 +174,13 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   size_t code_offset = 0;
    
-  //gc.collect();
+  // gc.collect();
 
-  // This can be moved
-  // Putting it in the main loop severely slows down the program,
-  // so it will need to be added to the VMFrame and updated.
-  // By copy
-
-  // size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
-  // VM main loop
   while(true) {
-    // We have to account for things moving.
+    // gc.collect();
 
     size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
     size_t insn = code[code_offset++];
-    // gc.collect();
-
 #ifdef AR_COMPUTED_GOTO
     goto *dispatch_table[insn];
 #endif
@@ -196,6 +202,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         AR_LOG_VM("global-get idx: " << idx << " ;; " << f.fn->constants->data[idx]);
         AR_ASSERT(sym.type() == SYMBOL && "global-get called against non-symbol");
         f.stack[f.stack_i++] = sym.symbol_value();
+        if(f.stack[f.stack_i - 1] == C_UNDEFINED) {
+          std::ostringstream os;
+          os << "reference to undefined global " << sym;
+          f.exception = eval_error(os.str());
+          goto exception;
+        }
         VM_DISPATCH();
       }
 
@@ -331,9 +343,9 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           }
           case FUNCTION:
           default:
-            std::cerr << "cannot call interpreted function from VM code" << std::endl;
-            AR_ASSERT(!"cannot call interpreted function from VM code");
-            break;
+            std::ostringstream os;
+            os << "attempt to apply non-applicable value " << afn;
+            return eval_error(os.str());
         }
         VM_DISPATCH();
       }
@@ -479,6 +491,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         VM_DISPATCH();
       }
 
+      VM_CASE(OP_PUSH_IMMEDIATE): {
+        AR_LOG_VM("push-immediate" << Value(code[code_offset]));
+        f.stack[f.stack_i++] = Value(code[code_offset++]);
+        VM_DISPATCH();
+      }
+
       VM_CASE(OP_BAD): {
 #ifndef AR_COMPUTED_GOTO
       default:
@@ -491,6 +509,38 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   }
 
   return f.stack[f.stack_i];
+
+  exception:
+    // Create VM tracebacks
+
+    // We take an array of VMSourceLocations and cycle through them until we find the closest
+    // one to the code position at which the exception occurred.
+
+    Value sources(f.fn->sources);
+    if(sources.type() == BLOB && sources.blob_length() > 0) {
+      // Source code information is available
+      size_t i = 0;
+      VMSourceLocation vmloc = sources.blob_ref<VMSourceLocation>(0);
+      for(i = 1; i < sources.blob_length() / 5; i++) {
+        VMSourceLocation vmloc2 = sources.blob_ref<VMSourceLocation>(i);
+        if(vmloc2.code > code_offset) {
+          break;
+        }
+        vmloc = vmloc2;
+      }
+
+      SourceLocation loc;
+      loc.source = vmloc.source;
+      loc.line = vmloc.line;
+      loc.begin = vmloc.begin;
+      loc.length = vmloc.length;
+
+      std::ostringstream os;
+      os << source_info(loc, f.fn->name);
+      stack_trace.push_back(os.str());
+    }
+
+    return f.exception;
 }
 
 }
