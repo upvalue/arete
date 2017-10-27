@@ -21,8 +21,8 @@
 # define VM_SWITCH() switch(insn)
 #endif
 
-#define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg)
-// #define AR_LOG_VM(msg)
+// #define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg)
+#define AR_LOG_VM(msg)
 // #define AR_LOG_VM(msg)
 // #define AR_LOG_VM_INSN(msg) ARETE_LOG(())
 
@@ -353,12 +353,34 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               AR_ASSERT(f.stack_i > 0);
 
               // Finally, check for an exception
-              if(f.stack[f.stack_i - 1].is_active_exception()) 
-                return f.stack[f.stack_i - 1];
+              if(f.stack[f.stack_i - 1].is_active_exception()) {
+                f.exception = f.stack[f.stack_i - 1];
+                goto exception;
+              }
             }
             break;
           }
-          case FUNCTION:
+          case FUNCTION: {
+            temps.clear();
+            temps.push_back(C_NIL);
+
+            for(size_t i = 0; i != fargc; i++) {
+              temps[0] = make_pair(f.stack[f.stack_i - fargc + i], temps[0]);
+            }
+
+            f.stack[f.stack_i - fargc - 1] = eval_apply_generic(afn, temps[0], false);
+            f.stack_i -= (fargc);
+
+            AR_ASSERT(f.stack_i > 0);
+
+            if(f.stack[f.stack_i - 1].is_active_exception()) {
+              f.exception = f.stack[f.stack_i - 1];
+              goto exception;
+            }
+
+            break;
+
+          }
           default:
             std::ostringstream os;
             os << "attempt to apply non-applicable value " << afn;

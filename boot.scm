@@ -568,4 +568,13 @@
 (define (values . rest)
   (cons (list 'values) rest))
 
-
+#;(define (vector . rest)
+  (let ((vec (make-vector)))
+    (if (null? rest)
+      vec
+      (let loop ((rest (cdr rest))
+                 (this (car rest)))
+        (vector-append! vec this)
+        (unless (null? rest)
+          (loop (cdr rest))
+          )))))

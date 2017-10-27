@@ -589,22 +589,6 @@
   fn)
 
 (define (compile-finish fn)
-  #|
-  (table-for-each 
-    (lambda (_ var)
-      (when (Var/free-variable-id var)
-        (unless (OpenFn/free-variables fn)
-          (OpenFn/free-variables! fn (make-vector)))
-
-        (compiler-log fn "has free variable" (Var/name var) " at local idx " (Var/idx var) " free-variable-id: " (Var/free-variable-id var))
-
-        (vector-append! (OpenFn/free-variables fn) (Var/idx var))))
-    (OpenFn/env fn))
-  |#
-
-  ;; TODO: Free-variables must be appended in order of definition.
-
-
   (compiler-log fn fn)
 
   (let loop ((i 0))
