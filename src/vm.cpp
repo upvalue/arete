@@ -258,6 +258,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       VM_CASE(OP_APPLY):
       VM_CASE(OP_APPLY_TAIL): {
+        insn = code[code_offset-1];
         size_t fargc = code[code_offset++];
         Value afn = f.stack[f.stack_i - fargc - 1];
         AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " fargc: " << fargc << " fn: " << afn);
@@ -570,6 +571,9 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       std::ostringstream os;
       os << source_info(loc, f.fn->name);
+      if(frames_lost > 0) {
+        os << std::endl << "<" << frames_lost << " frames lost due to tail call optimization>";
+      }
       stack_trace.push_back(os.str());
     }
 

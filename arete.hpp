@@ -1228,6 +1228,8 @@ struct GCCommon {
   size_t collections, live_objects_after_collection, live_memory_after_collection, heap_size;
   size_t block_size;
 
+  std::vector<std::string> load_paths;
+
   GCCommon(State& state_, size_t heap_size_ = ARETE_HEAP_SIZE): state(state_), 
     vm_frames(0),
     collect_before_every_allocation(false),
@@ -2001,6 +2003,7 @@ struct State {
   // TODO: This should perhaps be removed entirely.
   Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);
   Value apply_vm(Value fn, size_t argc, Value* argv);
+  Value apply(Value fn, size_t argc, Value* argv);
   
   /** Apply a C or a Scheme function */
   Value eval_apply_generic(Value fn, Value args, bool eval_args);
@@ -2049,8 +2052,6 @@ struct State {
   }
 
   ///// MODULES
-
-  std::vector<std::string> load_paths;
 
   Value load_stream(std::istream&, size_t source = 0);
   Value load_file(const std::string&);

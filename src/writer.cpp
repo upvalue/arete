@@ -207,6 +207,15 @@ void State::print_exception(std::ostream& os, Value exc) {
   AR_TYPE_ASSERT(exc.type() == EXCEPTION);
   print_stack_trace(os);
 
+  // TODO:
+  // Rather than having uniquely formatted errors for each type;
+  // we could attach a SourceLocation to Exception. Then, additional information can be pushed onto
+  // the call stack and the SourceLocation can be overwritten.
+
+  // The expander would have to be modified to extract source location information.
+
+  // This also makes more sense for e.g. the VM where a source pair is not available at execution.
+
   if(exc.exception_tag() == globals[State::S_EVAL_ERROR]) {
     os << "Evaluation error: " << exc.exception_message().string_data() << std::endl;
     if(exc.exception_irritants().type() == PAIR) {

@@ -660,7 +660,7 @@ Value State::eval_apply_generic(Value fn, Value args, bool eval_args) {
     return eval_apply_scheme(fn.function_parent_env(), fn, args, C_FALSE, C_FALSE, eval_args);
   } else if(fn.type() == CFUNCTION) {
     return eval_apply_c(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
-  } 
+  }
 
   std::cerr << "interpreter cannot apply object " << fn << std::endl;
   AR_ASSERT(!"eval_apply_generic failed");

@@ -212,7 +212,7 @@
 
   (for-each-i
     (lambda (i sub-x)
-      (compile-expr fn sub-x (list-ref-cell x i) #f))
+      (compile-expr fn sub-x (list-ref-cell x (fx+ i 1)) #f))
     (cdr x))
 
   (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
@@ -290,6 +290,8 @@
         (loop (OpenFn/parent search-fn))))))
 
 (define (compile-identifier fn x)
+  (if (rename? x)
+    (set! x (rename-expr x)))
   (define result (fn-lookup fn x))
 
   (compiler-log fn "compiling identifier" result)
@@ -371,6 +373,12 @@
 
 (define (compile-define fn x tail?)
   (define name (cadr x))
+  (define var #f)
+
+  (unless (OpenFn/toplevel? fn)
+    (set! var (Var/make (OpenFn/local-count fn) name))
+    (table-set! (OpenFn/env fn) name var)
+    (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1)))
 
   (compile-expr fn (list-ref x 2) (list-ref-cell x 2) tail?)
 
@@ -378,10 +386,7 @@
     (begin
       (emit fn 'push-constant (register-constant fn name))
       (emit fn 'global-set 0))
-    (let ((var (Var/make (OpenFn/local-count fn) name)))
-      ;; Register this variable as part of the environment
-      (table-set! (OpenFn/env fn) name var)
-      (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))
+    (begin
       (emit fn 'local-set (Var/idx var))))
 )
 
@@ -454,11 +459,11 @@
     (compile-constant fn #t) #;(emit fn 'push-constant (register-constant fn #t))
     (begin
       (for-each-i 
-        (lambda (i x)
+        (lambda (i sub-x)
           ;; Emit a jump-if-false for each expression
           ;; If it's at the expression
           ;(print i argc)
-          (compile-expr fn x #f (and tail? (fx= i argc)))
+          (compile-expr fn sub-x (list-ref-cell x (fx+ i 1)) (and tail? (fx= i argc)))
           (emit fn 'jump-if-false (if (fx= i argc) and-fail-pop and-fail) (if (fx= i argc) 0 1)))
         (cdr x))
 
@@ -490,7 +495,7 @@
           (argc (fx- x-len 2)))
       (for-each-i
         (lambda (i sub-x)
-          (compile-expr fn sub-x #f (and tail? (fx= i argc)))
+          (compile-expr fn sub-x (list-ref-cell x (fx+ i 1)) (and tail? (fx= i argc)))
           (emit fn 'jump-if-true or-success 0)
           (if (not (fx= i argc)) (emit fn 'pop)))
         (cdr x))
