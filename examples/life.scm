@@ -11,9 +11,20 @@
 
 (define (print-grid g)
   (let loop ((i 0))
-    (when (eq? (fx= i (vector-length g)) #f)
-      (print (vector-ref g i))
-      (loop (fx+ i 1)))))
+    (unless (= i (vector-length g))
+      (display "(")
+      (let loop2 ((sg (vector-ref g i))
+                  (j 0))
+        (unless (= j (vector-length sg))
+          (display
+            (if (eq? (vector-ref sg j) 1) "#" (if (= j (- (vector-length sg) 1)) "-" "-")))
+          (unless (= j (- (vector-length sg) 1))
+            (display " "))
+          (loop2 sg (+ j 1))))
+      (display ")")
+      (newline)
+      (loop (+ i 1))      
+      )))
 
 (define (get-cell g x y)
   ;(print x y)
@@ -51,8 +62,6 @@
     (let loop ((xi 0)
                (yi 0))
       (unless (= yi y)
-        ;(print xi yi (get-cell g xi yi) (next-cell g (get-cell g xi yi) xi yi))
-        ;(print "cell" xi yi)
         (set-cell! new-grid xi yi (next-cell g (get-cell g xi yi) xi yi))
         (loop
           (if (= (+ xi 1) x) 0 (+ xi 1))
@@ -63,18 +72,13 @@
   (define loop
     (lambda (i grid)
       (unless (= i turns)
-        (print "turn:" i)
+        (display "turn: ")
+        (display (+ i 1))
+        (newline)
         (print-grid grid)
-        (loop (fx+ i 1) (next-grid grid)))))
+        (loop (+ i 1) (next-grid grid)))))
 
-  (loop 0 grid)
-
-  #;(let loop ((i 0)
-             (grid grid))
-    (unless (= i turns)
-      (print "turn:" i)
-      (print-grid grid)
-      (loop (fx+ i 1) (next-grid grid)))))
+  (loop 0 grid))
 
 ;; Glider that goes into the lower right and becomes a 2x2 box
 (begin
@@ -88,6 +92,7 @@
 
   (simulate grid 25))
 
+#|
 ;; Blinker
 (begin
   (define grid (make-grid 3 3))
@@ -96,4 +101,5 @@
   (set-cell! grid 1 1 1)
   (set-cell! grid 2 1 1))
 
-(simulate grid 5)
+(simulate grid 20)
+|#
