@@ -25,6 +25,7 @@ void GCSemispace::copy(HeapValue** ref) {
 
   memcpy(cpy, obj, size);
   
+  AR_ASSERT(obj->size == size);
   // We use the object's size field to store the forward pointer
   obj->size = (size_t) cpy;
   obj->header = RESERVED;
@@ -185,12 +186,7 @@ void GCSemispace::copy_roots() {
 
     copy((HeapValue**) &link->fn);
 
-    Value updated_fn((VMFunction*) link->fn->size);
-
-    copy(&link->exception.heap);
-
-    // link->code = updated_fn.vm_function_code();
-    // link->code = updated_fn->code;
+    copy((HeapValue**)&link->exception);
 
     for(size_t i = 0; i != free_vars; i++) {
       copy((HeapValue**) &link->upvalues[i]);
@@ -204,9 +200,15 @@ void GCSemispace::copy_roots() {
       copy((HeapValue**) &link->stack[i]);
     }
 
-    for(unsigned i = 0 ; i != local_count; i++) {
+    for(unsigned i = 0; i != local_count; i++) {
       copy((HeapValue**) &link->locals[i]);
     }
+
+    // Update code pointer.
+    link->code = (size_t*)((char*) (link->fn) + sizeof(VMFunction));
+
+    // I lost like two hours to a missing paren here
+    // Like this: link->code = (size_t*)(char*) (link->fn) + sizeof(VMFunction);
 
     link = link->previous;
   }

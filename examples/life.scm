@@ -16,62 +16,84 @@
       (loop (fx+ i 1)))))
 
 (define (get-cell g x y)
-  (vector-ref (vector-ref g y) x))
+  ;(print x y)
+  (cond 
+    ((< x 0) 0)
+    ((< y 0) 0)
+    ((>= x (vector-length (vector-ref g 0))) 0)
+    ((>= y (vector-length g)) 0)
+    (else (vector-ref (vector-ref g y) x))))
 
 (define (set-cell! g x y n)
   (vector-set! (vector-ref g y) x n))
-      
 
 (define (next-cell g value x y)
-  (let ((n (+ (get-cell grid (- x 1) (- y 1))
-              (get-cell grid (- x 1) y)
-              (get-cell grid (- x 1) (- y 1))
-              (get-cell grid x (- y 1))
-              (get-cell grid x (+ y 1))
-              (get-cell grid x (+ x 1) (- y 1))
-              (get-cell grid (+ x 1) y)
-              (get-cell grid (+ x 1) (+ y 1)))))
-    (if (and (= cell 1) (or (= n 2) (= n 3)))
-      1
-      (if (and (= cell 0) (= n 3))
-        1
-        0))))
-
+  (let ((n (+ (get-cell g (- x 1) (- y 1))
+              (get-cell g (- x 1) y)
+              (get-cell g (- x 1) (+ y 1))
+              (get-cell g x (- y 1))
+              (get-cell g x (+ y 1))
+              (get-cell g (+ x 1) (- y 1))
+              (get-cell g (+ x 1) y)
+              (get-cell g (+ x 1) (+ y 1)))))
+    (cond 
+      ;; live cell with two or three living cells becomes dead 
+      ((and (= value 1) (or (= n 2) (= n 3))) 1)
+      ;; dead cell with three live cells becomes live
+      ((and (= value 0) (= n 3)) 1)
+      ;; everything else is dead
+      (else 0))))
 
 (define (next-grid g)
-  (let ((y (vector-length g))
-        (x (vector-length (vector-ref g 0))))
-    #t))
+  (let* ((y (vector-length g))
+         (x (vector-length (vector-ref g 0)))
+         (new-grid (make-grid x y)))
+    (let loop ((xi 0)
+               (yi 0))
+      (unless (= yi y)
+        ;(print xi yi (get-cell g xi yi) (next-cell g (get-cell g xi yi) xi yi))
+        ;(print "cell" xi yi)
+        (set-cell! new-grid xi yi (next-cell g (get-cell g xi yi) xi yi))
+        (loop
+          (if (= (+ xi 1) x) 0 (+ xi 1))
+          (if (= (+ xi 1) x) (+ yi 1) yi))))
+    new-grid))
 
 (define (simulate grid turns)
-  (let loop ((i 0))
-    (if (fx= i turns)
-      #t
-      (begin
+  (define loop
+    (lambda (i grid)
+      (unless (= i turns)
         (print "turn:" i)
-        (loop (fx+ i 1))))))
+        (print-grid grid)
+        (loop (fx+ i 1) (next-grid grid)))))
 
-#|
-(define initial-grid
-  (vector 
-    (vector 0 0 1 0 0 0 0 0)
-    (vector 0 0 0 1 0 0 0 0)
-    (vector 0 1 1 1 0 0 0 0)
-    (vector 0 0 0 0 0 0 0 0)
-  ))
-|#
+  (loop 0 grid)
 
-(define grid (make-grid 8 8))
-(set-cell! grid 3 0 1)
-(set-cell! grid 4 1 1)
-(set-cell! grid 2 2 1)
-(set-cell! grid 3 2 1)
-(set-cell! grid 4 2 1)
+  #;(let loop ((i 0)
+             (grid grid))
+    (unless (= i turns)
+      (print "turn:" i)
+      (print-grid grid)
+      (loop (fx+ i 1) (next-grid grid)))))
 
+;; Glider that goes into the lower right and becomes a 2x2 box
+(begin
+  (define grid (make-grid 8 8))
+  (set-cell! grid 2 0 1)
+  (set-cell! grid 3 1 1)
+  (set-cell! grid 1 2 1)
+  (set-cell! grid 2 2 1)
+  (set-cell! grid 3 2 1)
+  (print-grid grid)
 
-(print-grid grid)
+  (simulate grid 25))
 
-;(simulate grid 5)
-;(set-cell! grid 2 2 1)
-;(print-grid grid)
-;(print (get-cell grid 2 2))
+;; Blinker
+(begin
+  (define grid (make-grid 3 3))
+
+  (set-cell! grid 0 1 1)
+  (set-cell! grid 1 1 1)
+  (set-cell! grid 2 1 1))
+
+(simulate grid 5)

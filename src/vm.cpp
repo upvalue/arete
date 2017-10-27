@@ -13,7 +13,7 @@
 
 #ifdef AR_COMPUTED_GOTO
 # define VM_CASE(label) LABEL_##label 
-# define VM_DISPATCH() goto *dispatch_table[code[code_offset++]]
+# define VM_DISPATCH() goto *dispatch_table[f.code[code_offset++]]
 # define VM_SWITCH()
 #else 
 # define VM_CASE(label) case label 
@@ -21,10 +21,14 @@
 # define VM_SWITCH() switch(insn)
 #endif
 
-// #define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg)
-#define AR_LOG_VM(msg)
+//#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
+#define VM_CODE() (f.code)
+
+#define AR_LOG_VM(msg) \
+  if(f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT)) { \
+    ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg); \
+  }
 // #define AR_LOG_VM(msg)
-// #define AR_LOG_VM_INSN(msg) ARETE_LOG(())
 
 // A simple portable alternative to alloca would be just using a giant malloc'd or
 // stack-allocated array.
@@ -56,7 +60,7 @@ static std::string depth_to_string(const VMFrame& f) {
   return str;
 }
 
-VMFrame::VMFrame(State& state_): state(state_), exception(C_FALSE), stack_i(0), depth(0) {
+VMFrame::VMFrame(State& state_): state(state_), closure(0), exception(C_FALSE), stack_i(0), depth(0) {
   previous = state.gc.vm_frames;
   if(previous) {
     depth = previous->depth+1;
@@ -130,7 +134,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     f.closure = fn.as<Closure>();
     f.fn = fn.closure_function();
   } else {
-    f.closure = 0;
     f.fn = fn.as<VMFunction>();
   }
 
@@ -141,11 +144,10 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   f.stack = (Value*) alloca(f.fn->stack_max * sizeof(Value));
   f.locals = (Value*) alloca(f.fn->local_count * sizeof(Value));
 
+  //memset(f.stack, 0, f.fn->stack_max * sizeof(Value));
+
   // Initialize local variables
-  for(unsigned i = 0; i != argc; i++) {
-    AR_LOG_VM("LOCAL " << i << ' ' << argv[i]);
-    f.locals[i] = argv[i];
-  }
+  memcpy(f.locals, argv, argc * sizeof(Value));
 
   for(unsigned i = argc; i != f.fn->local_count; i++) { 
     AR_LOG_VM("LOCAL " << i << " = unspecified");
@@ -159,6 +161,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
     f.upvalues = (Value*) alloca(f.fn->free_variables->length * sizeof(Value));
 
+    //memset(f.upvalues, 0, f.fn->free_variables->length * sizeof(Value));
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
       f.upvalues[i].bits = 0;
     }
@@ -178,34 +181,36 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   // memset(f.locals, 0, f.fn->local_count * sizeof(Value));
 
   size_t code_offset = 0;
-   
+
+  f.code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
   // gc.collect();
+  AR_ASSERT(gc.live((HeapValue*) f.code));
 
   while(true) {
-    // gc.collect();
 
-    size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
-    size_t insn = code[code_offset++];
+    //size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
+    //f.code = code;
+    //size_t insn = f.code[code_offset++];
 #ifdef AR_COMPUTED_GOTO
-    goto *dispatch_table[insn];
+    VM_DISPATCH();
+
+    // goto *dispatch_table[insn];
 #endif
     
     VM_SWITCH()  {
       VM_CASE(OP_PUSH_CONSTANT): {
-        size_t idx = code[code_offset++];
+        size_t idx = VM_CODE()[code_offset++];
         f.stack[f.stack_i++] = f.fn->constants->data[idx];
         AR_PRINT_STACK();
         AR_LOG_VM("push-constant idx: " << idx << "; " << f.fn->constants->data[idx]);
-        //std::cout << code[code_offset] << std::endl;
-        //std::cout << OP_GLOBAL_GET << std::endl;
         VM_DISPATCH();
       }
 
       VM_CASE(OP_GLOBAL_GET): {
-        size_t idx = code[code_offset++];
+        size_t idx = VM_CODE()[code_offset++];
         Value sym = f.fn->constants->data[idx];
         AR_LOG_VM("global-get idx: " << idx << " ;; " << f.fn->constants->data[idx]);
-        AR_ASSERT(sym.type() == SYMBOL && "global-get called against non-symbol");
+        // AR_ASSERT(sym.type() == SYMBOL && "global-get called against non-symbol");
         f.stack[f.stack_i++] = sym.symbol_value();
         if(f.stack[f.stack_i - 1] == C_UNDEFINED) {
           std::ostringstream os;
@@ -217,7 +222,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       VM_CASE(OP_GLOBAL_SET): {
-        size_t err_on_undefined = code[code_offset++];
+        size_t err_on_undefined = VM_CODE()[code_offset++];
         AR_ASSERT(f.stack_i >= 2);
 
         Value val = f.stack[f.stack_i - 2], key = f.stack[f.stack_i - 1];
@@ -248,22 +253,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
       // Application logic.
 
-      // If C function, we pass it part of the stack (how to deal with tail calls? possible? 
-      // necessary?)
-
-      // If interpreted function, we build an arg-list out of the stack and apply it
-      // This may not actually be necessary if bootstrapping only goes one direction
-      // Should a VM function ever call an interpreted function?
-      // Well, don't worry about that for now.
-      
-      // If VM function, we call apply_vm with necessary args, copy args to locals at the beginning
-      // so they are collected properly, after which we don't access argv
-
+      // TODO: Tail calls of C code. Possible/necessary?
       VM_CASE(OP_APPLY):
       VM_CASE(OP_APPLY_TAIL): {
-        insn = code[code_offset-1];
-        size_t fargc = code[code_offset++];
+        size_t insn = VM_CODE()[code_offset-1];
+        size_t fargc = VM_CODE()[code_offset++];
+        AR_ASSERT(f.stack_i - argc - 1 >= 0);
         Value afn = f.stack[f.stack_i - fargc - 1];
+        AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " " << f.stack_i);
+        AR_ASSERT(gc.live(afn));
         AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " fargc: " << fargc << " fn: " << afn);
 
         switch(afn.type()) {
@@ -281,7 +279,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             } else if(fargc > max_arity && !var_arity) {
               std::ostringstream os;
               os << "function " << afn << " expected at most " << max_arity << " arguments " <<
-                "but only got " << fargc;
+                "but  " << fargc;
               f.exception = eval_error(os.str());
               goto exception;
             }
@@ -327,7 +325,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             } else if(fargc > max_arity && !var_arity) {
               std::ostringstream os;
               os << "function " << afn << " expected at most " << max_arity << " arguments " <<
-                "but only got " << fargc;
+                "but got " << fargc;
               f.exception = eval_error(os.str());
               goto exception;
             }
@@ -346,7 +344,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             } else {
               // Replace function on stack with result of function
               AR_ASSERT(((ptrdiff_t) f.stack_i - fargc - 1) >= 0);
-              f.stack[f.stack_i - fargc - 1] = apply_vm(to_apply, fargc, &f.stack[f.stack_i - fargc]);
+              f.stack[f.stack_i - fargc - 1] =
+                apply_vm(to_apply, fargc, &f.stack[f.stack_i - fargc]);
 
               // Pop arguments
               f.stack_i -= (fargc);
@@ -368,7 +367,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               temps[0] = make_pair(f.stack[f.stack_i - fargc + i], temps[0]);
             }
 
-            f.stack[f.stack_i - fargc - 1] = eval_apply_generic(afn, temps[0], false);
+            f.stack[f.stack_i - fargc - 1] =
+              eval_apply_generic(f.stack[f.stack_i - fargc - 1], temps[0], false);
             f.stack_i -= (fargc);
 
             AR_ASSERT(f.stack_i > 0);
@@ -390,14 +390,14 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       VM_CASE(OP_LOCAL_GET): {
-        size_t idx = code[code_offset++];
+        size_t idx = VM_CODE()[code_offset++];
         AR_LOG_VM("local-get idx: " << idx << " = " << f.locals[idx]);
         f.stack[f.stack_i++] = f.locals[idx];
         VM_DISPATCH();
       }
 
       VM_CASE(OP_LOCAL_SET): {
-        size_t idx = code[code_offset++];
+        size_t idx = VM_CODE()[code_offset++];
         AR_ASSERT("stack underflow" && f.stack_i >= 1);
         Value val = f.stack[--f.stack_i];
         AR_LOG_VM("local-set idx: " << idx << " = " << val);
@@ -408,7 +408,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       VM_CASE(OP_UPVALUE_GET): {
         AR_ASSERT(f.closure);
 
-        size_t idx = code[code_offset++];
+        size_t idx = VM_CODE()[code_offset++];
         AR_LOG_VM("upvalue-get " << idx);
         AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
         AR_ASSERT(gc.live(f.closure->upvalues->data[idx].upvalue()));
@@ -418,7 +418,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       VM_CASE(OP_UPVALUE_SET): {
         AR_ASSERT(f.closure);
-        size_t idx = code[code_offset++];
+        size_t idx = VM_CODE()[code_offset++];
         AR_ASSERT(f.stack_i >= 1);
         Value val = f.stack[--f.stack_i];
         Value upval = f.closure->upvalues->data[idx];
@@ -428,7 +428,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       VM_CASE(OP_CLOSE_OVER): {
-        size_t upvalues = code[code_offset++];
+        size_t upvalues = VM_CODE()[code_offset++];
         AR_LOG_VM("close-over " << upvalues);
 
         AR_ASSERT(upvalues > 0);
@@ -442,8 +442,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         temps.push_back(make_vector(upvalues));
 
         for(size_t i = 0; i != upvalues; i++) {
-          size_t is_enclosed = code[code_offset++];
-          size_t idx = code[code_offset++];
+          size_t is_enclosed = VM_CODE()[code_offset++];
+          size_t idx = VM_CODE()[code_offset++];
 
           if(is_enclosed) {
             AR_LOG_VM("enclosing free variable " << i << " from closure idx " << idx);
@@ -482,15 +482,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         //std::cout << stack[f.stack_i] << std::endl;
         //std::cout << stack[f.stack_i - 1] << std::endl;
 
-        code_offset = code[code_offset];
+        code_offset = VM_CODE()[code_offset];
         AR_LOG_VM("jump " << code_offset);
         VM_DISPATCH();
       }
 
       VM_CASE(OP_JUMP_IF_TRUE): {
-        size_t jmp_offset = code[code_offset++];
+        size_t jmp_offset = VM_CODE()[code_offset++];
         Value val = f.stack[f.stack_i-1];
-        size_t pop = code[code_offset++];
+        size_t pop = VM_CODE()[code_offset++];
 
         if(val == C_FALSE) {
           AR_LOG_VM("jump-if-true not jumping " << jmp_offset);
@@ -506,12 +506,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       VM_CASE(OP_JUMP_IF_FALSE): {
-        size_t jmp_offset = code[code_offset++];
+        size_t jmp_offset = VM_CODE()[code_offset++];
         Value val = f.stack[f.stack_i-1];
-        size_t pop = code[code_offset++];
+        size_t pop = VM_CODE()[code_offset++];
 
         if(val == C_FALSE) {
-          AR_LOG_VM("jump-if-false jumping" << jmp_offset);
+          AR_LOG_VM("jump-if-false jumping " << jmp_offset);
           code_offset = jmp_offset;
         } else {
           AR_LOG_VM("jump-if-false not jumping" << jmp_offset);
@@ -520,6 +520,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         if(pop) {
           f.stack_i--;
         }
+
         VM_DISPATCH();
       }
 
@@ -530,8 +531,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       VM_CASE(OP_PUSH_IMMEDIATE): {
-        AR_LOG_VM("push-immediate " << Value(code[code_offset]));
-        f.stack[f.stack_i++] = Value(code[code_offset++]);
+        AR_LOG_VM("push-immediate " << Value(VM_CODE()[code_offset]));
+        f.stack[f.stack_i++] = VM_CODE()[code_offset++];
         VM_DISPATCH();
       }
 
@@ -539,7 +540,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 #ifndef AR_COMPUTED_GOTO
       default:
 #endif
-        warn() << "encountered bad opcode: " << insn << std::endl;
+        warn() << "encountered bad opcode: " << VM_CODE()[code_offset-1] << std::endl;
         AR_ASSERT(!"bad opcode");
         break;
       }

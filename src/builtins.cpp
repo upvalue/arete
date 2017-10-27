@@ -1104,6 +1104,35 @@ Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+Value fn_set_vmfunction_name(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-vmfunction-name!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
+
+  VMFunction* fn = argv[0].as<VMFunction>();
+  fn->name = argv[1];
+
+  return C_UNSPECIFIED;
+}
+
+Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-vmfunction-log!";
+  AR_FN_EXPECT_TYPE(state, argv, 1, CONSTANT);
+
+  Value fn = argv[0];
+
+  if(argv[0].type() == CLOSURE) {
+    fn = fn.closure_function();
+  }
+
+  if(argv[1] == C_FALSE) {
+    fn.heap->unset_header_bit(Value::VMFUNCTION_LOG_BIT);
+  } else {
+    fn.heap->set_header_bit(Value::VMFUNCTION_LOG_BIT);
+  }
+
+  return C_UNSPECIFIED;
+}
+
 Value fn_function_env(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "function-env";
   AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
@@ -1582,6 +1611,8 @@ void State::install_core_functions() {
   defun_core("function-env", fn_function_env, 1);
   defun_core("function-body", fn_function_body, 1);
   defun_core("function-name", fn_function_name, 1);
+  defun_core("set-vmfunction-name!", fn_set_vmfunction_name, 2);
+  defun_core("set-vmfunction-log!", fn_set_vmfunction_log, 2);
 
   defun_core("top-level-value", fn_top_level_value, 1);
   defun_core("set-top-level-value!", fn_set_top_level_value, 2);

@@ -3,7 +3,7 @@
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
 
-;; TODO> Cannot use a macro defined in advance. Toplevel needs to behave like letrec-syntax, I think.
+;; TODO Cannot use a macro defined in advance. Toplevel needs to behave like letrec-syntax, I think.
 
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))

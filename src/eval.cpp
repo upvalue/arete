@@ -410,10 +410,6 @@ Value State::eval(Value env, Value exp, Value fn_name) {
           return apply_record(env, car, exp.cdr(), exp, fn_name);
         } else if(car.type() == VMFUNCTION || car.type() == CLOSURE) {
           return eval_apply_vm(env, car, exp.cdr(), exp, fn_name);
-          // arguments into a VectorStorage (or whatever)
-          // Value v = C_FALSE;
-          //return apply_vm(car, 0, &v);
-          // return apply_vm(env, car, exp.cdr(), exp, fn_name);
         }
       }
 
@@ -548,7 +544,7 @@ Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, V
 }
 
 Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
-  Value tmp, closure(C_FALSE);
+  Value tmp, closure(C_FALSE), vec;
   AR_FRAME(this, env, fn, args, src_exp, fn_name, tmp, closure);
 
   if(fn.type() == CLOSURE) {
@@ -573,7 +569,7 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
   }
 
   size_t argc = 0;
-  temps.clear();
+  vec = make_vector();
   while(args.type() == PAIR) {
     if(eval_args) {
       tmp = eval(env,  args.car());
@@ -581,12 +577,19 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
     } else {
       tmp = args.car();
     }
-    temps.push_back(tmp);
+    vector_append(vec, tmp);
+    // temps.push_back(tmp);
     argc++;
     args = args.cdr();
   }
 
-  tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &temps[0]);
+  if(closure != C_FALSE) {
+    AR_ASSERT(gc.live(closure));
+    AR_ASSERT(closure.type() == CLOSURE);
+  }
+  AR_ASSERT(gc.live(fn));
+  AR_ASSERT(fn.type() == VMFUNCTION);
+  tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &vec.vector_storage().vector_storage_data()[0]);
 
   EVAL_CHECK(tmp, src_exp, fn_name);
   return tmp;

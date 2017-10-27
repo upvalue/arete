@@ -40,8 +40,8 @@
 # define AR_ASSERT assert
 # define AR_TYPE_ASSERT assert
 #elif ARETE_ASSERTION_LEVEL == 1
-# define AR_ASSERT(x) if(!(x)) { std::cerr << "arete:assert: " << #x << " at " << __FILE__ << ':' << __LINE__ << " failed" << std::endl; }
-# define AR_TYPE_ASSERT(x) AR_ASSERT(x)
+# define AR_TYPE_ASSERT(x) if(!(x)) { std::cerr << "arete:assert: " << #x << " at " << __FILE__ << ':' << __LINE__ << " failed" << std::endl; }
+# define AR_ASSERT(x) 
 #else
 # define AR_ASSERT(x)
 # define AR_TYPE_ASSERT(x)
@@ -80,12 +80,10 @@
 
 // TODO: It's possible, though expensive and more complex, to do this with the incremental
 // collector. However, it shouldn't be necessary.
-
 #if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE && ARETE_GC_DEBUG == 1
 # ifndef ARETE_ASSERT_LIVE
 #  define ARETE_ASSERT_LIVE(obj) \
    AR_ASSERT("attempt to invoke method on non-live object" && (arete::current_state->gc.live((obj)) == true));
-
 # endif
 #endif
 
@@ -225,6 +223,9 @@ struct HeapValue {
   unsigned char get_mark_bit() const { return (header >> 8) & 1; }
   unsigned get_header_bit(unsigned bit) const { return header & bit; }
   void set_header_bit(unsigned bit) { header += bit; }
+  void unset_header_bit(unsigned bit) {
+    header -= bit;
+  }
 
   unsigned get_shared_count() const {
     return header >> 32;
@@ -315,7 +316,8 @@ struct Value {
 
   }
 
-  bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION; }
+  bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION ||
+    type() == VMFUNCTION; }
   bool applicable() const;
   bool identifierp() const { return type() == RENAME || type() == SYMBOL; }
 
@@ -527,6 +529,7 @@ struct Value {
   VectorStorage* vm_function_constants() const;
 
   static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
+  static const unsigned VMFUNCTION_LOG_BIT = 1 << 10;
 
   // UPVALUES
   
@@ -585,6 +588,10 @@ struct Value {
   // CASTING
   template <class T> T* as() const {
     AR_TYPE_ASSERT(type() == T::CLASS_TYPE);
+    return static_cast<T*>(heap);
+  }
+
+  template <class T> T* as_unsafe() const {
     return static_cast<T*>(heap);
   }
 

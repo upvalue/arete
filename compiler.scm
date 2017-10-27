@@ -363,20 +363,23 @@
   (compile-finish sub-fn)
 
   ;; Now emit an argument to push this function onto the stack
-  (emit fn 'push-constant (register-constant fn (OpenFn->procedure sub-fn)))
+  (let ((procedure (OpenFn->procedure sub-fn)))
+    (emit fn 'push-constant (register-constant fn procedure))
 
-  ;; Finally, if this function encloses free variables, we emit an instruction
-  ;; That will create a closure at runtime out of the compiled function
-  (aif (OpenFn/closure sub-fn)
-    (begin
-      (emit fn 'close-over (vector-length it))
-      (let loop ((i 0))
-        (unless (eq? i (vector-length it))
-          (let ((var (vector-ref it i)))
-            (if (Var/upvalue? var)
-              (emit fn 'words 1 (Var/idx var))
-              (emit fn 'words 0 (Var/free-variable-id var))))
-          (loop (fx+ i 1))))))
+    ;; Finally, if this function encloses free variables, we emit an instruction
+    ;; That will create a closure at runtime out of the compiled function
+    (aif (OpenFn/closure sub-fn)
+      (begin
+        (emit fn 'close-over (vector-length it))
+        (let loop ((i 0))
+          (unless (eq? i (vector-length it))
+            (let ((var (vector-ref it i)))
+              (if (Var/upvalue? var)
+                (emit fn 'words 1 (Var/idx var))
+                (emit fn 'words 0 (Var/free-variable-id var))))
+            (loop (fx+ i 1))))))
+    procedure)
+
 )
 
 (define (compile-define fn x tail?)
@@ -388,7 +391,9 @@
     (table-set! (OpenFn/env fn) name var)
     (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1)))
 
-  (compile-expr fn (list-ref x 2) (list-ref-cell x 2) tail?)
+  (let ((result (compile-expr fn (list-ref x 2) (list-ref-cell x 2) tail?)))
+    (when (procedure? result)
+      (set-vmfunction-name! result name)))
 
   (if (OpenFn/toplevel? fn)
     (begin
@@ -572,8 +577,7 @@
      (aif (special-form (car x))
        (compile-special-form fn x it tail?)
        (compile-apply fn x tail?)))
-    (else (raise 'compile "don't know how to compile expression" (list x))))
-  fn)
+    (else (raise 'compile "don't know how to compile expression" (list x)))))
 
 (define (compile fn body)
   (define end (fx- (length body) 1))
