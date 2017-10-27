@@ -267,6 +267,10 @@ struct Blob : HeapValue {
 
   char data[1];
 
+  template <class T> T blob_ref(size_t idx) const {
+    return ((T*) data)[idx];
+  }
+
   static const unsigned CLASS_TYPE = BLOB;
 };
 
@@ -1582,6 +1586,7 @@ struct State {
   }
 
   Value make_vector_storage(size_t capacity) {
+    // Account for Value[1]
     size_t size = (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity);
     VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE, size));
 
@@ -1592,11 +1597,11 @@ struct State {
   }
 
   Value make_vector(size_t capacity = 2) {
-    Value vec, storage;
+    Value vec(C_FALSE), storage(C_FALSE);
 
     AR_FRAME(this, vec, storage);
-    vec.heap = static_cast<Vector*>(gc.allocate(VECTOR, sizeof(Vector)));
     storage = make_vector_storage(capacity);
+    vec = gc.allocate(VECTOR, sizeof(Vector));
     static_cast<Vector*>(vec.heap)->storage = storage;
 
     return vec;
@@ -1613,7 +1618,7 @@ struct State {
     AR_ASSERT(store->length <= store->capacity);
     if(store->length == store->capacity) {
       Value storage = store, new_storage;
-      AR_FRAME(this, vector, value, storage);
+      AR_FRAME(this, vector, value, storage, new_storage);
 
       new_storage = make_vector_storage(store->capacity * 2);
       store = static_cast<VectorStorage*>(vector.vector_storage().heap);

@@ -1340,7 +1340,6 @@ Value fn_list_get_source(State& state, size_t argc, Value* argv) {
   return C_FALSE;
 }
 
-
 Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "OpenFn->procedure";
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
@@ -1349,7 +1348,8 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   size_t size = sizeof(VMFunction);
   Value name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob,
      sources_blob;
-  AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn, free_vars, free_vars_blob);
+  AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn, free_vars, free_vars_blob,
+    sources_blob);
 
   name = rec.record_ref(0);
   insns = rec.record_ref(1);

@@ -266,8 +266,15 @@
 
         ;; If this is a free variable and it hasn't been noted as such, do so now
         (unless (or (Var/upvalue? it) (Var/free-variable-id it))
+          (Var/free-variable-id! it (OpenFn/free-variable-count parent-fn))
           (OpenFn/free-variable-count! parent-fn (fx+ (OpenFn/free-variable-count parent-fn) 1))
-          (Var/free-variable-id! it (fx- (OpenFn/free-variable-count parent-fn) 1)))
+          (unless (OpenFn/free-variables parent-fn)
+            (OpenFn/free-variables! parent-fn (make-vector)))
+
+          ;; Append to vector of free variables
+          (vector-append! (OpenFn/free-variables parent-fn) (Var/idx it))
+
+          (compiler-log fn "noting free variable" it))
         ;; Append to closure
         (vector-append! closure it))
       (register-free-variable parent-fn x))))
@@ -283,6 +290,7 @@
           (if (eq? fn search-fn)
             ;; This upvalue has already been added to the closure
             (begin
+              (compiler-log fn "found existing upvalue" it)
               (cons 'upvalue (Var/idx it)))
             (begin
               (register-free-variable fn x)
@@ -573,7 +581,6 @@
   (for-each-i
     (lambda (i x)
       (register-source fn (list-ref-cell body i))
-      ;(print "CELL" (list-ref-cell body i))
       (compile-expr fn x #f (fx= i end)))
     body)
 
@@ -582,16 +589,20 @@
   fn)
 
 (define (compile-finish fn)
+  #|
   (table-for-each 
     (lambda (_ var)
       (when (Var/free-variable-id var)
         (unless (OpenFn/free-variables fn)
           (OpenFn/free-variables! fn (make-vector)))
 
-        (compiler-log fn "has free variable" (Var/name var) " at local idx " (Var/idx var))
+        (compiler-log fn "has free variable" (Var/name var) " at local idx " (Var/idx var) " free-variable-id: " (Var/free-variable-id var))
 
         (vector-append! (OpenFn/free-variables fn) (Var/idx var))))
     (OpenFn/env fn))
+  |#
+
+  ;; TODO: Free-variables must be appended in order of definition.
 
 
   (compiler-log fn fn)

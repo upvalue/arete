@@ -70,6 +70,8 @@ VMFrame::~VMFrame() {
   if(fn->free_variables) {
     // AR_LOG_VM("closing over " << fn->free_variables->length << " free variables");
     for(size_t i = 0; i != fn->free_variables->length; i++) {
+      //std::cout << "Closing over free variable " << fn->free_variables
+      //std::cout << "Closing over free variable " << i << " value of " << upvalues[i].upvalue() << std::endl;
       Value saved_local = upvalues[i].upvalue();
       upvalues[i].upvalue_close();
       AR_ASSERT(upvalues[i].upvalue_closed());
@@ -164,6 +166,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
       f.upvalues[i] = gc.allocate(UPVALUE, sizeof(Upvalue));
       size_t idx = ((size_t*) f.fn->free_variables->data)[i];
+      AR_LOG_VM("tying free variable " << i << " to local idx " << idx);
       f.upvalues[i].as<Upvalue>()->local = &f.locals[idx];
     }
   }
@@ -425,39 +428,18 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
             vector_append(temps[0], f.closure->upvalues->data[idx]);
           } else {
-            AR_LOG_VM("enclosing local variable " << i << " from f.upvalues idx " << idx);
-            // Problem: Upvalue array does not necessarily correlate 1:1 with locals.
+            //AR_LOG_VM("enclosing local variable " << f.fn->free_variables->blob_ref<size_t>(i)  << " as upvalue " << i << " from f.upvalues idx " << idx);
 
-            // In other words, something like (lambda (c d) (lambda () d))
-            // Will cause this to fail.
-            
-            // So we need to track a variable's location in the upvalue array,
-            // as well as its location in the locals index
-            // How to do this?
-
-            // close-over 0 0 1 0 1
-
-            // emit close-over 0 0 1
-            // 0 = this is a local
-            // 0 = location in upvalues array, for initialization
-            // 1 = location in locals
-
-            //std::cout << idx << std::endl;
-            //std::cout << f.fn->free_variables->length << std::endl;
             AR_ASSERT(!f.fn->free_variables || idx < f.fn->free_variables->length);
-            // std::cout << f.upvalues[idx].type() << std::endl;
-            // std::cout << (ptrdiff_t) f.upvalues[idx].bits << std::endl;
             AR_ASSERT(gc.live(f.upvalues[idx]));
             AR_ASSERT(f.upvalues[idx].type() == UPVALUE);
             AR_ASSERT(!f.upvalues[idx].upvalue_closed());
             AR_ASSERT(f.upvalues[idx].upvalue().type() != UPVALUE);
+            // AR_ASSERT(f.upvalues[idx].as<Upvalue>()->local == &f.locals[f.fn->free_variables->blob_ref<size_t>(i)]);
             vector_append(temps[0], f.upvalues[idx]);
           }
 
-          //std::cout << vec.vector_ref(i) << std::endl;
-          // AR_ASSERT("AUGH" && gc.live(vec.vector_ref(i)));
-          //std::cout << vec.vector_ref(i).upvalue_closed() << std::endl;
-          AR_LOG_VM("ENCLOSING VALUE " << i << " = " << temps[0].vector_ref(i) << " " << temps[0].vector_ref(i).upvalue());
+          AR_LOG_VM("upvalue " << i << " = " << temps[0].vector_ref(i) << " " << temps[0].vector_ref(i).upvalue());
           AR_ASSERT(temps[0].vector_ref(i).type() == UPVALUE);
           AR_ASSERT(temps[0].vector_ref(i).upvalue().type() != UPVALUE);
         }

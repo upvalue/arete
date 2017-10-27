@@ -99,6 +99,11 @@ void GCSemispace::collect(size_t request, bool force) {
         break;
       // Four pointers
       case VMFUNCTION:
+        AR_COPY(VMFunction, name);
+        AR_COPY(VMFunction, constants);
+        AR_COPY(VMFunction, free_variables);
+        AR_COPY(VMFunction, sources);
+        break;
       case RECORD_TYPE:
         AR_COPY(RecordType, apply);
         AR_COPY(RecordType, print);

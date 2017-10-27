@@ -81,7 +81,7 @@ Value State::eval_body(Value env,  Value fn_name, Value calling_fn_name, Value s
   AR_FRAME(this, env, fn_name, calling_fn_name, src_exp, body, tmp);
 
   while(body.type() == PAIR) {
-    tmp = eval(env,  body.car(), fn_name);
+    tmp = eval(env, body.car(), fn_name);
     if(tmp.is_active_exception()) return tmp;
     if(body.cdr() == C_NIL) {
       return tmp;
@@ -94,7 +94,7 @@ Value State::eval_body(Value env,  Value fn_name, Value calling_fn_name, Value s
 
 Value State::eval_cond(Value env,  Value exp, Value fn_name) {
   Value pred, body, lst = exp.cdr(), tmp;
-  AR_FRAME(this, env, exp,  fn_name, pred, body, lst);
+  AR_FRAME(this, env, exp,  fn_name, pred, body, lst, tmp);
 
   while(lst.cdr() != C_NIL) {
     pred = lst.caar();
@@ -131,7 +131,7 @@ Value State::eval_cond(Value env,  Value exp, Value fn_name) {
 
 Value State::eval_boolean_op(Value env, Value exp, Value fn_name, bool is_or) {
   Value tmp;
-  AR_FRAME(this, env, exp, tmp, fn_name);
+  AR_FRAME(this, env, exp, fn_name, tmp);
 
   exp = exp.cdr();
 
@@ -160,7 +160,7 @@ Value State::eval_begin(Value env,  Value exp, Value fn_name) {
 Value State::eval_lambda(Value env,  Value exp) {
   Value fn_env, args, args_head, args_tail, fn_name;
 
-  AR_FRAME(this, env,  exp, fn_env, args, args_head, args_tail);
+  AR_FRAME(this, env,  exp, fn_env, args, args_head, args_tail, fn_name);
   Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
   fn->name = C_FALSE;
   fn->parent_env = env;
@@ -405,10 +405,10 @@ Value State::eval(Value env, Value exp, Value fn_name) {
         if(car.type() == FUNCTION) {
           return eval_apply_scheme(env, car, exp.cdr(), exp, fn_name);
         } else if(car.type() == CFUNCTION) {
-          return eval_apply_c(env,  car, exp.cdr(), exp, fn_name);
+          return eval_apply_c(env, car, exp.cdr(), exp, fn_name);
         } else if(car.type() == RECORD) {
           return apply_record(env, car, exp.cdr(), exp, fn_name);
-        } else if(car.type() == VMFUNCTION || car.type()) {
+        } else if(car.type() == VMFUNCTION || car.type() == CLOSURE) {
           return eval_apply_vm(env, car, exp.cdr(), exp, fn_name);
           // arguments into a VectorStorage (or whatever)
           // Value v = C_FALSE;
@@ -477,8 +477,9 @@ Value State::eval(Value env, Value exp, Value fn_name) {
 Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args) {
   Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
   Value fn_name;
-  AR_FRAME(this, env, fn, args, new_env, fn_args, tmp, src_exp, rest_args_name, rest_args_head,
-    rest_args_tail, body, fn_name, calling_fn_name);
+
+  AR_FRAME(this, env, fn, args, src_exp, calling_fn_name, new_env, tmp, rest_args_name, fn_args,
+    rest_args_head, rest_args_tail, body, fn_name);
 
   fn_name = fn.function_name();
 
@@ -547,8 +548,8 @@ Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, V
 }
 
 Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
-  Value tmp,closure = C_FALSE;
-  AR_FRAME(this, env, closure, fn, args, src_exp, tmp, fn_name);
+  Value tmp, closure(C_FALSE);
+  AR_FRAME(this, env, fn, args, src_exp, fn_name, tmp, closure);
 
   if(fn.type() == CLOSURE) {
     closure = fn;
@@ -594,7 +595,7 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
 
 Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
   Value fn_args, tmp;
-  AR_FRAME(this, env,  fn, args, fn_args, src_exp, tmp, fn_name);
+  AR_FRAME(this, env, fn, args, src_exp, fn_name, fn_args, tmp);
 
   size_t given_args = args.list_length();
   size_t min_arity = fn.as<CFunction>()->min_arity;
