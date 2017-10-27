@@ -345,15 +345,30 @@
   ;; Calculate local count
   (OpenFn/local-count! sub-fn (if (identifier? args) 1 (fx+ arg-len (if (OpenFn/var-arity sub-fn) 1 0))))
 
-  (if (identifier? args)
-    (raise 'compile "can't handle varargs" (list x)))
 
-  ;; Here we seed the environment with the lambda's arguments
-  (for-each-i
-    (lambda (i x)
-      (table-set! (OpenFn/env sub-fn) x (Var/make i x))
-      #;(OpenFn/local-count! sub-fn (fx+ i 1)))
-    args)
+  (unless (null? args)
+    (if (identifier? args)
+      ;; (lambda args args)
+      (table-set! (OpenFn/env sub-fn) args (Var/make 0 args))
+
+      ;; Handle arguments, including varargs
+      (let loop ((rest (cdr args))
+                 (item (car args))
+                 (i 0))
+        (table-set! (OpenFn/env sub-fn) item (Var/make i item))
+        (unless (null? rest)
+
+          (if (pair? rest)
+            (loop (cdr rest) (car rest) (+ i 1))
+            ;; We've hit the varags
+            (table-set! (OpenFn/env sub-fn) rest (Var/make (+ i 1) rest)))))))
+
+    ;; Here we seed the environment with the lambda's arguments
+    #|(for-each-i
+      (lambda (i x)
+        (table-set! (OpenFn/env sub-fn) x (Var/make i x))
+        #;(OpenFn/local-count! sub-fn (fx+ i 1)))
+      args))|#
 
   ;; Compile the lambda's body
   (compile sub-fn (cddr x))
@@ -610,7 +625,7 @@
 
   (OpenFn->procedure fn))
 
-#;(define (recompile-function name)
+(define (recompile-function name)
   (let* ((oldfn (top-level-value name))
          (fn-name (function-name oldfn))
          (fn-body (function-body oldfn))
@@ -624,3 +639,4 @@
       (set-top-level-value! name result)
       (print result)
       result)))
+

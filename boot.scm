@@ -110,6 +110,10 @@
   (lambda (x env)
     (cons-source x (car x) (expand-map (cdr x) env))))
 
+(define expand-cond-expand
+  (lambda (x env)
+    unspecified))
+
 ;; Expand an application. Could be a special form, a macro, or a normal function application
 (define expand-apply
   (lambda (x env)
@@ -135,6 +139,7 @@
         ((eq? kar 'set!) (expand-set x env))
         ((eq? kar 'cond) (expand-cond x env))
         ((eq? kar 'quote) x)
+        ((eq? kar 'cond-expand) (expand-cond-expand x env))
         (else (begin 
                 (expand-macro x env))))
       ;; Normal function application

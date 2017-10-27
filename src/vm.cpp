@@ -5,6 +5,10 @@
 // TODO Disassembler
 // TODO Fix *code pointer
 
+// TODO: Style. It's somewhat awkward and difficult to manipulate the stack by arithmetic
+// e.g. after a function application there should probably be a simple way to save a position
+// on the stack and refer to it later.
+
 #include <alloca.h>
 
 #include "arete.hpp"
@@ -25,7 +29,7 @@
 #define VM_CODE() (f.code)
 
 #define AR_LOG_VM(msg) \
-  if(f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT)) { \
+  if(true || ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg); \
   }
 // #define AR_LOG_VM(msg)
@@ -149,7 +153,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   // Initialize local variables
   memcpy(f.locals, argv, argc * sizeof(Value));
 
-  for(unsigned i = argc; i != f.fn->local_count; i++) { 
+  for(unsigned i = argc; i < f.fn->local_count; i++) { 
     AR_LOG_VM("LOCAL " << i << " = unspecified");
     f.locals[i] = C_UNSPECIFIED;
   }
@@ -282,13 +286,13 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
                 "but  " << fargc;
               f.exception = eval_error(os.str());
               goto exception;
-            }
+            } 
 
             // AR_PRINT_STACK();
 
             // Replace function on stack with its result
             f.stack[f.stack_i - fargc - 1] =
-              afn.c_function_addr()(*this, fargc, &f.stack[f.stack_i - fargc]);
+              f.stack[f.stack_i - fargc - 1].c_function_addr()(*this, fargc, &f.stack[f.stack_i - fargc]);
 
             // AR_PRINT_STACK();
 
@@ -328,6 +332,33 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
                 "but got " << fargc;
               f.exception = eval_error(os.str());
               goto exception;
+            } else if(var_arity) {
+              temps.clear();
+              temps.push_back(to_apply);
+              temps.push_back(C_NIL);
+
+              for(size_t i = 0; i != fargc - min_arity; i++) {
+                // Say we have something like
+                // (define (a b . c) #t)
+                // min_arity is 1
+                // fargc is 2
+                // so we want to grab the values at f._stack
+                temps[1] = make_pair(f.stack[f.stack_i - i - 1], temps[1]);
+                // std::cout << temps[1] << std::endl;
+              }
+
+              to_apply = f.stack[f.stack_i - fargc - 1];
+
+              // Replace beginning of varargs with 
+              f.stack[(f.stack_i - fargc - 1) + min_arity + 1] = temps[1];
+              // Pop additional arguments off of stack, but leave mandatory arguments plus
+              // new rest list on stack
+              f.stack_i = (f.stack_i - fargc - 1) + min_arity + 2;
+              //std::cout << f.stack_i << ' ' << min_arity << std::endl;
+              //AR_PRINT_STACK();
+              fargc = min_arity + 1;
+              // std::cout << "new  fargc " << fargc << " new stack_I " << f.stack_i << std::endl;
+
             }
 
             if(insn == OP_APPLY_TAIL) {

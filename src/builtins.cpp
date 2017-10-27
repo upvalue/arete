@@ -1436,7 +1436,6 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
     vfn->set_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT);
   }
 
-
   fn = vfn;
 
   vfn->constants = rec.record_ref(2).vector_storage().as<VectorStorage>();

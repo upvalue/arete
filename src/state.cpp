@@ -13,7 +13,7 @@ void State::boot() {
 
   static const char* _symbols[] = {
     // C_SYNTAX values
-    "quote", "begin", "define", "lambda", "if", "cond", "and", "or", "set!",
+    "quote", "begin", "define", "lambda", "if", "cond", "cond-expand", "and", "or", "set!",
     "define-syntax", "let-syntax", "letrec-syntax", "define-library", "import",
     // Used by interpreter
     "else",

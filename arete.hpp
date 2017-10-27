@@ -1442,6 +1442,7 @@ struct State {
     S_LAMBDA,
     S_IF,
     S_COND,
+    S_COND_EXPAND,
     S_AND,
     S_OR,
     S_SET,
