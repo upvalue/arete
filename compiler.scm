@@ -88,6 +88,8 @@
         rest
         (loop (cdr rest) (fx+ ii 1))))))
 
+;; This function registers the source of a particular expression, by creating a vector with the offset of its code
+;; and its source code information (see SourceLocation in arete.hpp).
 (define (register-source fn cell)
   (aif (list-get-source cell)
     (begin
@@ -147,6 +149,7 @@
         (jump-if-false 13)
         (pop 14)
         (push-immediate 15)
+        (jump-if-true 16)
         (else (raise 'compile "unknown named instruction" (list insn)))))))
 
 ;; Adjust the stack size while recalculating the stack max if necessary
@@ -168,7 +171,7 @@
       ((push-immediate push-constant global-get local-get upvalue-get) 1)
       ((upvalue-set local-set global-set) 2)
       ;; Only pops stack if argument is 1
-      ((jump-if-false) (if (fx= (list-ref insns 2) 1) -1 0))
+      ((jump-if-false jump-if-true) (if (fx= (list-ref insns 2) 1) -1 0))
       ;; Remove arguments from stack, but push a single result
       ((apply apply-tail) (fx- (cadr insns)))
       (else (raise 'compile (print-string "unknown instruction" (car insns)) (list fn (car insns) insns)))
@@ -208,9 +211,8 @@
   (set! stack-check (OpenFn/stack-size fn))
 
   (for-each-i
-    (lambda (i x)
-      (compile-expr fn x #f #f))
-      ;(compile-expr fn x (and (eq? argc (fx- i 1)) tail?)))
+    (lambda (i sub-x)
+      (compile-expr fn sub-x (list-ref-cell x i) #f))
     (cdr x))
 
   (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
@@ -321,9 +323,9 @@
 
   ;; Most of the complexity of this function is just setting up the fields of OpenFn
   (OpenFn/parent! sub-fn fn)
+
   ;; Note the depth of the function
   (OpenFn/depth! sub-fn (fx+ (OpenFn/depth fn) 1))
-
 
   ;; Calculate arity
   (OpenFn/min-arity! sub-fn arg-len)
@@ -370,7 +372,7 @@
 (define (compile-define fn x tail?)
   (define name (cadr x))
 
-  (compile-expr fn (list-ref x 2) #f tail?)
+  (compile-expr fn (list-ref x 2) (list-ref-cell x 2) tail?)
 
   (if (OpenFn/toplevel? fn)
     (begin
@@ -387,7 +389,7 @@
   (define name (cadr x))
   (define result (fn-lookup fn name))
 
-  (compile-expr fn (list-ref x 2) #f tail?)
+  (compile-expr fn (list-ref x 2) (list-ref-cell x 2) tail?)
 
   (case (car result)
     (global
@@ -417,21 +419,19 @@
 (define (compile-if fn x tail?)
   (define condition (cadr x))
   (define then-branch (list-ref x 2))
-  (define else-branch (and (fx= (length x) 4) (list-ref x 3)))
+  (define else-branch (if (fx= (length x) 4) (list-ref x 3)))
   (define then-branch-end (gensym 'if-else))
   (define else-branch-end (gensym 'if-end))
 
-  (compile-expr fn condition #f #f)
+  (compile-expr fn condition (list-ref-cell x 1) #f)
 
-  ;(print 'jump-if-false then-branch-end)
   (emit fn 'jump-if-false then-branch-end 1)
-  (compile-expr fn then-branch #f tail?)
-  ;(pretty-print fn)
+  (compile-expr fn then-branch (list-ref-cell x 2) tail?)
 
   (emit fn 'jump else-branch-end)
   (register-label fn then-branch-end)
 
-  (compile-expr fn else-branch #f tail?)
+  (compile-expr fn else-branch (if (fx= (length x) 4) (list-ref-cell x 3) #f) tail?)
 
   (register-label fn else-branch-end))
 
@@ -480,14 +480,47 @@
   )
 )
 
+(define (compile-or fn x tail?)
+  (define x-len (length x))
+  (if (fx= x-len 1)
+    (compile-constant fn #f)
+    (let ((or-success (gensym 'or-success))
+          (or-fail-pop (gensym 'or-fail-pop))
+          (or-fail (gensym 'or-fail))
+          (argc (fx- x-len 2)))
+      (for-each-i
+        (lambda (i sub-x)
+          (compile-expr fn sub-x #f (and tail? (fx= i argc)))
+          (emit fn 'jump-if-true or-success 0)
+          (if (not (fx= i argc)) (emit fn 'pop)))
+        (cdr x))
+
+      (emit fn 'jump or-success)
+      (register-label fn or-fail-pop)
+
+      ;; Manually adjust stack size: or will always result in one value being pushed on the stack after it's 
+      ;; evaluated, whether successful or not.
+      (OpenFn/stack-size! fn (fx+ (OpenFn/stack-size fn) 1))
+
+      ;(emit fn 'pop)
+      ;(register-label fn or-fail)
+
+      (emit fn 'push-constant (register-constant fn #f))
+      (register-label fn or-success)
+    )
+
+  )
+)
+
 (define (compile-quote fn x)
   (emit fn 'push-constant (register-constant fn (cadr x))))
 
+;; Compiling a begin is fairly simple -- just need to make sure the last expression is considered a tail call.
 (define (compile-begin fn x tail?)
   (define x-len (fx- (length x) 2))
   (for-each-i 
-    (lambda (i x)
-      (compile-expr fn x #f (and tail? (fx= i x-len))))
+    (lambda (i sub-x)
+      (compile-expr fn sub-x (list-ref-cell x i) (and tail? (fx= i x-len))))
     (cdr x)))
 
 (define (compile-special-form fn x type tail?)
@@ -502,7 +535,6 @@
     (quote (compile-quote fn x))
     (begin (compile-begin fn x tail?))
     (else (raise 'compile "unknown special form" (list x)))))
-
 
 (define (special-form x)
   (when (rename? x)

@@ -2244,6 +2244,9 @@ inline Handle::~Handle() {
   if((argv)[(i)].type() != (expect)) { \
     std::ostringstream __os; \
     __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (Type)(argv[i].type()); \
+    std::ostringstream __os2; \
+    __os2 << __FILE__ << ':' << __LINE__; \
+    (state).stack_trace.push_back(__os2.str()); \
     return (state).type_error(__os.str()); \
   } 
 

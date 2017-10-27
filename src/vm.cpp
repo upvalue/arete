@@ -21,8 +21,8 @@
 # define VM_SWITCH() switch(insn)
 #endif
 
-// #define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg)
-#define AR_LOG_VM(msg)
+#define AR_LOG_VM(msg) ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg)
+// #define AR_LOG_VM(msg)
 // #define AR_LOG_VM(msg)
 // #define AR_LOG_VM_INSN(msg) ARETE_LOG(())
 
@@ -44,8 +44,8 @@ std::ostream& operator<<(std::ostream& os, const VMSourceLocation& loc) {
   os << "#<VMSourceLocation code-position: " << loc.code << ' ' <<
     "source: " << loc.source << " line: " << loc.line << " begin: " << loc.begin <<
     " length: " << loc.length << '>';
+  return os;
 }
-
 
 static std::string depth_to_string(const VMFrame& f) {
   std::string str;
@@ -99,6 +99,7 @@ enum {
   OP_JUMP_IF_FALSE = 13,
   OP_POP = 14,
   OP_PUSH_IMMEDIATE = 15,
+  OP_JUMP_IF_TRUE = 16,
 };
 
 #define AR_PRINT_STACK() \
@@ -111,7 +112,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_GLOBAL_GET, &&LABEL_OP_GLOBAL_SET
     , &&LABEL_OP_RETURN, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL, &&LABEL_OP_LOCAL_GET,
     &&LABEL_OP_LOCAL_SET, &&LABEL_OP_UPVALUE_GET, &&LABEL_OP_UPVALUE_SET, &&LABEL_OP_CLOSE_OVER,
-   &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_POP, &&LABEL_OP_PUSH_IMMEDIATE
+   &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_POP, &&LABEL_OP_PUSH_IMMEDIATE,
+   &&LABEL_OP_JUMP_IF_TRUE,
   };
 #endif
   // Frames lost  due to tail call optimization
@@ -270,23 +272,31 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               std::ostringstream os;
               os << "function " << afn << " expected at least " << min_arity << " arguments " <<
                 "but only got " << fargc;
-              return eval_error(os.str());
+              f.exception = eval_error(os.str());
+              goto exception;
             } else if(fargc > max_arity && !var_arity) {
               std::ostringstream os;
               os << "function " << afn << " expected at most " << max_arity << " arguments " <<
                 "but only got " << fargc;
-              return eval_error(os.str());
+              f.exception = eval_error(os.str());
+              goto exception;
             }
 
-            AR_PRINT_STACK();
+            // AR_PRINT_STACK();
 
             // Replace function on stack with its result
             f.stack[f.stack_i - fargc - 1] =
               afn.c_function_addr()(*this, fargc, &f.stack[f.stack_i - fargc]);
 
-            AR_PRINT_STACK();
+            // AR_PRINT_STACK();
 
             f.stack_i -= (fargc);
+
+            if(f.stack[f.stack_i - 1].is_active_exception()) {
+              f.exception = f.stack[f.stack_i - 1];
+              goto exception;
+            }
+
             break;
           }
           case VMFUNCTION:
@@ -307,12 +317,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               std::ostringstream os;
               os << "function " << afn << " expected at least " << min_arity << " arguments " <<
                 "but only got " << fargc;
-              return eval_error(os.str());
+
+              f.exception = eval_error(os.str());
+              goto exception;
             } else if(fargc > max_arity && !var_arity) {
               std::ostringstream os;
               os << "function " << afn << " expected at most " << max_arity << " arguments " <<
                 "but only got " << fargc;
-              return eval_error(os.str());
+              f.exception = eval_error(os.str());
+              goto exception;
             }
 
             if(insn == OP_APPLY_TAIL) {
@@ -469,17 +482,34 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         VM_DISPATCH();
       }
 
+      VM_CASE(OP_JUMP_IF_TRUE): {
+        size_t jmp_offset = code[code_offset++];
+        Value val = f.stack[f.stack_i-1];
+        size_t pop = code[code_offset++];
+
+        if(val == C_FALSE) {
+          AR_LOG_VM("jump-if-true not jumping " << jmp_offset);
+        } else {
+          AR_LOG_VM("jump-if-true jumping " << jmp_offset);
+          code_offset = jmp_offset;
+        }
+
+        if(pop) {
+          f.stack_i--;
+        }
+        VM_DISPATCH();
+      }
+
       VM_CASE(OP_JUMP_IF_FALSE): {
         size_t jmp_offset = code[code_offset++];
         Value val = f.stack[f.stack_i-1];
         size_t pop = code[code_offset++];
 
-        AR_LOG_VM("jump-if-false " << jmp_offset);
         if(val == C_FALSE) {
-          AR_LOG_VM("jump-if-false jumping");
+          AR_LOG_VM("jump-if-false jumping" << jmp_offset);
           code_offset = jmp_offset;
         } else {
-          AR_LOG_VM("jump-if-false not jumping");
+          AR_LOG_VM("jump-if-false not jumping" << jmp_offset);
         }
 
         if(pop) {
@@ -495,7 +525,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       VM_CASE(OP_PUSH_IMMEDIATE): {
-        AR_LOG_VM("push-immediate" << Value(code[code_offset]));
+        AR_LOG_VM("push-immediate " << Value(code[code_offset]));
         f.stack[f.stack_i++] = Value(code[code_offset++]);
         VM_DISPATCH();
       }

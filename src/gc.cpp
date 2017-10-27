@@ -181,6 +181,9 @@ void GCSemispace::copy_roots() {
     copy((HeapValue**) &link->fn);
 
     Value updated_fn((VMFunction*) link->fn->size);
+
+    copy(&link->exception.heap);
+
     // link->code = updated_fn.vm_function_code();
     // link->code = updated_fn->code;
 

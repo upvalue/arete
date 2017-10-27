@@ -209,7 +209,9 @@ void State::print_exception(std::ostream& os, Value exc) {
 
   if(exc.exception_tag() == globals[State::S_EVAL_ERROR]) {
     os << "Evaluation error: " << exc.exception_message().string_data() << std::endl;
-    print_src_pair(os, exc.exception_irritants());
+    if(exc.exception_irritants().type() == PAIR) {
+      print_src_pair(os, exc.exception_irritants());
+    }
     os << std::endl;
   } else if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]
     || exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {
