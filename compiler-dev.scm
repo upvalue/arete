@@ -21,17 +21,15 @@
   (OpenFn/toplevel?! fn #t)
 
   ;(print (slurp-file "examples/life.scm"))
-  ;(define file-body (slurp-file "examples/life.scm"))
-  (define file-body (slurp-file "tco.scm"))
+  (define file-body (slurp-file "tests/compiler/varargs2.scm"))
+  ;(define file-body (slurp-file "tco.scm"))
 
   (define fn-body
     (map (lambda (x) (expand x #f)) file-body))
 
   ;(print fn-body)
-
   (compile fn fn-body)
   (compile-finish fn)
-
 
   (define compiled-proc (OpenFn->procedure fn))
   (set-vmfunction-log! compiled-proc #t)

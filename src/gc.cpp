@@ -165,10 +165,7 @@ void GCSemispace::collect(size_t request, bool force) {
 #endif 
 }
 
-extern bool thing;
-
 void GCSemispace::copy_roots() {
-  // std::cout << state.symbol_table.size() << " live symbols" << std::endl;
   for(size_t i = 0; i != frames.size(); i++) {
     Frame* f = frames[i];
     for(size_t j = 0; j != f->size; j++) {

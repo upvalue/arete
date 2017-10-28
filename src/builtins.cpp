@@ -1172,6 +1172,20 @@ Value fn_function_name(State& state, size_t argc, Value* argv) {
   return argv[0].as<Function>()->name;
 }
 
+Value fn_function_arguments(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "function-arguments";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+
+  return argv[0].as<Function>()->arguments;
+}
+
+Value fn_function_rest_arguments(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "function-rest-arguments";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+  
+  return argv[0].as<Function>()->rest_arguments;
+}
+
 Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-value";
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
@@ -1610,6 +1624,8 @@ void State::install_core_functions() {
   defun_core("function-env", fn_function_env, 1);
   defun_core("function-body", fn_function_body, 1);
   defun_core("function-name", fn_function_name, 1);
+  defun_core("function-arguments", fn_function_arguments, 1);
+  defun_core("function-rest-arguments", fn_function_rest_arguments, 1);
   defun_core("set-vmfunction-name!", fn_set_vmfunction_name, 2);
   defun_core("set-vmfunction-log!", fn_set_vmfunction_log, 2);
 

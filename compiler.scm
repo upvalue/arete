@@ -329,13 +329,14 @@
   (define varargs (or (not (list? args)) (identifier? args)))
 
   (compiler-log sub-fn (OpenFn/name sub-fn))
-  (compiler-log fn "parent of " (OpenFn/name sub-fn) " is " (OpenFn/name fn))
+  (when fn
+    (compiler-log fn "parent of " (OpenFn/name sub-fn) " is " (OpenFn/name fn)))
 
   ;; Most of the complexity of this function is just setting up the fields of OpenFn
   (OpenFn/parent! sub-fn fn)
 
   ;; Note the depth of the function
-  (OpenFn/depth! sub-fn (fx+ (OpenFn/depth fn) 1))
+  (OpenFn/depth! sub-fn (if fn (fx+ (OpenFn/depth fn) 1) 0))
 
   ;; Calculate arity
   (OpenFn/min-arity! sub-fn arg-len)
@@ -360,7 +361,8 @@
           (if (pair? rest)
             (loop (cdr rest) (car rest) (+ i 1))
             ;; We've hit the varargs
-            (table-set! (OpenFn/env sub-fn) rest (Var/make (+ i 1) rest)))))))
+            (begin
+              (table-set! (OpenFn/env sub-fn) rest (Var/make (+ i 1) rest))))))))
 
   ;; Compile the lambda's body
   (compile sub-fn (cddr x))
@@ -370,23 +372,25 @@
   (compile-finish sub-fn)
 
   ;; Now emit an argument to push this function onto the stack
-  (let ((procedure (OpenFn->procedure sub-fn)))
-    (emit fn 'push-constant (register-constant fn procedure))
+  (when fn
+    (let ((procedure (OpenFn->procedure sub-fn)))
+      (emit fn 'push-constant (register-constant fn procedure))
 
-    ;; Finally, if this function encloses free variables, we emit an instruction
-    ;; That will create a closure at runtime out of the compiled function
-    (aif (OpenFn/closure sub-fn)
-      (begin
-        (emit fn 'close-over (vector-length it))
-        (let loop ((i 0))
-          (unless (eq? i (vector-length it))
-            (let ((var (vector-ref it i)))
-              (if (Var/upvalue? var)
-                (emit fn 'words 1 (Var/idx var))
-                (emit fn 'words 0 (Var/free-variable-id var))))
-            (loop (fx+ i 1))))))
-    procedure)
+      ;; Finally, if this function encloses free variables, we emit an instruction
+      ;; That will create a closure at runtime out of the compiled function
+      (aif (OpenFn/closure sub-fn)
+        (begin
+          (emit fn 'close-over (vector-length it))
+          (let loop ((i 0))
+            (unless (eq? i (vector-length it))
+              (let ((var (vector-ref it i)))
+                (if (Var/upvalue? var)
+                  (emit fn 'words 1 (Var/idx var))
+                  (emit fn 'words 0 (Var/free-variable-id var))))
+              (loop (fx+ i 1))))))
+      procedure))
 
+  sub-fn
 )
 
 (define (compile-define fn x tail?)
@@ -617,18 +621,60 @@
 
   (OpenFn->procedure fn))
 
+(define (test-function a b . c)
+  (print a b c))
+
+(define (append-source src lst elt)
+  (let loop ((lst lst))
+    (if (pair? lst)
+      ;; (1 2 3)
+      ;; (cons 1 (cons 2 (cons 3 
+      (cons-source src (car lst)
+        (loop (cdr lst))
+      )
+      elt)
+  )
+)
+
 (define (recompile-function name)
   (let* ((oldfn (top-level-value name))
          (fn-name (function-name oldfn))
          (fn-body (function-body oldfn))
-         (fn (OpenFn/make fn-name)))
+         (fn-proper-args (function-arguments oldfn))
+         (fn-rest-arguments (function-rest-arguments oldfn))
+         ;; Reconstruct a valid arguments list.
+         (fn-args 
+           (if (and (not (null? fn-proper-args)) fn-rest-arguments)
+             (append-source fn-body fn-proper-args fn-rest-arguments)
+             (if (null? fn-proper-args)
+               fn-rest-arguments
+               fn-proper-args)))
 
-    (compile fn fn-body)
-    (compile-finish fn)
-    (print "welcome to itok")
+         #;(fn (OpenFn/make fn-name))
+         
+         (fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
+         )
 
-    (let ((result (OpenFn->procedure fn)))
-      (set-top-level-value! name result)
-      (print result)
-      result)))
+    ;(print fn-args)
 
+    ;(print fn-name fn-body fn-args fn-rest-arguments)
+
+    ;(print fn-args)
+    ;(print (list-source fn-body 'lambda fn-args (car fn-body)))
+
+    (print fn-args)
+    (print fn-expr)
+    
+    (let* ((fn (compile-lambda #f fn-expr))
+           (proc (OpenFn->procedure fn)))
+      (set-top-level-value! name proc))))
+
+
+(define (main)
+  (test-function 1 2 3 4 5)
+  (recompile-function 'test-function)
+  (set-vmfunction-log! test-function #t)
+  (test-function 1 2 3 4 5)
+  #t)
+
+;(main)

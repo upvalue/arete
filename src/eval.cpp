@@ -543,9 +543,9 @@ Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, V
   return tmp;
 }
 
-Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
-  Value tmp, closure(C_FALSE), vec;
-  AR_FRAME(this, env, fn, args, src_exp, fn_name, tmp, closure);
+Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name) {
+  Value tmp, closure(C_FALSE), vec, varargs_begin, varargs_cur;
+  AR_FRAME(this, env, fn, args, src_exp, fn_name, tmp, closure, varargs_begin, varargs_cur);
 
   if(fn.type() == CLOSURE) {
     closure = fn;
@@ -571,16 +571,31 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
   size_t argc = 0;
   vec = make_vector();
   while(args.type() == PAIR) {
-    if(eval_args) {
-      tmp = eval(env,  args.car());
-      EVAL_CHECK(tmp, src_exp, fn_name);
-    } else {
-      tmp = args.car();
-    }
+    tmp = eval(env,  args.car());
+    EVAL_CHECK(tmp, src_exp, fn_name);
     vector_append(vec, tmp);
     // temps.push_back(tmp);
     argc++;
+    if(argc == max_arity) break;
     args = args.cdr();
+  }
+
+  if(args.type() == PAIR && fn.vm_function_variable_arity()) {
+    varargs_begin = varargs_cur = C_NIL;
+    while(args.type() == PAIR) {
+      tmp = eval(env, args.car());
+      EVAL_CHECK(tmp, src_exp, fn_name);
+      if(varargs_cur == C_NIL) {
+        varargs_begin = varargs_cur = make_pair(tmp, C_NIL);
+      } else {
+        tmp = make_pair(tmp, C_NIL);
+        varargs_cur.set_cdr(tmp);
+        varargs_cur = tmp;
+      }
+      args = args.cdr();
+    }
+    vector_append(vec, varargs_begin);
+    argc++;
   }
 
   if(closure != C_FALSE) {

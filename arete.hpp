@@ -36,6 +36,10 @@
 # define ARETE_BENCH_GC 1
 #endif
 
+#ifndef ARETE_ASSERTION_LEVEL
+# define ARETE_ASSERTION_LEVEL 0
+#endif
+
 #if ARETE_ASSERTION_LEVEL == 2
 # define AR_ASSERT assert
 # define AR_TYPE_ASSERT assert
@@ -71,7 +75,7 @@
 #define ARETE_GC_INCREMENTAL 1
 
 #ifndef ARETE_GC_STRATEGY
-# define ARETE_GC_STRATEGY ARETE_GC_INCREMENTAL
+# define ARETE_GC_STRATEGY ARETE_GC_SEMISPACE
 #endif 
 
 #ifndef ARETE_GC_DEBUG
@@ -2011,7 +2015,7 @@ struct State {
 
   /** Apply a scheme function */
   Value eval_apply_scheme(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
-  Value eval_apply_vm(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
+  Value eval_apply_vm(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name);
   Value eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
   // TODO: This should perhaps be removed entirely.
   Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);
@@ -2072,6 +2076,10 @@ struct State {
   ///// VIRUTAL MACHINE
 
   Value apply_vm(Value fn, size_t argc, Value* argv);
+  /** Shortcut: apply a VM function to something in the temps array */
+  Value apply_vm_temps(Value fn) {
+    return apply_vm(fn, temps.size(), &temps[0]);
+  }
 
   // Command line interface
 
