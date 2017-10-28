@@ -1189,6 +1189,8 @@ struct VMFrame {
 
   VMFrame(State& state);
   ~VMFrame();
+
+  void destroy();
 };
 
 /** An individual tracked pointer. Can be allocated on the heap. */
@@ -1417,9 +1419,7 @@ struct State {
       temps(),
 
       shared_objects_begin(0),
-      shared_objects_i(0) 
-      
-      {
+      shared_objects_i(0) {
     symbol_table = new symbol_table_t();
     current_state = this;
   }
@@ -2015,7 +2015,6 @@ struct State {
   Value eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
   // TODO: This should perhaps be removed entirely.
   Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);
-  Value apply_vm(Value fn, size_t argc, Value* argv);
   Value apply(Value fn, size_t argc, Value* argv);
   
   /** Apply a C or a Scheme function */
@@ -2069,6 +2068,10 @@ struct State {
   Value load_stream(std::istream&, size_t source = 0);
   Value load_file(const std::string&);
   Value load_module(const std::string&);
+
+  ///// VIRUTAL MACHINE
+
+  Value apply_vm(Value fn, size_t argc, Value* argv);
 
   // Command line interface
 

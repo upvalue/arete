@@ -340,11 +340,10 @@
   ;; Calculate arity
   (OpenFn/min-arity! sub-fn arg-len)
   (OpenFn/max-arity! sub-fn arg-len)
-  (OpenFn/var-arity! sub-fn (or (not (list? args)) (identifier? args)))
+  (OpenFn/var-arity! sub-fn varargs)
 
-  ;; Calculate local count
+  ;; Calculate argument count
   (OpenFn/local-count! sub-fn (if (identifier? args) 1 (fx+ arg-len (if (OpenFn/var-arity sub-fn) 1 0))))
-
 
   (unless (null? args)
     (if (identifier? args)
@@ -360,15 +359,8 @@
 
           (if (pair? rest)
             (loop (cdr rest) (car rest) (+ i 1))
-            ;; We've hit the varags
+            ;; We've hit the varargs
             (table-set! (OpenFn/env sub-fn) rest (Var/make (+ i 1) rest)))))))
-
-    ;; Here we seed the environment with the lambda's arguments
-    #|(for-each-i
-      (lambda (i x)
-        (table-set! (OpenFn/env sub-fn) x (Var/make i x))
-        #;(OpenFn/local-count! sub-fn (fx+ i 1)))
-      args))|#
 
   ;; Compile the lambda's body
   (compile sub-fn (cddr x))

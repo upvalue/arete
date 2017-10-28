@@ -9,8 +9,6 @@
 // e.g. after a function application there should probably be a simple way to save a position
 // on the stack and refer to it later.
 
-#include <alloca.h>
-
 #include "arete.hpp"
 
 #define AR_COMPUTED_GOTO
@@ -29,7 +27,7 @@
 #define VM_CODE() (f.code)
 
 #define AR_LOG_VM(msg) \
-  if(true || ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
+  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg); \
   }
 // #define AR_LOG_VM(msg)
@@ -74,6 +72,10 @@ VMFrame::VMFrame(State& state_): state(state_), closure(0), exception(C_FALSE), 
 }
 
 VMFrame::~VMFrame() {
+  destroy();
+}
+
+void VMFrame::destroy() {
   // Close over upvalues
   if(fn->free_variables) {
     // AR_LOG_VM("closing over " << fn->free_variables->length << " free variables");
@@ -126,7 +128,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
    &&LABEL_OP_JUMP_IF_TRUE,
   };
 #endif
-  // Frames lost  due to tail call optimization
+  // Frames lost due to tail call optimization
   size_t frames_lost = 0;
  tail:
 
@@ -143,12 +145,16 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   AR_LOG_VM("ENTERING FUNCTION " << f.fn->name << " closure: " << (f.closure == 0 ? "#f" : "#t")
      << " free_variables: " << f.fn->free_variables);
-  
-  // Allocate storage
-  f.stack = (Value*) alloca(f.fn->stack_max * sizeof(Value));
-  f.locals = (Value*) alloca(f.fn->local_count * sizeof(Value));
 
-  //memset(f.stack, 0, f.fn->stack_max * sizeof(Value));
+  size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;     
+
+  void* stack[f.fn->stack_max];
+  void* locals[f.fn->local_count];
+  void* upvalues[upvalue_count];
+
+  // Allocate storage
+  f.stack = (Value*) stack;
+  f.locals = (Value*) locals;
 
   // Initialize local variables
   memcpy(f.locals, argv, argc * sizeof(Value));
@@ -158,12 +164,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     f.locals[i] = C_UNSPECIFIED;
   }
 
+  f.upvalues = 0;
+
   if(f.fn->free_variables != 0) {
     // Allocate upvalues as needed
     // TODO: Is GC allocating here dangerous? We can copy the blob locally as well.
     // If necessary
     AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
-    f.upvalues = (Value*) alloca(f.fn->free_variables->length * sizeof(Value));
+    f.upvalues = (Value*) upvalues;
+    // f.upvalues = (Value*) malloc(f.fn->free_variables->length * sizeof(Value));
 
     //memset(f.upvalues, 0, f.fn->free_variables->length * sizeof(Value));
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
@@ -191,7 +200,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   AR_ASSERT(gc.live((HeapValue*) f.code));
 
   while(true) {
-
     //size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
     //f.code = code;
     //size_t insn = f.code[code_offset++];
@@ -370,6 +378,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               argc = fargc;
               argv = &temps[0];
               fn = to_apply;
+              
+              /*
+              size_t stack_pointer = 0;
+              asm("mov %%rsp,%0" : "=r"(stack_pointer));
+              std::cout << stack_pointer << std::endl;
+              */
 
               goto tail;
             } else {
