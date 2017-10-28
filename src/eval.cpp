@@ -673,24 +673,47 @@ Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value 
   EVAL_CHECK(tmp, src_exp, fn_name);
   return tmp;
 }
-Value State::eval_apply_generic(Value fn, Value args, bool eval_args) {
-  AR_ASSERT(fn.applicable() && "eval_apply_generic called on non-applicable object");
-  if(fn.type() == FUNCTION) {
-    return eval_apply_scheme(fn.function_parent_env(), fn, args, C_FALSE, C_FALSE, eval_args);
-  } else if(fn.type() == CFUNCTION) {
-    return eval_apply_c(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
-  } else if(fn.type() == VMFUNCTION || fn.type() == CLOSURE) {
-    return eval_apply_vm(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
-  }
 
-  std::cerr << "interpreter cannot apply object " << fn << std::endl;
-  AR_ASSERT(!"eval_apply_generic failed");
-  return C_UNSPECIFIED;
+Value State::eval_apply_function(Value fn, Value args) {
+  AR_TYPE_ASSERT(fn.type() == FUNCTION);
+
+  return eval_apply_scheme(fn.function_parent_env(), fn, args, C_FALSE, C_FALSE, false);
 }
 
 Value State::apply(Value fn, size_t argc, Value* argv) {
+  switch(fn.type()) {
+    case VMFUNCTION: case CLOSURE:
+      return apply_vm(fn, argc, argv);
+    case CFUNCTION:
+      return fn.c_function_addr()(*this, argc, argv);
+    case FUNCTION: {
+      Value lst = C_NIL;
+      size_t i;
+
+      temps.clear();
+
+      for(i = 0; i != argc; i++) {
+        temps.push_back(argv[i]);
+      }
+
+      AR_FRAME(*this, fn, lst);
+      while(i--) {
+        lst = make_pair(temps[i], lst);
+      }
+
+      return eval_apply_function(fn, lst);
+    }
+      break;
+    default:
+      return eval_error("cannot apply type", fn);
+  }
 
   return C_UNSPECIFIED;
+}
+
+Value State::apply_vector_storage(Value fn, Value vector_storage) {
+  VectorStorage* store = vector_storage.as<VectorStorage>();
+  return apply(fn, store->length, store->data);
 }
 
 Value State::expand_expr(Value exp) {
@@ -731,8 +754,6 @@ Value State::eval_toplevel(Value exp) {
   exp = expand_expr(exp);
 
   return eval(C_FALSE, exp);
-
-
 }
 
 } // namespace arete

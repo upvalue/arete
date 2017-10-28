@@ -78,12 +78,12 @@ static bool do_repl(State& state, bool read_only) {
       break;
     }
 
+    bool history_add = true;
 #else
     std::cout << prompt;
     size_t size = 0;
     char* line = 0;
     size = getline(&line, &size, stdin);
-
 
     if(!line || feof(stdin)) break;
 
@@ -97,9 +97,16 @@ static bool do_repl(State& state, bool read_only) {
 #endif
     liness << line;
 
+
     XReader reader(state, liness, line_name.str());
 
-    for(x = reader.read(); x != C_EOF; x = reader.read()) {
+    x = reader.read();
+    // Don't add comments/expressionless lines to history
+    if(x == C_EOF) {
+      history_add = false;
+    }
+
+    for(; x != C_EOF; x = reader.read()) {
       if(x.is_active_exception()) {
         std::cerr << x.exception_message().string_data() << std::endl;
         break;
@@ -125,7 +132,9 @@ static bool do_repl(State& state, bool read_only) {
     }
 
 #if AR_LINENOISE
-    linenoiseHistoryAdd(line);
+    if(history_add) {
+      linenoiseHistoryAdd(line);
+    }
     free(line);
 #endif
   }

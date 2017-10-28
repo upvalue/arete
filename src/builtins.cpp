@@ -609,7 +609,6 @@ Value fn_list_join(State& state, size_t argc, Value* argv) {
  * if ret is true it will allocate and return a list of the results of function application.
  */
 Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, bool improper, bool ret, bool indice) {
-
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
 
   if(argv[1] == C_NIL) return ret ? C_NIL : C_UNSPECIFIED;
@@ -627,11 +626,14 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
   size_t i = 0;
 
   while(lst.type() == PAIR) {
-    arg = state.make_pair(lst.car(), C_NIL);
     if(indice) {
-      arg = state.make_pair(Value::make_fixnum(i), arg);
+      Value argv[2] = {Value::make_fixnum(i), lst.car()};
+      tmp = state.apply(fn, 2, argv);
+    } else {
+      Value argv[1] = {lst.car()};
+      tmp = state.apply(fn, 1, argv);
     }
-    tmp = state.eval_apply_generic(fn, arg, false);
+
     if(tmp.is_active_exception()) return tmp;
     if(ret) {
       // Try to preserve source information if it's available
@@ -653,10 +655,12 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
     lst = lst.cdr();
   }
 
+  // Optionally handle an improper list
   if(lst != C_NIL) {
     if(improper) {
-      arg = state.make_pair(lst, C_NIL);
-      tmp = state.eval_apply_generic(fn, arg, false);
+      Value argv[1] = {lst};
+      tmp = state.apply(fn, 1, argv);
+
       if(tmp.is_active_exception()) return tmp;
       if(ret) {
         nlst_current.set_cdr(tmp);
@@ -741,10 +745,21 @@ Value fn_apply(State& state, size_t argc, Value* argv) {
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
 
-  Value fn = argv[0], args = argv[1], tmp;
-  AR_FRAME(state, fn, args, tmp);
+  size_t length = argv[1].list_length();
+  Value sub_argv;
 
-  tmp = state.eval_apply_generic(fn, args, false);
+  Value fn = argv[0], args = argv[1], tmp;
+  AR_FRAME(state, fn, args, tmp, sub_argv);
+
+  args = argv[1];
+
+  sub_argv = state.make_vector_storage(length);
+  while(args.type() == PAIR) {
+    state.vector_storage_append(sub_argv, args.car());
+    args = args.cdr();
+  }
+
+  tmp = state.apply_vector_storage(fn, sub_argv);
 
   return tmp;
 }
@@ -901,7 +916,9 @@ Value fn_table_for_each(State& state, size_t argc, Value* argv) {
       while(chain != C_NIL) {
         arg = state.make_pair(chain.cdar(), C_NIL);
         arg = state.make_pair(chain.caar(), arg);
-        tmp = state.eval_apply_generic(fn, arg, false);
+
+        Value argv[2] = {chain.caar(), chain.cdar()};
+        tmp = state.apply(fn, 2, argv);
         if(tmp.is_active_exception()) return tmp;
         chain = chain.cdr();
       }
@@ -1211,7 +1228,7 @@ Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
     key = state.get_symbol(keys[i]);
     value = key.symbol_value();
 
-    Value argv[2] = {key, value};
+    // Value argv[2] = {key, value};
     
     //(void) state.apply(fn, 2, argv);
   }

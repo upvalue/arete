@@ -1794,7 +1794,8 @@ struct State {
   // The internal application machinery is unfortunately somewhat complex due to the need for
   // interpreted, c++ and virtual machine functions to all be able to call eachother.
 
-  // Moreover, C++ and virtual machine functions use a different calling convention: argc/argv style
+  // Moreover, C++ and virtual machine functions use a different calling convention: argc/argv
+  // style
   // whereas the interpreter takes a list and converts it into an environment for evaluation.
 
   // The functions below should only be called by the interpreter and can optionally evaluate
@@ -1806,14 +1807,18 @@ struct State {
   Value eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
   Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);
   
-  /** Apply a C or a Scheme function */
-  Value eval_apply_generic(Value fn, Value args, bool eval_args);
+  /** Apply a Scheme function against a list of already-evaluated arguments */
+  Value eval_apply_function(Value fn, Value args);
 
   Value expand_expr(Value exp);
   Value eval_toplevel(Value exp);
 
-  /** This is the primary application function, and the only one that should be called by C++
+  /**
+   * This is the primary application function, and the only one that should be called by C++
    * functions. Argv can be evaluated on the stack or a pointer to the temps vector.
+   *
+   * NOTE: This should not be called against State::temps, as it is used to construct a list when
+   * interpreter functions are called.
    */
   Value apply(Value fn, size_t argc, Value* argv);
 
@@ -1821,7 +1826,7 @@ struct State {
    * Shorthand for calling apply against a vector. Necessary when building up garbage-collected
    * lists of arguments.
    */
-  Value apply_vector(Value fn, Value vec);
+  Value apply_vector_storage(Value fn, Value vec);
 
 
   ///// MODULES

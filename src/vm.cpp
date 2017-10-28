@@ -401,6 +401,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               goto exception;
             } else if(var_arity) {
               temps.clear();
+              // We have to save to_apply on temps because it might be collected during make_pair
               temps.push_back(to_apply);
               temps.push_back(C_NIL);
 
@@ -418,14 +419,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
               // Replace beginning of varargs with 
               f.stack[(f.stack_i - fargc - 1) + min_arity + 1] = temps[1];
+
               // Pop additional arguments off of stack, but leave mandatory arguments plus
               // new rest list on stack
               f.stack_i = (f.stack_i - fargc - 1) + min_arity + 2;
-              //std::cout << f.stack_i << ' ' << min_arity << std::endl;
-              //AR_PRINT_STACK();
-              fargc = min_arity + 1;
-              // std::cout << "new  fargc " << fargc << " new stack_I " << f.stack_i << std::endl;
 
+              fargc = min_arity + 1;
             }
 
             if(insn == OP_APPLY_TAIL) {
@@ -437,12 +436,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               argc = fargc;
               argv = &temps[0];
               fn = to_apply;
-              
-              /*
-              size_t stack_pointer = 0;
-              asm("mov %%rsp,%0" : "=r"(stack_pointer));
-              std::cout << stack_pointer << std::endl;
-              */
 
               goto tail;
             } else {
@@ -474,7 +467,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             // std::cout << "built args: " << temps[0] << std::endl;
 
             f.stack[f.stack_i - fargc - 1] =
-              eval_apply_generic(f.stack[f.stack_i - fargc - 1], temps[0], false);
+              eval_apply_function(f.stack[f.stack_i - fargc - 1], temps[0]);
             f.stack_i -= (fargc);
 
             AR_ASSERT(f.stack_i > 0);
