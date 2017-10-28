@@ -1195,6 +1195,30 @@ Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   return r;
 }
 
+Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "top-level-for-each";
+  AR_FN_EXPECT_APPLICABLE(state, argv, 0);
+
+  Value fn = argv[0], key, value;
+  AR_FRAME(state, fn, key, value);
+
+  std::vector<std::string> keys;
+  for(auto it = state.symbol_table->begin(); it != state.symbol_table->end(); it++) {
+    keys.push_back(it->first);
+  }
+
+  for(size_t i = 0; i != keys.size(); i++) {
+    key = state.get_symbol(keys[i]);
+    value = key.symbol_value();
+
+    Value argv[2] = {key, value};
+    
+    //(void) state.apply(fn, 2, argv);
+  }
+
+  return Value::make_fixnum(keys.size());
+}
+
 Value fn_set_top_level_value(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-top-level-value!";
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
@@ -1282,13 +1306,6 @@ Value fn_register_record_type(State& state, size_t argc, Value* argv) {
 }
 
 
-#define AR_FN_EXPECT_APPLICABLE(state, argv, arg) \
-  if(!((argv)[(arg)].applicable())) { \
-    std::ostringstream os; \
-    os << fn_name << " expected argument " << (arg) << " to be applicable but got a non-applicable " << (argv)[(arg)].type(); \
-    return state.type_error(os.str()); \
-  }
-
 Value fn_set_record_type_printer(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-record-type-printer!";
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
@@ -1355,8 +1372,9 @@ Value fn_record_type_descriptor(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_record_isa(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "record-isa?";
-  AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
+  // static const char* fn_name = "record-isa?";
+  if(argv[0].type() != RECORD)
+    return C_FALSE;
   Value rec = argv[0], rtd = argv[1];
 
   return Value::make_boolean(rec.record_isa(rtd));
@@ -1410,7 +1428,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
     for(size_t i = 0; i != length; i++) {
       free_vars_blob.blob_set<size_t>(i, free_vars.vector_ref(i).fixnum_value());
       AR_ASSERT(((size_t*) free_vars_blob.as<Blob>()->data)[i] ==
-        free_vars.vector_ref(i).fixnum_value());
+        (size_t)free_vars.vector_ref(i).fixnum_value());
     }
 
     AR_ASSERT(free_vars_blob.blob_length() == length);
@@ -1631,6 +1649,8 @@ void State::install_core_functions() {
 
   defun_core("top-level-value", fn_top_level_value, 1);
   defun_core("set-top-level-value!", fn_set_top_level_value, 2);
+
+  defun_core("top-level-for-each", fn_top_level_for_each, 1);
 
   // Records
   defun_core("register-record-type", fn_register_record_type, 5);

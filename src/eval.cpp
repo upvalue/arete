@@ -16,6 +16,35 @@
 
 namespace arete {
 
+Value State::make_env(Value parent) {
+  Value vec;
+  AR_FRAME(this, vec, parent);
+  vec = make_vector(3);
+  vector_append(vec, parent);
+  vector_append(vec, C_FALSE);
+  return vec;
+}
+
+void State::env_set(Value env, Value name, Value val) {
+  AR_FRAME(this, env, name, val);
+  AR_TYPE_ASSERT(name.identifierp());
+  // AR_TYPE_ASSERT(name.type() == SYMBOL);
+  // Toplevel set
+  while(env != C_FALSE) {
+    for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
+      if(identifier_equal(env.vector_ref(i-1), name)) {
+        env.vector_set(i, val);
+        return;
+      }
+    }
+    env = env.vector_ref(0);
+  }
+  if(name.type() == RENAME) {
+    name = name.rename_expr();
+  }
+  name.as<Symbol>()->value = val;
+}
+
 bool State::env_defined(Value env, Value name) {
   if(name.type() != SYMBOL) return false;
 
@@ -114,7 +143,7 @@ Value State::eval_cond(Value env,  Value exp, Value fn_name) {
   // Check for else clause
   pred = lst.caar();
   body = lst.cdar();
-  if(pred == get_symbol(S_ELSE)) {
+  if(pred == globals[S_ELSE]) {
     return eval_body(env,  fn_name, fn_name, body, body);
   } else {
     tmp = eval(env,  pred, fn_name);
@@ -202,8 +231,6 @@ Value State::eval_lambda(Value env,  Value exp) {
       // TODO this should not modify the source list.
       fn->arguments = args;
 
-      // std::cout << fn->arguments << std::endl;
-      // std::cout << fn->rest_arguments << std::endl;
     }
   }
   fn->body = exp.cddr();
@@ -249,7 +276,6 @@ Value State::eval_define(Value env,  Value exp, Value fn_name) {
   if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
     tmp.as<Function>()->name = name;
   }
-  // std::cout << "env_set " << env << ' ' << name << std::endl;
 
   return C_UNSPECIFIED;
 }
@@ -354,28 +380,28 @@ Value State::eval(Value env, Value exp, Value fn_name) {
         if(car.type() == RENAME && tmp == C_SYNTAX) {
           car = car.rename_expr();
         }
-        if(car == get_symbol(S_DEFINE)) {
+        if(car == globals[S_DEFINE]) {
           return eval_define(env, exp, fn_name);
-        } else if(car == get_symbol(S_LAMBDA)) {
+        } else if(car == globals[S_LAMBDA]) {
           return eval_lambda(env, exp);
-        } else if(car == get_symbol(S_SET)) {
+        } else if(car == globals[S_SET]) {
           return eval_set(env,  exp, fn_name);
-        } else if(car == get_symbol(S_BEGIN)) {
+        } else if(car == globals[S_BEGIN]) {
           return eval_begin(env,  exp, fn_name);
-        } else if(car == get_symbol(S_COND)) {
+        } else if(car == globals[S_COND]) {
           return eval_cond(env,  exp, fn_name);
           // add fn name
-        } else if(car == get_symbol(S_AND)) {
+        } else if(car == globals[S_AND]) {
           return eval_boolean_op(env, exp, fn_name, false);
-        } else if(car == get_symbol(S_OR)) {
+        } else if(car == globals[S_OR]) {
           return eval_boolean_op(env, exp, fn_name, true);
-        } else if(car == get_symbol(S_IF)) {
+        } else if(car == globals[S_IF]) {
           if(length != 3 && length != 4) {
             return eval_error("if requires 2-3 arguments", exp);
           }
 
           return eval_if(env,  exp, length == 4, fn_name);
-        } else if(car == get_symbol(S_QUOTE)) {
+        } else if(car == globals[S_QUOTE]) {
           if(length == 1) return eval_error("quote needs at least one argument", exp);
           else if(length > 2) return eval_error("quote takes exactly 1 argument", exp.cddr());
           return exp.cadr();
@@ -406,8 +432,6 @@ Value State::eval(Value env, Value exp, Value fn_name) {
           return eval_apply_scheme(env, car, exp.cdr(), exp, fn_name);
         } else if(car.type() == CFUNCTION) {
           return eval_apply_c(env, car, exp.cdr(), exp, fn_name);
-        } else if(car.type() == RECORD) {
-          return apply_record(env, car, exp.cdr(), exp, fn_name);
         } else if(car.type() == VMFUNCTION || car.type() == CLOSURE) {
           return eval_apply_vm(env, car, exp.cdr(), exp, fn_name);
         }
@@ -438,7 +462,7 @@ Value State::eval(Value env, Value exp, Value fn_name) {
       res = env_lookup(env, exp);
 
       if(res.bits == 0) {
-        return C_UNSPECIFIED;
+        return C_FALSE;
       } 
 
       if(res == C_UNDEFINED) {
@@ -451,7 +475,7 @@ Value State::eval(Value env, Value exp, Value fn_name) {
       if(res == C_SYNTAX) {
         std::stringstream os;
         os << "attempt to use syntax " << exp << " as value";
-        if(exp == get_symbol(S_DEFINE_SYNTAX)) {
+        if(exp == globals[S_DEFINE_SYNTAX]) {
           // if this happened, it's probably because the macroexpander has not been loaded
           os << " (did you load boot.scm?)";
         }
@@ -543,7 +567,7 @@ Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, V
   return tmp;
 }
 
-Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name) {
+Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
   Value tmp, closure(C_FALSE), vec, varargs_begin, varargs_cur;
   AR_FRAME(this, env, fn, args, src_exp, fn_name, tmp, closure, varargs_begin, varargs_cur);
 
@@ -649,41 +673,66 @@ Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value 
   EVAL_CHECK(tmp, src_exp, fn_name);
   return tmp;
 }
-
-Value State::apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name) {
-  Value apply = fn.record_type().record_type_apply(), args2 = C_FALSE;
-  AR_FRAME(this, env, fn, args, src_exp, fn_name, apply, args, args2);
-
-  // Interesting: Reusing the args var here like this causes a GC failure.
-  // Perhaps make_pair gets inlined or something here and causes some kind of tracking issue?
-  // args = make_pair(fn, args);
-
-  // Prepend record to arguments
-  args2 = make_pair(fn, args);
-
-  if(apply.type() == FUNCTION) {
-    return eval_apply_scheme(env, apply, args2, src_exp, fn_name, true);
-  } else if(apply.type() == CFUNCTION) {
-    return eval_apply_c(env, apply, args2, src_exp, fn_name, true);
-  } else {
-    return type_error("record applicator must be function or cfunction");
-  }
-  gc.collect();
-  // std::cout << "HAH" << std::endl;
-  return C_UNSPECIFIED;
-}
-
 Value State::eval_apply_generic(Value fn, Value args, bool eval_args) {
   AR_ASSERT(fn.applicable() && "eval_apply_generic called on non-applicable object");
   if(fn.type() == FUNCTION) {
     return eval_apply_scheme(fn.function_parent_env(), fn, args, C_FALSE, C_FALSE, eval_args);
   } else if(fn.type() == CFUNCTION) {
     return eval_apply_c(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
+  } else if(fn.type() == VMFUNCTION || fn.type() == CLOSURE) {
+    return eval_apply_vm(C_FALSE, fn, args, C_FALSE, C_FALSE, false);
   }
 
   std::cerr << "interpreter cannot apply object " << fn << std::endl;
   AR_ASSERT(!"eval_apply_generic failed");
   return C_UNSPECIFIED;
+}
+
+Value State::apply(Value fn, size_t argc, Value* argv) {
+
+  return C_UNSPECIFIED;
+}
+
+Value State::expand_expr(Value exp) {
+  Value expand = get_global_value(G_EXPANDER);
+  // Comment out to disable macroexpansion
+  if(expand != C_UNDEFINED) {
+    Value args, sym, mod, saved = C_FALSE;
+    AR_FRAME(this, expand, exp, args, sym, saved);
+    args = make_pair(C_FALSE, C_NIL);
+    args = make_pair(exp, args);
+
+    // Save for source code info
+    saved = exp;
+    exp = eval_apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
+    if(exp.is_active_exception()) {
+      std::ostringstream os1;
+      std::ostringstream os2;
+      os1 << saved;
+      os2 << "Error while expanding expression: " << std::endl << os1.str().substr(0, 120);
+      if(os1.str().size() > 120) os2 << " ... ";
+      os2 << std::endl;
+      print_src_pair(os2, saved);
+      stack_trace.insert(stack_trace.begin(), os2.str());
+      return exp;
+    }
+
+    if(get_global_value(G_EXPANDER_PRINT) == C_TRUE) {
+      print_src_pair(std::cout, saved);
+      std::cout << std::endl;
+      std::cout << "Expanded to: " << exp << std::endl;
+    }
+  } 
+
+  return exp;
+}
+
+Value State::eval_toplevel(Value exp) {
+  exp = expand_expr(exp);
+
+  return eval(C_FALSE, exp);
+
+
 }
 
 } // namespace arete

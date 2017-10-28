@@ -1,4 +1,4 @@
-// arete.hpp - Arete scheme header pair
+// arete.hpp - Arete Scheme
 #ifndef ARETE_HPP
 #define ARETE_HPP
 
@@ -112,7 +112,7 @@
 #ifndef ARETE_LOG
 # define ARETE_LOG(tag, prefix, msg) \
   if((ARETE_LOG_TAGS) & (tag)) { \
-    std::cout << ARETE_COLOR_RED << "arete:" << prefix << ": " << ARETE_COLOR_RESET << msg << std::endl; \
+    std::cerr << ARETE_COLOR_RED << "arete:" << prefix << ": " << ARETE_COLOR_RESET << msg << std::endl; \
   }
 #endif 
 
@@ -171,8 +171,9 @@ enum Type {
   FLONUM = 4,
   STRING = 5,
   CHARACTER = 6,
+  BLOB = 7,
   // Have pointers
-  SYMBOL = 7,
+  SYMBOL = 8,
   VECTOR = 9,
   VECTOR_STORAGE = 10,
   PAIR = 11, 
@@ -186,7 +187,6 @@ enum Type {
   VMFUNCTION = 19,
   CLOSURE = 20,
   UPVALUE = 21,
-  BLOB = 22,
   FILE_PORT = 23,
 };
 
@@ -195,16 +195,16 @@ std::ostream& operator<<(std::ostream& os, Type type);
 // Constants:
 
 enum {
+  C_FALSE = 0,            // 0000 0000 #f
   C_TRUE = 2,             // 0000 0010 #t
-  C_FALSE = 6,            // 0000 0110 #f
   C_NIL = 10,             // 0000 1010 ()
   C_UNSPECIFIED = 14 ,    // 0000 1110 #<unspecified> 
   C_EOF = 18,             // 0001 0010 #<eof>
   C_SYNTAX = 34,          // 0100 0010 #<syntax>
-  C_UNDEFINED = 66,
+  C_UNDEFINED = 66,       // 1000 0010 #<undefined>
 };
 
-// A heap-allocated, garbage-collected value.
+/** A heap-allocated, garbage collected value. */
 struct HeapValue {
   // Heap value headers are formatted like this:
 
@@ -242,15 +242,19 @@ struct HeapValue {
     // header = header & 255;
   }
 
-
   void flip_mark_bit() { header += get_mark_bit() ? -256 : 256; }
 };
 
-// Floating point number
+/**
+ * A floating point number
+ */
 struct Flonum : HeapValue {
   double number;  
 };
 
+/**
+ * A string
+ */
 struct String : HeapValue {
   size_t bytes;
   char data[1];
@@ -258,7 +262,9 @@ struct String : HeapValue {
   static const Type CLASS_TYPE = STRING;
 };
 
-// TODO: These should not be heap-allocated if possible.
+/**
+ * A character.
+ */
 struct Char : HeapValue {
   char datum;
 };
@@ -285,18 +291,35 @@ struct FilePort {
   static const unsigned CLASS_TYPE = FILE_PORT;
 };
 
+/**
+ * Value is the primary data structure used to represent, interact with and manipulate Scheme
+ * values from C++ code. 
+ * 
+ * Internally, Scheme values are represented either as immediate values: constants and fixnums,
+ * which end either in 10, 01, or are #f (which is NULL). Pointers to heap-allocated values always
+ * end in 00.
+ * 
+ * The methods on the Value class generally make assertions about the type of an object before any
+ * sort of potentially unsafe heap accesses are made.
+ * 
+ * Note that most mutation methods (e.g. set-car!) are part of the State object. This is because
+ * the generational garbage collector needs to keep track of pointer stores.
+ */
 struct Value {
   union {
     HeapValue* heap;
     ptrdiff_t bits;
   };
 
+  /** Default constructor: set Value to C_FALSE */
   Value(): bits(0) {}
   Value(HeapValue* heap_): heap(heap_) {}
   Value(ptrdiff_t bits_): bits(bits_) {}
 
   /** Returns true if this value is immediate */
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
+
+  /** Static immediate checker, used by garbage collector */
   static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
 
   /** Returns true if the value contains no pointers. */
@@ -317,17 +340,24 @@ struct Value {
       default:
         return false;
     }
-
   }
 
+  /** Returns true if the object is a procedure? in Scheme terms. */
   bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION ||
     type() == VMFUNCTION; }
+
+  /** Returns true if the object is applicable */
   bool applicable() const;
+
+  /** Returns true if the object is an identifier (a rename or a symbol) */
   bool identifierp() const { return type() == RENAME || type() == SYMBOL; }
 
+  /** Returns true if the object is a number */
   bool numeric() const {
-    Type tipe = type();
-    return tipe == FLONUM || tipe == FIXNUM;
+    switch(type()) {
+      case FLONUM: case FIXNUM: return true;
+      default: return false;
+    }
   }
 
   inline bool eqv(const Value &rhs) const {
@@ -393,6 +423,7 @@ struct Value {
   void vector_clear();
   size_t vector_length() const;
 
+  // VECTOR STORAGE
   Value* vector_storage_data() const;
 
   // STRINGS
@@ -483,6 +514,7 @@ struct Value {
   // True if a pair has been generated as a result of the expansion pass
   static const unsigned PAIR_GENERATED_BIT = 1 << 10;
 
+  /* Check whether a pair has source code information attached to it */
   bool pair_has_source() const {
     AR_TYPE_ASSERT(type() == PAIR);
     return heap->get_header_bit(PAIR_SOURCE_BIT);
@@ -493,8 +525,8 @@ struct Value {
     return heap->get_header_bit(PAIR_GENERATED_BIT);
   }
 
-  /** Return a pointer to a pair's source location. Note that this may be moved by the GC, so should
-  be copied. */
+  /** Return a pair's source code information. This is an error if the pair does not have
+   * source code information */
   SourceLocation pair_src() const;
   void set_pair_src(const SourceLocation&);
 
@@ -526,7 +558,9 @@ struct Value {
   unsigned vm_function_constant_count() const;
   unsigned vm_function_min_arity() const;
   unsigned vm_function_max_arity() const;
-  bool vm_function_variable_arity() const { return heap->get_header_bit(VMFUNCTION_VARIABLE_ARITY_BIT); }
+  bool vm_function_variable_arity() const {
+    return heap->get_header_bit(VMFUNCTION_VARIABLE_ARITY_BIT);
+  }
 
   Value vm_function_name() const;
   size_t* vm_function_code() const;
@@ -549,9 +583,8 @@ struct Value {
 
   // CLOSURES
 
-  /** Retrieve a Closure's function*/
+  /** Retrieve a Closure's function */
   VMFunction* closure_function() const;
-
 
   static const unsigned UPVALUE_CLOSED_BIT = 1 << 9;
 
@@ -1140,8 +1173,6 @@ inline bool Value::record_isa(Value rhs) const {
 inline bool Value::applicable() const {
   if(type() == FUNCTION || type() == CFUNCTION || type() == VMFUNCTION || type() == CLOSURE) {
     return true;
-  } else if(type() == RECORD) {
-    return record_applicable();
   }
   return false;
 }
@@ -1413,6 +1444,9 @@ struct State {
   unsigned shared_objects_begin;
   unsigned shared_objects_i;
 
+  /** A stack trace. */
+  std::vector<std::string> stack_trace;
+
   State():
       gc(*this),
       gensym_counter(0),
@@ -1489,159 +1523,58 @@ struct State {
   // Value creation; all of these will cause allocations
 
   /** Create a Flonum */
-  Value make_flonum(double number) {
-    Flonum* heap = (Flonum*) gc.allocate(FLONUM, sizeof(Flonum));
-    heap->number = number;
-    Value v(heap);
-    return v;
-  }
-  
-  /** Get a Global symbol */
-  Value get_symbol(Global sym) {
-    Value sym2 =  (globals.at((size_t) sym));
-    // std::cout << sym2 << std::endl;
-    AR_ASSERT(sym2.type() == SYMBOL);
-    return sym2;
-  }
+  Value make_flonum(double number);
 
-  /** Get the value of a Global symbol */
-  Value get_global_value(Global sym) {
-    Value s = globals.at((size_t) sym);
-    return s.as<Symbol>()->value;
-  }
+    /** Get the value of a Global symbol */
+  Value get_global_value(Global sym);
   
   /** Set the value of a Global symbol */
-  void set_global_value(Global sym, Value v) {
-    globals.at((size_t) sym).as<Symbol>()->value = v;
-  }
+  void set_global_value(Global sym, Value v);
 
-  Value get_symbol(Value name) {
-    AR_TYPE_ASSERT(name.type() == STRING);
-    std::string cname(name.string_data());
-    return get_symbol(cname);
-  }
+
+  /** Get a Global symbol */
+  Value get_symbol(Global sym);
+
+  /**
+   * Return a symbol for a given String
+   */
+  Value get_symbol(Value name);
 
   /** 
    * Given a C++ string, retrieve a symbol. May cause allocation if the symbol has not already been
    * interned
    */
-  Value get_symbol(const std::string& name) {
-    symbol_table_t::const_iterator x = symbol_table->find(name);
-    if(x == symbol_table->end()) {
-      Symbol* heap = static_cast<Symbol*>(gc.allocate(SYMBOL, sizeof(Symbol)));
-      AR_ASSERT(heap->get_type() == SYMBOL);
-
-      Value sym = heap, string;
-      AR_FRAME(this, sym, string);
-
-      string = make_string(name);
-
-      sym.as<Symbol>()->value = C_UNDEFINED;
-      sym.as<Symbol>()->name = string;
-
-      symbol_table->insert(std::make_pair(name, (Symbol*) sym.heap));
-
-      return sym;
-    } else {
-      AR_ASSERT(symbol_table->size() > 0);
-      return x->second;
-    }
-  }
+  Value get_symbol(const std::string& name);
 
   /** Generate a unique symbol. */
-  Value gensym(Value sym) {
-    std::ostringstream os;
-    os << "#:" << sym.symbol_name_data() << gensym_counter;
-    gensym_counter++;
-    Value sym2 = get_symbol(os.str());
-    sym2.heap->set_header_bit(Value::SYMBOL_GENSYM_BIT);
-    return sym2;
-  }
+  Value gensym(Value sym);
 
-  Value make_rename(Value expr, Value env) {
-    AR_FRAME(this, expr, env);
-    Rename* heap = static_cast<Rename*>(gc.allocate(RENAME, sizeof(Rename)));
-    heap->expr = expr;
-    heap->env = env;
-    heap->gensym = C_FALSE;
-    return heap;
-  }
+  Value make_rename(Value expr, Value env);
 
-  /** cons */
   Value make_pair(Value car = C_FALSE, Value cdr = C_FALSE,
-      size_t size = sizeof(Pair) - sizeof(SourceLocation)) {
-    AR_FRAME(this, car, cdr);
-    Pair* heap = (Pair*) gc.allocate(PAIR, size);
+    size_t size = sizeof(Pair) - sizeof(SourceLocation));
+  Value make_src_pair(Value car, Value cdr, SourceLocation& loc);
+  Value make_char(char c);
 
-    heap->data_car = car;
-    heap->data_cdr = cdr;
-    return heap;
-  }
+  /** Create vector backing storage */
+  Value make_vector_storage(size_t capacity);
 
-  /** Generate a pair with source code information */
-  Value make_src_pair(Value car, Value cdr, SourceLocation& loc) {
-    Value pare = C_FALSE;
-    AR_FRAME(this, pare, car, cdr);
-    pare = make_pair(car, cdr, sizeof(Pair));
-    pare.heap->set_header_bit(Value::PAIR_SOURCE_BIT);
-    AR_ASSERT(pare.type() == PAIR);
-    AR_ASSERT(pare.pair_has_source());
-    pare.set_pair_src(loc);
+  /** Create a vector
+   * @param capacity The initial capacity of the vector. Can save reallocs if this is known
+   * in advance
+   */
+  Value make_vector(size_t capacity = 2);
+  /**
+   * In-place vector append.
+   */ 
+  void vector_append(Value vector, Value value);
 
-    return pare;
-  }
+  /**
+   * In-place vector storage append. Error if it goes over capacity!
+   */
+  void vector_storage_append(Value sstore, Value value);
 
-  Value make_char(char c) {
-    Char* heap = static_cast<Char*>(gc.allocate(CHARACTER, sizeof(Char)));
-    heap->datum = c;
-    return heap;
-  }
-
-  Value make_vector_storage(size_t capacity) {
-    // Account for Value[1]
-    size_t size = (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity);
-    VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE, size));
-
-    storage->capacity = capacity;
-    storage->length = 0;
-
-    return storage;
-  }
-
-  Value make_vector(size_t capacity = 2) {
-    Value vec(C_FALSE), storage(C_FALSE);
-
-    AR_FRAME(this, vec, storage);
-    storage = make_vector_storage(capacity);
-    vec = gc.allocate(VECTOR, sizeof(Vector));
-    static_cast<Vector*>(vec.heap)->storage = storage;
-
-    return vec;
-  }
-
-  /** Mutating vector append */
-  void vector_append(Value vector, Value value) {
-    AR_TYPE_ASSERT(vector.type() == VECTOR);
-    // std::cout << "vector_append" << std::endl;
-    VectorStorage* store = static_cast<VectorStorage*>(vector.vector_storage().heap);
-
-    store->data[store->length++] = value;
-    
-    AR_ASSERT(store->length <= store->capacity);
-    if(store->length == store->capacity) {
-      Value storage = store, new_storage;
-      AR_FRAME(this, vector, value, storage, new_storage);
-
-      new_storage = make_vector_storage(store->capacity * 2);
-      store = static_cast<VectorStorage*>(vector.vector_storage().heap);
-      static_cast<VectorStorage*>(new_storage.heap)->length = store->length;
-      
-      memcpy(static_cast<VectorStorage*>(new_storage.heap)->data, store->data, sizeof(Value) * store->length);
-      static_cast<Vector*>(vector.heap)->storage = new_storage;
-    }
-  }
-
-  // Hash table functionality
+  ///// TABLES
 
   void table_setup(Value table, size_t size_log2);
   ptrdiff_t hash_index(Value table, Value key, bool& unhashable);
@@ -1678,52 +1611,15 @@ struct State {
   /**
    * Deep equality comparison. Will not terminate on shared structure.
    */
-  bool equals(Value a, Value b) const {
-    if(a.bits == b.bits) return true;
+  bool equals(Value a, Value b);
 
-    if(a.type() == VECTOR && b.type() == VECTOR) {
-      if(a.vector_length() != b.vector_length()) return false;
-      for(size_t i = 0; i < a.vector_length(); i++) {
-        if(!equals(a.vector_ref(i), b.vector_ref(i))) {
-          return false;
-        }
-      }
-      return true;
-    } else if(a.type() == PAIR && b.type() == PAIR) {
-      while(a.type() == PAIR && b.type() == PAIR) {
-        if(!equals(a.car(), b.car())) {
-          return false;
-        }
-        a = a.cdr();
-        b = b.cdr();
-      }
-
-      if(a != C_NIL || b != C_NIL) {
-        return equals(a, b);
-      }
-
-      return true;
-    } else if(a.type() == STRING && b.type() == STRING) {
-      if(a.string_bytes() != b.string_bytes()) return false;
-      return strncmp(a.string_data(), b.string_data(), a.string_bytes()) == 0;
-    }
-
-    return a.bits == b.bits;
-  }
   // Strings
   
   /**
    * Create a copy of a string
    * @param x A STRING Value
    */
-  Value string_copy(Value x) {
-    AR_FRAME(this, x);
-    String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + x.string_bytes()));
-    strncpy(heap->data, x.string_data(), x.string_bytes());
-    heap->bytes = x.string_bytes();
-    heap->data[x.string_bytes()] = '\0';
-    return heap;
-  }
+  Value string_copy(Value x);
 
   // Records
 
@@ -1738,45 +1634,11 @@ struct State {
 
   /** Register a new type of record */
   size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
-      Value field_names = C_FALSE, Value parent = C_FALSE) {
-    Value name = C_FALSE, tipe = C_FALSE;
+      Value field_names = C_FALSE, Value parent = C_FALSE);
 
-    AR_FRAME(this, tipe, name, field_names, parent);
+  void record_set(Value rec_, unsigned field, Value value);
 
-    tipe = gc.allocate(RECORD_TYPE, sizeof(RecordType));
-    name = make_string(cname);
-
-    tipe.as<RecordType>()->name = name;
-    tipe.as<RecordType>()->print = C_FALSE;
-    tipe.as<RecordType>()->apply = C_FALSE;
-    tipe.as<RecordType>()->parent = parent;
-    tipe.as<RecordType>()->field_count = field_count;
-    tipe.as<RecordType>()->field_names = field_names;
-    tipe.as<RecordType>()->data_size = data_size;
-
-    size_t idx = register_global(tipe);
-    return idx;
-  }
-
-  void record_set(Value rec_, unsigned field, Value value) {
-    Record* rec = rec_.as<Record>();
-
-    AR_TYPE_ASSERT(rec->type->field_count > field && "out of range error on record");
-
-    rec->fields[field] = value;
-  }
-
-  ///// BELOW HERE: Constructors
-
-  Value make_string(const std::string& body) {
-    String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + body.size()));
-    heap->bytes = body.size();
-    strncpy(heap->data, body.c_str(), body.size());
-    AR_ASSERT(heap->data[heap->bytes] == '\0');
-    // heap->data[heap->bytes] = '\0';
-
-    return heap;
-  }
+  Value make_string(const std::string& body);
 
   template <class T>
   Value make_blob(size_t count) {
@@ -1786,74 +1648,20 @@ struct State {
   }
 
   /** Make an exception from Scheme values */
-  Value make_exception(Value tag, Value message, Value irritants = C_UNSPECIFIED) {
-    Value exc;
-    AR_FRAME(this, tag, message, irritants, exc);
-    Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
-    exc.heap = heap;
-    heap->tag = tag;
-    heap->message = message;
-    heap->irritants = irritants;
-    return heap;
-  }
-
+  Value make_exception(Value tag, Value message, Value irritants = C_UNSPECIFIED);
   /** Make an exception with a C++ std::string message */
-  Value make_exception(Value tag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
-    Value message;
-    AR_FRAME(this, tag, message, irritants);
-    message = make_string(cmessage);
-    return make_exception(tag, message, irritants);
-  }
-
+  Value make_exception(Value tag, const std::string& cmessage, Value irritants = C_UNSPECIFIED);
   /** Make an exception with a C++ std::string message and tag */
-  Value make_exception(const std::string& ctag, const std::string& cmessage, Value irritants = C_UNSPECIFIED) { 
-    Value tag;
-    AR_FRAME(this, tag, irritants);
-    tag = get_symbol(ctag);
-    return make_exception(tag, cmessage, irritants);
-  }
-  
+  Value make_exception(const std::string& ctag, const std::string& cmessage,
+    Value irritants = C_UNSPECIFIED);
   /** Make an exception with a builtin tag */
-  Value make_exception(Global s, const std::string& cmessage, Value irritants = C_UNSPECIFIED) {
-    return make_exception(get_symbol(s), cmessage, irritants);
-  }
+  Value make_exception(Global s, const std::string& cmessage, Value irritants = C_UNSPECIFIED);
+  Value make_record(Value tipe);
 
-  Value make_record(Value tipe) {
-    AR_FRAME(this, tipe);
+  Value make_record(size_t tag);
 
-    unsigned field_count = tipe.as<RecordType>()->field_count;
-    unsigned data_size = tipe.as<RecordType>()->data_size;
-    Value record = static_cast<Record*>(
-      gc.allocate(RECORD, sizeof(Record) + 
-        ((field_count * sizeof(Value)) - sizeof(Value))
-        + data_size));
-
-    record.as<Record>()->type = tipe.as<RecordType>();
-    for(unsigned i = 0; i != field_count; i++) {
-      record.as<Record>()->fields[i] = C_FALSE;
-    }
-
-    return record;
-  }
-
-  Value make_record(size_t tag) {
-    AR_ASSERT(globals.size() > tag);
-    return make_record(globals.at(tag).as<RecordType>());
-  }
-
-  Value make_c_function(Value name, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
-    if(max_arity == 0)
-      max_arity = min_arity;
-    AR_FRAME(this, name);
-    CFunction *cfn = static_cast<CFunction*>(gc.allocate(CFUNCTION, sizeof(CFunction)));
-    cfn->name = name;
-    cfn->addr = addr;
-    cfn->min_arity = min_arity;
-    cfn->max_arity = max_arity;
-    if(variable_arity)
-      cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
-    return cfn;
-  }
+  Value make_c_function(Value name, c_function_t addr, size_t min_arity, size_t max_arity,
+    bool variable_arity);
 
   Value make_file_port(const std::string& path);
 
@@ -1861,8 +1669,6 @@ struct State {
 
   // Print out a table's internal structure for debugging purposes
   void print_table_verbose(Value tbl);
-
-
 
   Value pretty_print(std::ostream& os, Value v);
   bool pretty_print_shared_obj(std::ostream& os, Value v, print_table_t* printed);
@@ -1926,9 +1732,6 @@ struct State {
 
   ///// EVAL! Interpreter
 
-  // Functions for interacting with the Scheme environment
-  std::vector<std::string> stack_trace;
-
   void install_core_functions();
 
   /** Defines a built-in function */
@@ -1944,34 +1747,9 @@ struct State {
 
   static const size_t VECTOR_ENV_FIELDS = 2;
 
-  Value make_env(Value parent = C_FALSE) {
-    Value vec;
-    AR_FRAME(this, vec, parent);
-    vec = make_vector(3);
-    vector_append(vec, parent);
-    vector_append(vec, C_FALSE);
-    return vec;
-  }
+  Value make_env(Value parent = C_FALSE);
 
-  void env_set(Value env, Value name, Value val) {
-    AR_FRAME(this, env, name, val);
-    AR_TYPE_ASSERT(name.identifierp());
-    // AR_TYPE_ASSERT(name.type() == SYMBOL);
-    // Toplevel set
-    while(env != C_FALSE) {
-      for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
-        if(identifier_equal(env.vector_ref(i-1), name)) {
-          env.vector_set(i, val);
-          return;
-        }
-      }
-      env = env.vector_ref(0);
-    }
-    if(name.type() == RENAME) {
-      name = name.rename_expr();
-    }
-    name.as<Symbol>()->value = val;
-  }
+  void env_set(Value env, Value name, Value val);
 
   bool identifier_equal(Value id1, Value id2) {
     if(id1 == id2) return true;
@@ -2013,59 +1791,38 @@ struct State {
   Value eval_if(Value env, Value exp, bool has_else, Value fn_name);
   Value eval(Value env, Value exp, Value fn_name = C_FALSE);
 
+  // The internal application machinery is unfortunately somewhat complex due to the need for
+  // interpreted, c++ and virtual machine functions to all be able to call eachother.
+
+  // Moreover, C++ and virtual machine functions use a different calling convention: argc/argv style
+  // whereas the interpreter takes a list and converts it into an environment for evaluation.
+
+  // The functions below should only be called by the interpreter and can optionally evaluate
+  // their arguments 
+
   /** Apply a scheme function */
   Value eval_apply_scheme(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
-  Value eval_apply_vm(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name);
+  Value eval_apply_vm(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
   Value eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
-  // TODO: This should perhaps be removed entirely.
   Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);
-  Value apply(Value fn, size_t argc, Value* argv);
   
   /** Apply a C or a Scheme function */
   Value eval_apply_generic(Value fn, Value args, bool eval_args);
 
-  Value expand_expr(Value exp) {
-    Value expand = get_global_value(G_EXPANDER);
+  Value expand_expr(Value exp);
+  Value eval_toplevel(Value exp);
 
-    // Comment out to disable macroexpansion
-    if(expand != C_UNDEFINED) {
-      Value args, sym, mod, saved = C_FALSE;
-      AR_FRAME(this, expand, exp, args, sym, saved);
-      args = make_pair(C_FALSE, C_NIL);
-      args = make_pair(exp, args);
+  /** This is the primary application function, and the only one that should be called by C++
+   * functions. Argv can be evaluated on the stack or a pointer to the temps vector.
+   */
+  Value apply(Value fn, size_t argc, Value* argv);
 
-      // Save for source code info
-      saved = exp;
-      exp = eval_apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
-      if(exp.is_active_exception()) {
-        std::ostringstream os1;
-        std::ostringstream os2;
-        os1 << saved;
-        os2 << "Error while expanding expression: " << std::endl << os1.str().substr(0, 120);
-        if(os1.str().size() > 120) os2 << " ... ";
-        os2 << std::endl;
-        print_src_pair(os2, saved);
-        stack_trace.insert(stack_trace.begin(), os2.str());
-        return exp;
-      }
+  /**
+   * Shorthand for calling apply against a vector. Necessary when building up garbage-collected
+   * lists of arguments.
+   */
+  Value apply_vector(Value fn, Value vec);
 
-      if(get_global_value(G_EXPANDER_PRINT) == C_TRUE) {
-        print_src_pair(std::cout, saved);
-        std::cout << std::endl;
-        std::cout << "Expanded to: " << exp << std::endl;
-      }
-    } 
-
-    return exp;
-  }
-
-  Value apply_toplevel(Value fn, size_t argc, Value* argv);
-
-  Value eval_toplevel(Value exp) {
-    exp = expand_expr(exp);
-
-    return eval(C_FALSE, exp);
-  }
 
   ///// MODULES
 
@@ -2258,10 +2015,18 @@ inline Handle::~Handle() {
 
 } // namespace arete
 
+// Handy macros for writing CFunctions
+
+#define AR_FN_STACK_TRACE(state) \
+  std::ostringstream __stackinfo; \
+  __stackinfo << __FILE__ << ":" << __LINE__; \
+  (state).stack_trace.push_back(__stackinfo.str());
+
 #define AR_FN_EXPECT_POSITIVE(state, argv, i) \
   if((argv[(i)]).fixnum_value() < 0) { \
     std::ostringstream __os; \
     __os << "function " << (fn_name) << " expected argument " << (i) << " to be a positive fixnum but got " << (argv)[(i)];  \
+    AR_FN_STACK_TRACE(state); \
     return (state).eval_error(__os.str()); \
   }
 
@@ -2269,9 +2034,7 @@ inline Handle::~Handle() {
   if((argv)[(i)].type() != (expect)) { \
     std::ostringstream __os; \
     __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (Type)(argv[i].type()); \
-    std::ostringstream __os2; \
-    __os2 << __FILE__ << ':' << __LINE__; \
-    (state).stack_trace.push_back(__os2.str()); \
+    AR_FN_STACK_TRACE(state); \
     return (state).type_error(__os.str()); \
   } 
 
@@ -2279,7 +2042,16 @@ inline Handle::~Handle() {
   if(!(expr)) { \
     std::ostringstream __os; \
     __os << "function " << (fn_name) << " expected argument " << (i) << ' ' << msg ; \
+    AR_FN_STACK_TRACE(state); \
     return (state).type_error(__os.str()); \
+  }
+
+#define AR_FN_EXPECT_APPLICABLE(state, argv, arg) \
+  if(!((argv)[(arg)].applicable())) { \
+    std::ostringstream os; \
+    os << fn_name << " expected argument " << (arg) << " to be applicable but got a non-applicable " << (argv)[(arg)].type(); \
+    AR_FN_STACK_TRACE(state); \
+    return state.type_error(os.str()); \
   }
 
 #endif // ARETE_HPP

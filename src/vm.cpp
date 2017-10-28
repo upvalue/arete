@@ -1,9 +1,8 @@
 // vm.cpp - Virtual machine
 
-// DONE Computed goto
-// TODO alloca alternative?
 // TODO Disassembler
-// TODO Fix *code pointer
+
+// TODO Portable alternative to stack-allocated arrays.
 
 // TODO: Style. It's somewhat awkward and difficult to manipulate the stack by arithmetic
 // e.g. after a function application there should probably be a simple way to save a position
@@ -20,7 +19,7 @@
 #else 
 # define VM_CASE(label) case label 
 # define VM_DISPATCH() break ;
-# define VM_SWITCH() switch(insn)
+# define VM_SWITCH() switch(f.code[code_offset++])
 #endif
 
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
@@ -32,10 +31,6 @@
   }
 // #define AR_LOG_VM(msg)
 
-// A simple portable alternative to alloca would be just using a giant malloc'd or
-// stack-allocated array.
-
-// It could be free'd by VMFrame, or something
 
 namespace arete {
 
@@ -94,24 +89,36 @@ void VMFrame::destroy() {
   state.gc.vm_frames = previous;
 }
 
+
+// Note: The value of these instructions must be reflected in the computed-goto array below
+// and in the compiler
 enum {
+  // These instructions are the core of the virtual machine; they are arranged roughly
+  // by their purpose
   OP_BAD = 0,
+  // Simple stack operations
   OP_PUSH_CONSTANT = 1,
-  OP_GLOBAL_GET = 2,
-  OP_GLOBAL_SET = 3,
-  OP_RETURN = 4,
-  OP_APPLY = 5,
-  OP_APPLY_TAIL = 6,
-  OP_LOCAL_GET = 7,
-  OP_LOCAL_SET = 8,
-  OP_UPVALUE_GET = 9,
-  OP_UPVALUE_SET = 10,
-  OP_CLOSE_OVER = 11,
-  OP_JUMP = 12,
-  OP_JUMP_IF_FALSE = 13,
-  OP_POP = 14,
-  OP_PUSH_IMMEDIATE = 15,
+  OP_PUSH_IMMEDIATE = 2,
+  OP_POP = 3,
+  // Getters and setters
+  OP_GLOBAL_GET = 4,
+  OP_GLOBAL_SET = 5,
+  OP_LOCAL_GET = 6,
+  OP_LOCAL_SET = 7,
+  OP_UPVALUE_GET = 8,
+  OP_UPVALUE_SET = 9,
+  OP_CLOSE_OVER = 10,
+  // Application
+  OP_APPLY = 11,
+  OP_APPLY_TAIL = 12,
+  // Flow control
+  OP_RETURN = 13,
+  OP_JUMP = 14,
+  OP_JUMP_IF_FALSE = 15,
   OP_JUMP_IF_TRUE = 16,
+
+  // Instructions below this point are "open-coded" versions of the builtin C++ routines for speed;
+  // they are not necessary for the VM to function.
 };
 
 #define AR_PRINT_STACK() \
@@ -121,11 +128,22 @@ enum {
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 #ifdef AR_COMPUTED_GOTO
   static void* dispatch_table[] = {
+    &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,
+    
+    &&LABEL_OP_GLOBAL_GET, 
+    &&LABEL_OP_GLOBAL_SET, &&LABEL_OP_LOCAL_GET, &&LABEL_OP_LOCAL_SET, &&LABEL_OP_UPVALUE_GET,
+    &&LABEL_OP_UPVALUE_SET,
+    
+    &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
+
+    &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_JUMP_IF_TRUE
+    /*
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_GLOBAL_GET, &&LABEL_OP_GLOBAL_SET
     , &&LABEL_OP_RETURN, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL, &&LABEL_OP_LOCAL_GET,
     &&LABEL_OP_LOCAL_SET, &&LABEL_OP_UPVALUE_GET, &&LABEL_OP_UPVALUE_SET, &&LABEL_OP_CLOSE_OVER,
    &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_POP, &&LABEL_OP_PUSH_IMMEDIATE,
    &&LABEL_OP_JUMP_IF_TRUE,
+   */
   };
 #endif
   // Frames lost due to tail call optimization
@@ -218,6 +236,18 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         VM_DISPATCH();
       }
 
+      VM_CASE(OP_POP): {
+        AR_LOG_VM("pop");
+        f.stack_i--;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_PUSH_IMMEDIATE): {
+        AR_LOG_VM("push-immediate " << Value(VM_CODE()[code_offset]));
+        f.stack[f.stack_i++] = VM_CODE()[code_offset++];
+        VM_DISPATCH();
+      }
+
       VM_CASE(OP_GLOBAL_GET): {
         size_t idx = VM_CODE()[code_offset++];
         Value sym = f.fn->constants->data[idx];
@@ -257,14 +287,43 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         VM_DISPATCH();
       }
 
-      VM_CASE(OP_RETURN): {
-        AR_LOG_VM("return");
-        AR_PRINT_STACK();
-        if(f.stack_i == 0) return C_UNSPECIFIED;
-        return f.stack[f.stack_i - 1];
+      VM_CASE(OP_LOCAL_GET): {
+        size_t idx = VM_CODE()[code_offset++];
+        AR_LOG_VM("local-get idx: " << idx << " = " << f.locals[idx]);
+        f.stack[f.stack_i++] = f.locals[idx];
+        VM_DISPATCH();
       }
-      // Application logic.
 
+      VM_CASE(OP_LOCAL_SET): {
+        size_t idx = VM_CODE()[code_offset++];
+        AR_ASSERT("stack underflow" && f.stack_i >= 1);
+        Value val = f.stack[--f.stack_i];
+        AR_LOG_VM("local-set idx: " << idx << " = " << val);
+        f.locals[idx] = val;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_UPVALUE_GET): {
+        AR_ASSERT(f.closure);
+
+        size_t idx = VM_CODE()[code_offset++];
+        AR_LOG_VM("upvalue-get " << idx);
+        AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
+        AR_ASSERT(gc.live(f.closure->upvalues->data[idx].upvalue()));
+        f.stack[f.stack_i++] = f.closure->upvalues->data[idx].upvalue();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_UPVALUE_SET): {
+        AR_ASSERT(f.closure);
+        size_t idx = VM_CODE()[code_offset++];
+        AR_ASSERT(f.stack_i >= 1);
+        Value val = f.stack[--f.stack_i];
+        Value upval = f.closure->upvalues->data[idx];
+        upval.upvalue_set(val);
+        AR_LOG_VM("upvalue-set " << idx << " = " << val);
+        VM_DISPATCH();
+      }
       // TODO: Tail calls of C code. Possible/necessary?
       VM_CASE(OP_APPLY):
       VM_CASE(OP_APPLY_TAIL): {
@@ -409,8 +468,10 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             temps.push_back(C_NIL);
 
             for(size_t i = 0; i != fargc; i++) {
-              temps[0] = make_pair(f.stack[f.stack_i - fargc + i], temps[0]);
+              temps[0] = make_pair(f.stack[f.stack_i - i - 1], temps[0]);
             }
+
+            // std::cout << "built args: " << temps[0] << std::endl;
 
             f.stack[f.stack_i - fargc - 1] =
               eval_apply_generic(f.stack[f.stack_i - fargc - 1], temps[0], false);
@@ -431,44 +492,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             os << "attempt to apply non-applicable value " << afn;
             return eval_error(os.str());
         }
-        VM_DISPATCH();
-      }
-
-      VM_CASE(OP_LOCAL_GET): {
-        size_t idx = VM_CODE()[code_offset++];
-        AR_LOG_VM("local-get idx: " << idx << " = " << f.locals[idx]);
-        f.stack[f.stack_i++] = f.locals[idx];
-        VM_DISPATCH();
-      }
-
-      VM_CASE(OP_LOCAL_SET): {
-        size_t idx = VM_CODE()[code_offset++];
-        AR_ASSERT("stack underflow" && f.stack_i >= 1);
-        Value val = f.stack[--f.stack_i];
-        AR_LOG_VM("local-set idx: " << idx << " = " << val);
-        f.locals[idx] = val;
-        VM_DISPATCH();
-      }
-
-      VM_CASE(OP_UPVALUE_GET): {
-        AR_ASSERT(f.closure);
-
-        size_t idx = VM_CODE()[code_offset++];
-        AR_LOG_VM("upvalue-get " << idx);
-        AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
-        AR_ASSERT(gc.live(f.closure->upvalues->data[idx].upvalue()));
-        f.stack[f.stack_i++] = f.closure->upvalues->data[idx].upvalue();
-        VM_DISPATCH();
-      }
-
-      VM_CASE(OP_UPVALUE_SET): {
-        AR_ASSERT(f.closure);
-        size_t idx = VM_CODE()[code_offset++];
-        AR_ASSERT(f.stack_i >= 1);
-        Value val = f.stack[--f.stack_i];
-        Value upval = f.closure->upvalues->data[idx];
-        upval.upvalue_set(val);
-        AR_LOG_VM("upvalue-set " << idx << " = " << val);
         VM_DISPATCH();
       }
 
@@ -517,36 +540,21 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         VM_DISPATCH();
       }
 
+      ///// FLOW CONTROL
+
+      VM_CASE(OP_RETURN): {
+        AR_LOG_VM("return");
+        AR_PRINT_STACK();
+        if(f.stack_i == 0) return C_UNSPECIFIED;
+        return f.stack[f.stack_i - 1];
+      }
+      // Application logic.
+
+
       VM_CASE(OP_JUMP): {
         // Drop condition from stack
-        // std::cout << "DROPPING CONDITION " << stack[f.stack_i - 2] << std::endl;
-        // std::cout << "REPLACED WITH " << stack[f.stack_i - 1] << std::endl;
-        //stack[f.stack_i - 1] = stack[f.stack_i - 2];
-        //f.stack_i--;
-
-        //std::cout << stack[f.stack_i] << std::endl;
-        //std::cout << stack[f.stack_i - 1] << std::endl;
-
         code_offset = VM_CODE()[code_offset];
         AR_LOG_VM("jump " << code_offset);
-        VM_DISPATCH();
-      }
-
-      VM_CASE(OP_JUMP_IF_TRUE): {
-        size_t jmp_offset = VM_CODE()[code_offset++];
-        Value val = f.stack[f.stack_i-1];
-        size_t pop = VM_CODE()[code_offset++];
-
-        if(val == C_FALSE) {
-          AR_LOG_VM("jump-if-true not jumping " << jmp_offset);
-        } else {
-          AR_LOG_VM("jump-if-true jumping " << jmp_offset);
-          code_offset = jmp_offset;
-        }
-
-        if(pop) {
-          f.stack_i--;
-        }
         VM_DISPATCH();
       }
 
@@ -569,15 +577,21 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         VM_DISPATCH();
       }
 
-      VM_CASE(OP_POP): {
-        AR_LOG_VM("pop");
-        f.stack_i--;
-        VM_DISPATCH();
-      }
+      VM_CASE(OP_JUMP_IF_TRUE): {
+        size_t jmp_offset = VM_CODE()[code_offset++];
+        Value val = f.stack[f.stack_i-1];
+        size_t pop = VM_CODE()[code_offset++];
 
-      VM_CASE(OP_PUSH_IMMEDIATE): {
-        AR_LOG_VM("push-immediate " << Value(VM_CODE()[code_offset]));
-        f.stack[f.stack_i++] = VM_CODE()[code_offset++];
+        if(val == C_FALSE) {
+          AR_LOG_VM("jump-if-true not jumping " << jmp_offset);
+        } else {
+          AR_LOG_VM("jump-if-true jumping " << jmp_offset);
+          code_offset = jmp_offset;
+        }
+
+        if(pop) {
+          f.stack_i--;
+        }
         VM_DISPATCH();
       }
 

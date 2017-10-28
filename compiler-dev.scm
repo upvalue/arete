@@ -21,7 +21,7 @@
   (OpenFn/toplevel?! fn #t)
 
   ;(print (slurp-file "examples/life.scm"))
-  (define file-body (slurp-file "tests/compiler/varargs2.scm"))
+  (define file-body (slurp-file "examples/life.scm"))
   ;(define file-body (slurp-file "tco.scm"))
 
   (define fn-body

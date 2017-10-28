@@ -54,10 +54,19 @@
   toplevel? ;; 17
   )
 
+;; TODO: Probably need to remove
+;; interpreter closures if we want to recompile the whole heap.
 (set! OpenFn/make
   (let ((make OpenFn/make))
     (lambda (name)
       (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f (make-table) #f))))
+
+;; Although this is called Var, it might be more proper to think of it as a Binding that can be propagated through the
+;; call stack
+
+;; For example, in the expression (lambda (a) (lambda () (lambda () a)))
+;; When A is accessed from the third lambda expression, a Var will be added to it and the one above marking it as an
+;; upvalue
 
 (define-record Var
   idx
@@ -71,6 +80,18 @@
   (let ((make Var/make))
     (lambda (id name)
       (make id name #f #f))))
+
+(define (compiler-log fn . rest)
+  (when (not (eq? (top-level-value 'COMPILER-LOG) unspecified))
+    (display "arete:cc:")
+    (let loop ((i 0))
+      (unless (fx= i (OpenFn/depth fn))
+        (display ">")
+        (loop (fx+ i 1))))
+
+    (display " ")
+
+    (apply pretty-print rest)))
 
 ;; This function returns the "cell" at a given I.
 ;; For example, (list-ref-cell '(1 2 3) 1) returns (2 3)
@@ -102,18 +123,6 @@
             (vector-append! sources (vector-ref it i))
             (loop (fx+ i 1) sources)))))))
 
-(define (compiler-log fn . rest)
-  (when (not (eq? (top-level-value 'COMPILER-LOG) unspecified))
-    (display "arete:cc:")
-    (let loop ((i 0))
-      (unless (fx= i (OpenFn/depth fn))
-        (display ">")
-        (loop (fx+ i 1))))
-
-    (display " ")
-
-    (apply pretty-print rest)))
-
 (define (register-constant fn const)
   ;; Extreme optimization: linear search for duplicate constants
   (let ((constants (OpenFn/constants fn)))
@@ -127,6 +136,7 @@
           (loop (fx+ i 1)))))))
 
 ;; This converts symbols into their equivalent fixnums
+
 (define (insn->byte fn insn)
   (cond
     ((fixnum? insn) insn)
@@ -134,6 +144,46 @@
     ((gensym? insn) (table-ref (OpenFn/labels fn) insn))
     (else 
       (case insn
+        ;; See vm.cpp for details
+        (push-constant 1)
+        (push-immediate 2)
+        (pop 3)
+        (global-get 4)
+        (global-set 5)
+        (local-get 6)
+        (local-set 7)
+        (upvalue-get 8)
+        (upvalue-set 9)
+        (close-over 10)
+        (apply 11)
+        (apply-tail 12)
+        (return 13)
+        (jump 14)
+        (jump-if-false 15)
+        (jump-if-true 16)
+
+        #|
+  OP_BAD = 0,
+  // Simple stack operations
+  OP_PUSH_CONSTANT = 1,
+  OP_PUSH_IMMEDIATE = 2,
+  OP_POP = 3,
+  // Getters and setters
+  OP_GLOBAL_GET = 4,
+  OP_GLOBAL_SET = 5,
+  OP_LOCAL_GET = 6,
+  OP_LOCAL_SET = 7,
+  OP_UPVALUE_GET = 8,
+  OP_UPVALUE_SET = 9,
+  OP_CLOSE_OVER = 10,
+  // Application
+  OP_APPLY = 11,
+  OP_APPLY_TAIL = 12,
+  // Flow control
+  OP_RETURN = 13,
+  OP_JUMP = 14,
+  OP_JUMP_IF_FALSE = 15,
+  OP_JUMP_IF_TRUE = 16,
         (push-constant 1)
         (global-get 2)
         (global-set 3)
@@ -150,6 +200,7 @@
         (pop 14)
         (push-immediate 15)
         (jump-if-true 16)
+        |#
         (else (raise 'compile "unknown named instruction" (list insn)))))))
 
 ;; Adjust the stack size while recalculating the stack max if necessary
@@ -336,6 +387,7 @@
   (OpenFn/parent! sub-fn fn)
 
   ;; Note the depth of the function
+  
   (OpenFn/depth! sub-fn (if fn (fx+ (OpenFn/depth fn) 1) 0))
 
   ;; Calculate arity
@@ -621,10 +673,8 @@
 
   (OpenFn->procedure fn))
 
-(define (test-function a b . c)
-  (print a b c))
-
 (define (append-source src lst elt)
+  ;(print "append-source got: " src lst elt)
   (let loop ((lst lst))
     (if (pair? lst)
       ;; (1 2 3)
@@ -644,34 +694,35 @@
          (fn-rest-arguments (function-rest-arguments oldfn))
          ;; Reconstruct a valid arguments list.
          (fn-args 
-           (if (and (not (null? fn-proper-args)) fn-rest-arguments)
-             (append-source fn-body fn-proper-args fn-rest-arguments)
-             (if (null? fn-proper-args)
-               fn-rest-arguments
-               fn-proper-args)))
+           (begin
+             (print "append-source should get:" fn-body fn-proper-args fn-rest-arguments)
+
+             (if (and (not (null? fn-proper-args)) fn-rest-arguments)
+               (append-source fn-body fn-proper-args fn-rest-arguments)
+               (if (null? fn-proper-args)
+                 fn-rest-arguments
+                 fn-proper-args))))
 
          #;(fn (OpenFn/make fn-name))
          
-         (fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
+         (fn-expr (list-source fn-body 'lambda fn-args fn-body))
          )
 
-    ;(print fn-args)
-
-    ;(print fn-name fn-body fn-args fn-rest-arguments)
-
-    ;(print fn-args)
-    ;(print (list-source fn-body 'lambda fn-args (car fn-body)))
-
-    (print fn-args)
     (print fn-expr)
     
     (let* ((fn (compile-lambda #f fn-expr))
            (proc (OpenFn->procedure fn)))
       (set-top-level-value! name proc))))
 
+(define (test-function a b . c)
+  (print a b c)
+  (print 'easy-as-one-two-three))
 
 (define (main)
   (test-function 1 2 3 4 5)
+  ;(recompile-function 'recompile-function)
+  ;(print recompile-function)
+  ;(set-vmfunction-log! recompile-function #t)
   (recompile-function 'test-function)
   (set-vmfunction-log! test-function #t)
   (test-function 1 2 3 4 5)

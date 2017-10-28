@@ -65,7 +65,7 @@ TEST_CASE("constant representation") {
   CHECK(t == C_TRUE);
 
   CHECK(t.bits == 2);
-  CHECK(f.bits == 6);
+  CHECK(f.bits == 0);
   CHECK(nil.bits == 10);
   CHECK(nil.bits != f.bits);
   CHECK(eof.bits == 18);
