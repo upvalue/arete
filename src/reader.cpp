@@ -333,9 +333,13 @@ XReader::TokenType XReader::next_token() {
       tokenize_symbol();
       return TK_SYMBOL;
     } else {
-      std::cerr << "unknown character " << c << ' ' << (ptrdiff_t) c << std::endl;
       ARETE_LOG_READ("unknown character " << c << ' ' << (ptrdiff_t) c);
-      AR_ASSERT(!"unknown character");
+      std::ostringstream os;
+      os << "unknown character '" << c << "' (int = " << (ptrdiff_t) c << ")";
+      read_error(os.str(), token_start_line, position, position+1);
+      return TK_ERROR;
+
+      // AR_ASSERT(!"unknown character");
     }
   }
   return TK_EOF;

@@ -495,7 +495,8 @@ Value State::eval(Value env, Value exp, Value fn_name) {
   return C_UNSPECIFIED;
 }
 
-Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args) {
+Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp,
+    Value calling_fn_name, bool eval_args) {
   Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
   Value fn_name;
 
@@ -533,18 +534,25 @@ Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, V
     } else {
       tmp = args.car();
     }
+    //std::cout << "return error1 " << eval_args << ' ' <<  args << ' ' << std::endl;
+    //std::cout << "Erroring: " << args.car() << " => " << tmp << std::endl;
+    EVAL_CHECK(tmp, src_exp, calling_fn_name);
+    //std::cout << "return error2" << std::endl;
     vector_append(new_env, fn_args.car());
     fn_args = fn_args.cdr();
     vector_append(new_env, tmp);
-    EVAL_CHECK(tmp, src_exp, calling_fn_name);
     args = args.cdr();
   }
 
   // std::cout << "Args " << args << " " << args.type() << std::endl;
   if(fn.function_rest_arguments() != C_FALSE) {
     while(args.type() == PAIR) {
-      tmp = eval(env, args.car(), calling_fn_name);
-      EVAL_CHECK(tmp, src_exp, calling_fn_name);
+      if(eval_args) {
+        tmp = eval(env, args.car(), calling_fn_name);
+        EVAL_CHECK(tmp, src_exp, calling_fn_name);
+      } else {
+        tmp = args.car();
+      }
       if(rest_args_head == C_NIL) {
         rest_args_head = rest_args_tail = make_pair(tmp, C_NIL);
       } else {
@@ -570,7 +578,7 @@ Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp, V
 
 Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
   Value tmp, closure(C_FALSE), vec, varargs_begin, varargs_cur;
-  AR_FRAME(this, env, fn, args, src_exp, fn_name, tmp, closure, varargs_begin, varargs_cur);
+  AR_FRAME(this, env, fn, args, src_exp, fn_name, tmp, closure, vec, varargs_begin, varargs_cur);
 
   if(fn.type() == CLOSURE) {
     closure = fn;
@@ -599,7 +607,11 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
     if(argc == max_arity) {
       break;
     }
-    tmp = eval(env,  args.car());
+    if(eval_args) {
+      tmp = eval(env,  args.car());
+    } else {
+      tmp = args.car();
+    }
     EVAL_CHECK(tmp, src_exp, fn_name);
     vector_append(vec, tmp);
     // temps.push_back(tmp);
@@ -610,7 +622,7 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
   if(args.type() == PAIR && fn.vm_function_variable_arity()) {
     varargs_begin = varargs_cur = C_NIL;
     while(args.type() == PAIR) {
-      tmp = eval(env, args.car());
+      tmp = eval_args ? args.car() : eval(env, args.car());
       EVAL_CHECK(tmp, src_exp, fn_name);
       if(varargs_cur == C_NIL) {
         varargs_begin = varargs_cur = make_pair(tmp, C_NIL);
@@ -723,14 +735,15 @@ Value State::expand_expr(Value exp) {
   Value expand = get_global_value(G_EXPANDER);
   // Comment out to disable macroexpansion
   if(expand != C_UNDEFINED) {
-    Value args, sym, mod, saved = C_FALSE;
-    AR_FRAME(this, expand, exp, args, sym, saved);
-    args = make_pair(C_FALSE, C_NIL);
-    args = make_pair(exp, args);
+    Value sym, mod, saved = C_FALSE;
+    AR_FRAME(this, expand, exp, sym, saved);
+    Value argv[2] = {exp, C_FALSE};
 
-    // Save for source code info
+    // Save the original expression for source code information
     saved = exp;
-    exp = eval_apply_scheme(C_FALSE, expand, args, exp, C_FALSE, false);
+
+    exp = apply(expand, 2, argv);
+
     if(exp.is_active_exception()) {
       std::ostringstream os1;
       std::ostringstream os2;

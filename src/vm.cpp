@@ -26,7 +26,7 @@
 #define VM_CODE() (f.code)
 
 #define AR_LOG_VM(msg) \
-  if(true || ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
+  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg); \
   }
 // #define AR_LOG_VM(msg)
@@ -213,7 +213,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   size_t code_offset = 0;
 
-  f.code = f.fn->code_pointer();
+  f.code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
   // gc.collect();
   AR_ASSERT(gc.live((HeapValue*) f.code));
 
@@ -374,10 +374,10 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           }
           case VMFUNCTION:
           case CLOSURE: {
-            Value to_apply = afn;
-
             // Check for a closure and extract function from it if necessary,
             // so we can inspect the actual function
+            Value to_apply = afn;
+
             if(afn.type() == CLOSURE) {
               afn = afn.closure_function();
             }
@@ -417,7 +417,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
               to_apply = f.stack[f.stack_i - fargc - 1];
 
-              std::cout << "CREATED VARARGS LIST" << std::endl;
               // Replace beginning of varargs with 
               f.stack[(f.stack_i - fargc - 1) + min_arity + 1] = temps[1];
 
@@ -432,7 +431,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               frames_lost++;
 
               temps.clear();
-
               temps.insert(temps.end(), &f.stack[f.stack_i - fargc], &f.stack[f.stack_i]);
 
               argc = fargc;
@@ -649,8 +647,7 @@ void State::disassemble(std::ostream& os, Value fn) {
 
   os << "vmfunction " << vmf->name << std::endl;
 
-  size_t i = 0;
-  size_t *code = vmf->code_pointer();
+  // size_t i = 0;
 
   while(true) {
 

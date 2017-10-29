@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <sys/time.h>
 
 #include "arete.hpp"
 
@@ -1006,21 +1007,35 @@ Value fn_function_env(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "set-function-macro-bit!";
-
-  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
-
-  Function* fn = argv[0].as<Function>();
-  fn->set_header_bit(Value::FUNCTION_MACRO_BIT);
-
-  return fn;
+  switch(argv[0].type()) {
+    case FUNCTION:
+      argv[0].heap->set_header_bit(Value::FUNCTION_MACRO_BIT);
+      break;
+    case CLOSURE:
+    case VMFUNCTION: {
+      Value fn = argv[0].closure_unbox();
+      fn.heap->set_header_bit(Value::VMFUNCTION_MACRO_BIT);
+      break;
+    }
+    default: return argv[0];
+  }
+  return argv[0];
 }
 
 Value fn_function_min_arity(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "function-min-arity";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+  switch(argv[0].type()) {
+    case FUNCTION: {
+      return Value::make_fixnum(argv[0].function_arguments().list_length());
+    }
+    case CLOSURE:
+    case VMFUNCTION: {
+      Value x = argv[0].closure_unbox();
 
-  return Value::make_fixnum(argv[0].function_arguments().list_length());
+      return Value::make_fixnum(x.vm_function_min_arity());
+    }
+    default:
+      return Value::make_fixnum(1);
+  }
 }
 
 Value fn_function_body(State& state, size_t argc, Value* argv) {
@@ -1359,7 +1374,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   return fn;
 }
 
-Value fn_object_bits(State& state, size_t argc, Value* argv) {
+Value fn_value_bits(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(argv[0].bits);
 }
 
@@ -1368,6 +1383,15 @@ Value fn_object_bits(State& state, size_t argc, Value* argv) {
 Value fn_gc_collect(State& state, size_t argc, Value* argv) {
   state.gc.collect();
   return C_UNSPECIFIED;
+}
+
+Value fn_current_millisecond(State& state, size_t argc, Value* argv) {
+
+  struct timeval te; 
+  gettimeofday(&te, NULL); // get current time
+  size_t milliseconds = te.tv_sec*1000LL + te.tv_usec/1000; // caculate milliseconds
+
+  return Value::make_fixnum(milliseconds);
 }
 
 void State::defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
@@ -1383,43 +1407,20 @@ void State::defun_core(const std::string& cname, c_function_t addr, size_t min_a
 }
 
 void State::load_builtin_functions() {
-#if 0
-  // Numbers
-  defun_core("fx+", fn_fx_add, 1, 1, true);
-  defun_core("fx=", fn_fx_equals, 2, 2, true);
-  defun_core("fx-", fn_fx_sub, 1, 1, true);
-  defun_core("fx<", fn_fx_lt, 2);
-  defun_core("fx>", fn_fx_gt, 2);
-  defun_core("fx/", fn_fx_div, 2, 2);
-
-  defun_core("+", fn_add, 1, 1, true);
-  defun_core("-", fn_sub, 1, 1, true);
-  defun_core("/", fn_div, 2, 2, true);
-  defun_core("*", fn_mul, 1, 1, true);
-  defun_core("=", fn_num_equal, 2, 2, true);
-  defun_core("<", fn_lt, 2, 2, true);
-  defun_core(">", fn_gt, 2, 2, true);
-  defun_core("<=", fn_lte, 2, 2, true);
-  defun_core(">=", fn_gte, 2, 2, true);
-#endif
-
   // Conversion
   defun_core("string->symbol", fn_string_to_symbol, 1);
   defun_core("symbol->string", fn_symbol_to_string, 1);
 
   // Predicates
-  defun_core("null?", fn_nullp, 1);
   defun_core("char?", fn_charp, 1);
   defun_core("procedure?", fn_procedurep, 1);
   defun_core("pair?", fn_pairp, 1);
-  defun_core("symbol?", fn_symbolp, 1);
-  defun_core("rename?", fn_renamep, 1);
   defun_core("macro?", fn_macrop, 1);
   defun_core("self-evaluating?", fn_self_evaluatingp, 1);
-  defun_core("identifier?", fn_identifierp, 1);
-  defun_core("table?", fn_tablep, 1);
-  defun_core("string?", fn_stringp, 1);
+
+  // Operations on raw objects
   defun_core("value-type", fn_value_type, 1);
+  defun_core("value-bits", fn_value_bits, 1);
 
   // Strings
   defun_core("string-copy", fn_string_copy, 1);
@@ -1538,10 +1539,13 @@ void State::load_builtin_functions() {
   // Compiler
   defun_core("list-get-source", fn_list_get_source, 1);
   defun_core("OpenFn->procedure", fn_openfn_to_procedure, 1);
-  defun_core("object-bits", fn_object_bits, 1);
 
   // Garbage collector
   defun_core("gc:collect", fn_gc_collect, 0);
+
+  // Misc
+  defun_core("current-millisecond", fn_current_millisecond, 0);
+
 }
 
 }

@@ -54,12 +54,12 @@
   toplevel? ;; 17
   )
 
-;; TODO: Probably need to remove
-;; interpreter closures if we want to recompile the whole heap.
+(define %OpenFn/make OpenFn/make)
+
 (set! OpenFn/make
-  (let ((make OpenFn/make))
-    (lambda (name)
-      (make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f (make-table) #f))))
+  (lambda (name)
+    (%OpenFn/make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f (make-table)
+                  #f)))
 
 ;; Although this is called Var, it might be more proper to think of it as a Binding that can be propagated through the
 ;; call stack
@@ -76,10 +76,9 @@
   ;; If not #f, index in f.fn->upvalues. Mutually exclusive with upvalue?
   free-variable-id)
 
+(define %Var/make Var/make)
 (set! Var/make
-  (let ((make Var/make))
-    (lambda (id name)
-      (make id name #f #f))))
+  (lambda (id name) (%Var/make id name #f #f)))
 
 (define (compiler-log fn . rest)
   (when (not (eq? (top-level-value 'COMPILER-LOG) unspecified))
@@ -92,6 +91,10 @@
     (display " ")
 
     (apply pretty-print rest)))
+
+(define (print-function fn)
+  (print (OpenFn/name fn))
+  (print (OpenFn/insns fn)))
 
 ;; This function returns the "cell" at a given I.
 ;; For example, (list-ref-cell '(1 2 3) 1) returns (2 3)
@@ -162,45 +165,6 @@
         (jump-if-false 15)
         (jump-if-true 16)
 
-        #|
-  OP_BAD = 0,
-  // Simple stack operations
-  OP_PUSH_CONSTANT = 1,
-  OP_PUSH_IMMEDIATE = 2,
-  OP_POP = 3,
-  // Getters and setters
-  OP_GLOBAL_GET = 4,
-  OP_GLOBAL_SET = 5,
-  OP_LOCAL_GET = 6,
-  OP_LOCAL_SET = 7,
-  OP_UPVALUE_GET = 8,
-  OP_UPVALUE_SET = 9,
-  OP_CLOSE_OVER = 10,
-  // Application
-  OP_APPLY = 11,
-  OP_APPLY_TAIL = 12,
-  // Flow control
-  OP_RETURN = 13,
-  OP_JUMP = 14,
-  OP_JUMP_IF_FALSE = 15,
-  OP_JUMP_IF_TRUE = 16,
-        (push-constant 1)
-        (global-get 2)
-        (global-set 3)
-        (return 4)
-        (apply 5)
-        (apply-tail 6)
-        (local-get 7)
-        (local-set 8)
-        (upvalue-get 9)
-        (upvalue-set 10)
-        (close-over 11)
-        (jump 12)
-        (jump-if-false 13)
-        (pop 14)
-        (push-immediate 15)
-        (jump-if-true 16)
-        |#
         (else (raise 'compile "unknown named instruction" (list insn)))))))
 
 ;; Adjust the stack size while recalculating the stack max if necessary
@@ -242,7 +206,7 @@
 
 (define (compile-constant fn x)
   (if (or (fixnum? x) (boolean? x))
-    (emit fn 'push-immediate (object-bits x))
+    (emit fn 'push-immediate (value-bits x))
     (emit fn 'push-constant (register-constant fn x)))
 )
 
@@ -379,7 +343,11 @@
   (define arg-len (args-length args))
   (define varargs (or (not (list? args)) (identifier? args)))
 
+  ;; Check what the value of sub-fn is during a recompiled compile-lambda call
+  ; (print sub-fn)
+
   (compiler-log sub-fn (OpenFn/name sub-fn))
+
   (when fn
     (compiler-log fn "parent of " (OpenFn/name sub-fn) " is " (OpenFn/name fn)))
 
@@ -555,8 +523,6 @@
 
       (emit fn 'push-constant (register-constant fn #f))
       (register-label fn and-end)
-
-
     )
   )
 )
@@ -685,6 +651,8 @@
   (let* ((oldfn (top-level-value name))
          (fn-name (function-name oldfn))
          (fn-body (function-body oldfn))
+         ;; TODO Could just save the original arguments list in the Function; it doesn't really matter
+         ;; if they are oversized as they won't exist during normal execution in any case
          (fn-proper-args (function-arguments oldfn))
          (fn-rest-arguments (function-rest-arguments oldfn))
          ;; Reconstruct a valid arguments list.
@@ -701,26 +669,72 @@
          (fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
          )
 
-    (print fn-expr)
+    ;(print "FN-EXPR:" fn-expr)
     
-    (let* ((fn (compile-lambda #f fn-expr))
-           (proc (OpenFn->procedure fn)))
-      (set-top-level-value! name proc))))
+    (let ((fn (compile-lambda #f fn-expr)))
+      (OpenFn/name! fn fn-name)
+      (set-top-level-value! name (OpenFn->procedure fn)))))
 
+    
 (define (test-function a b . c)
   (print a b "c:" c)
   (let ((var (list a b c)))
-    var)
+    (set! c #f)
+    (list a b c var))
 )
 
+(define (time-function str cb)
+  (let ((time-start (current-millisecond)))
+    (cb)
+    (let ((time-end (current-millisecond)))
+      (print str)
+      (print (- time-end time-start) "ms elapsed"))))
+
+(define (function-2 a)
+ a)
+
+(define (function-1 . args)
+  (define name #t) name)
+
 (define (main)
-  ; (test-function 1 2 3 4 5)
+  #|
+  (recompile-function 'not)
+  (recompile-function 'time-function)
+  (recompile-function 'compiler-log)
+  (recompile-function 'append-source)
+  (recompile-function 'compile-expr)
+  (recompile-function 'compile-toplevel)
+  (recompile-function 'compile-finish)
+  (recompile-function 'args-length)
+|#
+  ;(recompile-function 'emit)
+  ;(recompile-function 'function-1)
+  ;(print (function-1))
+  ;(set-top-level-value! 'COMPILER-LOG #t)
+  ;(recompile-function 'function-1)
+  ;(print (function-1 12345))
+
+  ;; Shortest case -- calling interpreted functions in certain ways from VM functions seems to cause errors
+  ;(recompile-function 'emit)
+  #|(recompile-function 'compile-define)
+  (recompile-function 'function-1)
+  (recompile-function 'compile-set!)
+  (recompile-function 'compile-lambda)
+
   (recompile-function 'recompile-function)
-  ;(print recompile-function)
-  (recompile-function 'test-function)
-  ;(set-vmfunction-log! recompile-function #t)
-  (set-vmfunction-log! test-function #t)
-  (print (test-function 1 2 3 4 5))
+  |#
+  (top-level-for-each
+    (lambda (k v)
+      (when (eq? (value-type v) 13)
+        #t)))
+;        #;(print k "is an interpreted function, and must be DESTROYED"))))
+  ;(recompile-function 'compile-lambda)
+  ;(recompile-function 'function-2)
+  ;(print (function-1 'asdf 'bsdf))
+  #;(time-function "compiled fib"
+    (lambda ()
+      (print (fib 30))))
+  ;(set-vmfunction-log! test-function #t)
   #t)
 
-(main)
+;(main)

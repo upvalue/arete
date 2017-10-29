@@ -343,9 +343,13 @@ struct Value {
   }
 
   /** Returns true if the object is a procedure? in Scheme terms. */
-  bool procedurep() const { return type() == FUNCTION || type() == CFUNCTION ||
-    type() == VMFUNCTION; }
-
+  bool procedurep() const {
+    switch(type()) {
+      case FUNCTION: case CFUNCTION: case VMFUNCTION: case CLOSURE: return true;
+      default: return false;
+    }
+  }
+    
   /** Returns true if the object is applicable */
   bool applicable() const;
 
@@ -587,6 +591,9 @@ struct Value {
   /** Retrieve a Closure's function */
   VMFunction* closure_function() const;
 
+  /** If a type is a closure, return its function */
+  Value closure_unbox() const;
+
   static const unsigned UPVALUE_CLOSED_BIT = 1 << 9;
 
   // RECORD
@@ -823,6 +830,7 @@ inline Value Value::exception_irritants() const {
 
 /// FUNCTIONS
 
+/** An interpreted Scheme function */
 struct Function : HeapValue {
   Value name, parent_env, arguments, rest_arguments, body;
 
@@ -972,6 +980,13 @@ struct Closure : HeapValue {
 
   static const unsigned CLASS_TYPE = CLOSURE;
 };
+
+inline Value Value::closure_unbox() const {
+  if(type() == CLOSURE) {
+    as<Closure>()->function;
+  }
+  return heap;
+}
 
 inline VMFunction* Value::closure_function() const {
   return as<Closure>()->function.as<VMFunction>();
