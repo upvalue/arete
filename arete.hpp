@@ -1219,6 +1219,8 @@ struct GC;
  * FrameHack turns a Value& into a pointer to a stack-allocated Value. 
  */
 struct FrameHack {
+  // TODO: If the collector is incremental, there's no need to save
+  // pointer-to-pointers
   FrameHack(Value& value_): value((HeapValue**) &value_.bits) {}
   ~FrameHack() {}
   HeapValue** value;
@@ -1255,11 +1257,13 @@ struct VMFrame {
   Value exception;
   size_t stack_i;
   size_t depth;
+  bool destroyed;
 
   VMFrame(State& state);
   ~VMFrame();
 
-  void destroy();
+  void setup(Value to_apply);
+  void close_over();
 };
 
 /** An individual tracked pointer. Can be allocated on the heap. */
@@ -1411,9 +1415,8 @@ struct GCIncremental : GCCommon {
   size_t block_i, block_cursor;
 
   GCIncremental(State& state_): GCCommon(state_), mark_bit(1), block_i(0), block_cursor(0) {
-    Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
+    Block *b = new Block(heap_size, mark_bit);
     blocks.push_back(b);
-    heap_size = block_size = ARETE_BLOCK_SIZE;
 
     // Blocks should be allocated dead
     AR_ASSERT(!marked((HeapValue*) b->data));

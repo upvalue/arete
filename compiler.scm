@@ -230,7 +230,9 @@
       (compile-expr fn sub-x (list-ref-cell x (fx+ i 1)) #f))
     (cdr x))
 
-  (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
+  ;; Stack size sanity check
+  ;; Except for toplevel functions
+  (unless (or (OpenFn/toplevel? fn) (eq? (fx- (OpenFn/stack-size fn) argc) stack-check))
     (raise 'compile (print-string "expected function stack size" (OpenFn/stack-size fn)
                                   "to match 0 + function arguments" stack-check) (list fn x)))
 
@@ -666,18 +668,12 @@
          
          ;(fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
          (fn-exxxpr
-           ;; Functions which use COND
+           ;; Unexpanded boot functions which use COND
+           ;; need to be expanded.
            (if (memq name '(expand-apply expand))
              (expand fn-expr #f)
              fn-expr))
          )
-
-    #|
-    (print (function-body oldfn))
-    (print "fn-expr" fn-expr)
-    (print "fn-expanded" (expand '(lambda (x env) #t) #f))
-    (print "fn-exxxpr" fn-exxxpr)
-    |#
 
     (let ((fn (compile-lambda #f fn-exxxpr)))
       (OpenFn/name! fn fn-name)
@@ -693,9 +689,11 @@
       (print ";;" (- time-end time-start) "ms elapsed"))))
 
 ;; n.b. it's possible that bugs could lurk here, if the order of function recompilation is important
-;; (it should not be)
+;; (it should not be). because top-level-for-each just iterates over the symbol table in whatever order it
+;; happens to exist
 
 ;; we could also list them out by hand, but that seems kind of tedious, doesn't it?
+
 (define (pull-up-bootstraps)
   (time-function "bootstrapped!"
     (lambda () 
@@ -714,11 +712,52 @@
       "functions")
 )))
 
-#|
-(pull-up-bootstraps)
+#;(let ((unsuccessful #f))
+  (top-level-for-each
+    (lambda (k v)
+      (when (eq? (value-type v) 13)
+        (set! unsuccessful #t))))
 
-(top-level-for-each
-  (lambda (k v)
-    (when (eq? (value-type v) 13)
-      (print "Bootstrap unsuccessful"))))
-|#
+  (when unsuccessful
+    (print "Bootstrap unsuccessful")))
+
+;; Print some intermediate value and return it
+(define (pi i)
+  (print i)
+  i)
+
+(define (main)
+
+  (define fn 
+    (compile-toplevel
+      (pi (expand
+        '((lambda (b)
+           (case #t
+             ((thing) b)
+             (else #f)))) #f))
+  ))
+
+
+  (let ((subfn (fn)))
+    (print subfn)
+    (print (subfn #t)))
+
+)
+
+(pull-up-bootstraps)
+;(main)
+
+
+
+(time-function "full expand & compile on VM"
+  (lambda ()
+    (let
+      ((expander (slurp-file "boot.scm"))
+       (struct (slurp-file "struct.scm"))
+       (compiler (slurp-file "compiler.scm")))
+
+      (compile-toplevel (expand expander #f))
+      (compile-toplevel (expand struct #f))
+      (compile-toplevel (expand compiler #f))
+    )))
+

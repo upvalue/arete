@@ -1285,7 +1285,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   // TODO: Could type check more thoroughly here.
 
   size_t size = sizeof(VMFunction);
-  Value name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob,
+  Value name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob = C_FALSE,
      sources_blob;
   AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn, free_vars, free_vars_blob,
     sources_blob);

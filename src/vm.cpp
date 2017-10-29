@@ -25,10 +25,10 @@
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
 #define VM_CODE() (f.code)
 
-#define AR_VM_LOG_ALWAYS 0
+#define AR_VM_LOG_ALWAYS false
 
 #define AR_LOG_VM(msg) \
-  if(AR_VM_LOG_ALWAYS || ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
+  if((AR_VM_LOG_ALWAYS) || ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg); \
   }
 // #define AR_LOG_VM(msg)
@@ -66,7 +66,8 @@ static std::string depth_to_string(const VMFrame& f) {
   return str;
 }
 
-VMFrame::VMFrame(State& state_): state(state_), closure(0), exception(C_FALSE), stack_i(0), depth(0) {
+VMFrame::VMFrame(State& state_): state(state_), closure(0), exception(C_FALSE), stack_i(0),
+    depth(0), destroyed(false) {
   previous = state.gc.vm_frames;
   if(previous) {
     depth = previous->depth+1;
@@ -76,10 +77,34 @@ VMFrame::VMFrame(State& state_): state(state_), closure(0), exception(C_FALSE), 
 }
 
 VMFrame::~VMFrame() {
-  destroy();
+  //std::cerr << "~VMFrame " << depth << std::endl;
+  AR_ASSERT(destroyed);
+  if(!destroyed) close_over();
+  // Pop frame
+  AR_ASSERT(state.gc.vm_frames == this);
+  state.gc.vm_frames = previous;
 }
 
-void VMFrame::destroy() {
+void VMFrame::setup(Value to_apply) {
+  destroyed = false;
+
+  if(to_apply.type_unsafe() == CLOSURE) {
+    closure = to_apply.as_unsafe<Closure>();
+    fn = closure->function.as_unsafe<VMFunction>();
+  } else {
+    closure = 0;
+    fn = to_apply.as_unsafe<VMFunction>();
+  }
+
+}
+
+// Due to something related to the way clang destroys stack-allocated variably sized
+// arrays (which we use to store the stack, locals, and free variables), we have to
+// manually destroy VMFrames ahead of their actual ~VMFrame call rather than
+// relying on RAII.
+
+void VMFrame::close_over() {
+  AR_ASSERT(!destroyed);
   // Close over upvalues
   if(fn->free_variables) {
     // AR_LOG_VM("closing over " << fn->free_variables->length << " free variables");
@@ -87,17 +112,21 @@ void VMFrame::destroy() {
       //std::cout << "Closing over free variable " << fn->free_variables
       //std::cout << "Closing over free variable " << i << " value of " << upvalues[i].upvalue() << std::endl;
       Value saved_local = upvalues[i].upvalue();
+      AR_ASSERT(state.gc.live(saved_local));
       upvalues[i].upvalue_close();
       AR_ASSERT(upvalues[i].upvalue_closed());
       AR_ASSERT(upvalues[i].upvalue() == saved_local);
     }
   }
 
-  // Pop frame
-  AR_ASSERT(state.gc.vm_frames == this);
-  state.gc.vm_frames = previous;
+  fn = 0;
+  closure = 0;
+  upvalues = 0;
+  stack = 0;
+  locals = 0;
+  stack_i = 0;
+  destroyed = true;
 }
-
 
 // Note: The value of these instructions must be reflected in the computed-goto array below
 // and in the compiler
@@ -130,6 +159,13 @@ enum {
   // they are not necessary for the VM to function.
 };
 
+struct StackThing {
+  StackThing() {}
+  ~StackThing() {
+    std::cout << "~StackThing" << std::endl;
+  }
+};
+
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 #ifdef AR_COMPUTED_GOTO
   static void* dispatch_table[] = {
@@ -153,11 +189,16 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 #endif
   // Frames lost due to tail call optimization
   size_t frames_lost = 0;
+  VMFrame f(*this);
+  f.setup(fn);
  tail:
 
-  VMFrame f(*this);
+  // StackThing item;
 
   AR_ASSERT(gc.vm_frames == &f);
+
+
+  /* CLANG_FIX
 
   if(fn.type() == CLOSURE) {
     f.closure = fn.as<Closure>();
@@ -165,6 +206,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   } else {
     f.fn = fn.as<VMFunction>();
   }
+  */
 
   AR_LOG_VM("ENTERING FUNCTION " << f.fn->name << " closure: " << (f.closure == 0 ? "#f" : "#t")
      << " free_variables: " << f.fn->free_variables);
@@ -174,10 +216,19 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   void* stack[f.fn->stack_max];
   void* locals[f.fn->local_count];
   void* upvalues[upvalue_count];
+  //void* stack = (void*) alloca(f.fn->stack_max * sizeof(void*));
+  //void* locals = (void*) alloca(f.fn->local_count * sizeof(void*));
+  //void* upvalues = (void*) alloca(upvalue_count * sizeof(Value));
+
+  if(upvalue_count) {
+    //std::cerr << "allocating space for " << upvalue_count << " upvalues" << std::endl;
+    //std::cerr << (size_t) stack << ' ' << (size_t) locals << ' ' << (size_t) upvalues << std::endl;
+  }
 
   // Allocate storage
   f.stack = (Value*) stack;
   f.locals = (Value*) locals;
+  f.upvalues = upvalue_count ? (Value*) upvalues : 0;
 
   // Initialize local variables
   memcpy(f.locals, argv, argc * sizeof(Value));
@@ -192,13 +243,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     // TODO: Is GC allocating here dangerous? We can copy the blob locally as well.
     // If necessary
     AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
-    f.upvalues = (Value*) upvalues;
-    // f.upvalues = (Value*) malloc(f.fn->free_variables->length * sizeof(Value));
 
-    //memset(f.upvalues, 0, f.fn->free_variables->length * sizeof(Value));
-    for(size_t i = 0; i != f.fn->free_variables->length; i++) {
-      f.upvalues[i].bits = 0;
-    }
+    memset(f.upvalues, 0, f.fn->free_variables->length * sizeof(Value));
 
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
       f.upvalues[i] = gc.allocate(UPVALUE, sizeof(Upvalue));
@@ -207,6 +253,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       f.upvalues[i].as<Upvalue>()->local = &f.locals[idx];
     }
   }
+
+  //gc.collect();
 
   size_t code_offset = 0;
 
@@ -428,6 +476,11 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               argc = fargc;
               argv = &temps[0];
               fn = to_apply;
+              
+              f.close_over();
+              AR_ASSERT(f.destroyed);
+              f.setup(fn);
+              AR_ASSERT(!f.destroyed);
 
               goto tail;
             } else {
@@ -505,21 +558,33 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             vector_storage_append(temps[0], f.closure->upvalues->data[idx]);
           } else {
             //AR_LOG_VM("enclosing local variable " << f.fn->free_variables->blob_ref<size_t>(i)  << " as upvalue " << i << " from f.upvalues idx " << idx);
+            //AR_ASSERT("local variable is live." && gc.live(f.locals[f.fn->free_variables->blob_ref<size_t>(i)]));
 
+            /*
             AR_ASSERT(!f.fn->free_variables || idx < f.fn->free_variables->length);
             AR_ASSERT(gc.live(f.upvalues[idx]));
             AR_ASSERT(f.upvalues[idx].type() == UPVALUE);
             AR_ASSERT(!f.upvalues[idx].upvalue_closed());
             AR_ASSERT(f.upvalues[idx].upvalue().type() != UPVALUE);
+            */
             // AR_ASSERT(f.upvalues[idx].as<Upvalue>()->local == &f.locals[f.fn->free_variables->blob_ref<size_t>(i)]);
             vector_storage_append(temps[0], f.upvalues[idx]);
           }
 
-          AR_LOG_VM("upvalue " << i << " = " << temps[0].vector_ref(i) << " " << temps[0].vector_ref(i).upvalue());
+          AR_LOG_VM("upvalue " << i << " = " << temps[0].as<VectorStorage>()->data[i] << " " << temps[0].as<VectorStorage>()->data[i].upvalue())
         }
         temps.push_back(gc.allocate(CLOSURE, sizeof(Closure)));
+        AR_ASSERT(gc.live(temps[0]));
+        AR_ASSERT(gc.live(temps[1]));
         temps[1].as<Closure>()->upvalues = temps[0].as<VectorStorage>();
         temps[1].as<Closure>()->function = f.stack[f.stack_i-1];
+        AR_ASSERT(gc.live(f.stack[f.stack_i - 1]));
+
+        for(size_t i = 0; i != upvalues; i++) {
+          AR_ASSERT(gc.live(temps[1].as<Closure>()->upvalues->data[i]));
+        }
+
+
         f.stack[f.stack_i-1] = temps[1];
         VM_DISPATCH();
       }
@@ -529,8 +594,11 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       VM_CASE(OP_RETURN): {
         AR_LOG_VM("return");
         AR_PRINT_STACK();
-        if(f.stack_i == 0) return C_UNSPECIFIED;
-        return f.stack[f.stack_i - 1];
+        Value ret = f.stack_i == 0 ? C_UNSPECIFIED : f.stack[f.stack_i - 1];
+        f.close_over();
+        AR_ASSERT(f.destroyed);
+        return ret;
+        //return f.stack[f.stack_i - 1];
       }
       // Application logic.
 
@@ -589,6 +657,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
     }
   }
+
+  std::cerr << "This should never be reached" << std::endl; 
 
   return f.stack[f.stack_i];
 

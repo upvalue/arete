@@ -201,19 +201,24 @@ void GCSemispace::copy_roots() {
     copy((HeapValue**) &link->exception);
 
     for(size_t i = 0; i != free_vars; i++) {
-      copy((HeapValue**) &link->upvalues[i]);
+      copy((HeapValue**) &link->upvalues[i].heap);
     }
 
     if(link->closure != 0) {
       copy((HeapValue**) &link->closure);
     }
 
-    for(size_t i = 0; i != stack_i; i++) {
-      copy((HeapValue**) &link->stack[i]);
+    if(link->stack != 0) {
+      for(size_t i = 0; i != stack_i; i++) {
+        copy((HeapValue**) &link->stack[i]);
+      }
     }
 
-    for(unsigned i = 0; i != local_count; i++) {
-      copy((HeapValue**) &link->locals[i]);
+    if(link->locals != 0) {
+      for(unsigned i = 0; i != local_count; i++) {
+        copy((HeapValue**) &link->locals[i]);
+      }
+
     }
 
     // Update code pointer.
