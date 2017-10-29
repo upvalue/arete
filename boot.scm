@@ -13,16 +13,24 @@
 
 (define not (lambda (x) (eq? x #f)))
 
-(define boolean? (lambda (v) (or (eq? v #t) (eq? v #f))))
 
 (define fixnum? (lambda (v) (eq? (value-type v) 1)))
+(define flonum? (lambda (v) (eq? (value-type v) 4)))
+(define constant? (lambda (v) (eq? (value-type v) 2)))
+(define boolean? (lambda (v) (or (eq? v #t) (eq? v #f))))
+(define character? (lambda (v) (eq? (value-type v) 6)))
+(define pair? (lambda (v) (eq? (value-type v) 11)))
+(define table? (lambda (v) (eq? (value-type v) 15)))
 (define string? (lambda (v) (eq? (value-type v) 5)))
 (define symbol? (lambda (v) (eq? (value-type v) 8)))
 (define vector? (lambda (v) (eq? (value-type v) 9)))
-(define table? (lambda (v) (eq? (value-type v) 15)))
 (define rename? (lambda (v) (eq? (value-type v) 16)))
 (define identifier? (lambda (v) (or (rename? v) (symbol? v))))
 (define null? (lambda (v) (eq? (value-bits v) 10)))
+
+(define self-evaluating?
+  (lambda (v)
+    (or (character? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v))))
 
 ;(define interpreted-function? (lambda (v) (eq? (value-type v)
 
@@ -129,6 +137,9 @@
     ;; TODO: (let ((begin (lambda () (print "hello")))) (begin)) ?
     (if (and syntax? (rename? kar))
       (set! kar (rename-expr kar)))
+
+    (if (eq? (top-level-value 'EXPANDER-PRINT) #t)
+      (print x syntax?))
 
     ;; Check for special syntactic forms
     (if syntax?

@@ -104,6 +104,7 @@ void GCSemispace::collect(size_t request, bool force) {
         AR_COPY(VMFunction, constants);
         AR_COPY(VMFunction, free_variables);
         AR_COPY(VMFunction, sources);
+        AR_COPY(VMFunction, macro_env);
         break;
       case RECORD_TYPE:
         AR_COPY(RecordType, apply);

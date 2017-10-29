@@ -696,6 +696,10 @@
 (define (function-1 . args)
   (define name #t) name)
 
+(define-syntax ye-macro
+  (lambda (x)
+    #t))
+
 (define (main)
   #|
   (recompile-function 'not)
@@ -723,10 +727,15 @@
 
   (recompile-function 'recompile-function)
   |#
+  #|
   (top-level-for-each
     (lambda (k v)
       (when (eq? (value-type v) 13)
         #t)))
+  |#
+  (recompile-function 'ye-macro)
+  (set-function-macro-bit! (top-level-value 'ye-macro))
+  (set-vmfunction-log! (top-level-value 'ye-macro) #t)
 ;        #;(print k "is an interpreted function, and must be DESTROYED"))))
   ;(recompile-function 'compile-lambda)
   ;(recompile-function 'function-2)
@@ -737,4 +746,5 @@
   ;(set-vmfunction-log! test-function #t)
   #t)
 
-;(main)
+(set-top-level-value! 'EXPANDER-PRINT #t)
+(main)

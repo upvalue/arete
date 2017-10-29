@@ -562,11 +562,15 @@ struct Value {
   unsigned vm_function_constant_count() const;
   unsigned vm_function_min_arity() const;
   unsigned vm_function_max_arity() const;
+  bool vm_function_is_macro() const {
+    return heap->get_header_bit(VMFUNCTION_MACRO_BIT);
+  }
   bool vm_function_variable_arity() const {
     return heap->get_header_bit(VMFUNCTION_VARIABLE_ARITY_BIT);
   }
 
   Value vm_function_name() const;
+  Value vm_function_macro_env() const;
   size_t* vm_function_code() const;
   VectorStorage* vm_function_constants() const;
 
@@ -894,6 +898,7 @@ struct VMFunction : HeapValue {
   VectorStorage* constants;
   Blob* free_variables;
   Blob* sources;
+  Value macro_env;
 
   unsigned constant_count, min_arity, max_arity, stack_max, local_count;
   size_t bytecode_size;
@@ -905,6 +910,10 @@ struct VMFunction : HeapValue {
   }
 
 };
+
+inline Value Value::vm_function_macro_env() const {
+  return as<VMFunction>()->macro_env;
+}
 
 inline unsigned Value::vm_function_constant_count() const {
   return as<VMFunction>()->constant_count;

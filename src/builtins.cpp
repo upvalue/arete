@@ -253,27 +253,6 @@ Value fn_procedurep(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].procedurep());
 }
 
-Value fn_pairp(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == PAIR);
-}
-
-Value fn_symbolp(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == SYMBOL);
-}
-
-Value fn_tablep(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == TABLE);
-}
-
-
-Value fn_charp(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == CHARACTER);
-}
-
-Value fn_stringp(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == STRING);
-}
-
 Value fn_value_type(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(argv[0].type());
 }
@@ -956,7 +935,13 @@ Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
   Value result = fn_env_lookup(state, argc, argv);
 
   if(result == C_SYNTAX) return C_TRUE;
-  return Value::make_boolean(result.type() == FUNCTION && result.function_is_macro());
+  switch(result.type()) {
+    case FUNCTION:
+      return Value::make_boolean(result.function_is_macro());
+    case CLOSURE: case VMFUNCTION:
+      return Value::make_boolean(result.closure_unbox().vm_function_is_macro());
+    default: return C_FALSE;
+  }
 }
 
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
@@ -1001,9 +986,12 @@ Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
 
 Value fn_function_env(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "function-env";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
-
-  return argv[0].function_parent_env();
+  switch(argv[0].type()) {
+    case FUNCTION: return argv[0].function_parent_env();
+    case CLOSURE:
+    case VMFUNCTION: return argv[0].vm_function_macro_env();
+    default: return state.type_error("function-env expected valid macro");
+  }
 }
 
 Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
@@ -1412,11 +1400,8 @@ void State::load_builtin_functions() {
   defun_core("symbol->string", fn_symbol_to_string, 1);
 
   // Predicates
-  defun_core("char?", fn_charp, 1);
   defun_core("procedure?", fn_procedurep, 1);
-  defun_core("pair?", fn_pairp, 1);
   defun_core("macro?", fn_macrop, 1);
-  defun_core("self-evaluating?", fn_self_evaluatingp, 1);
 
   // Operations on raw objects
   defun_core("value-type", fn_value_type, 1);
