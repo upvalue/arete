@@ -5,6 +5,8 @@
 
 namespace arete {
 
+State* current_state = 0;
+
 void State::boot() {
   source_names.push_back("unknown");
   source_names.push_back("anonymous");

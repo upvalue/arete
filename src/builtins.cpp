@@ -9,9 +9,6 @@
 
 namespace arete {
 
-size_t gc_collect_timer = 0;
-State* current_state = 0;
-
 Value State::load_stream(std::istream& input, size_t source) {
   XReader reader(*this, input);
   Value x;
@@ -1070,6 +1067,7 @@ Value fn_top_level_value(State& state, size_t argc, Value* argv) {
 Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-for-each";
   AR_FN_EXPECT_APPLICABLE(state, argv, 0);
+  size_t count = 0;
 
   Value fn = argv[0], key, value;
   AR_FRAME(state, fn, key, value);
@@ -1092,8 +1090,10 @@ Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
     Value tst = state.apply(fn, 2, argv);
 
     if(tst.is_active_exception()) return tst;
+    if(tst == C_TRUE) count++;
   }
 
+  if(count > 0) return Value::make_fixnum(count);
   return Value::make_fixnum(keys.size());
 }
 
@@ -1353,7 +1353,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   // Copy bytecode
   size_t* code_array = (size_t*) fn.vm_function_code();
 
-  AR_ASSERT(((char*) code_array) > ((char*) fn.vm_function_constants()));
+  AR_ASSERT(((char*) code_array) > ((char*) &fn.as_unsafe<VMFunction>()->constants));
   
   for(size_t i = 0; i != insn_count; i++) {
     (*code_array++) = insns.vector_ref(i).fixnum_value();

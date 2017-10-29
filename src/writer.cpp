@@ -253,16 +253,6 @@ void State::print_exception(std::ostream& os, Value exc) {
   }
 }
 
-void State::print_gc_stats(std::ostream& os) {
-  os << (gc.heap_size / 1024) << "kb in use after " << gc.collections << " collections and "
-      << gc.allocations << " allocations " << std::endl;
-
-#ifdef ARETE_BENCH_GC
-    std::cout << (gc_collect_timer / 1000) << "ms in collection" << std::endl;
-#endif
-  }
-
-
 void State::print_stack_trace(std::ostream& os, bool clear) {
   if(stack_trace.size() > 0)
     os << "Stack trace: " << std::endl;

@@ -1304,10 +1304,13 @@ struct GCCommon {
   std::vector<Frame*> frames;
   std::list<Handle*> handles;
   VMFrame* vm_frames;
-  // Number of total allocations
+  /** If true, collect before every allocation. Flushes out GC bugs, incredibly expensive */
   bool collect_before_every_allocation;
+  /** Number of total allocations */
   size_t allocations;
-  size_t collections, live_objects_after_collection, live_memory_after_collection, heap_size;
+  /** Number of total collections */
+  size_t collections;
+  size_t live_objects_after_collection, live_memory_after_collection, heap_size;
   size_t block_size;
 
   std::vector<std::string> load_paths;
@@ -1410,6 +1413,7 @@ struct GCIncremental : GCCommon {
   GCIncremental(State& state_): GCCommon(state_), mark_bit(1), block_i(0), block_cursor(0) {
     Block *b = new Block(ARETE_BLOCK_SIZE, mark_bit);
     blocks.push_back(b);
+    heap_size = block_size = ARETE_BLOCK_SIZE;
 
     // Blocks should be allocated dead
     AR_ASSERT(!marked((HeapValue*) b->data));
@@ -1430,9 +1434,8 @@ struct GCIncremental : GCCommon {
   }
 
   void mark(HeapValue* v);
-  void mark_symbol_table();
-
   void collect();
+  void grow_heap();
 
   HeapValue* allocate(Type type, size_t size);
 };

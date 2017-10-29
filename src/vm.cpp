@@ -10,7 +10,7 @@
 
 #include "arete.hpp"
 
-#define AR_COMPUTED_GOTO
+#define AR_COMPUTED_GOTO 1
 
 #ifdef AR_COMPUTED_GOTO
 # define VM_CASE(label) LABEL_##label 
@@ -187,8 +187,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     f.locals[i] = C_UNSPECIFIED;
   }
 
-  f.upvalues = 0;
-
   if(f.fn->free_variables != 0) {
     // Allocate upvalues as needed
     // TODO: Is GC allocating here dangerous? We can copy the blob locally as well.
@@ -210,26 +208,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     }
   }
 
-  // TODO: This doesn't necessarily need to be initialized; we could
-  // place the stack pointer in the VMFrame structure and only
-  // collect what has been set
-
-  // memset(f.locals, 0, f.fn->local_count * sizeof(Value));
-
   size_t code_offset = 0;
 
   f.code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
-  // gc.collect();
+
   AR_ASSERT(gc.live((HeapValue*) f.code));
 
   while(true) {
-    //size_t* code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
-    //f.code = code;
-    //size_t insn = f.code[code_offset++];
 #ifdef AR_COMPUTED_GOTO
     VM_DISPATCH();
-
-    // goto *dispatch_table[insn];
 #endif
     
     VM_SWITCH()  {
@@ -314,6 +301,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         size_t idx = VM_CODE()[code_offset++];
         AR_LOG_VM("upvalue-get " << idx);
         AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
+        AR_ASSERT(gc.live(f.closure->upvalues->data[idx]));
         AR_ASSERT(gc.live(f.closure->upvalues->data[idx].upvalue()));
         f.stack[f.stack_i++] = f.closure->upvalues->data[idx].upvalue();
         VM_DISPATCH();
@@ -505,7 +493,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
         // More investigation required.
 
-        temps.push_back(make_vector(upvalues));
+        temps.push_back(make_vector_storage(upvalues));
 
         for(size_t i = 0; i != upvalues; i++) {
           size_t is_enclosed = VM_CODE()[code_offset++];
@@ -514,7 +502,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           if(is_enclosed) {
             AR_LOG_VM("enclosing free variable " << i << " from closure idx " << idx);
             AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
-            vector_append(temps[0], f.closure->upvalues->data[idx]);
+            vector_storage_append(temps[0], f.closure->upvalues->data[idx]);
           } else {
             //AR_LOG_VM("enclosing local variable " << f.fn->free_variables->blob_ref<size_t>(i)  << " as upvalue " << i << " from f.upvalues idx " << idx);
 
@@ -524,15 +512,13 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             AR_ASSERT(!f.upvalues[idx].upvalue_closed());
             AR_ASSERT(f.upvalues[idx].upvalue().type() != UPVALUE);
             // AR_ASSERT(f.upvalues[idx].as<Upvalue>()->local == &f.locals[f.fn->free_variables->blob_ref<size_t>(i)]);
-            vector_append(temps[0], f.upvalues[idx]);
+            vector_storage_append(temps[0], f.upvalues[idx]);
           }
 
           AR_LOG_VM("upvalue " << i << " = " << temps[0].vector_ref(i) << " " << temps[0].vector_ref(i).upvalue());
-          AR_ASSERT(temps[0].vector_ref(i).type() == UPVALUE);
-          AR_ASSERT(temps[0].vector_ref(i).upvalue().type() != UPVALUE);
         }
         temps.push_back(gc.allocate(CLOSURE, sizeof(Closure)));
-        temps[1].as<Closure>()->upvalues = temps[0].vector_storage().as<VectorStorage>();
+        temps[1].as<Closure>()->upvalues = temps[0].as<VectorStorage>();
         temps[1].as<Closure>()->function = f.stack[f.stack_i-1];
         f.stack[f.stack_i-1] = temps[1];
         VM_DISPATCH();

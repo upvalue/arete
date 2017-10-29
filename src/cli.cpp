@@ -200,6 +200,7 @@ int State::enter_cli(int argc_, char* argv[]) {
   static std::string debug_gc("--debug-gc");
   static std::string set("--set");
   static std::string eval("--eval");
+  static std::string stats("--stats");
 
   if(argc == 1) {
     if(do_repl(*this, false) == false) {
@@ -222,6 +223,8 @@ int State::enter_cli(int argc_, char* argv[]) {
         if(!do_file(*this, arg2, true))
           return EXIT_FAILURE;
       }
+    } else if(stats.compare(arg) == 0) {
+      print_gc_stats(std::cout);
     } else if(eval.compare(arg) == 0) {
       // Evaluate following string
       if((i + 1) >= argc) {

@@ -20,7 +20,7 @@
 
   (OpenFn/toplevel?! fn #t)
 
-  (define file-body (slurp-file "examples/life.scm"))
+  (define file-body (slurp-file "examples/fib.scm"))
 
   (define fn-body
     (map (lambda (x) (expand x #f)) file-body))

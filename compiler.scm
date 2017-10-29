@@ -689,8 +689,8 @@
   (let ((time-start (current-millisecond)))
     (cb)
     (let ((time-end (current-millisecond)))
-      (print str)
-      (print (- time-end time-start) "ms elapsed"))))
+      (print ";;" str)
+      (print ";;" (- time-end time-start) "ms elapsed"))))
 
 ;; n.b. it's possible that bugs could lurk here, if the order of function recompilation is important
 ;; (it should not be)
@@ -699,22 +699,26 @@
 (define (pull-up-bootstraps)
   (time-function "bootstrapped!"
     (lambda () 
-    (top-level-for-each
-      (lambda (k v)
-        (if (eq? (value-type v) 13)
-          (begin
-            (print ";; compiling" k)
-            (let ((is-macro (env-syntax? #f k)))
-              (recompile-function k)
-              #;(when is-macro
-                (set-function-macro-bit! (top-level-value k)))))))))))
+      (print ";; compiled"
+      (top-level-for-each
+        (lambda (k v)
+          (if (eq? (value-type v) 13)
+            (begin
+              ;(print ";; compiling" k)
+              (let ((is-macro (env-syntax? #f k)))
+                (recompile-function k)
+                )
+              #t
+              
+              ))))
+      "functions")
+)))
 
-(define (main)
-  #t)
-
+#|
 (pull-up-bootstraps)
 
 (top-level-for-each
   (lambda (k v)
     (when (eq? (value-type v) 13)
       (print "Bootstrap unsuccessful"))))
+|#

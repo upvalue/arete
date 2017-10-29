@@ -6,6 +6,17 @@
 
 namespace arete {
 
+size_t gc_collect_timer = 0;
+
+void State::print_gc_stats(std::ostream& os) {
+  os << (gc.heap_size / 1024) << "kb in use after " << gc.collections << " collections and "
+     << gc.allocations << " allocations " << std::endl;
+
+#ifdef ARETE_BENCH_GC
+  std::cout << (gc_collect_timer / 1000) << "ms in collection" << std::endl;
+#endif
+}
+
 void GCSemispace::copy(HeapValue** ref) {
   // If this is a null ptr or immediate value, nothing is necessary
   if(ref == 0 || Value::immediatep(*ref))
@@ -78,7 +89,10 @@ void GCSemispace::collect(size_t request, bool force) {
         if(!obj->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
           // There is no need to do anything here as the local will be updated by copy_roots
           break;
-        } 
+        } else {
+          AR_COPY(Upvalue, converted);
+          break;
+        }
       case VECTOR:
       case CFUNCTION:
       case TABLE:
@@ -243,7 +257,6 @@ void GCIncremental::mark(HeapValue* v) {
     return;
   
   live_objects_after_collection++;
-  // std::cout << "object of type " << v->get_type() << " is size " << v->size << std::endl;
   live_memory_after_collection += v->size;
 
   v->flip_mark_bit();
@@ -258,7 +271,10 @@ void GCIncremental::mark(HeapValue* v) {
       if(!v->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
         // There is no need to do anything here as the local will be updated by copy_roots
         break;
-      } 
+      } else {
+        v = static_cast<Upvalue*>(v)->converted.heap;
+        goto again;
+      }
     // One pointer
     case VECTOR:
     case CFUNCTION:
@@ -280,6 +296,7 @@ void GCIncremental::mark(HeapValue* v) {
       v = static_cast<Exception*>(v)->irritants.heap;
       goto again;
     // Four pointers
+    case VMFUNCTION:
     case RECORD_TYPE:
       mark(static_cast<RecordType*>(v)->apply.heap);
       mark(static_cast<RecordType*>(v)->print.heap);
@@ -318,13 +335,6 @@ void GCIncremental::mark(HeapValue* v) {
   }
 }
 
-void GCIncremental::mark_symbol_table() {
-  ARETE_LOG_GC(state.symbol_table->size() << " live symbols");
-  for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
-    mark(x->second);
-  }
-}
-
 void GCIncremental::collect() {
 #ifdef ARETE_BENCH_GC
   auto t1 = std::chrono::high_resolution_clock::now();
@@ -350,12 +360,62 @@ void GCIncremental::collect() {
     }
   }
 
+  VMFrame* link = vm_frames;
+  while(link != 0) {
+    VMFunction* fn = link->fn;
+
+    size_t stack_i = link->stack_i;
+    unsigned local_count = fn->local_count;
+    size_t free_vars = fn->free_variables ? fn->free_variables->length : 0;
+
+    mark(link->fn);
+
+    mark(link->exception.heap);
+
+    for(size_t i = 0; i != free_vars; i++) {
+      mark(link->upvalues[i].heap);
+    }
+
+    if(link->closure != 0) {
+      mark(link->closure);
+    }
+
+    for(size_t i = 0; i != stack_i; i++) {
+      mark(link->stack[i].heap);
+    }
+
+    for(unsigned i = 0; i != local_count; i++) {
+      mark(link->locals[i].heap);
+    }
+
+    // I lost like two hours to a missing paren here
+    // Like this: link->code = (size_t*)(char*) (link->fn) + sizeof(VMFunction);
+    // Fun stuff.
+
+    link = link->previous;
+  }
+
+  for(size_t i = 0; i != state.globals.size(); i++) {
+    mark(state.globals[i].heap);
+  }
+
+  for(size_t i = 0; i != state.temps.size(); i++) {
+    mark(state.temps[i].heap);
+  }
+
+  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
+    mark(((*i)->ref.heap));
+  }
+
+  ARETE_LOG_GC(state.symbol_table->size() << " live symbols");
+
+  for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
+    mark(x->second);
+  }
+
   for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
     mark((*i)->ref.heap);
   }
-
-  // TODO: Symbol table should be weak
-  mark_symbol_table();
 
   ARETE_LOG_GC("found " << live_objects_after_collection << " live objects taking up " <<
     live_memory_after_collection << "b")
@@ -367,13 +427,8 @@ void GCIncremental::collect() {
   AR_ASSERT(live_memory_after_collection <= heap_size);
 
   if(load_factor >= ARETE_GC_LOAD_FACTOR) {
-    ARETE_LOG_GC(load_factor << "% of memory is still live after collection, adding a block");
-    block_size *= 2;
-    Block* b = new Block(block_size, mark_bit);
-    AR_ASSERT(b->size == block_size);
-    AR_ASSERT(!marked((HeapValue*)b->data));
-    heap_size += block_size;
-    blocks.push_back(b);
+    ARETE_LOG_GC(load_factor << "% of memory is still live after collection, adding a block of size " << block_size);
+    grow_heap();
   }
 #ifdef ARETE_BENCH_GC
   auto t2 = std::chrono::high_resolution_clock::now();
@@ -382,9 +437,18 @@ void GCIncremental::collect() {
 
 }
 
+  void GCIncremental::grow_heap() {
+    block_size *= 2;
+    Block* b = new Block(block_size, mark_bit);
+    AR_ASSERT(b->size == block_size);
+    AR_ASSERT(!marked((HeapValue*)b->data));
+    heap_size += block_size;
+    blocks.push_back(b);
+  }
+
 HeapValue* GCIncremental::allocate(Type type, size_t size) {
   size_t sz = align(8, size);
-  bool collected = false;
+  unsigned collected = 0;
   ++allocations;
 
   // Searches through live memory in a first-fit fashion for somewhere to allocate the value; if it fails,
@@ -465,11 +529,16 @@ retry:
 
   ARETE_LOG_GC("reached end of " << blocks.size() << " blocks");
 
-  if(!collected) {
+  if(collected == 0) {
     // No room, run a collection
     ARETE_LOG_GC("out of room, attempting collection for allocation of size " << size);
     collect();
     collected = true;
+    goto retry;
+  } else if(collected == 1) {
+    ARETE_LOG_GC("collection failed to free up enough space for allocation of size " << size << " adding another block");
+    grow_heap();
+    collected++;
     goto retry;
   } else {
     // Collection has failed to create enough space. Give up.
