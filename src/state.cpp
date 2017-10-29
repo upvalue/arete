@@ -24,7 +24,7 @@ void State::boot() {
     // Tags for errors that may be thrown by the runtime
     "file", "read", "eval", "type", "expand", "syntax",
     // Various variables
-    "*expander-print*",
+    "EXPANDER-PRINT",
     "expander"
   };
 
@@ -49,7 +49,9 @@ void State::boot() {
     globals.push_back(s);
   }
 
-  install_core_functions();
+  load_builtin_functions();
+  load_numeric_functions();
+
   // Uncomment to see allocations after boot
   // gc.allocations = 0;
 }

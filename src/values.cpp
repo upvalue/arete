@@ -4,13 +4,6 @@
 
 namespace arete {
 
-Value State::make_flonum(double number) {
-  Flonum* heap = (Flonum*) gc.allocate(FLONUM, sizeof(Flonum));
-  heap->number = number;
-  Value v(heap);
-  return v;
-}
-
 Value State::get_symbol(Global sym) {
   Value sym2 = (globals.at((size_t) sym));
   AR_ASSERT(sym2.type() == SYMBOL);

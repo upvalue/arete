@@ -458,6 +458,7 @@
         (if (cdr lst)
           (list #'concat-list (cadr obj) (qq-list c (cdr lst)))
           (cadr obj))
+        ;; TODO: This could be replaced with cons* for less calls and less confusing output
         (list #'cons (qq-object c obj) (qq-list c (cdr lst)))))
     (list #'quote lst)))
 

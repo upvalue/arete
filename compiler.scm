@@ -674,14 +674,9 @@
   (OpenFn->procedure fn))
 
 (define (append-source src lst elt)
-  ;(print "append-source got: " src lst elt)
   (let loop ((lst lst))
     (if (pair? lst)
-      ;; (1 2 3)
-      ;; (cons 1 (cons 2 (cons 3 
-      (cons-source src (car lst)
-        (loop (cdr lst))
-      )
+      (cons-source src (car lst) (loop (cdr lst)))
       elt)
   )
 )
@@ -695,8 +690,6 @@
          ;; Reconstruct a valid arguments list.
          (fn-args 
            (begin
-             (print "append-source should get:" fn-body fn-proper-args fn-rest-arguments)
-
              (if (and (not (null? fn-proper-args)) fn-rest-arguments)
                (append-source fn-body fn-proper-args fn-rest-arguments)
                (if (null? fn-proper-args)
@@ -705,7 +698,7 @@
 
          #;(fn (OpenFn/make fn-name))
          
-         (fn-expr (list-source fn-body 'lambda fn-args fn-body))
+         (fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
          )
 
     (print fn-expr)
@@ -715,17 +708,19 @@
       (set-top-level-value! name proc))))
 
 (define (test-function a b . c)
-  (print a b c)
-  (print 'easy-as-one-two-three))
+  (print a b "c:" c)
+  (let ((var (list a b c)))
+    var)
+)
 
 (define (main)
-  (test-function 1 2 3 4 5)
-  ;(recompile-function 'recompile-function)
+  ; (test-function 1 2 3 4 5)
+  (recompile-function 'recompile-function)
   ;(print recompile-function)
-  ;(set-vmfunction-log! recompile-function #t)
   (recompile-function 'test-function)
+  ;(set-vmfunction-log! recompile-function #t)
   (set-vmfunction-log! test-function #t)
-  (test-function 1 2 3 4 5)
+  (print (test-function 1 2 3 4 5))
   #t)
 
-;(main)
+(main)

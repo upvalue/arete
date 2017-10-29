@@ -57,151 +57,6 @@ Value State::load_module(const std::string& identifier) {
   return C_FALSE;
 }
 
-// Casting arithmetic
-
-// This is actually pretty tricky due to the need to cast from fixnum from flonum, the desire to
-// avoid code duplication, and the need to avoid allocation because there's no good way currently
-// to track variadic arguments
-
-#define OPV(name, cname, operator, sub, nozero) \
-  Value name(State& state, size_t argc, Value* argv) { \
-    static const char* fn_name = cname; \
-    ptrdiff_t fxresult = 0; \
-    size_t i = 0; \
-    if(argc == 1) { \
-      AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric()); \
-      if(sub) return argv[0].type() == FLONUM ? state.make_flonum(0 - argv[0].flonum_value()) : Value::make_fixnum(0 - argv[0].fixnum_value()); \
-      return argv[0]; \
-    } \
-    for(i = 0; i != argc; i++) { \
-      if(argv[i].type() == FLONUM) break; \
-      AR_FN_ASSERT_ARG(state, i, "to be a number", argv[i].type() == FIXNUM); \
-      if(nozero && argv[i].fixnum_value() == 0) return state.type_error("divide by zero"); \
-      if(i == 0) { fxresult = argv[i].fixnum_value(); } else { fxresult = fxresult operator argv[i].fixnum_value(); } \
-    } \
-    if(i == argc) return Value::make_fixnum(fxresult); \
-    double flresult = (double) fxresult; \
-    for(; i != argc; i++) { \
-      AR_FN_ASSERT_ARG(state, i, "to be a number", argv[i].type() == FIXNUM || argv[i].type() == FLONUM); \
-      if(i == 0) { flresult = argv[i].flonum_value(); continue; } \
-      if(argv[i].type() == FIXNUM) { \
-        if(nozero && argv[i].fixnum_value() == 0) return state.type_error("divide by zero"); \
-        flresult = flresult operator (double) argv[i].fixnum_value(); \
-      } else if(argv[i].type() == FLONUM) { \
-        if(nozero && argv[i].flonum_value() == 0.0) return state.type_error("divide by zero"); \
-        flresult = flresult operator argv[i].flonum_value(); \
-      } \
-    } \
-    return state.make_flonum(flresult); \
-  }
-
-OPV(fn_add, "+", +, false, false)
-OPV(fn_sub, "-", -, true, false)
-OPV(fn_mul, "*", *, false, false)
-OPV(fn_div, "/", /, false, true)
-
-#undef OPV
-
-#define OPV_BOOL(name, cname, operator) \
-  Value name(State& state, size_t argc, Value* argv) { \
-    static const char* fn_name = cname; \
-    AR_FN_ASSERT_ARG(state, 0, "to be numeric", argv[0].numeric()); \
-    for(size_t i = 0; i != argc - 1; i++) { \
-      AR_FN_ASSERT_ARG(state, (i+1), "to be numeric", argv[i+1].numeric()); \
-      if(argv[i].type() == FIXNUM) { \
-        if(argv[i+1].type() == FIXNUM) { \
-          if(!(argv[i].bits operator argv[i+1].bits)) return C_FALSE; \
-        } else { \
-          if(!(argv[i].fixnum_value() operator argv[i+1].flonum_value())) return C_FALSE; \
-        } \
-      } \
-    } \
-    Value lhs = argv[argc-2], rhs = argv[argc-1]; \
-    if(lhs.type() == FLONUM && rhs.type() == FLONUM) \
-      return Value::make_boolean(lhs.flonum_value() operator rhs.flonum_value()); \
-    else if(lhs.type() == FLONUM && rhs.type() == FIXNUM) \
-      return Value::make_boolean(lhs.flonum_value() operator rhs.fixnum_value()); \
-    else if(lhs.type() == FIXNUM && rhs.type() == FLONUM) \
-      return Value::make_boolean(lhs.fixnum_value() operator rhs.flonum_value()); \
-    else if(lhs.type() == FLONUM && rhs.type() == FIXNUM) \
-      return Value::make_boolean(lhs.flonum_value() operator rhs.fixnum_value()); \
-    return C_TRUE; \
-  }
-
-// After writing all this out I see why the Lua/JS guys gave up and used floating point math only
-
-OPV_BOOL(fn_num_equal, "=", ==)
-OPV_BOOL(fn_lt, "<", <)
-OPV_BOOL(fn_lte, "<=", <=)
-OPV_BOOL(fn_gte, ">=", >=)
-OPV_BOOL(fn_gt, ">", >)
-
-#undef OPV_BOOL
-// Fixnum arithmetic
-
-Value fn_fx_sub(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "fx-";
-
-  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-
-  if(argc == 1) {
-    return Value::make_fixnum(0 - argv[0].fixnum_value());
-  }
-
-  ptrdiff_t result = argv[0].fixnum_value();
-
-  for(size_t i = 1; i != argc; i++) {
-    AR_FN_EXPECT_TYPE(state, argv, i, FIXNUM);
-    result -= argv[i].fixnum_value();
-  }
-
-  return Value::make_fixnum(result);
-}
-
-Value fn_fx_add(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "fx+";
-  ptrdiff_t result = 0;
-
-  for(size_t i = 0; i != argc; i++) {
-    AR_FN_EXPECT_TYPE(state, argv, i, FIXNUM);
-    result += argv[i].fixnum_value();
-  }
-
-  return Value::make_fixnum(result);
-}
-
-Value fn_fx_equals(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "fx=";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  return Value::make_boolean(argv[0].bits == argv[1].bits);
-}
-
-Value fn_fx_lt(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "fx<";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  return Value::make_boolean(argv[0].fixnum_value() < argv[1].fixnum_value());
-}
-
-Value fn_fx_gt(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "fx>";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  return Value::make_boolean(argv[0].fixnum_value() > argv[1].fixnum_value());
-}
-
-Value fn_fx_div(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "fx/";
-
-  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  
-  if(argv[1].fixnum_value() == 0) return state.type_error("divide by zero"); \
-  
-  return Value::make_fixnum(argv[0].fixnum_value() / argv[1].fixnum_value());
-}
-
 // Conversions
 Value fn_string_to_symbol(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string->symbol";
@@ -405,17 +260,10 @@ Value fn_symbolp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == SYMBOL);
 }
 
-Value fn_flonump(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == FLONUM);
-}
-
 Value fn_tablep(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == TABLE);
 }
 
-Value fn_fixnump(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == FIXNUM);
-}
 
 Value fn_charp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == CHARACTER);
@@ -1212,6 +1060,7 @@ Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   return r;
 }
 
+/** Iterate over everything that might be a toplevel function. */
 Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-for-each";
   AR_FN_EXPECT_APPLICABLE(state, argv, 0);
@@ -1228,9 +1077,15 @@ Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
     key = state.get_symbol(keys[i]);
     value = key.symbol_value();
 
-    // Value argv[2] = {key, value};
+    // Scheme code can't touch these
+    if(value == C_UNDEFINED || value == C_SYNTAX)
+      value = C_UNSPECIFIED;
+
+    Value argv[2] = {key, value};
     
-    //(void) state.apply(fn, 2, argv);
+    Value tst = state.apply(fn, 2, argv);
+
+    if(tst.is_active_exception()) return tst;
   }
 
   return Value::make_fixnum(keys.size());
@@ -1527,7 +1382,8 @@ void State::defun_core(const std::string& cname, c_function_t addr, size_t min_a
   //sym.heap->set_header_bit(Value::SYMBOL_IMMUTABLE_BIT);
 }
 
-void State::install_core_functions() {
+void State::load_builtin_functions() {
+#if 0
   // Numbers
   defun_core("fx+", fn_fx_add, 1, 1, true);
   defun_core("fx=", fn_fx_equals, 2, 2, true);
@@ -1545,6 +1401,7 @@ void State::install_core_functions() {
   defun_core(">", fn_gt, 2, 2, true);
   defun_core("<=", fn_lte, 2, 2, true);
   defun_core(">=", fn_gte, 2, 2, true);
+#endif
 
   // Conversion
   defun_core("string->symbol", fn_string_to_symbol, 1);
@@ -1560,8 +1417,6 @@ void State::install_core_functions() {
   defun_core("macro?", fn_macrop, 1);
   defun_core("self-evaluating?", fn_self_evaluatingp, 1);
   defun_core("identifier?", fn_identifierp, 1);
-  defun_core("fixnum?", fn_fixnump, 1);
-  defun_core("flonum?", fn_flonump, 1);
   defun_core("table?", fn_tablep, 1);
   defun_core("string?", fn_stringp, 1);
   defun_core("value-type", fn_value_type, 1);

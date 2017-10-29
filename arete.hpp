@@ -568,6 +568,7 @@ struct Value {
 
   static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
   static const unsigned VMFUNCTION_LOG_BIT = 1 << 10;
+  static const unsigned VMFUNCTION_MACRO_BIT = 1 << 11;
 
   // UPVALUES
   
@@ -888,7 +889,13 @@ struct VMFunction : HeapValue {
 
   unsigned constant_count, min_arity, max_arity, stack_max, local_count;
   size_t bytecode_size;
+
   static const unsigned CLASS_TYPE = VMFUNCTION;
+
+  size_t* code_pointer() {
+    return (size_t*)(((char*)((size_t) this)) + sizeof(VMFunction));
+  }
+
 };
 
 inline unsigned Value::vm_function_constant_count() const {
@@ -1732,7 +1739,8 @@ struct State {
 
   ///// EVAL! Interpreter
 
-  void install_core_functions();
+  void load_builtin_functions();
+  void load_numeric_functions();
 
   /** Defines a built-in function */
   void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
@@ -1838,14 +1846,22 @@ struct State {
   ///// VIRUTAL MACHINE
 
   Value apply_vm(Value fn, size_t argc, Value* argv);
+
   /** Shortcut: apply a VM function to something in the temps array */
   Value apply_vm_temps(Value fn) {
     return apply_vm(fn, temps.size(), &temps[0]);
   }
 
+  /** Print a readable version of a function's bytecode. */
+  void disassemble(std::ostream&, Value);
+
   // Command line interface
 
-  int enter_cli(int, char*[]);
+  /**
+   * Allow Arete's command line interface to run.
+   * @return A normal exit code
+   */
+  int enter_cli(int argc, char* argv[]);
 };
 
 ///// READ! S-Expression reader

@@ -202,10 +202,11 @@ void GCSemispace::copy_roots() {
     }
 
     // Update code pointer.
-    link->code = (size_t*)((char*) (link->fn) + sizeof(VMFunction));
+    link->code = link->fn->code_pointer();
 
     // I lost like two hours to a missing paren here
     // Like this: link->code = (size_t*)(char*) (link->fn) + sizeof(VMFunction);
+    // Fun stuff.
 
     link = link->previous;
   }

@@ -1,4 +1,5 @@
 // eval.cpp - Interpreter & related functionality
+
 #include "arete.hpp"
 
 #define EVAL_TRACE(exp, fn_name) \
@@ -595,12 +596,14 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
   size_t argc = 0;
   vec = make_vector();
   while(args.type() == PAIR) {
+    if(argc == max_arity) {
+      break;
+    }
     tmp = eval(env,  args.car());
     EVAL_CHECK(tmp, src_exp, fn_name);
     vector_append(vec, tmp);
     // temps.push_back(tmp);
     argc++;
-    if(argc == max_arity) break;
     args = args.cdr();
   }
 
@@ -740,7 +743,7 @@ Value State::expand_expr(Value exp) {
       return exp;
     }
 
-    if(get_global_value(G_EXPANDER_PRINT) == C_TRUE) {
+    if(get_global_value(G_EXPANDER_PRINT) != C_UNDEFINED) {
       print_src_pair(std::cout, saved);
       std::cout << std::endl;
       std::cout << "Expanded to: " << exp << std::endl;
