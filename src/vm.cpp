@@ -25,11 +25,20 @@
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
 #define VM_CODE() (f.code)
 
+#define AR_VM_LOG_ALWAYS 0
+
 #define AR_LOG_VM(msg) \
-  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
+  if(AR_VM_LOG_ALWAYS || ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg); \
   }
 // #define AR_LOG_VM(msg)
+
+#if 0
+#define AR_PRINT_STACK() \
+  std::cerr << "stack " << (f.stack_i) << " out of " << f.fn->stack_max << " allocated " << std::endl; \
+  for(size_t i = 0; i != f.stack_i; i++) std::cerr << i << ": " << f.stack[i] << std::endl;
+#endif
+#define AR_PRINT_STACK()
 
 
 namespace arete {
@@ -120,10 +129,6 @@ enum {
   // Instructions below this point are "open-coded" versions of the builtin C++ routines for speed;
   // they are not necessary for the VM to function.
 };
-
-#define AR_PRINT_STACK() \
-  AR_LOG_VM("stack " << (f.stack_i) << " out of " << f.fn->stack_max << " allocated "); \
-  for(size_t i = 0; i != f.stack_i; i++) AR_LOG_VM(i << ": " << f.stack[i]);
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 #ifdef AR_COMPUTED_GOTO
@@ -329,7 +334,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       VM_CASE(OP_APPLY_TAIL): {
         size_t insn = VM_CODE()[code_offset-1];
         size_t fargc = VM_CODE()[code_offset++];
-        AR_ASSERT(f.stack_i - argc - 1 >= 0);
         Value afn = f.stack[f.stack_i - fargc - 1];
         AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " " << f.stack_i);
         AR_ASSERT(gc.live(afn));
@@ -440,7 +444,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               goto tail;
             } else {
               // Replace function on stack with result of function
-              AR_ASSERT(((ptrdiff_t) f.stack_i - fargc - 1) >= 0);
+              AR_ASSERT(((ptrdiff_t) (f.stack_i - fargc - 1)) >= 0);
               f.stack[f.stack_i - fargc - 1] =
                 apply_vm(to_apply, fargc, &f.stack[f.stack_i - fargc]);
 
@@ -482,7 +486,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           }
           default:
             std::ostringstream os;
-            os << "attempt to apply non-applicable value " << afn;
+            AR_PRINT_STACK();
+            os << "vm: attempt to apply non-applicable value " << afn;
             return eval_error(os.str());
         }
         VM_DISPATCH();

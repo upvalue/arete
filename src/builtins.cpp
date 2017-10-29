@@ -975,6 +975,8 @@ Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
     fn = fn.closure_function();
   }
 
+  if(fn.type() != VMFUNCTION) return C_FALSE;
+
   if(argv[1] == C_FALSE) {
     fn.heap->unset_header_bit(Value::VMFUNCTION_LOG_BIT);
   } else {
@@ -985,7 +987,7 @@ Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_function_env(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "function-env";
+  // static const char* fn_name = "function-env";
   switch(argv[0].type()) {
     case FUNCTION: return argv[0].function_parent_env();
     case CLOSURE:
@@ -1002,10 +1004,11 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
     case CLOSURE:
     case VMFUNCTION: {
       Value fn = argv[0].closure_unbox();
+      if(fn.heap->get_header_bit(Value::VMFUNCTION_MACRO_BIT)) return argv[0];
       fn.heap->set_header_bit(Value::VMFUNCTION_MACRO_BIT);
       break;
     }
-    default: return argv[0];
+    default: break;
   }
   return argv[0];
 }

@@ -5,7 +5,7 @@
 #define EVAL_TRACE(exp, fn_name) \
   if((exp).type() == PAIR && (exp).pair_has_source()) { \
     std::ostringstream os; \
-    os << source_info((exp).pair_src(), (fn_name)); \
+    os << source_info((exp).pair_src(), (fn_name), true); \
     stack_trace.push_back(os.str()); \
   }
   
@@ -534,10 +534,8 @@ Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp,
     } else {
       tmp = args.car();
     }
-    //std::cout << "return error1 " << eval_args << ' ' <<  args << ' ' << std::endl;
-    //std::cout << "Erroring: " << args.car() << " => " << tmp << std::endl;
+
     EVAL_CHECK(tmp, src_exp, calling_fn_name);
-    //std::cout << "return error2" << std::endl;
     vector_append(new_env, fn_args.car());
     fn_args = fn_args.cdr();
     vector_append(new_env, tmp);
@@ -607,12 +605,11 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
     if(argc == max_arity) {
       break;
     }
+    tmp = args.car();
     if(eval_args) {
-      tmp = eval(env,  args.car());
-    } else {
-      tmp = args.car();
-    }
-    EVAL_CHECK(tmp, src_exp, fn_name);
+      tmp = eval(env, args.car());
+      EVAL_CHECK(tmp, src_exp, fn_name);
+    } 
     vector_append(vec, tmp);
     // temps.push_back(tmp);
     argc++;
@@ -622,8 +619,11 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
   if(args.type() == PAIR && fn.vm_function_variable_arity()) {
     varargs_begin = varargs_cur = C_NIL;
     while(args.type() == PAIR) {
-      tmp = eval_args ? args.car() : eval(env, args.car());
-      EVAL_CHECK(tmp, src_exp, fn_name);
+      tmp = args.car();
+      if(eval_args) {
+        tmp = eval(env, tmp);
+        EVAL_CHECK(tmp, src_exp, fn_name);
+      } 
       if(varargs_cur == C_NIL) {
         varargs_begin = varargs_cur = make_pair(tmp, C_NIL);
       } else {
@@ -756,8 +756,9 @@ Value State::expand_expr(Value exp) {
       return exp;
     }
 
-    if(get_global_value(G_EXPANDER_PRINT) != C_UNDEFINED) {
-      print_src_pair(std::cout, saved);
+    if(get_global_value(G_EXPANDER_PRINT) != C_UNDEFINED &&
+        get_global_value(G_EXPANDER_PRINT) != C_FALSE) {
+      print_src_pair(std::cout, saved, ARETE_COLOR_BLUE);
       std::cout << std::endl;
       std::cout << "Expanded to: " << exp << std::endl;
     }

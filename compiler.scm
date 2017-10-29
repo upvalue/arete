@@ -231,7 +231,9 @@
     (cdr x))
 
   (unless (eq? (fx- (OpenFn/stack-size fn) argc) stack-check)
-    (raise 'compile "stack size does not reflect function arguments" (list fn x)))
+    (raise 'compile (print-string "expected function stack size" (OpenFn/stack-size fn)
+                                  "to match 0 + function arguments" stack-check) (list fn x)))
+
 
   (emit fn (if tail? 'apply-tail 'apply) (length (cdr x)))
   )
@@ -387,6 +389,7 @@
   ;; Compile the lambda's body
   (compile sub-fn (cddr x))
 
+  ;(pretty-print sub-fn)
   ;(when (top-level-value '*compiler-log*) (pretty-print sub-fn))
   ;; And it's finally done
   (compile-finish sub-fn)
@@ -545,13 +548,6 @@
       (emit fn 'jump or-success)
       (register-label fn or-fail-pop)
 
-      ;; Manually adjust stack size: or will always result in one value being pushed on the stack after it's 
-      ;; evaluated, whether successful or not.
-      (OpenFn/stack-size! fn (fx+ (OpenFn/stack-size fn) 1))
-
-      ;(emit fn 'pop)
-      ;(register-label fn or-fail)
-
       (emit fn 'push-constant (register-constant fn #f))
       (register-label fn or-success)
     )
@@ -651,9 +647,10 @@
   (let* ((oldfn (top-level-value name))
          (fn-name (function-name oldfn))
          (fn-body (function-body oldfn))
+         (macro? (env-syntax? #f name))
          ;; TODO Could just save the original arguments list in the Function; it doesn't really matter
          ;; if they are oversized as they won't exist during normal execution in any case
-         (fn-proper-args (function-arguments oldfn))
+         (fn-proper-args (or (function-arguments oldfn) '()))
          (fn-rest-arguments (function-rest-arguments oldfn))
          ;; Reconstruct a valid arguments list.
          (fn-args 
@@ -661,27 +658,32 @@
              (if (and (not (null? fn-proper-args)) fn-rest-arguments)
                (append-source fn-body fn-proper-args fn-rest-arguments)
                (if (null? fn-proper-args)
-                 fn-rest-arguments
+                 (or fn-rest-arguments '())
                  fn-proper-args))))
 
          #;(fn (OpenFn/make fn-name))
+         (fn-expr (list-concat (list-source fn-body 'lambda fn-args) fn-body))
          
-         (fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
+         ;(fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
+         (fn-exxxpr
+           ;; Functions which use COND
+           (if (memq name '(expand-apply expand))
+             (expand fn-expr #f)
+             fn-expr))
          )
 
-    ;(print "FN-EXPR:" fn-expr)
-    
-    (let ((fn (compile-lambda #f fn-expr)))
-      (OpenFn/name! fn fn-name)
-      (set-top-level-value! name (OpenFn->procedure fn)))))
+    #|
+    (print (function-body oldfn))
+    (print "fn-expr" fn-expr)
+    (print "fn-expanded" (expand '(lambda (x env) #t) #f))
+    (print "fn-exxxpr" fn-exxxpr)
+    |#
 
-    
-(define (test-function a b . c)
-  (print a b "c:" c)
-  (let ((var (list a b c)))
-    (set! c #f)
-    (list a b c var))
-)
+    (let ((fn (compile-lambda #f fn-exxxpr)))
+      (OpenFn/name! fn fn-name)
+      (set-top-level-value! name (OpenFn->procedure fn))
+      (when macro?
+        (set-function-macro-bit! (top-level-value name))))))
 
 (define (time-function str cb)
   (let ((time-start (current-millisecond)))
@@ -690,61 +692,29 @@
       (print str)
       (print (- time-end time-start) "ms elapsed"))))
 
-(define (function-2 a)
- a)
+;; n.b. it's possible that bugs could lurk here, if the order of function recompilation is important
+;; (it should not be)
 
-(define (function-1 . args)
-  (define name #t) name)
-
-(define-syntax ye-macro
-  (lambda (x)
-    #t))
+;; we could also list them out by hand, but that seems kind of tedious, doesn't it?
+(define (pull-up-bootstraps)
+  (time-function "bootstrapped!"
+    (lambda () 
+    (top-level-for-each
+      (lambda (k v)
+        (if (eq? (value-type v) 13)
+          (begin
+            (print ";; compiling" k)
+            (let ((is-macro (env-syntax? #f k)))
+              (recompile-function k)
+              #;(when is-macro
+                (set-function-macro-bit! (top-level-value k)))))))))))
 
 (define (main)
-  #|
-  (recompile-function 'not)
-  (recompile-function 'time-function)
-  (recompile-function 'compiler-log)
-  (recompile-function 'append-source)
-  (recompile-function 'compile-expr)
-  (recompile-function 'compile-toplevel)
-  (recompile-function 'compile-finish)
-  (recompile-function 'args-length)
-|#
-  ;(recompile-function 'emit)
-  ;(recompile-function 'function-1)
-  ;(print (function-1))
-  ;(set-top-level-value! 'COMPILER-LOG #t)
-  ;(recompile-function 'function-1)
-  ;(print (function-1 12345))
-
-  ;; Shortest case -- calling interpreted functions in certain ways from VM functions seems to cause errors
-  ;(recompile-function 'emit)
-  #|(recompile-function 'compile-define)
-  (recompile-function 'function-1)
-  (recompile-function 'compile-set!)
-  (recompile-function 'compile-lambda)
-
-  (recompile-function 'recompile-function)
-  |#
-  #|
-  (top-level-for-each
-    (lambda (k v)
-      (when (eq? (value-type v) 13)
-        #t)))
-  |#
-  (recompile-function 'ye-macro)
-  (set-function-macro-bit! (top-level-value 'ye-macro))
-  (set-vmfunction-log! (top-level-value 'ye-macro) #t)
-;        #;(print k "is an interpreted function, and must be DESTROYED"))))
-  ;(recompile-function 'compile-lambda)
-  ;(recompile-function 'function-2)
-  ;(print (function-1 'asdf 'bsdf))
-  #;(time-function "compiled fib"
-    (lambda ()
-      (print (fib 30))))
-  ;(set-vmfunction-log! test-function #t)
   #t)
 
-(set-top-level-value! 'EXPANDER-PRINT #t)
-(main)
+(pull-up-bootstraps)
+
+(top-level-for-each
+  (lambda (k v)
+    (when (eq? (value-type v) 13)
+      (print "Bootstrap unsuccessful"))))

@@ -225,8 +225,11 @@ struct HeapValue {
   unsigned get_header() const { return header; }
   unsigned get_type() const { return header & 255; }
   unsigned char get_mark_bit() const { return (header >> 8) & 1; }
-  unsigned get_header_bit(unsigned bit) const { return header & bit; }
-  void set_header_bit(unsigned bit) { header += bit; }
+  unsigned get_header_bit(unsigned bit) const { return (header & bit) == bit; }
+  void set_header_bit(unsigned bit) {
+    AR_ASSERT(!get_header_bit(bit));
+    header += bit;
+  }
   void unset_header_bit(unsigned bit) {
     header -= bit;
   }
@@ -992,7 +995,7 @@ struct Closure : HeapValue {
 
 inline Value Value::closure_unbox() const {
   if(type() == CLOSURE) {
-    as<Closure>()->function;
+    return as<Closure>()->function;
   }
   return heap;
 }
@@ -1420,7 +1423,7 @@ struct GCIncremental : GCCommon {
 
   /** This doesn't do anything, but is here so GCSemispace::live calls can be used in normal
    * source code */
-  bool live(const Value v) { return true; }
+  bool live(const Value v) { (void) v; return true; }
 
   bool marked(HeapValue* v) const {
     return v->get_mark_bit() == mark_bit;
@@ -1713,12 +1716,13 @@ struct State {
    * Print information about an erroneous pair
    * @return true if argument's source was successfully printed
    */
-  bool print_src_pair(std::ostream& os, Value pair);
+  bool print_src_pair(std::ostream& os, Value pair, const char* color = ARETE_COLOR_RED);
 
    /**
    * Print an erroneous line of source code with offending information highlighted
    */
-  void print_src_line(std::ostream& os, const SourceLocation& src);
+  void print_src_line(std::ostream& os, const SourceLocation& src,
+    const char* color = ARETE_COLOR_RED);
   
   /**
    * Special-cased exception printing: this pretty-prints an exception, but also handles 
@@ -1734,8 +1738,9 @@ struct State {
   void print_stack_trace(std::ostream& os = std::cerr, bool clear = true);
 
   /** Return a description of a source location */
-  std::string source_info(const SourceLocation loc, Value fn_name = C_FALSE) {
+  std::string source_info(const SourceLocation loc, Value fn_name = C_FALSE, bool from_eval = false) {
     std::ostringstream ss;
+    if(from_eval) ss << "eval: ";
     ss << source_names[loc.source] << ':' << loc.line;
     if(fn_name == C_TRUE) 
       ss << " in toplevel";

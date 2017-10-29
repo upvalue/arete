@@ -138,9 +138,6 @@
     (if (and syntax? (rename? kar))
       (set! kar (rename-expr kar)))
 
-    (if (eq? (top-level-value 'EXPANDER-PRINT) #t)
-      (print x syntax?))
-
     ;; Check for special syntactic forms
     (if syntax?
       (cond
@@ -461,9 +458,9 @@
     ;; let return
     result))
 
-(define (concat-list x y)
+(define (list-concat x y)
   (if (pair? x)
-      (cons (car x) (concat-list (cdr x) y))
+      (cons (car x) (list-concat (cdr x) y))
       y))
 
 (define (qq-list c lst)
@@ -471,7 +468,7 @@
     (let ((obj (car lst)))
       (if (and (pair? obj) (c #'unquote-splicing (car obj)))
         (if (cdr lst)
-          (list #'concat-list (cadr obj) (qq-list c (cdr lst)))
+          (list #'list-concat (cadr obj) (qq-list c (cdr lst)))
           (cadr obj))
         ;; TODO: This could be replaced with cons* for less calls and less confusing output
         (list #'cons (qq-object c obj) (qq-list c (cdr lst)))))

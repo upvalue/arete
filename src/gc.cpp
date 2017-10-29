@@ -184,7 +184,7 @@ void GCSemispace::copy_roots() {
 
     copy((HeapValue**) &link->fn);
 
-    copy((HeapValue**)&link->exception);
+    copy((HeapValue**) &link->exception);
 
     for(size_t i = 0; i != free_vars; i++) {
       copy((HeapValue**) &link->upvalues[i]);
@@ -253,12 +253,12 @@ void GCIncremental::mark(HeapValue* v) {
   switch(v->get_type()) {
     case FLONUM: case STRING: case CHARACTER: case BLOB:
       break;
-      // One pointer
-      case UPVALUE:
-        if(!v->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
-          // There is no need to do anything here as the local will be updated by copy_roots
-          break;
-        } 
+    // One pointer
+    case UPVALUE:
+      if(!v->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
+        // There is no need to do anything here as the local will be updated by copy_roots
+        break;
+      } 
     // One pointer
     case VECTOR:
     case CFUNCTION:

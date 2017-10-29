@@ -160,7 +160,7 @@ std::ostream& operator<<(std::ostream& os, Value v) {
   return os;
 }
  
-void State::print_src_line(std::ostream& os, const SourceLocation& src) {
+void State::print_src_line(std::ostream& os, const SourceLocation& src, const char* color) {
   unsigned seek_line = 1;
   std::string source_line;
   char c;
@@ -176,7 +176,7 @@ void State::print_src_line(std::ostream& os, const SourceLocation& src) {
       if(seek_line == src.line) {
         unsigned line_position = ss.tellg();
         std::getline(ss, source_line);
-        os << ARETE_COLOR_RED << source_line << ARETE_COLOR_RESET << std::endl;
+        os << color << source_line << ARETE_COLOR_RESET << std::endl;
 
         size_t i, j;
         // Print whitespace for each char in source line until the beginning of this element
@@ -458,10 +458,10 @@ void State::print_table_verbose(Value tbl) {
   std::cout << '>' << std::endl;
 }
 
-bool State::print_src_pair(std::ostream& os, Value pair) {
+bool State::print_src_pair(std::ostream& os, Value pair, const char* color) {
   if(pair.type() == PAIR && pair.pair_has_source()) {
     SourceLocation src(pair.pair_src());
-    print_src_line(os, src);
+    print_src_line(os, src, color);
     return true;
   }
   return false;
