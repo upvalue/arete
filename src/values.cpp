@@ -19,6 +19,39 @@ void State::set_global_value(Global sym, Value v) {
   globals.at((size_t) sym).as<Symbol>()->value = v;
 }
 
+bool State::equals(Value a, Value b) {
+  if(a.bits == b.bits) return true;
+
+  if(a.type() == VECTOR && b.type() == VECTOR) {
+    if(a.vector_length() != b.vector_length()) return false;
+    for(size_t i = 0; i < a.vector_length(); i++) {
+      if(!equals(a.vector_ref(i), b.vector_ref(i))) {
+        return false;
+      }
+    }
+    return true;
+  } else if(a.type() == PAIR && b.type() == PAIR) {
+    while(a.type() == PAIR && b.type() == PAIR) {
+      if(!equals(a.car(), b.car())) {
+        return false;
+      }
+      a = a.cdr();
+      b = b.cdr();
+    }
+
+    if(a != C_NIL || b != C_NIL) {
+      return equals(a, b);
+    }
+
+    return true;
+  } else if(a.type() == STRING && b.type() == STRING) {
+    if(a.string_bytes() != b.string_bytes()) return false;
+    return strncmp(a.string_data(), b.string_data(), a.string_bytes()) == 0;
+  }
+
+  return a.bits == b.bits;
+}
+
 Value State::get_symbol(const std::string& name) {
   symbol_table_t::const_iterator x = symbol_table->find(name);
   if(x == symbol_table->end()) {
@@ -270,39 +303,6 @@ void State::vector_append(Value vector, Value value) {
     memcpy(static_cast<VectorStorage*>(new_storage.heap)->data, store->data, sizeof(Value) * store->length);
     static_cast<Vector*>(vector.heap)->storage = new_storage;
   }
-}
-
-bool State::equals(Value a, Value b) {
-  if(a.bits == b.bits) return true;
-
-  if(a.type() == VECTOR && b.type() == VECTOR) {
-    if(a.vector_length() != b.vector_length()) return false;
-    for(size_t i = 0; i < a.vector_length(); i++) {
-      if(!equals(a.vector_ref(i), b.vector_ref(i))) {
-        return false;
-      }
-    }
-    return true;
-  } else if(a.type() == PAIR && b.type() == PAIR) {
-    while(a.type() == PAIR && b.type() == PAIR) {
-      if(!equals(a.car(), b.car())) {
-        return false;
-      }
-      a = a.cdr();
-      b = b.cdr();
-    }
-
-    if(a != C_NIL || b != C_NIL) {
-      return equals(a, b);
-    }
-
-    return true;
-  } else if(a.type() == STRING && b.type() == STRING) {
-    if(a.string_bytes() != b.string_bytes()) return false;
-    return strncmp(a.string_data(), b.string_data(), a.string_bytes()) == 0;
-  }
-
-  return a.bits == b.bits;
 }
 
 } // namespace arete

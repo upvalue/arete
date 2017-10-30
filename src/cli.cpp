@@ -107,7 +107,7 @@ static bool do_repl(State& state, bool read_only) {
 #endif
     liness << line;
 
-    XReader reader(state, liness, line_name.str());
+    XReader reader(state, liness, true, line_name.str());
 
     x = reader.read();
     // Don't add comments/expressionless lines to history
@@ -168,7 +168,7 @@ bool do_file(State& state, std::string path, bool read_only) {
     return false;
   }
 
-  XReader reader(state, fs, path);
+  XReader reader(state, fs, true, path);
   
   while(x != C_EOF) {
     x = reader.read();
@@ -247,7 +247,7 @@ int State::enter_cli(int argc_, char* argv[]) {
 
       i += 1;
 
-      XReader reader(*this, ss, "eval argument");
+      XReader reader(*this, ss, false, "eval argument");
 
       Value x;
 
@@ -263,7 +263,7 @@ int State::enter_cli(int argc_, char* argv[]) {
         x = eval_toplevel(x);
 
         if(x.is_active_exception()) 
-          return cli_exception(this, x, "--eval argument resulted in an eval exception");
+          return cli_exception(this, x, "--eval argument resulted in an evaluation error");
       }
 
     } else if(set.compare(arg) == 0) {

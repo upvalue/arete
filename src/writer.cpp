@@ -27,6 +27,7 @@ std::ostream& operator<<(std::ostream& os, Type type) {
     case CFUNCTION: return os << "cfunction";
     case CLOSURE: return os << "closure";
     case TABLE: return os << "table";
+    case FILE_PORT: return os << "file-port";
     default: return os << "unknown";
   }
 }
@@ -128,6 +129,16 @@ std::ostream& operator<<(std::ostream& os, Value v) {
         if(i != v.vector_length() - 1) os << ' ';
       }
       return os << ')';
+    case FILE_PORT: {
+      Value path = v.file_port_path();
+      os << "#<";
+      if(v.file_port_readable()) {
+        os << "input-file-port";
+      } else {
+        os << "output-file-port";
+      }
+      return os << ' ' << path << '>';
+    }
     case CLOSURE:
       return os << "#<closure " << v.bits << ">";
     case UPVALUE:

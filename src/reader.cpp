@@ -23,6 +23,20 @@ namespace arete {
 
 // Thus we can report errors with a level of granularity generally not provided by Scheme systems.
 
+XReader::XReader(State& state_, std::istream& is_, bool slurp_source, const std::string& desc):
+    state(state_), is(is_), source(0), position(0),
+    line(1), column(1), active_error(C_FALSE) {
+  
+  is >> std::noskipws;
+
+  if(desc.compare("anonymous") == 0) {
+    source = 0;
+  } else {
+    source = state.register_source(desc, is);
+  }
+}
+
+
 unsigned State::register_source(const std::string& path, std::istream& is) {
   ARETE_LOG_READ("registering source " << path);
   std::ostringstream contents;

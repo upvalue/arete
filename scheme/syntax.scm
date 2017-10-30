@@ -26,7 +26,10 @@
 (define vector? (lambda (v) (eq? (value-type v) 9)))
 (define rename? (lambda (v) (eq? (value-type v) 16)))
 (define identifier? (lambda (v) (or (rename? v) (symbol? v))))
+
+;; Constants
 (define null? (lambda (v) (eq? (value-bits v) 10)))
+(define eof-object? (lambda (v) (eq? (value-bits v) 18)))
 
 (define self-evaluating?
   (lambda (v)

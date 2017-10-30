@@ -14,7 +14,6 @@
 
 #include <assert.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 #include <stddef.h>
 #include <list>
@@ -108,11 +107,19 @@
 #define ARETE_LOG_TAG_READER (1 << 1)
 #define ARETE_LOG_TAG_VM (1 << 2)
 
-#define ARETE_COLOR_BLUE "\033[1;34m"
-#define ARETE_COLOR_YELLOW "\33[1;33m"
-#define ARETE_COLOR_GREEN "\033[1;32m"
-#define ARETE_COLOR_RED "\033[1;31m"
-#define ARETE_COLOR_RESET "\033[0m"
+#ifdef _MSC_VER
+# define ARETE_COLOR_BLUE ""
+# define ARETE_COLOR_YELLOW ""
+# define ARETE_COLOR_GREEN ""
+# define ARETE_COLOR_RED ""
+# define ARETE_COLOR_RESET ""
+#else
+# define ARETE_COLOR_BLUE "\033[1;34m"
+# define ARETE_COLOR_YELLOW "\33[1;33m"
+# define ARETE_COLOR_GREEN "\033[1;32m"
+# define ARETE_COLOR_RED "\033[1;31m"
+# define ARETE_COLOR_RESET "\033[0m"
+#endif
 
 #ifndef ARETE_LOG
 # define ARETE_LOG(tag, prefix, msg) \
@@ -132,6 +139,7 @@ struct SourceLocation;
 struct Pair;
 struct VectorStorage;
 struct VMFunction;
+struct XReader;
 
 extern size_t gc_collect_timer;
 
@@ -291,12 +299,6 @@ struct Blob : HeapValue {
   }
 
   static const unsigned CLASS_TYPE = BLOB;
-};
-
-struct FilePort {
-  FILE* handle;
-
-  static const unsigned CLASS_TYPE = FILE_PORT;
 };
 
 /**
@@ -628,10 +630,21 @@ struct Value {
 
   // PORTS
 
-  FILE* file_port_handle() const;
+  std::istream* file_port_input_handle() const;
+  std::ostream* file_port_output_handle() const;
+  Value file_port_path() const;
+
+  bool file_port_readable() const {
+    return heap->get_header_bit(FILE_PORT_INPUT_BIT);
+  }
+
+  bool file_port_writable() const {
+    return heap->get_header_bit(FILE_PORT_OUTPUT_BIT);
+  }
 
   static const unsigned FILE_PORT_INPUT_BIT = 1 << 9;
   static const unsigned FILE_PORT_OUTPUT_BIT = 1 << 10;
+  static const unsigned FILE_PORT_NEVER_CLOSE_BIT = 1 << 11;
 
   // OPERATORS
 
@@ -1210,10 +1223,35 @@ inline bool Value::record_isa(Value rhs) const {
 }
 
 inline bool Value::applicable() const {
-  if(type() == FUNCTION || type() == CFUNCTION || type() == VMFUNCTION || type() == CLOSURE) {
-    return true;
+  switch(type()) {
+    case FUNCTION: case CFUNCTION: case VMFUNCTION: case CLOSURE:
+      return true;
+    default: return false;
   }
-  return false;
+}
+
+struct FilePort : HeapValue {
+  Value path;
+  union {
+    std::istream* input_handle;
+    std::ostream* output_handle;
+  };
+
+  XReader* reader;
+
+  static const unsigned CLASS_TYPE = FILE_PORT;
+};
+
+inline std::istream* Value::file_port_input_handle() const {
+  return as<FilePort>()->input_handle;
+}
+
+inline std::ostream* Value::file_port_output_handle() const {
+  return as<FilePort>()->output_handle;
+}
+
+inline Value Value::file_port_path() const {
+  return as<FilePort>()->path;
 }
 
 ///// GC! Garbage collection
@@ -1312,6 +1350,9 @@ struct GCCommon {
   State& state;
   std::vector<Frame*> frames;
   std::list<Handle*> handles;
+
+  /** Vector of obejcts that need to be finalized */
+  std::vector<Value> finalizers;
   VMFrame* vm_frames;
   /** If true, collect before every allocation. Flushes out GC bugs, incredibly expensive */
   bool collect_before_every_allocation;
@@ -1541,6 +1582,8 @@ struct State {
     // Global variables
     G_EXPANDER_PRINT,
     G_EXPANDER,
+    G_CURRENT_INPUT_PORT,
+    G_CURRENT_OUTPUT_PORT,
     G_END
   };
 
@@ -1548,7 +1591,21 @@ struct State {
     * this is separate so the uninitialized State can be unit tested in various ways */
   void boot();
 
-  // Value creation; all of these will cause allocations
+  // Value operations
+
+  /**
+   * Deep equality comparison. Will not terminate on shared structure.
+   */
+  bool equals(Value a, Value b);
+
+  /**
+   * Register a value as a permanent global
+   * @return Its index in the State::globals array
+   */
+  size_t register_global(Value glob) {
+    globals.push_back(glob);
+    return globals.size() - 1;
+  }
 
   /** Create a Flonum */
   Value make_flonum(double number);
@@ -1635,12 +1692,6 @@ struct State {
    * @param size_log2 log2(size_log2) = memory usage of the hash table
    */
   Value make_table(size_t size_log2 = 4);
-
-  /**
-   * Deep equality comparison. Will not terminate on shared structure.
-   */
-  bool equals(Value a, Value b);
-
   // Strings
   
   /**
@@ -1650,15 +1701,6 @@ struct State {
   Value string_copy(Value x);
 
   // Records
-
-  /**
-   * Register a value as a permanent global
-   * @return Its index in the State::globals array
-   */
-  size_t register_global(Value glob) {
-    globals.push_back(glob);
-    return globals.size() - 1;
-  }
 
   /** Register a new type of record */
   size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
@@ -1691,7 +1733,18 @@ struct State {
   Value make_c_function(Value name, c_function_t addr, size_t min_arity, size_t max_arity,
     bool variable_arity);
 
-  Value make_file_port(const std::string& path);
+  Value make_input_file_port(Value path);
+  Value make_input_file_port(const char* cpath, std::istream* is);
+
+  /*
+   * Finalize an object that relies on external resources. Arete will emit a warning if 
+   * the GC has to finalize anything as programs should use methods like call-with-input-file
+   * to ensure that ports have limited extent.
+   * @param type Object type, must be passed manually as object may be dead when this is called
+   * @param object The object to finalize
+   * @param called_by_gc True if called by GC; 
+   */
+  void finalize(Type object_type, Value object, bool called_by_gc);
 
   // WRITE! Output
 
@@ -1760,6 +1813,7 @@ struct State {
 
   void load_builtin_functions();
   void load_numeric_functions();
+  void load_file_functions();
 
   /** Defines a built-in function */
   void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
@@ -1937,20 +1991,10 @@ struct XReader {
     TK_EOF
   };
 
-  XReader(State& state_, std::istream& is_, const std::string& desc = "anonymous"):
-      state(state_), is(is_), source(0), position(0),
-      line(1), column(1), active_error(C_FALSE) {
-    
-    is >> std::noskipws;
-
-    if(desc.compare("anonymous") == 0) {
-      source = 0;
-    } else {
-      source = state.register_source(desc, is);
-    }
-  }
-
+  XReader(State& state_, std::istream& is_, bool slurp_source, const std::string& desc = 
+    "anonymous");
   ~XReader() {}
+
 
   /**
    * Read a character while tracking source code location
@@ -2103,5 +2147,7 @@ inline Handle::~Handle() {
     AR_FN_STACK_TRACE(state); \
     return state.type_error(os.str()); \
   }
+
+  
 
 #endif // ARETE_HPP

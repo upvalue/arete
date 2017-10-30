@@ -48,7 +48,11 @@ void State::boot() {
     "file", "read", "eval", "type", "expand", "syntax",
     // Various variables
     "EXPANDER-PRINT",
-    "expander"
+    "expander",
+
+    // I/O
+    "*current-input-port*",
+    "*current-output-port*",
   };
 
   AR_ASSERT((sizeof(_symbols) / sizeof(const char*)) == G_END &&
@@ -72,8 +76,12 @@ void State::boot() {
     globals.push_back(s);
   }
 
+
   load_builtin_functions();
+  load_file_functions();
   load_numeric_functions();
+
+  set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
 
   // Uncomment to see allocations after boot
   // gc.allocations = 0;
