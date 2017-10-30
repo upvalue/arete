@@ -7,6 +7,27 @@ namespace arete {
 
 State* current_state = 0;
 
+State::State():
+  gc(*this),
+  gensym_counter(0),
+  symbol_table(),
+  source_names(),
+  source_contents(),
+  globals(),
+  temps(),
+
+  shared_objects_begin(0),
+  shared_objects_i(0) {
+
+  symbol_table = new symbol_table_t();
+  current_state = this;
+}
+
+State::~State() {
+  delete symbol_table;
+  current_state = 0;
+}
+  
 void State::boot() {
   source_names.push_back("unknown");
   source_names.push_back("anonymous");
@@ -57,5 +78,18 @@ void State::boot() {
   // Uncomment to see allocations after boot
   // gc.allocations = 0;
 }
+
+std::string State::source_info(const SourceLocation loc, Value fn_name,
+    bool from_eval) {
+  std::ostringstream ss;
+  if(from_eval) ss << "eval: ";
+  ss << source_names[loc.source] << ':' << loc.line;
+  if(fn_name == C_TRUE) 
+    ss << " in toplevel";
+  else if(fn_name != C_FALSE)
+    ss << " in " << fn_name;
+  return ss.str();
+}
+
 
 }

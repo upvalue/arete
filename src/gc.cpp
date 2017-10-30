@@ -1,5 +1,7 @@
 // gc.cpp - Garbage collection
 
+#include <chrono>
+
 #include "arete.hpp"
 
 #define ARETE_LOG_GC(msg) ARETE_LOG((ARETE_LOG_TAG_GC), "gc", msg)

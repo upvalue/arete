@@ -773,4 +773,8 @@ Value State::eval_toplevel(Value exp) {
   return eval(C_FALSE, exp);
 }
 
+Value State::eval_toplevel_list(Value exp) {
+  return C_UNSPECIFIED;
+}
+
 } // namespace arete

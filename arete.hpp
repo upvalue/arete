@@ -22,7 +22,6 @@
 #include <sstream>
 #include <vector>
 #include <unordered_map>
-#include <chrono>
 
 ///// PRE! Preprocessor macros and compile-time configuration macros
 
@@ -32,7 +31,9 @@
 
 #ifdef ARETE_DEV
 # define ARETE_GC_DEBUG 1
-# define ARETE_ASSERTION_LEVEL 2
+# ifndef ARETE_ASSERTION_LEVEL
+#  define ARETE_ASSERTION_LEVEL 2
+# endif
 # define ARETE_BENCH_GC 1
 #endif
 
@@ -52,7 +53,11 @@
 #endif
 
 #ifndef AR_LINENOISE
-# define AR_LINENOISE 1
+# ifdef _MSC_VER
+#  define AR_LINENOISE 0
+# else
+#  define AR_LINENOISE 1
+# endif
 #endif
 
 #define AR_FRAME(state, ...)  \
@@ -1487,26 +1492,9 @@ struct State {
   /** A stack trace. */
   std::vector<std::string> stack_trace;
 
-  State():
-      gc(*this),
-      gensym_counter(0),
-      symbol_table(),
-      source_names(),
-      source_contents(),
-      globals(),
-      temps(),
+  State();
+  ~State();
 
-      shared_objects_begin(0),
-      shared_objects_i(0) {
-    symbol_table = new symbol_table_t();
-    current_state = this;
-  }
-
-  ~State() {
-    delete symbol_table;
-    current_state = 0;
-  }
-  
   // Note that order is important here. Everything from S_QUOTE to S_LETREC_SYNTAX
   // will be set to C_SYNTAX meaning that its values can't be handled directly
   // by Scheme code. 
@@ -1743,17 +1731,13 @@ struct State {
   /** Print a stack trace. */
   void print_stack_trace(std::ostream& os = std::cerr, bool clear = true);
 
-  /** Return a description of a source location */
-  std::string source_info(const SourceLocation loc, Value fn_name = C_FALSE, bool from_eval = false) {
-    std::ostringstream ss;
-    if(from_eval) ss << "eval: ";
-    ss << source_names[loc.source] << ':' << loc.line;
-    if(fn_name == C_TRUE) 
-      ss << " in toplevel";
-    else if(fn_name != C_FALSE)
-      ss << " in " << fn_name;
-    return ss.str();
-  }
+  /**
+   * Return a description of a source location
+   * @param from_eval True if this was called from interpreter; string will be prepended with eval:
+   * in that case.
+   */
+  std::string source_info(const SourceLocation loc, Value fn_name = C_FALSE,
+    bool from_eval = false);
 
   /** Return a description of the source location of a pair */
   std::string source_info(Value expr, bool& found) {
@@ -1848,13 +1832,17 @@ struct State {
   Value eval_apply_scheme(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
   Value eval_apply_vm(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
   Value eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
-  Value apply_record(Value env, Value fn, Value args, Value src_exp, Value fn_name);
   
   /** Apply a Scheme function against a list of already-evaluated arguments */
   Value eval_apply_function(Value fn, Value args);
 
   Value expand_expr(Value exp);
+  /** Evaluate a toplevel expression, expanding and compiling it if the expander 
+   * have been set up */
   Value eval_toplevel(Value exp);
+
+  /** Same, but with a list of expressions */
+  Value eval_toplevel_list(Value exp);
 
   /**
    * This is the primary application function, and the only one that should be called by C++
@@ -1879,6 +1867,12 @@ struct State {
   Value load_module(const std::string&);
 
   ///// VIRUTAL MACHINE
+
+  size_t vm_stack_size, vm_stack_i;
+  void** vm_stack;
+
+  void vm_initialize();
+  void vm_destroy();
 
   Value apply_vm(Value fn, size_t argc, Value* argv);
 

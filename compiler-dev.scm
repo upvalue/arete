@@ -1,6 +1,5 @@
-(load "boot.scm")
-(load "struct.scm")
-(load "compiler.scm")
+(load "scheme/syntax.scm")
+(load "scheme/compiler.scm")
 
 ;; It would be possible to print quite good errors given enough info
 ;; For example --
@@ -20,7 +19,7 @@
 
   (OpenFn/toplevel?! fn #t)
 
-  (define file-body (slurp-file "examples/life.scm"))
+  (define file-body (slurp-file "examples/fib.scm"))
 
   (define fn-body
     (map (lambda (x) (expand x #f)) file-body))
@@ -35,6 +34,6 @@
   ;(print (expand '(define (hello) #t) #f))
 )
 
-(set-top-level-value! 'COMPILER-LOG #t)
+;(set-top-level-value! 'COMPILER-LOG #t)
 
 (main)

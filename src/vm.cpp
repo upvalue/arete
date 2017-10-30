@@ -10,6 +10,19 @@
 
 #include "arete.hpp"
 
+// If true, will allocate Scheme stack values, local variables, and upvalues on the C stack.
+// Improves performances, but relies on non-standard C++ dynamically sized stack arrays.
+// May also cause issues with multithreaded programs.
+
+// TODO: Non C-stack improvement. There's no need to malloc every function call. Rather we should
+// use more intelligent allocation. The problem is that realloc'ing on the fly is rather complex as
+// the existing pointers need to be updated; I tried this approach and couldn't get it to work.
+
+// Another approach might be to just chain together malloc'd blocks
+
+#define AR_USE_C_STACK 1
+
+// If true, will use "computed goto" instead of a normal switch statement
 #define AR_COMPUTED_GOTO 1
 
 #ifdef AR_COMPUTED_GOTO
@@ -66,7 +79,8 @@ static std::string depth_to_string(const VMFrame& f) {
   return str;
 }
 
-VMFrame::VMFrame(State& state_): state(state_), closure(0), exception(C_FALSE), stack_i(0),
+VMFrame::VMFrame(State& state_): state(state_), closure(0), 
+    stack(0), locals(0), upvalues(0), exception(C_FALSE),stack_i(0),
     depth(0), destroyed(false) {
   previous = state.gc.vm_frames;
   if(previous) {
@@ -96,6 +110,24 @@ void VMFrame::setup(Value to_apply) {
     fn = to_apply.as_unsafe<VMFunction>();
   }
 
+#if !AR_USE_C_STACK
+  size_t upvalue_count = fn->free_variables ? fn->free_variables->length : 0;
+  size_t alloc_size = (fn->stack_max + fn->local_count + upvalue_count);
+  stack = (Value*) malloc(alloc_size * sizeof(void*));
+  locals = (Value*)  (((char*) stack) + (fn->stack_max * sizeof(void*)));
+  if(upvalue_count)
+    upvalues = (Value*) (((char*) locals) + (fn->local_count * sizeof(void*)));
+#if 0
+  std::cerr << "allocated " << (alloc_size * sizeof(Value)) << "b stack space" <<std::endl;
+
+  std::cout << "stack " << fn->stack_max << " @ " << (size_t) stack << std::endl;
+
+  std::cout << "locals " << fn->local_count << " @ stack + " << (fn->stack_max * sizeof(void*)) << ' ' << (size_t) locals << std::endl;
+  if(upvalue_count) {
+    std::cout << "upvals " << upvalue_count << " @ stack + " << ((fn->stack_max + fn->local_count) * sizeof(void*)) << ' ' << (size_t) upvalues << std::endl;
+  }
+#endif
+#endif
 }
 
 // Due to something related to the way clang destroys stack-allocated variably sized
@@ -103,15 +135,19 @@ void VMFrame::setup(Value to_apply) {
 // manually destroy VMFrames ahead of their actual ~VMFrame call rather than
 // relying on RAII.
 
+// This isn't necessary with GNU c.
+
 void VMFrame::close_over() {
   AR_ASSERT(!destroyed);
   // Close over upvalues
   if(fn->free_variables) {
     // AR_LOG_VM("closing over " << fn->free_variables->length << " free variables");
+    AR_ASSERT(upvalues);
     for(size_t i = 0; i != fn->free_variables->length; i++) {
       //std::cout << "Closing over free variable " << fn->free_variables
       //std::cout << "Closing over free variable " << i << " value of " << upvalues[i].upvalue() << std::endl;
       Value saved_local = upvalues[i].upvalue();
+      (void) saved_local;
       AR_ASSERT(state.gc.live(saved_local));
       upvalues[i].upvalue_close();
       AR_ASSERT(upvalues[i].upvalue_closed());
@@ -119,6 +155,11 @@ void VMFrame::close_over() {
     }
   }
 
+#if !AR_USE_C_STACK
+  free(stack);
+  //state.vm_stack_i = vm_stack_begin;
+  // std::cerr << "restoring state.vm_stack_i to " << vm_stack_begin << std::endl;
+#endif
   fn = 0;
   closure = 0;
   upvalues = 0;
@@ -159,13 +200,6 @@ enum {
   // they are not necessary for the VM to function.
 };
 
-struct StackThing {
-  StackThing() {}
-  ~StackThing() {
-    std::cout << "~StackThing" << std::endl;
-  }
-};
-
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 #ifdef AR_COMPUTED_GOTO
   static void* dispatch_table[] = {
@@ -178,13 +212,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
 
     &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_JUMP_IF_TRUE
-    /*
-    &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_GLOBAL_GET, &&LABEL_OP_GLOBAL_SET
-    , &&LABEL_OP_RETURN, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL, &&LABEL_OP_LOCAL_GET,
-    &&LABEL_OP_LOCAL_SET, &&LABEL_OP_UPVALUE_GET, &&LABEL_OP_UPVALUE_SET, &&LABEL_OP_CLOSE_OVER,
-   &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_POP, &&LABEL_OP_PUSH_IMMEDIATE,
-   &&LABEL_OP_JUMP_IF_TRUE,
-   */
   };
 #endif
   // Frames lost due to tail call optimization
@@ -193,48 +220,96 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   f.setup(fn);
  tail:
 
-  // StackThing item;
-
   AR_ASSERT(gc.vm_frames == &f);
-
-
-  /* CLANG_FIX
-
-  if(fn.type() == CLOSURE) {
-    f.closure = fn.as<Closure>();
-    f.fn = fn.closure_function();
-  } else {
-    f.fn = fn.as<VMFunction>();
-  }
-  */
 
   AR_LOG_VM("ENTERING FUNCTION " << f.fn->name << " closure: " << (f.closure == 0 ? "#f" : "#t")
      << " free_variables: " << f.fn->free_variables);
 
+  // Allocate function's required storage
+#if AR_USE_C_STACK
   size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;     
 
   void* stack[f.fn->stack_max];
   void* locals[f.fn->local_count];
   void* upvalues[upvalue_count];
-  //void* stack = (void*) alloca(f.fn->stack_max * sizeof(void*));
-  //void* locals = (void*) alloca(f.fn->local_count * sizeof(void*));
-  //void* upvalues = (void*) alloca(upvalue_count * sizeof(Value));
 
-  if(upvalue_count) {
-    //std::cerr << "allocating space for " << upvalue_count << " upvalues" << std::endl;
-    //std::cerr << (size_t) stack << ' ' << (size_t) locals << ' ' << (size_t) upvalues << std::endl;
-  }
-
-  // Allocate storage
+  // Add storage to VM frame
   f.stack = (Value*) stack;
   f.locals = (Value*) locals;
   f.upvalues = upvalue_count ? (Value*) upvalues : 0;
+#else
+#if 0
+  size_t alloc_size = f.fn->stack_max + f.fn->local_count + upvalue_count;
+  AR_LOG_VM("VM: growing heap-allocated stack at " << vm_stack_i << " by " << alloc_size);
 
+  // This is quite tricky, 
+
+  // we can't realloc easily in the middle of VM execution because pointers have already been saved
+  // on the stack at each function call. We have to update them all in place. But even that isn't
+  // enough, because we copy locals from the existing stack, so we have to leave an unused margin at
+  // the end of the stack, allocate and do that first, then realloc.
+
+  f.vm_stack_begin = vm_stack_i;
+  vm_stack_i += alloc_size;
+
+  void* stack = ((char*) vm_stack) + (f.vm_stack_begin * sizeof(void*));
+  void* locals = (((char*) vm_stack) + ((f.vm_stack_begin + f.fn->stack_max) * sizeof(void*)));
+  void* upvalues = (((char*) vm_stack) +
+    + ((f.vm_stack_begin + f.fn->stack_max + f.fn->local_count) * sizeof(void*)));
+
+  // Initialize local variables
+  memcpy(locals, argv, argc * sizeof(Value));
+
+  for(unsigned i = argc; i < f.fn->local_count; i++) { 
+    ((Value*)locals)[i] = C_UNSPECIFIED;
+  }
+
+  if(vm_stack_i + alloc_size > (vm_stack_size - 256)) {
+    AR_ASSERT(vm_stack_i < vm_stack_size);
+    AR_LOG_VM("VM: reallocating heap-allocated stack to " << vm_stack_size * 2);
+    std::cerr << "REALLOCATING HEAP-ALLOCATED STACK TO " << vm_stack_size * 2 << std::endl;
+    vm_stack_size *= 2;
+    AR_ASSERT(vm_stack_i + alloc_size < vm_stack_size);
+    vm_stack = (void**)realloc(vm_stack, vm_stack_size * sizeof(void*));
+
+    for(VMFrame* fi = &f; fi != 0; fi = fi->previous) {
+      AR_ASSERT(!fi->destroyed);
+      // Update all pointers
+      fi->stack = (Value*)(((char*) vm_stack) + (fi->vm_stack_begin * sizeof(void*)));
+      fi->locals = (Value*)(((char*) vm_stack) + ((fi->vm_stack_begin + fi->fn->stack_max) * sizeof(void*)));
+      if(fi->upvalues) {
+        fi->upvalues = (Value*)(((char*) vm_stack) +
+          ((fi->vm_stack_begin + fi->fn->stack_max + fi->fn->local_count) * sizeof(void*)));
+      }
+    }
+  } else {
+    f.stack = (Value*) stack;
+    f.locals = (Value*) locals;
+    f.upvalues = upvalue_count ? (Value*) upvalues : 0;
+  }
+
+    /*
+  std::cout << "stack " << f.fn->stack_max << " @ " << (size_t) stack << std::endl;
+
+  std::cout << "locals " << f.fn->local_count << " @ stack + " << (f.fn->stack_max * sizeof(void*)) << ' ' << (size_t) locals << std::endl;
+  if(upvalue_count) {
+    std::cout << "upvals " << upvalue_count << " @ stack + " << ((f.fn->stack_max + f.fn->local_count) * sizeof(void*)) << ' ' << (size_t) upvalues;
+  }
+  */
+#endif 
+/*
+  size_t alloc_size = (f.fn->stack_max + f.fn->local_count + upvalue_count);
+  void* stack_storage = malloc(alloc_size * sizeof(void*));
+
+  f.stack = (Value*) stack_storage;
+  f.locals = (Value*)  ((char*) stack_storage) + (f.fn->stack_max * sizeof(void*));
+  f.upvalues = (Value*) ((char*) f.locals) + (f.fn->local_count * sizeof(void*));
+  */
+#endif
   // Initialize local variables
   memcpy(f.locals, argv, argc * sizeof(Value));
 
   for(unsigned i = argc; i < f.fn->local_count; i++) { 
-    AR_LOG_VM("LOCAL " << i << " = unspecified");
     f.locals[i] = C_UNSPECIFIED;
   }
 
@@ -400,8 +475,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             // Replace function on stack with its result
             f.stack[f.stack_i - fargc - 1] =
               f.stack[f.stack_i - fargc - 1].c_function_addr()(*this, fargc, &f.stack[f.stack_i - fargc]);
-
-            // AR_PRINT_STACK();
 
             f.stack_i -= (fargc);
 
@@ -695,7 +768,9 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       stack_trace.push_back(os.str());
     }
 
-    return f.exception;
+    Value exc = f.exception;
+    f.close_over();
+    return exc;
 }
 
 void State::disassemble(std::ostream& os, Value fn) {
