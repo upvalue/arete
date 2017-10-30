@@ -26,7 +26,7 @@
 #endif
 
 #ifndef AR_USE_C_STACK
-# define AR_USE_C_STACK 1
+# define AR_USE_C_STACK 0
 #endif
 
 // If true, will use "computed goto" instead of a normal switch statement
@@ -50,7 +50,7 @@
 #define AR_VM_LOG_ALWAYS true
 
 #define AR_LOG_VM(msg) \
-  if((AR_VM_LOG_ALWAYS) || ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
+  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg); \
   }
 // #define AR_LOG_VM(msg)
@@ -348,7 +348,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   AR_ASSERT(gc.live((HeapValue*) f.code));
 
   while(true) {
-#ifdef AR_COMPUTED_GOTO
+#if AR_COMPUTED_GOTO
     VM_DISPATCH();
 #endif
     
