@@ -54,7 +54,7 @@
 
 #ifndef AR_LINENOISE
 # ifdef _MSC_VER
-#  define AR_LINENOISE 0
+#  define AR_LINENOISE 1
 # else
 #  define AR_LINENOISE 1
 # endif
@@ -227,7 +227,7 @@ struct HeapValue {
     size = size_;
   }
 
-  unsigned get_header() const { return header; }
+  unsigned get_header() const { return (unsigned) header; }
   unsigned get_type() const { return header & 255; }
   unsigned char get_mark_bit() const { return (header >> 8) & 1; }
   unsigned get_header_bit(unsigned bit) const { return (header & bit) == bit; }
@@ -415,7 +415,7 @@ struct Value {
   // CONSTANTS
   unsigned constant_value() const {
     AR_ASSERT(type() == CONSTANT);
-    return bits;
+    return (unsigned) bits;
   }
 
   static Value make_boolean(ptrdiff_t cmp) {
@@ -1339,7 +1339,7 @@ struct GCCommon {
   // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) == 16,
   // and align(8, 247) == 248 
   static size_t align(size_t boundary, size_t value) {
-    return (value + (boundary - 1)) & -boundary;
+    return (size_t)((value + (boundary - 1)) & -boundary);
   }
 };
 

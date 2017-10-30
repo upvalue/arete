@@ -145,7 +145,8 @@ void XReader::tokenize_symbol() {
 void XReader::tokenize_string() {
   char c;
 
-  AR_ASSERT(is.tellg() == token_start_position);
+	// MSVC error?
+  //AR_ASSERT(is.tellg() == token_start_position);
   eatc();
 
   while(peekc(c)) {

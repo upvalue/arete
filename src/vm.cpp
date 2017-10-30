@@ -20,12 +20,21 @@
 
 // Another approach might be to just chain together malloc'd blocks
 
-#define AR_USE_C_STACK 1
+#ifdef _MSC_VER
+# define AR_USE_C_STACK 0
+# define AR_COMPUTED_GOTO 0
+#endif
+
+#ifndef AR_USE_C_STACK
+# define AR_USE_C_STACK 1
+#endif
 
 // If true, will use "computed goto" instead of a normal switch statement
-#define AR_COMPUTED_GOTO 1
+#ifndef AR_COMPUTED_GOTO
+# define AR_COMPUTED_GOTO 1
+#endif
 
-#ifdef AR_COMPUTED_GOTO
+#if AR_COMPUTED_GOTO
 # define VM_CASE(label) LABEL_##label 
 # define VM_DISPATCH() goto *dispatch_table[f.code[code_offset++]]
 # define VM_SWITCH()
@@ -38,7 +47,7 @@
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
 #define VM_CODE() (f.code)
 
-#define AR_VM_LOG_ALWAYS false
+#define AR_VM_LOG_ALWAYS true
 
 #define AR_LOG_VM(msg) \
   if((AR_VM_LOG_ALWAYS) || ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
@@ -201,7 +210,7 @@ enum {
 };
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
-#ifdef AR_COMPUTED_GOTO
+#if AR_COMPUTED_GOTO
   static void* dispatch_table[] = {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,
     
@@ -333,7 +342,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   size_t code_offset = 0;
 
-  f.code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
+  //f.code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
+	f.code = (size_t*) f.fn->code_pointer();
 
   AR_ASSERT(gc.live((HeapValue*) f.code));
 

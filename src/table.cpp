@@ -9,12 +9,12 @@ void State::table_setup(Value table, size_t size_log2) {
 
   AR_FRAME(this, table);
 
-  size_t size = 1 << size_log2;
+  size_t size = (size_t)(1 << size_log2);
   chains = static_cast<VectorStorage*>(make_vector_storage(size).heap);
   // In case of GC move
   Table *heap = table.as<Table>();
   heap->entries = 0;
-  heap->size_log2 = size_log2;
+  heap->size_log2 = (unsigned char)size_log2;
   // Fill entries with #f
   chains->length = size;
   for(size_t i = 0; i != chains->length; i++) {

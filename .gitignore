@@ -1,6 +1,8 @@
 *.d
 *.o
+*.obj
 /arete
+*.exe
 /tests/test-incremental
 /tests/test-semispace
 vgcore*

@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
-#include <sys/time.h>
+#ifndef _MSC_VER
+# include <sys/time.h>
+#endif
 
 #include "arete.hpp"
 
@@ -1377,12 +1379,15 @@ Value fn_gc_collect(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_current_millisecond(State& state, size_t argc, Value* argv) {
-
+#ifdef _MSC_VER
+	return Value::make_fixnum(0);
+#else
   struct timeval te; 
   gettimeofday(&te, NULL); // get current time
   size_t milliseconds = te.tv_sec*1000LL + te.tv_usec/1000; // caculate milliseconds
 
   return Value::make_fixnum(milliseconds);
+#endif
 }
 
 void State::defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {

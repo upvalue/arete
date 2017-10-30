@@ -55,7 +55,13 @@ static bool do_repl(State& state, bool read_only) {
 
   std::ostringstream hist_file;
 
-  hist_file << getenv("HOME") << "/.arete_history";
+	if(getenv("HOME")) {
+		hist_file << getenv("HOME") << "/.arete_history";
+	} else if(getenv("HOMEPATH")) {
+		hist_file << getenv("HOMEPATH") << "/.arete_history";
+	}
+
+
   size_t i = 0;
 
 #if AR_LINENOISE
@@ -71,6 +77,7 @@ static bool do_repl(State& state, bool read_only) {
 
     std::stringstream liness;
     liness >> std::noskipws;
+    bool history_add = true;
 #if AR_LINENOISE
     char *line = linenoise(prompt);
 
@@ -78,14 +85,17 @@ static bool do_repl(State& state, bool read_only) {
       break;
     }
 
-    bool history_add = true;
 #else
     std::cout << prompt;
     size_t size = 0;
-    char* line = 0;
-    size = getline(&line, &size, stdin);
+    //char* line = 0;
+		char line[512];
+    // size = getline(&line, &size, stdin);
+		if(!std::cin.getline((char*)&line, 512)) break;
 
     if(!line || feof(stdin)) break;
+
+		std::cout << "Read me a line " << line << std::endl;
 
     
     // std::cout << prompt;
@@ -96,7 +106,6 @@ static bool do_repl(State& state, bool read_only) {
     //  break;
 #endif
     liness << line;
-
 
     XReader reader(state, liness, line_name.str());
 

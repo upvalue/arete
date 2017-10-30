@@ -19,7 +19,7 @@
 
   (OpenFn/toplevel?! fn #t)
 
-  (define file-body (slurp-file "examples/fib.scm"))
+  (define file-body (slurp-file "tests/compiler/hello.scm"))
 
   (define fn-body
     (map (lambda (x) (expand x #f)) file-body))
@@ -34,6 +34,6 @@
   ;(print (expand '(define (hello) #t) #f))
 )
 
-;(set-top-level-value! 'COMPILER-LOG #t)
+(set-top-level-value! 'COMPILER-LOG #t)
 
 (main)
