@@ -515,7 +515,7 @@
         (,#'begin ,@(cddr x)))))
 
 #|
-This actually seriously slows down the compiler vs using a C++ function.
+This actually seriously slows down the compiler (which uses memv via case) vs using a C++ function.
 
 Need some basic inlining for sure.
 
@@ -566,7 +566,7 @@ Need some basic inlining for sure.
           #t 
           (if (or (symbol? (car clause)) (self-evaluating? (car clause)))
             ;; Immediate values result in an eq? call
-            `(,#'eq? ,#'result (,#'quote ,(car clause)))            
+            `(,#'eqv? ,#'result (,#'quote ,(car clause)))            
             ;; Lists will be memv'd
             `(,#'memv ,#'result (,#'quote ,(car clause))))))
 

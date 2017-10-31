@@ -24,7 +24,7 @@ But here are some things that may differentiate it from other programming langua
 - Precise, compacting garbage collection.
 
 - Somewhat self-hosting: Arete is bootstrapped on a simple, highly minimal interpreted subset of Scheme, which is
-  replaced with a bytecode compiler before user programs are run.
+  replaced with a bytecode compiler written in Scheme before user programs are run.
 
 - Windows/MSVC support (not always a given for lisps)
 
