@@ -531,6 +531,13 @@
 (define (member obj lst) (%member-impl equal? obj lst))
 |#
 
+#;(define (memv obj lst)
+  (if (null? lst) 
+    #f
+    (if (eqv? (car lst) obj)
+      lst
+      (memv obj (cdr lst)))))
+
 ;; case
 ;; TODO =>
 (define-syntax case

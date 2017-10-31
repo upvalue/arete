@@ -109,7 +109,7 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       return os << '>';
     }
     case VMFUNCTION: {
-      os << "#<vmfunction " << v.vm_function_name() << ' ' << (void*) v.bits;
+      os << "#<vmfunction " << v.vm_function_name();
       os << ' ' << v.vm_function_min_arity() << '-';
       if(v.vm_function_variable_arity()) {
         os << "rest";

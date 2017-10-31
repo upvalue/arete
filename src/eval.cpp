@@ -780,31 +780,34 @@ Value State::eval_toplevel(Value exp) {
 }
 
 Value State::eval_toplevel_list(Value lst) {
-  Value elt, lst_top, tmp, compiler;
-  AR_FRAME(*this, lst, elt, lst_top, tmp, compiler);
+  Value elt, lst_top, tmp, compiler, vfn;
+  AR_FRAME(*this, lst, elt, lst_top, tmp, compiler, vfn);
   lst_top = lst;
+  compiler = get_global_value(G_COMPILER);
   while(lst.type() == PAIR) {
     tmp = expand_expr(lst.car());
+
+    // We have to eval expressions as we encounter them, if the
+    // compiler hasn't been fully installed yet, in order to allow LOADing the expander, compiler
+    // and then using them from the file which did that
+    if(compiler == C_UNDEFINED) {
+      tmp = eval(C_FALSE, tmp);
+      if(tmp.is_active_exception() || lst.cdr() == C_NIL) return tmp;
+    }
+
     if(tmp.is_active_exception()) return tmp;
     lst.set_car(tmp);
     lst = lst.cdr();
   }
 
   lst = lst_top;
-  //std::cout << lst << std::endl;
 
-  compiler = get_global_value(G_COMPILER);
-  if(compiler != C_UNDEFINED) {
-
-  } else {
-    while(lst.type() == PAIR) {
-      tmp  = eval_toplevel(lst.car());
-      if(tmp.is_active_exception()) return tmp;
-      if(lst.cdr() == C_NIL) return tmp;
-      lst = lst.cdr();
-    }
-
-    return C_UNSPECIFIED;
+  if(compiler != C_UNSPECIFIED && compiler != C_UNDEFINED) {
+    Value argv[1] = {lst};
+    tmp = apply(compiler, 1, argv);
+    if(tmp.is_active_exception()) return tmp;
+    tmp = apply(tmp, 0, 0);
+    return tmp;
   }
 
   return C_UNSPECIFIED;

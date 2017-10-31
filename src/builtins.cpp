@@ -39,20 +39,18 @@ Value State::load_stream(std::istream& input, size_t source) {
 }
 
 Value State::load_file(const std::string& path) {
-  std::ifstream handle(path);
+  Value x, tmp;
+  AR_FRAME(*this, x, tmp);
 
-  // std::cout << ";; loading module " << path << std::endl; 
+  x = slurp_file(path);
 
-  if(!handle.good()) { 
-    std::ostringstream os;
-    os << "Could not load file " << path;
-    return make_exception(globals[S_FILE_ERROR], os.str());
-  }
+  AR_FN_STATE_CHECK(x);
 
-  return load_stream(handle);
+  x = eval_toplevel_list(x);
+
+  return x;
 }
 
-// Various state methods that rely on forward declarations
 Value State::load_module(const std::string& identifier) {
   return C_FALSE;
 }

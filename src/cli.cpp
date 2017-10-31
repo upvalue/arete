@@ -162,14 +162,7 @@ bool do_file(State& state, std::string path, bool read_only) {
 
   AR_FRAME(state, x, tmp);
 
-  x = state.slurp_file(path);
-
-  if(x.is_active_exception()) {
-    state.print_exception(std::cerr, x);
-    return false;
-  }
-
-  x = state.eval_toplevel_list(x);
+  x = state.load_file(path);
 
   if(x.is_active_exception()) {
     state.print_exception(std::cerr, x);

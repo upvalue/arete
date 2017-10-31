@@ -2130,6 +2130,23 @@ inline Handle::~Handle() {
   __stackinfo << __FILE__ << ":" << __LINE__; \
   (state).stack_trace.push_back(__stackinfo.str());
 
+#define AR_FN_CHECK(state, exc) \
+  if((exc).is_active_exception()) { \
+    AR_FN_STACK_TRACE(state); \
+    return state; \
+  }
+
+#define AR_FN_STATE_STACK_TRACE() \
+  std::ostringstream __stackinfo; \
+  __stackinfo << __FILE__ << ":" << __LINE__; \
+  stack_trace.push_back(__stackinfo.str());
+
+#define AR_FN_STATE_CHECK(exc) \
+  if((exc).is_active_exception()) { \
+    AR_FN_STATE_STACK_TRACE(); \
+    return (exc); \
+  }
+
 #define AR_FN_EXPECT_POSITIVE(state, argv, i) \
   if((argv[(i)]).fixnum_value() < 0) { \
     std::ostringstream __os; \
