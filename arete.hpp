@@ -632,6 +632,7 @@ struct Value {
 
   std::istream* file_port_input_handle() const;
   std::ostream* file_port_output_handle() const;
+  XReader* file_port_reader() const;
   Value file_port_path() const;
 
   bool file_port_readable() const {
@@ -1237,6 +1238,7 @@ struct FilePort : HeapValue {
     std::ostream* output_handle;
   };
 
+  /** S-expression reader. Created lazily */
   XReader* reader;
 
   static const unsigned CLASS_TYPE = FILE_PORT;
@@ -1405,6 +1407,7 @@ struct GCSemispace : GCCommon {
 
   void copy_roots();
   void collect(size_t request = 0, bool force = false);
+  void run_finalizers(bool finalize_all);
 
   // live is a special debug method available with the Semispace collector.
   // Since checking whether a variable is live is simple pointer arithmetic,
@@ -1735,6 +1738,8 @@ struct State {
 
   Value make_input_file_port(Value path);
   Value make_input_file_port(const char* cpath, std::istream* is);
+  Value make_output_file_port(Value path);
+  Value make_output_file_port(const char* cpath, std::ostream* os);
 
   /*
    * Finalize an object that relies on external resources. Arete will emit a warning if 
@@ -1855,6 +1860,10 @@ struct State {
     Value rename_key;
     bool found;
     return env_lookup_impl(env, name, rename_key, found);
+  }
+
+  Value file_error(const std::string& msg) {
+    return make_exception("file-error", msg);
   }
 
   Value type_error(const std::string& msg) {
@@ -2147,7 +2156,5 @@ inline Handle::~Handle() {
     AR_FN_STACK_TRACE(state); \
     return state.type_error(os.str()); \
   }
-
-  
 
 #endif // ARETE_HPP

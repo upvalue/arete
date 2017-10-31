@@ -316,7 +316,7 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
     Value v2;
     for(v2 = v; v2.type() == PAIR; v2 = v2.cdr()) {
       pretty_print_sub(os, v2.car(), printed);
-      if(v2.cdr() != C_NIL) os << ' ';
+      if(v2.cdr().type() == PAIR) os << ' ';
     }
     if(v2 != C_NIL) {
       os << " . ";

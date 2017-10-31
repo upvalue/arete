@@ -768,6 +768,9 @@ Value State::expand_expr(Value exp) {
 }
 
 Value State::eval_toplevel(Value exp) {
+  // So, this should:
+  // expand an expression or list of expressions
+  // then compile into a list of expression.
   exp = expand_expr(exp);
 
   return eval(C_FALSE, exp);

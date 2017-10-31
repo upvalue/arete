@@ -13,7 +13,6 @@
 
 (define not (lambda (x) (eq? x #f)))
 
-
 (define fixnum? (lambda (v) (eq? (value-type v) 1)))
 (define flonum? (lambda (v) (eq? (value-type v) 4)))
 (define constant? (lambda (v) (eq? (value-type v) 2)))
@@ -31,12 +30,15 @@
 (define null? (lambda (v) (eq? (value-bits v) 10)))
 (define eof-object? (lambda (v) (eq? (value-bits v) 18)))
 
+(define input-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 9))))
+(define output-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 10))))
+
+(define current-input-port (lambda () *current-input-port*))
+(define current-output-port (lambda () *current-output-port*))
+
 (define self-evaluating?
   (lambda (v)
     (or (character? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v))))
-
-;(define interpreted-function? (lambda (v) (eq? (value-type v)
-
 
 (define unspecified (if #f #f))
 
@@ -474,8 +476,12 @@
           (list #'list-concat (cadr obj) (qq-list c (cdr lst)))
           (cadr obj))
         ;; TODO: This could be replaced with cons* for less calls and less confusing output
-        (list #'cons (qq-object c obj) (qq-list c (cdr lst)))))
-    (list #'quote lst)))
+        (list #'cons (qq-object c obj) (qq-list c (cdr lst)))
+      ))
+    (begin
+      (if (null? lst) 
+        '()
+        (list #'quote lst)))))
 
 (define (qq-element c lst)
   (if (c #'unquote (car lst))
@@ -507,6 +513,24 @@
 
     `(,#'if (,#'not ,(list-ref x 1))
         (,#'begin ,@(cddr x)))))
+
+#|
+This actually seriously slows down the compiler vs using a C++ function.
+
+Need some basic inlining for sure.
+
+(define (%member-impl cmp? obj lst)
+  (let loop ((lst lst))
+    (if (null? lst)
+      #f
+      (if (cmp? (car lst) obj)
+        lst
+        (loop (cdr lst))))))
+
+(define (memq obj lst) (%member-impl eq? obj lst))
+(define (memv obj lst) (%member-impl eqv? obj lst))
+(define (member obj lst) (%member-impl equal? obj lst))
+|#
 
 ;; case
 ;; TODO =>
@@ -680,3 +704,41 @@
       )
     
   )) ;; lambda (x)
+
+;; (define-record Box asdf)
+;; (Box/asdf)
+;; (Box/asdf!)
+;; (Box/set-asdf!)
+;; (Box/update-asdf) 
+
+;; PORTS
+
+(define (call-with-input-file path thunk)
+  (let* ((file (open-input-file path))
+         (result (thunk file)))
+    (close-input-port file)
+    result))
+
+(define (call-with-output-file path thunk)
+  (let* ((file (open-output-file path))
+         (result (thunk file)))
+    (close-output-port file)
+    file))
+
+;; LISTS
+
+(define (assoc-impl cmp? obj alist)
+  (if (null? alist)
+    #f
+    (let loop ((elt (car alist))
+               (rest (cdr alist)))
+      (if (and (pair? elt) (cmp? (car elt) obj))
+        elt
+        (if (null? rest)
+          #f
+          (loop (car rest) (cdr rest)))))))
+
+(define (assq obj alist) (assoc-impl eq? obj alist))
+(define (assv obj alist) (assoc-impl eqv? obj alist))
+(define (assoc obj alist?) (assoc-impl equal? obj alist))
+

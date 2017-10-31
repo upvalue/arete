@@ -24,6 +24,8 @@ State::State():
 }
 
 State::~State() {
+  // Finalize all objects (close ports, free memory, etc)
+  gc.run_finalizers(true);
   delete symbol_table;
   current_state = 0;
 }
@@ -82,6 +84,7 @@ void State::boot() {
   load_numeric_functions();
 
   set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
+  set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
 
   // Uncomment to see allocations after boot
   // gc.allocations = 0;

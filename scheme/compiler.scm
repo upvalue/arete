@@ -637,6 +637,7 @@
 
   (OpenFn->procedure fn))
 
+;; A copying append that uses source information
 (define (append-source src lst elt)
   (let loop ((lst lst))
     (if (pair? lst)
@@ -645,6 +646,7 @@
   )
 )
 
+;; Recompiles a toplevel function that's been defined under the interpreter
 (define (recompile-function name)
   (let* ((oldfn (top-level-value name))
          (fn-name (function-name oldfn))

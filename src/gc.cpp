@@ -48,6 +48,29 @@ void GCSemispace::copy(HeapValue** ref) {
 
 extern bool thing;
 
+void GCSemispace::run_finalizers(bool finalize_all) {
+  // Finalize objects
+  std::vector<Value> finalizers2;
+  ARETE_LOG_GC("checking " << finalizers.size() << " finalizable objects");
+  for(size_t i = 0; i != finalizers.size(); i++) {
+    Value f = finalizers[i];
+    // This object is dead, finalize it
+    // The pointer itself in finalizers is not updated, but if the object is dead, its
+    // heap-allocated type should now be reserved
+    if(f.heap->get_type() == RESERVED) {
+      f.heap = reinterpret_cast<HeapValue*>(f.heap->size);
+      finalizers2.push_back(f);
+      if(!finalize_all)
+        continue;
+    }
+    // This object is dead, finalize it
+    state.finalize((Type)f.heap->get_type(), f.heap, true);
+  }
+  ARETE_LOG_GC(finalizers2.size() << " finalizable objects survived collection");
+
+  finalizers = finalizers2;
+}
+
 // Semispace collector
 void GCSemispace::collect(size_t request, bool force) {
 
@@ -172,26 +195,7 @@ void GCSemispace::collect(size_t request, bool force) {
   block_cursor = other_cursor - other->data;
   live_memory_after_collection = block_cursor;
 
-  // Finalize objects
-  std::vector<Value> finalizers2;
-  ARETE_LOG_GC("checking " << finalizers.size() << " finalizable objects");
-  for(size_t i = 0; i != finalizers.size(); i++) {
-    Value f = finalizers[i];
-    // This object is dead, finalize it
-    // The pointer itself in finalizers is not updated, but if the object is dead, its
-    // heap-allocated type should now be reserved
-    if(f.heap->get_type() == RESERVED) {
-      f.heap = reinterpret_cast<HeapValue*>(f.heap->size);
-      finalizers2.push_back(f);
-      continue;
-    }
-    // This object is dead, finalize it
-    state.finalize((Type)f.heap->get_type(), f.heap, true);
-  }
-  ARETE_LOG_GC(finalizers2.size() << " finalizable objects survived collection");
-
-  finalizers = finalizers2;
-
+  run_finalizers(false);
   delete active;
   active = other;
 

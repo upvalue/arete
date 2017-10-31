@@ -88,82 +88,16 @@ Value fn_equal(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(state.equals(argv[0], argv[1]));
 }
 
-Value fn_display(State& state, size_t argc, Value* argv) {
-  if(argv[0].type() == STRING)
-    std::cout << argv[0].string_data();
-  else
-    std::cout << argv[0];
-  return C_UNSPECIFIED;
-}
-
-Value fn_write(State& state, size_t argc, Value* argv) {
-  std::cout << argv[0];
-  return C_UNSPECIFIED;
-}
-
-Value fn_newline(State& state, size_t argc, Value* argv) {
-  std::cout << std::endl;
-  return C_UNSPECIFIED;
-}
-
-Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bool whitespace, bool pretty) {
-  for(size_t i = 0; i != argc; i++) {
-    if(argv[i].type() == STRING) {
-      os << argv[i].string_data();
-    } else {
-      if(pretty) {
-        state.pretty_print(os, argv[i]);
-      } else {
-        os << argv[i];
-      }
-    }
-
-    if(whitespace && i != argc - 1)  {
-      os << ' ';
-    }
-  }
-
-  return C_UNSPECIFIED;
-}
-
-Value fn_print(State& state, size_t argc, Value* argv) {
-  Value chk = fn_print_impl(state, argc, argv, std::cout, true, false);
-  std::cout << std::endl;
-  return chk;
-}
-
-Value fn_print_string(State& state, size_t argc, Value* argv) {
-  std::ostringstream os;
-  Value chk = fn_print_impl(state, argc, argv, os, true, false);
-  if(chk.is_active_exception()) return chk;
-  return state.make_string(os.str());
-}
-
-static Value fn_pretty_print(State& state, size_t argc, Value* argv) {
-  Value chk = fn_print_impl(state, argc, argv, std::cout, true, true);
-  std::cout << std::endl;
-  return chk;
-}
-
 Value fn_string_append(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string-append";
+  std::ostringstream os;
   for(size_t i = 0; i != argc; i++) {
     AR_FN_EXPECT_TYPE(state, argv, i, STRING);
+    os << argv[i].string_data();
   }
-  std::ostringstream os;
-  fn_print_impl(state, argc, argv, os, false, false);
+
   return state.make_string(os.str());
 }
-
-Value fn_print_table_verbose(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "print-table-verbose";
-  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
-
-  state.print_table_verbose(argv[0]);
-  
-  return C_UNSPECIFIED;
-}
-
 
 static Value fn_load_file(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "load";
@@ -316,6 +250,27 @@ Value fn_list(State& state, size_t argc, Value* argv) {
 
 Value fn_list_source(State& state, size_t argc, Value* argv) {
   return fn_list_impl(state, argc, argv, true);
+}
+
+// (cons* 1) => 1
+// (cons* 1 2 3) => (1 2 . 3)
+Value fn_cons_star(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "cons*";
+  if(argc == 1) return argv[0];
+
+  state.temps.clear();
+  for(size_t i = 0; i != argc - 1; i++) {
+    state.temps.push_back(argv[i]);
+  }
+
+  Value lst, elt;
+  AR_FRAME(state, lst, elt);
+  elt = argv[argc-1];
+  for(size_t i = state.temps.size(); i != 0; i--) {
+    lst = state.make_pair(state.temps[i-1], elt);
+    elt = lst;
+  }
+  return lst;
 }
 
 /** Returns the length of a list */
@@ -1331,6 +1286,15 @@ Value fn_value_bits(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(argv[0].bits);
 }
 
+Value fn_value_header_bit(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "value-header-bit";
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  if(argv[0].immediatep()) {
+    return state.eval_error("value-header bit got immediate object");
+  }
+  return Value::make_boolean(argv[0].heap->get_header_bit(argv[1].fixnum_value() > 0));
+}
+
 // Garbage collector
 
 Value fn_gc_collect(State& state, size_t argc, Value* argv) {
@@ -1374,6 +1338,7 @@ void State::load_builtin_functions() {
   // Operations on raw objects
   defun_core("value-type", fn_value_type, 1);
   defun_core("value-bits", fn_value_bits, 1);
+  defun_core("value-header-bit?", fn_value_header_bit, 2);
 
   // Strings
   defun_core("string-copy", fn_string_copy, 1);
@@ -1381,6 +1346,7 @@ void State::load_builtin_functions() {
   // Lists
   defun_core("cons", fn_cons, 2);
   defun_core("list", fn_list, 0, 0, true);
+  defun_core("cons*", fn_cons_star, 1, 1, true);
   defun_core("list?", fn_listp, 1);
   defun_core("list-ref", fn_list_ref, 2);
   defun_core("list-join", fn_list_join, 2);
@@ -1420,14 +1386,7 @@ void State::load_builtin_functions() {
   defun_core("equal?", fn_equal, 2);
 
   // I/O
-  defun_core("display", fn_display, 1, 1, false);
-  defun_core("write", fn_write, 1, 1, false);
-  defun_core("newline", fn_newline, 0);
-  defun_core("print", fn_print, 0, 0, true);
-  defun_core("print-string", fn_print_string, 0, 0, true);
-  defun_core("pretty-print", fn_pretty_print, 0, 0, true);
   defun_core("string-append", fn_string_append, 0, 0, true);
-  defun_core("print-table-verbose", fn_print_table_verbose, 1);
   defun_core("load", fn_load_file, 1);
 
   // Pairs
