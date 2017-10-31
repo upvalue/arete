@@ -1026,6 +1026,8 @@ inline VMFunction* Value::closure_function() const {
 
 /// VECTORS
 
+/** Backing storage for vectors. These are also used internally when the size
+ * of a vector-like object is known in advance */
 struct VectorStorage : HeapValue {
   size_t length, capacity;
   Value data[1];
@@ -1488,6 +1490,7 @@ struct GCIncremental : GCCommon {
   void mark(HeapValue* v);
   void collect();
   void grow_heap();
+  void run_finalizers(bool) {}
 
   HeapValue* allocate(Type type, size_t size);
 };

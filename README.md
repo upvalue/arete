@@ -21,7 +21,7 @@ But here are some things that may differentiate it from other programming langua
 - Reasonably fast. Current performance goal is "VM fast" eg. Arete should be competitive with Lua and other
   lightweight VM-based languages.
 
-- Precise, compacting garbage collection.
+- Precise garbage collection. Choose between compacting (Cheney) or incremental (lazy sweep).
 
 - Somewhat self-hosting: Arete is bootstrapped on a simple, highly minimal interpreted subset of Scheme, which is
   replaced with a bytecode compiler written in Scheme before user programs are run.
@@ -34,7 +34,7 @@ Arete uses the C++ STL, and optionally the linenoise-ng library from ArangoDB.
 
 # R?RS/SRFI compliance.
 
-Arete currently aims at R5RS compliance - continuations. It is probable that R7RS modules will be added in the near
+Arete currently aims at R5RS compliance minus continuations. It is probable that R7RS modules will be added in the near
 future. 
 
 # Future

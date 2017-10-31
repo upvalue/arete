@@ -255,7 +255,7 @@ Value fn_list_source(State& state, size_t argc, Value* argv) {
 // (cons* 1) => 1
 // (cons* 1 2 3) => (1 2 . 3)
 Value fn_cons_star(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "cons*";
+  //static const char* fn_name = "cons*";
   if(argc == 1) return argv[0];
 
   state.temps.clear();
@@ -1326,10 +1326,24 @@ void State::defun_core(const std::string& cname, c_function_t addr, size_t min_a
   //sym.heap->set_header_bit(Value::SYMBOL_IMMUTABLE_BIT);
 }
 
+Value fn_char_to_integer(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "char->integer";
+  AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
+  return Value::make_fixnum(argv[0].character());
+}
+
+Value fn_integer_to_char(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "integer->char";
+  AR_FN_EXPECT_TYPE(state, 0, argv, FIXNUM);
+  return state.make_char(argv[0].fixnum_value());
+}
+
 void State::load_builtin_functions() {
   // Conversion
   defun_core("string->symbol", fn_string_to_symbol, 1);
   defun_core("symbol->string", fn_symbol_to_string, 1);
+  defun_core("char->integer", fn_char_to_integer, 1);
+  defun_core("integer->char", fn_integer_to_char, 1);
 
   // Predicates
   defun_core("procedure?", fn_procedurep, 1);

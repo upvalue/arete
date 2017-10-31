@@ -8,6 +8,10 @@
 ;; TODO Check lambda body
 ;; TODO Proper error reporting
 
+;; TODO. All we need to implement display closures would be a simple analysis pass to check set! on variables.
+;; This would remove a pointer dereference for variables which are not set!, which might actually be a decent boost
+;; given the naive way certain expressions (e.g. (let loop ())) introduce free variables
+
 ;; OpenFn is a record representing a function in the process of being compiled.
 
 ;; Note: Internal structure is manipulated by openfn_to_procedure in builtins.cpp and that must be updated
@@ -606,6 +610,7 @@
        (compile-apply fn x tail?)))
     (else (raise 'compile "don't know how to compile expression" (list x)))))
 
+;; Compiler entry point; compiles a list of expressions and adds them to a function
 (define (compile fn body)
   (define end (fx- (length body) 1))
   (compiler-log fn "compiling body" body)
@@ -619,6 +624,7 @@
 
   fn)
 
+;; Compiler finisher -- converts symbolic VM instructions into actual fixnums
 (define (compile-finish fn)
   (compiler-log fn fn)
 
@@ -627,6 +633,8 @@
       (vector-set! (OpenFn/insns fn) i (insn->byte fn (vector-ref (OpenFn/insns fn) i)))
       (loop (fx+ i 1)))))
 
+;; This is where most expressions will enter the compiler, it creates a function on-the-fly and returns it for
+;; execution
 (define (compile-toplevel body)
   (define fn (OpenFn/make 'vm-toplevel))
 

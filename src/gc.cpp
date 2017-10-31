@@ -9,6 +9,28 @@
 namespace arete {
 
 size_t gc_collect_timer = 0;
+size_t gc_alloc_timer = 0;
+
+#ifdef ARETE_BENCH_GC
+struct GCTimer {
+  GCTimer(size_t& timer_): timer(timer_) {
+    t1 = std::chrono::high_resolution_clock::now();
+  }
+
+  ~GCTimer() {
+    timer += (std::chrono::duration_cast<std::chrono::microseconds>((
+      std::chrono::high_resolution_clock::now() - t1))).count();
+  }
+
+  size_t& timer;
+  std::chrono::time_point<std::chrono::high_resolution_clock> t1, t2;
+};
+#else
+struct GCTimer {
+  GCTimer(size_t) {}
+  ~GCTimer() {}
+};
+#endif
 
 void State::print_gc_stats(std::ostream& os) {
   os << (gc.heap_size / 1024) << "kb in use after " << gc.collections << " collections and "
@@ -16,6 +38,10 @@ void State::print_gc_stats(std::ostream& os) {
 
 #ifdef ARETE_BENCH_GC
   std::cout << (gc_collect_timer / 1000) << "ms in collection" << std::endl;
+# if ARETE_GC_STRATEGY == ARETE_GC_INCREMENTAL
+  std::cout << (gc_alloc_timer / 1000) << "ms in allocation" << std::endl;
+  std::cout << ((gc_collect_timer + gc_alloc_timer) / 1000) << " ms total" << std::endl;
+# endif 
 #endif
 }
 
@@ -73,12 +99,9 @@ void GCSemispace::run_finalizers(bool finalize_all) {
 
 // Semispace collector
 void GCSemispace::collect(size_t request, bool force) {
-
   collections++;
 
-#ifdef ARETE_BENCH_GC
-  auto t1 = std::chrono::high_resolution_clock::now();
-#endif
+  GCTimer timer(gc_collect_timer);
 
   size_t new_heap_size = heap_size;
   size_t pressure = (live_memory_after_collection * 100) / heap_size;
@@ -198,11 +221,6 @@ void GCSemispace::collect(size_t request, bool force) {
   run_finalizers(false);
   delete active;
   active = other;
-
-#ifdef ARETE_BENCH_GC
-  auto t2 = std::chrono::high_resolution_clock::now();
-  gc_collect_timer += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-#endif 
 }
 
 void GCSemispace::copy_roots() {
@@ -269,6 +287,7 @@ void GCSemispace::copy_roots() {
   }
 
   ARETE_LOG_GC(state.symbol_table->size() << " live symbols");
+
   // TODO: To make this a weak table, simply check for RESERVED in this. If forwarded, set it up
   // otherwise delete reference
   for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
@@ -366,9 +385,7 @@ void GCIncremental::mark(HeapValue* v) {
 }
 
 void GCIncremental::collect() {
-#ifdef ARETE_BENCH_GC
-  auto t1 = std::chrono::high_resolution_clock::now();
-#endif 
+  GCTimer timer(gc_collect_timer);
   // ARETE_LOG_GC("collecting");
   collections++;
   live_objects_after_collection = live_memory_after_collection = 0;
@@ -460,11 +477,6 @@ void GCIncremental::collect() {
     ARETE_LOG_GC(load_factor << "% of memory is still live after collection, adding a block of size " << block_size);
     grow_heap();
   }
-#ifdef ARETE_BENCH_GC
-  auto t2 = std::chrono::high_resolution_clock::now();
-  gc_collect_timer += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-#endif 
-
 }
 
   void GCIncremental::grow_heap() {
@@ -477,6 +489,7 @@ void GCIncremental::collect() {
   }
 
 HeapValue* GCIncremental::allocate(Type type, size_t size) {
+  GCTimer timer(gc_alloc_timer);
   size_t sz = align(8, size);
   unsigned collected = 0;
   ++allocations;
@@ -493,6 +506,7 @@ retry:
 
       AR_ASSERT(v->size > 0); // assert that memory has been initialized with some kind of size
 
+      // When we locate a dead object, coalesce it along with all other dead objects into a bigger chunk.
       if((!marked(v))) {
         // Combine dead objects
         while(true) {
@@ -504,10 +518,11 @@ retry:
           // std::cout << "combining two dead objects " << std::endl;
           size_t dead_size = v2->size;
           v->size += dead_size;
-          memset(v2, 0, dead_size);
+          //memset(v2, 0, dead_size);
         }
       }
 
+      // This dead object has enough room to fit this allocation
       if((!marked(v) && v->size >= sz)) {
         size_t mem_size = v->size;
 
@@ -517,6 +532,7 @@ retry:
         // If there is enough room after this memory to handle another object, note down its
         // size and move on
 
+        // Flonum is used here as the smallest useful object
         if(mem_size - sz >= sizeof(Flonum)) {
           // ARETE_LOG_GC("additional " << (mem_size - sz) << " bytes after object");
           HeapValue* next_object = ((HeapValue*) ((blocks[block_i]->data + block_cursor) + sz));
@@ -527,7 +543,7 @@ retry:
 
           block_cursor += sz;
         } else {
-          // Otherwise, just allocate room for the object
+          // Otherwise, just use the entire thing
           sz = mem_size;
           block_cursor += sz;
         }
@@ -541,6 +557,7 @@ retry:
 
         // Break up memory as necessary
         ret->size = sz;
+
         return ret;
       } else if(!marked(v)) {
         // Finally mark the object so that when all marks are reversed it will be dead

@@ -514,11 +514,10 @@
     `(,#'if (,#'not ,(list-ref x 1))
         (,#'begin ,@(cddr x)))))
 
+;; This actually seriously slows down the compiler (which uses memv via case) vs using a C++ function.
+;;Need some basic inlining for sure.
+
 #|
-This actually seriously slows down the compiler (which uses memv via case) vs using a C++ function.
-
-Need some basic inlining for sure.
-
 (define (%member-impl cmp? obj lst)
   (let loop ((lst lst))
     (if (null? lst)
