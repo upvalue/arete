@@ -1,4 +1,4 @@
-// files.cpp - Operations on files
+// files.cpp - Operations on files, input and output from Scheme code
 
 #include <algorithm>
 #include <fstream>
@@ -281,6 +281,15 @@ Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bo
   return C_UNSPECIFIED;
 }
 
+Value fn_print_source(State& state, size_t argc, Value* argv) {
+  if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
+    state.print_src_pair(std::cerr, argv[0]);
+    fn_print_impl(state, argc-1, &argv[1], std::cerr, true, false);
+    std::cerr << std::endl;
+  }
+  return C_UNSPECIFIED;
+}
+
 Value fn_print(State& state, size_t argc, Value* argv) {
   Value chk = fn_print_impl(state, argc, argv, std::cout, true, false);
   std::cout << std::endl;
@@ -300,26 +309,21 @@ static Value fn_pretty_print(State& state, size_t argc, Value* argv) {
   return chk;
 }
 
-
-Value fn_slurp_file(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "slurp-file";
-  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
-
-  std::string path(argv[0].string_data());
+Value State::slurp_file(const std::string& path) {
   std::ifstream fs(path);
 
   if(!fs.good()) {
     std::ostringstream os;
-    os << "could not open file " << argv[0].string_data();
-    return state.make_exception(state.globals[State::S_READ_ERROR], os.str());
+    os << "could not open file " << path;
+    return make_exception(globals[State::S_READ_ERROR], os.str());
   }
 
   Value x, lst = C_NIL;
 
-  AR_FRAME(state, x, lst);
+  AR_FRAME(*this, x, lst);
 
-  XReader reader(state, fs, true, path);
-  state.temps.clear();
+  XReader reader(*this, fs, true, path);
+  temps.clear();
   while(true) {
     x = reader.read();
 
@@ -329,16 +333,26 @@ Value fn_slurp_file(State& state, size_t argc, Value* argv) {
 
     if(x == C_EOF) break;
 
-    state.temps.push_back(x);
+    temps.push_back(x);
   }
 
-  std::reverse(state.temps.begin(), state.temps.end());
+  std::reverse(temps.begin(), temps.end());
 
-  for(size_t i = 0; i != state.temps.size(); i++) {
-    lst = state.make_pair(state.temps[i], lst);
+  for(size_t i = 0; i != temps.size(); i++) {
+    lst = make_pair(temps[i], lst);
   }
 
   return lst;
+}
+
+
+Value fn_slurp_file(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "slurp-file";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+
+  std::string path(argv[0].string_data());
+
+  return state.slurp_file(path);
 }
 
 Value fn_print_table_verbose(State& state, size_t argc, Value* argv) {
@@ -364,6 +378,7 @@ void State::load_file_functions() {
   defun_core("write", fn_write, 1, 2);
   defun_core("newline", fn_newline, 0, 1);
   defun_core("print", fn_print, 0, 0, true);
+  defun_core("print-source", fn_print_source, 0, 0, true);
   defun_core("print-string", fn_print_string, 0, 0, true);
   defun_core("pretty-print", fn_pretty_print, 0, 0, true);
   defun_core("print-table-verbose", fn_print_table_verbose, 1);}

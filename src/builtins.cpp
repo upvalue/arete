@@ -980,6 +980,13 @@ Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   return r;
 }
 
+Value fn_top_level_bound(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "top-level-bound?";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+
+  return Value::make_boolean(argv[0].symbol_value() != C_UNDEFINED);
+}
+
 /** Iterate over everything that might be a toplevel function. */
 Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-for-each";
@@ -1446,6 +1453,7 @@ void State::load_builtin_functions() {
   defun_core("set-vmfunction-log!", fn_set_vmfunction_log, 2);
 
   defun_core("top-level-value", fn_top_level_value, 1);
+  defun_core("top-level-bound?", fn_top_level_bound, 1);
   defun_core("set-top-level-value!", fn_set_top_level_value, 2);
 
   defun_core("top-level-for-each", fn_top_level_for_each, 1);

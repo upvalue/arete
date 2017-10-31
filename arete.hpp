@@ -1588,6 +1588,7 @@ struct State {
     // Global variables
     G_EXPANDER_PRINT,
     G_EXPANDER,
+    G_COMPILER,
     G_CURRENT_INPUT_PORT,
     G_CURRENT_OUTPUT_PORT,
     G_END
@@ -1907,7 +1908,7 @@ struct State {
    * have been set up */
   Value eval_toplevel(Value exp);
 
-  /** Same, but with a list of expressions */
+  /** Same, but with a list of expressions in-place */
   Value eval_toplevel_list(Value exp);
 
   /**
@@ -1928,6 +1929,7 @@ struct State {
 
   ///// MODULES
 
+  Value slurp_file(const std::string& path);
   Value load_stream(std::istream&, size_t source = 0);
   Value load_file(const std::string&);
   Value load_module(const std::string&);

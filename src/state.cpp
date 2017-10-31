@@ -51,7 +51,7 @@ void State::boot() {
     // Various variables
     "EXPANDER-PRINT",
     "expander",
-
+    "compiler",
     // I/O
     "*current-input-port*",
     "*current-output-port*",

@@ -239,12 +239,12 @@ void State::print_exception(std::ostream& os, Value exc) {
     Value irritants = exc.exception_irritants();
 
     if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]) {
-      os << "Error during expansion: ";
+      os << std::endl << "Error during expansion: ";
     } else if(exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {
       os << "Error in macro syntax: ";
     }
 
-    os << exc.exception_message().string_data() << std::endl;
+    os << ARETE_COLOR_BLUE << exc.exception_message().string_data() << ARETE_COLOR_RESET << std::endl;
 
     bool source_printed = false;
 

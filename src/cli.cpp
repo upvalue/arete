@@ -162,34 +162,19 @@ bool do_file(State& state, std::string path, bool read_only) {
 
   AR_FRAME(state, x, tmp);
 
-  std::ifstream fs(path);
-  if(!fs.good()) {
-    std::cerr << "Could not open file " << path << std::endl;
+  x = state.slurp_file(path);
+
+  if(x.is_active_exception()) {
+    state.print_exception(std::cerr, x);
     return false;
   }
 
-  XReader reader(state, fs, true, path);
-  
-  while(x != C_EOF) {
-    x = reader.read();
-    if(x.is_active_exception()) {
-      std::cerr << x.exception_message().string_data() << std::endl;
-      return false;
-    } else if(x != C_EOF) {
-      if(read_only) {
-        std::cout << x << std::endl;
-        continue;
-      }
+  x = state.eval_toplevel_list(x);
 
-      tmp = state.eval_toplevel(x);
-
-      if(tmp.is_active_exception()) {
-        state.print_exception(std::cerr, tmp);
-        return false;
-      }
-    }
+  if(x.is_active_exception()) {
+    state.print_exception(std::cerr, x);
+    return false;
   }
-
 
   return true;
 }

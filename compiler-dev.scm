@@ -15,23 +15,17 @@
 ;; We'd need the source information of where the arguments were generated...
 
 (define (main)
-  (define fn (OpenFn/make 'vm-toplevel))
+  ;(define fn (OpenFn/make 'vm-toplevel))
 
-  (OpenFn/toplevel?! fn #t)
+  ;(OpenFn/toplevel?! fn #t)
 
-  (define file-body (slurp-file "examples/fib.scm"))
+  (define file-body (slurp-file "global.scm"))
 
   (define fn-body
     (map (lambda (x) (expand x #f)) file-body))
 
-  ;(print fn-body)
-  (compile fn fn-body)
-  (compile-finish fn)
-
-  (define compiled-proc (OpenFn->procedure fn))
-  (set-vmfunction-log! compiled-proc #t)
-  (print (compiled-proc))
-  ;(print (expand '(define (hello) #t) #f))
+  (let ((fn (compile-toplevel fn-body)))
+    (print (fn)))
 )
 
 (set-top-level-value! 'COMPILER-LOG #t)

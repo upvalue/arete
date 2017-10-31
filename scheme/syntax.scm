@@ -47,7 +47,7 @@
     (define env (top-level-value '*current-rename-env*))
 
     (if (not (symbol? name))
-      (raise 'expand "attempt to rename non-symbol" (list x)))
+      (raise 'expand "attempt to rename non-symbol" (list name)))
 
     (if (eq? (top-level-value '*current-rename-env*) unspecified)
       (raise 'expand "(rename) called without environment (did you forget to unquote a rename?)" (list name)))
@@ -413,7 +413,7 @@
     (define result #f)
 
     (if (fx< (length x) 3)
-      (raise 'expand "let has no body" x))
+      (raise 'expand "let has no body" (list x)))
 
     (if (symbol? (list-ref x 1))
       (begin
@@ -739,5 +739,4 @@
 
 (define (assq obj alist) (assoc-impl eq? obj alist))
 (define (assv obj alist) (assoc-impl eqv? obj alist))
-(define (assoc obj alist?) (assoc-impl equal? obj alist))
-
+(define (assoc obj alist) (assoc-impl equal? obj alist))

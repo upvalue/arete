@@ -733,6 +733,7 @@ Value State::apply_vector_storage(Value fn, Value vector_storage) {
 
 Value State::expand_expr(Value exp) {
   Value expand = get_global_value(G_EXPANDER);
+
   // Comment out to disable macroexpansion
   if(expand != C_UNDEFINED) {
     Value sym, mod, saved = C_FALSE;
@@ -773,10 +774,39 @@ Value State::eval_toplevel(Value exp) {
   // then compile into a list of expression.
   exp = expand_expr(exp);
 
+  if(exp.is_active_exception()) return exp;
+
   return eval(C_FALSE, exp);
 }
 
-Value State::eval_toplevel_list(Value exp) {
+Value State::eval_toplevel_list(Value lst) {
+  Value elt, lst_top, tmp, compiler;
+  AR_FRAME(*this, lst, elt, lst_top, tmp, compiler);
+  lst_top = lst;
+  while(lst.type() == PAIR) {
+    tmp = expand_expr(lst.car());
+    if(tmp.is_active_exception()) return tmp;
+    lst.set_car(tmp);
+    lst = lst.cdr();
+  }
+
+  lst = lst_top;
+  //std::cout << lst << std::endl;
+
+  compiler = get_global_value(G_COMPILER);
+  if(compiler != C_UNDEFINED) {
+
+  } else {
+    while(lst.type() == PAIR) {
+      tmp  = eval_toplevel(lst.car());
+      if(tmp.is_active_exception()) return tmp;
+      if(lst.cdr() == C_NIL) return tmp;
+      lst = lst.cdr();
+    }
+
+    return C_UNSPECIFIED;
+  }
+
   return C_UNSPECIFIED;
 }
 

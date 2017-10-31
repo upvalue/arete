@@ -1,5 +1,10 @@
 ;; compiler.scm - Arete bytecode compiler
 
+;; If you have a function with ten parameters
+;; you probably missed a few.
+
+;; - Alan Perlis.
+
 ;; DONE Closures (via upvalues)
 ;; DONE define
 ;; DONE set!
@@ -101,17 +106,17 @@
   (print (OpenFn/insns fn)))
 
 ;; This function returns the "cell" at a given I.
-;; For example, (list-ref-cell '(1 2 3) 1) returns (2 3)
+;; For example, (list-tail '(1 2 3) 1) returns (2 3)
 ;; This is useful for getting source code information attached to lists.
-(define (list-ref-cell lst i)
+(define (list-tail lst i)
   (if (or (null? lst) (not (pair? lst)))
-    (raise 'type "list-ref-cell expects a list with at least one element as its argument" (list lst)))
+    (raise 'type "list-tail expects a list with at least one element as its argument" (list lst)))
   (if (fx= i 0)
     lst
     (let loop ((rest lst)
                (ii 0))
       (if (null? rest)
-        (raise 'type "list-ref-cell bounds error" (list lst (length lst) i)))
+        (raise 'type "list-tail bounds error" (list lst (length lst) i)))
       (if (fx= ii i)
         rest
         (loop (cdr rest) (fx+ ii 1))))))
@@ -231,7 +236,7 @@
 
   (for-each-i
     (lambda (i sub-x)
-      (compile-expr fn sub-x (list-ref-cell x (fx+ i 1)) #f))
+      (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f))
     (cdr x))
 
   ;; Stack size sanity check
@@ -302,28 +307,33 @@
         (vector-append! closure it))
       (register-free-variable parent-fn x))))
 
-(define (fn-lookup fn x)
+(define (fn-lookup fn x src)
   (let loop ((search-fn fn))
     (if (eq? search-fn #f)
       (cons 'global x)
-      (aif (table-ref (OpenFn/env search-fn) x)
-        (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
-          (cons 'local (Var/idx it))
-          ;; This is an upvalue
-          (if (eq? fn search-fn)
-            ;; This upvalue has already been added to the closure
-            (begin
-              (compiler-log fn "found existing upvalue" it)
-              (cons 'upvalue (Var/idx it)))
-            (begin
-              (register-free-variable fn x)
-              (fn-lookup fn x))))
-        (loop (OpenFn/parent search-fn))))))
+      (if (OpenFn/toplevel? search-fn)
+        (begin
+          (unless (or (top-level-bound? x) (table-ref (OpenFn/env search-fn) x))
+            (print-source src "Warning: reference to undefined global variable" x))
+          (cons 'global x))
+        (aif (table-ref (OpenFn/env search-fn) x)
+          (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
+            (cons 'local (Var/idx it))
+            ;; This is an upvalue
+            (if (eq? fn search-fn)
+              ;; This upvalue has already been added to the closure
+              (begin
+                (compiler-log fn "found existing upvalue" it)
+                (cons 'upvalue (Var/idx it)))
+              (begin
+                (register-free-variable fn x)
+                (fn-lookup fn x src))))
+          (loop (OpenFn/parent search-fn)))))))
 
-(define (compile-identifier fn x)
+(define (compile-identifier fn x src)
   (if (rename? x)
     (set! x (rename-expr x)))
-  (define result (fn-lookup fn x))
+  (define result (fn-lookup fn x src))
 
   (compiler-log fn "compiling identifier" result)
 
@@ -431,7 +441,7 @@
     (table-set! (OpenFn/env fn) name var)
     (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1)))
 
-  (let ((result (compile-expr fn (list-ref x 2) (list-ref-cell x 2) tail?)))
+  (let ((result (compile-expr fn (list-ref x 2) (list-tail x 2) tail?)))
     (when (procedure? result)
       (set-vmfunction-name! result name)))
 
@@ -443,11 +453,11 @@
       (emit fn 'local-set (Var/idx var))))
 )
 
-(define (compile-set! fn x tail?)
+(define (compile-set! fn x src tail?)
   (define name (cadr x))
-  (define result (fn-lookup fn name))
+  (define result (fn-lookup fn name src))
 
-  (compile-expr fn (list-ref x 2) (list-ref-cell x 2) tail?)
+  (compile-expr fn (list-ref x 2) (list-tail x 2) tail?)
 
   (case (car result)
     (global
@@ -481,15 +491,15 @@
   (define then-branch-end (gensym 'if-else))
   (define else-branch-end (gensym 'if-end))
 
-  (compile-expr fn condition (list-ref-cell x 1) #f)
+  (compile-expr fn condition (list-tail x 1) #f)
 
   (emit fn 'jump-if-false then-branch-end 1)
-  (compile-expr fn then-branch (list-ref-cell x 2) tail?)
+  (compile-expr fn then-branch (list-tail x 2) tail?)
 
   (emit fn 'jump else-branch-end)
   (register-label fn then-branch-end)
 
-  (compile-expr fn else-branch (if (fx= (length x) 4) (list-ref-cell x 3) #f) tail?)
+  (compile-expr fn else-branch (if (fx= (length x) 4) (list-tail x 3) #f) tail?)
 
   (register-label fn else-branch-end))
 
@@ -516,7 +526,7 @@
           ;; Emit a jump-if-false for each expression
           ;; If it's at the expression
           ;(print i argc)
-          (compile-expr fn sub-x (list-ref-cell x (fx+ i 1)) (and tail? (fx= i argc)))
+          (compile-expr fn sub-x (list-tail x (fx+ i 1)) (and tail? (fx= i argc)))
           (emit fn 'jump-if-false (if (fx= i argc) and-fail-pop and-fail) (if (fx= i argc) 0 1)))
         (cdr x))
 
@@ -546,7 +556,7 @@
           (argc (fx- x-len 2)))
       (for-each-i
         (lambda (i sub-x)
-          (compile-expr fn sub-x (list-ref-cell x (fx+ i 1)) (and tail? (fx= i argc)))
+          (compile-expr fn sub-x (list-tail x (fx+ i 1)) (and tail? (fx= i argc)))
           (emit fn 'jump-if-true or-success 0)
           (if (not (fx= i argc)) (emit fn 'pop)))
         (cdr x))
@@ -569,15 +579,15 @@
   (define x-len (fx- (length x) 2))
   (for-each-i 
     (lambda (i sub-x)
-      (compile-expr fn sub-x (list-ref-cell x i) (and tail? (fx= i x-len))))
+      (compile-expr fn sub-x (list-tail x i) (and tail? (fx= i x-len))))
     (cdr x)))
 
-(define (compile-special-form fn x type tail?)
+(define (compile-special-form fn x src type tail?)
   (compiler-log fn "compiling special form" type x)
   (case type
     (lambda (compile-lambda fn x))
     (define (compile-define fn x tail?))
-    (set! (compile-set! fn x tail?))
+    (set! (compile-set! fn x src tail?))
     (if (compile-if fn x tail?))
     (and (compile-and fn x tail?))
     (or (compile-or fn x tail?))
@@ -603,10 +613,10 @@
   )
   (cond
     ((self-evaluating? x) (compile-constant fn x))
-    ((identifier? x) (compile-identifier fn x))
+    ((identifier? x) (compile-identifier fn x src))
     ((list? x)
      (aif (special-form (car x))
-       (compile-special-form fn x it tail?)
+       (compile-special-form fn x src it tail?)
        (compile-apply fn x tail?)))
     (else (raise 'compile "don't know how to compile expression" (list x)))))
 
@@ -616,7 +626,7 @@
   (compiler-log fn "compiling body" body)
   (for-each-i
     (lambda (i x)
-      (register-source fn (list-ref-cell body i))
+      (register-source fn (list-tail body i))
       (compile-expr fn x #f (fx= i end)))
     body)
 
@@ -639,6 +649,17 @@
   (define fn (OpenFn/make 'vm-toplevel))
 
   (OpenFn/toplevel?! fn #t)
+
+  (for-each
+    (lambda (x)
+      ;; It is possible for #<unspecified> 
+      ;; to occur in toplevel bodies because it is returned by the expander.
+      (unless (eq? x unspecified)
+        (if (eq? (car x) 'define)
+          (let ((var (Var/make 0 (cadr x))))
+            (compiler-log fn "registering global variable" (cadr x))
+            (table-set! (OpenFn/env fn) (cadr x) var)))))
+    body)
 
   (compile fn body)
   (compile-finish fn)
