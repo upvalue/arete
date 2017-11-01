@@ -227,7 +227,8 @@ struct HeapValue {
   // . = object-specific flags
   size_t header;
 
-  // Size of the object
+  /** Size of the object. In the moving collector, this field is also used to store a pointer to
+   * copied objects */
   size_t size;
 
   void initialize(unsigned type, unsigned mark_bit, size_t size_) {
@@ -1363,7 +1364,7 @@ struct GCCommon {
   size_t live_objects_after_collection, live_memory_after_collection, heap_size;
   size_t block_size;
 
-  std::vector<std::string> load_paths;
+  std::vector<std::string> symbols_to_destroy;
 
   GCCommon(State& state_, size_t heap_size_ = ARETE_HEAP_SIZE): state(state_), 
     vm_frames(0),
@@ -1404,6 +1405,8 @@ struct GCSemispace : GCCommon {
   void copy(HeapValue** ref);
 
   void copy_roots();
+  /** Update symbol table after collection */
+  void update_symbol_table();
   void collect(size_t request = 0, bool force = false);
   void run_finalizers(bool finalize_all);
 
