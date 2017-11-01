@@ -592,8 +592,11 @@
   (compiler-log fn "compiling special form" type x)
   (case type
     (lambda (compile-lambda fn x))
-    (define (compile-define fn x tail?))
-    (set! (compile-set! fn x src tail?))
+    ;; TODO: Define and set cannot have tail-applications currently, because the global-set instructions are
+    ;; generated after them.
+    ;; So something like (set! var (fn)) should not destroy the stack frame.
+    (define (compile-define fn x #f))
+    (set! (compile-set! fn x src #f))
     (if (compile-if fn x tail?))
     (and (compile-and fn x tail?))
     (or (compile-or fn x tail?))
@@ -633,7 +636,9 @@
   (for-each-i
     (lambda (i x)
       (register-source fn (list-tail body i))
-      (compile-expr fn x #f (fx= i end))
+      ;; No tail calls in toplevel programs, so that something like
+      ;; (define x (vm-function)) at REPL will work.
+      (compile-expr fn x #f (and (not (OpenFn/toplevel? fn)) (fx= i end)))
       #;(if (OpenFn/toplevel? fn)
         (emit fn 'pop))
     )
@@ -672,7 +677,6 @@
     body)
 
   (compile fn body)
-  ;(print fn)
   (compile-finish fn)
 
   ;(print "toplevel stack size" (OpenFn/stack-size fn))

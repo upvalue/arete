@@ -1364,8 +1364,6 @@ struct GCCommon {
   size_t live_objects_after_collection, live_memory_after_collection, heap_size;
   size_t block_size;
 
-  std::vector<std::string> symbols_to_destroy;
-
   GCCommon(State& state_, size_t heap_size_ = ARETE_HEAP_SIZE): state(state_), 
     vm_frames(0),
     collect_before_every_allocation(false),
@@ -1405,8 +1403,6 @@ struct GCSemispace : GCCommon {
   void copy(HeapValue** ref);
 
   void copy_roots();
-  /** Update symbol table after collection */
-  void update_symbol_table();
   void collect(size_t request = 0, bool force = false);
   void run_finalizers(bool finalize_all);
 
@@ -1861,11 +1857,7 @@ struct State {
    */
   Value env_lookup_impl(Value& env, Value name, Value& rename_key, bool& reached_toplevel);
 
-  Value env_lookup(Value env, Value name) {
-    Value rename_key;
-    bool found;
-    return env_lookup_impl(env, name, rename_key, found);
-  }
+  Value env_lookup(Value env, Value name);
 
   Value file_error(const std::string& msg) {
     return make_exception("file-error", msg);

@@ -400,13 +400,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           if(key.symbol_value() == C_UNDEFINED) {
             std::ostringstream os;
             os << "attempt to set! undefined variable " << key;
-            return eval_error(os.str());
+            f.exception = eval_error(os.str());
+            goto exception;
           }
         }
         if(key.symbol_immutable()) {
           std::ostringstream os;
           os << "attempt to set! immutable symbol " << key;
-          return eval_error(os.str());
+          f.exception = eval_error(os.str());
+          goto exception;
         }
         f.stack_i -= 1;
         key.set_symbol_value(val);
@@ -488,7 +490,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               f.stack[f.stack_i - fargc - 1].c_function_addr()(*this, fargc, &f.stack[f.stack_i - fargc]);
 
             f.stack_i -= (fargc);
-
+            
             if(f.stack[f.stack_i - 1].is_active_exception()) {
               f.exception = f.stack[f.stack_i - 1];
               goto exception;
@@ -593,15 +595,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               temps[0] = make_pair(f.stack[f.stack_i - i - 1], temps[0]);
             }
 
-            // std::cout << "built args: " << temps[0] << std::endl;
-
             f.stack[f.stack_i - fargc - 1] =
               eval_apply_function(f.stack[f.stack_i - fargc - 1], temps[0]);
+
             f.stack_i -= (fargc);
 
             AR_ASSERT(f.stack_i > 0);
 
             if(f.stack[f.stack_i - 1].is_active_exception()) {
+              std::cerr << "Exception, get after it!" << std::endl;
               f.exception = f.stack[f.stack_i - 1];
               goto exception;
             }
@@ -779,8 +781,11 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       stack_trace.push_back(os.str());
     }
 
+
+    AR_ASSERT(!f.destroyed);
     Value exc = f.exception;
     f.close_over();
+    AR_ASSERT(exc.is_active_exception());
     return exc;
 }
 

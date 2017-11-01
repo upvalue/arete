@@ -94,6 +94,12 @@ Value State::env_lookup_impl(Value& env, Value name, Value& rename_key, bool& re
   return name.as<Symbol>()->value;
 }
 
+Value State::env_lookup(Value env, Value name) {
+  Value rename_key;
+  bool found;
+  return env_lookup_impl(env, name, rename_key, found);
+}
+
 /** Return an eval error with source code information */
 Value State::eval_error(const std::string& msg, Value exp) {
   std::ostringstream os;
@@ -282,8 +288,8 @@ Value State::eval_define(Value env,  Value exp, Value fn_name) {
 }
 
 Value State::eval_set(Value env, Value exp, Value fn_name) {
-  Value tmp, name, body;
-  AR_FRAME(this, name, tmp, body, exp, env, fn_name);
+  Value tmp, name, body, env_search = env;
+  AR_FRAME(this, name, tmp, body, exp, env, fn_name, env_search);
 
   if(exp.list_length() != 3) {
     return eval_error("set! must be a list with exactly three elements");
@@ -295,18 +301,18 @@ Value State::eval_set(Value env, Value exp, Value fn_name) {
     return eval_error("first argument to set! must be a symbol", exp.cdr());
   }
 
-  if(name.symbol_immutable()) {
-    if(exp.pair_has_source()) {
-      warn() << source_info(exp.pair_src()) << " setting immutable symbol " << name << " may not have expected effects";
-    } else {
-      warn() << "setting immutable symbol " << name << " may not have expected effects";
-
-    }
-  }
-
   body = exp.caddr();
 
-  tmp = env_lookup(env, name);
+  Value rename_key;
+  bool found;
+  tmp = env_lookup_impl(env_search, name, rename_key, found);
+
+  if(env_search == C_FALSE && name.symbol_immutable()) {
+    std::ostringstream os;
+    os << "attempt to set! immutable builtin " << name << std::endl;
+    return eval_error(os.str(), exp.cdr());
+  }
+
   if(tmp == C_UNDEFINED) {
     std::ostringstream os;
     os << "attempt to set! undefined variable " << name;

@@ -1018,6 +1018,7 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   Value tag = argv[0], message = argv[1], irritants = argv[2], exc;
   AR_FRAME(state, tag, message, irritants, exc);
   exc = state.make_exception(tag, message, irritants);
+  AR_ASSERT(exc.is_active_exception());
   return exc;
 }
 
@@ -1270,8 +1271,7 @@ void State::defun_core(const std::string& cname, c_function_t addr, size_t min_a
   sym.set_symbol_value(cfn);
 
   // Prevent collection of the function
-  (void) register_global(sym);
-  //sym.heap->set_header_bit(Value::SYMBOL_IMMUTABLE_BIT);
+  // sym.heap->set_header_bit(Value::SYMBOL_IMMUTABLE_BIT);
 }
 
 Value fn_char_to_integer(State& state, size_t argc, Value* argv) {

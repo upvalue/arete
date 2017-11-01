@@ -245,9 +245,6 @@ void GCSemispace::collect(size_t request, bool force) {
 
   run_finalizers(false);
 
-  // TODO: It probably makes sense to hold onto this memory unless the heap has grown. 
-  update_symbol_table();
-
   Block* swap = active;
   active = other;
   other = swap;
@@ -332,35 +329,13 @@ void GCSemispace::copy_roots() {
 
   ARETE_LOG_GC(state.symbol_table->size() << " live symbols");
 
-  // TODO: To make this a weak table, simply check for RESERVED in this. If forwarded, set it up
-  // otherwise delete reference
   for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
     Symbol* v = x->second;
-    if(v->value != C_UNDEFINED) {
-      copy((HeapValue**) &v);
-      state.symbol_table->at(x->first) = (Symbol*) v;
-    }
+    copy((HeapValue**) &v);
+    state.symbol_table->at(x->first) = v;
+    //copy((HeapValue**) &x->second);
   }
 }
-
-void GCSemispace::update_symbol_table() {
-  symbols_to_destroy.clear();
-
-  for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
-    if(x->second->get_type() == RESERVED) {
-      x->second = (Symbol*) x->second->size;
-    } else if(x->second->value == C_UNDEFINED) {
-      symbols_to_destroy.push_back(x->first);
-    }
-  }
-
-  // ARETE_LOG_GC("collected " << symbols_to_destroy.size() << " symbols");
-
-  for(size_t i = 0; i != symbols_to_destroy.size(); i++) {
-    state.symbol_table->erase(state.symbol_table->find(symbols_to_destroy[i]));
-  }
-}
-
 
 ///// INCREMENTAL
 void GCIncremental::mark(HeapValue* v) {
