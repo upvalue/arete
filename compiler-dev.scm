@@ -15,19 +15,11 @@
 ;; We'd need the source information of where the arguments were generated...
 
 (define (main)
-  ;(define fn (OpenFn/make 'vm-toplevel))
-
-  ;(OpenFn/toplevel?! fn #t)
-
-  (define file-body (slurp-file "global.scm"))
-
-  (define fn-body
-    (map (lambda (x) (expand x #f)) file-body))
-
-  (let ((fn (compile-toplevel fn-body)))
-    (print (fn)))
+  (pull-up-bootstraps)
+  (print "do it!")
+  (load "examples/tak.scm")
 )
 
-(set-top-level-value! 'COMPILER-LOG #t)
+;(set-top-level-value! 'COMPILER-LOG #t)
 
 (main)

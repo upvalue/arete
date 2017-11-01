@@ -364,6 +364,15 @@ Value fn_print_table_verbose(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+Value fn_load_file(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "load";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  
+  std::string path(argv[0].string_data());
+  
+  return state.load_file(path);
+}
+
 void State::load_file_functions() {
   defun_core("slurp-file", fn_slurp_file, 1);
   defun_core("open-input-file", fn_open_input_file, 1);
@@ -381,6 +390,8 @@ void State::load_file_functions() {
   defun_core("print-source", fn_print_source, 0, 0, true);
   defun_core("print-string", fn_print_string, 0, 0, true);
   defun_core("pretty-print", fn_pretty_print, 0, 0, true);
-  defun_core("print-table-verbose", fn_print_table_verbose, 1);}
+  defun_core("print-table-verbose", fn_print_table_verbose, 1);
+  defun_core("load", fn_load_file, 1);
+}
 
 }

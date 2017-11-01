@@ -2,8 +2,6 @@
 
 // TODO Disassembler
 
-// TODO Portable alternative to stack-allocated arrays.
-
 // TODO: Style. It's somewhat awkward and difficult to manipulate the stack by arithmetic
 // e.g. after a function application there should probably be a simple way to save a position
 // on the stack and refer to it later.
