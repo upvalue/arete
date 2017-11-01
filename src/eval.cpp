@@ -787,6 +787,8 @@ Value State::eval_toplevel_list(Value lst) {
   while(lst.type() == PAIR) {
     tmp = expand_expr(lst.car());
 
+    if(tmp.is_active_exception()) return tmp;
+
     // We have to eval expressions as we encounter them, if the
     // compiler hasn't been fully installed yet, in order to allow LOADing the expander, compiler
     // and then using them from the file which did that

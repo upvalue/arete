@@ -1,5 +1,9 @@
 // builtins.cpp - builtin functionality
 
+// TODO: Move more of these to Scheme. It might be possible to destroy some of them
+// by providing an unsafe low-level memory operation like value-set-pointer 
+// and value-bits.
+
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -8,6 +12,7 @@
 #endif
 
 #include "arete.hpp"
+
 
 namespace arete {
 
@@ -1066,19 +1071,34 @@ Value fn_rename_gensym(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
-  return state.eval(argv[1], argv[0]);
+  // TODO compiler and let-syntax. How do they work together?
+
+
+  return state.eval(C_FALSE, argv[0]);
 }
 
 ///// MISC
 
 Value fn_raise(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "raise";
-  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
-  AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
-  Value tag = argv[0], message = argv[1], irritants = argv[2], exc;
-  AR_FRAME(state, tag, message, irritants, exc);
-  exc = state.make_exception(tag, message, irritants);
-  return exc;
+  if(argc == 1) {
+    AR_FN_EXPECT_TYPE(state, argv, 0, EXCEPTION);
+    // Single argument means we want to re-raise an exception
+    argv[0].heap->set_header_bit(Value::EXCEPTION_ACTIVE_BIT);
+    return argv[0];
+  } else {
+    AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+    AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
+    Value tag = argv[0], message = argv[1], irritants = argv[2], exc;
+    AR_FRAME(state, tag, message, irritants, exc);
+    exc = state.make_exception(tag, message, irritants);
+    return exc;
+  }
+}
+
+Value fn_catch(State& state, size_t argc, Value* argv) {
+  Value tag = argv[0], try_branch = argv[1], catch_branch = argv[2];
+  return C_UNSPECIFIED;
 }
 
 ///// RECORDS
@@ -1383,7 +1403,7 @@ void State::load_builtin_functions() {
   defun_core("member", fn_member, 2);
   
   defun_core("apply", fn_apply, 2);
-  defun_core("eval", fn_eval, 2);
+  defun_core("eval", fn_eval, 1, 2);
 
   // Vectors
   defun_core("make-vector", fn_make_vector, 0, 2);
@@ -1415,7 +1435,8 @@ void State::load_builtin_functions() {
   defun_core("set-cdr!", fn_set_car, 2, 2);
 
   // Exceptions
-  defun_core("raise", fn_raise, 3);
+  defun_core("raise", fn_raise, 1, 3);
+  defun_core("catch", fn_catch, 2);
 
   ///// Expansion support functionality
   defun_core("cons-source", fn_cons_source, 3);
@@ -1438,7 +1459,8 @@ void State::load_builtin_functions() {
   defun_core("gensym", fn_gensym, 0, 1);
   defun_core("gensym?", fn_gensymp, 1);
 
-  // Function modification
+  // Function inspection and modification
+  // Works on interpreted and VM functions.
   defun_core("set-function-name!", fn_set_function_name, 2);
   defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
   defun_core("function-min-arity", fn_function_min_arity, 1);

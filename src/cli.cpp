@@ -162,7 +162,19 @@ bool do_file(State& state, std::string path, bool read_only) {
 
   AR_FRAME(state, x, tmp);
 
-  x = state.load_file(path);
+  if(read_only) {
+    x = state.slurp_file(path);
+    while(x.type() == PAIR) {
+      if(x.car().is_active_exception()) {
+        break;
+      }
+      std::cout << x.car() << std::endl;
+      x = x.cdr();
+    }
+  } else {
+    x = state.load_file(path);
+  }
+
 
   if(x.is_active_exception()) {
     state.print_exception(std::cerr, x);

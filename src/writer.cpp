@@ -227,6 +227,10 @@ void State::print_exception(std::ostream& os, Value exc) {
 
   // This also makes more sense for e.g. the VM where a source pair is not available at execution.
 
+  // OR: We could have some kind of source-format thing which pulls source information when
+  // possible. This makes sense and is easier to use from within Scheme code, and more extensible,
+  // not requiring us to special case each type of exception.
+
   if(exc.exception_tag() == globals[State::S_EVAL_ERROR]) {
     os << "Evaluation error: " << exc.exception_message().string_data() << std::endl;
     if(exc.exception_irritants().type() == PAIR) {

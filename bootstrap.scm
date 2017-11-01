@@ -3,7 +3,7 @@
 (load "scheme/syntax.scm")
 (load "scheme/compiler.scm")
 
-(set-top-level-value! 'compiler compile-toplevel)
+;(set-top-level-value! 'compiler compile-toplevel)
 
 (pull-up-bootstraps)
 

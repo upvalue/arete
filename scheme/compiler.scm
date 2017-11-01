@@ -17,6 +17,12 @@
 ;; This would remove a pointer dereference for variables which are not set!, which might actually be a decent boost
 ;; given the naive way certain expressions (e.g. (let loop ())) introduce free variables
 
+;; TODO: Optimization
+
+;; TODO: Figure out how to get more detailed about function names and preserve them in stack traces.
+;; eg (define (myfn) (let loop () #t))
+;; an error in let-loop should give more information than it does.
+
 ;; OpenFn is a record representing a function in the process of being compiled.
 
 ;; Note: Internal structure is manipulated by openfn_to_procedure in builtins.cpp and that must be updated
@@ -190,10 +196,10 @@
     (case (car insns)
       ;; A note: jump does not actually pop the stack, but because it's always generated after a jump-if-false
       ;; expression and conditionally evaluated, saying it does makes it simpler to check the stack size
-      ((jump pop) -1)
+      ((jump pop global-set) -1)
       ((words close-over return) 0)
       ((push-immediate push-constant global-get local-get upvalue-get) 1)
-      ((upvalue-set local-set global-set) 2)
+      ((upvalue-set local-set) 2) ;; TODO: Omitting the two here causes a horrific expansion error
       ;; Only pops stack if argument is 1
       ((jump-if-false jump-if-true) (if (fx= (list-ref insns 2) 1) -1 0))
       ;; Remove arguments from stack, but push a single result
@@ -447,8 +453,8 @@
 
   (if (OpenFn/toplevel? fn)
     (begin
-      (emit fn 'push-constant (register-constant fn name))
-      (emit fn 'global-set 0))
+      ;(emit fn 'push-constant (register-constant fn name))
+      (emit fn 'global-set 0 (register-constant fn name)))
     (begin
       (emit fn 'local-set (Var/idx var))))
 )
@@ -462,8 +468,8 @@
   (case (car result)
     (global
       (begin
-        (emit fn 'push-constant (register-constant fn name))
-        (emit fn 'global-set 1)))
+        ;(emit fn 'push-constant (register-constant fn name))
+        (emit fn 'global-set 1 (register-constant fn name))))
     (local
       (emit fn 'local-set (cdr result)))
     (upvalue
@@ -627,7 +633,11 @@
   (for-each-i
     (lambda (i x)
       (register-source fn (list-tail body i))
-      (compile-expr fn x #f (fx= i end)))
+      (compile-expr fn x #f (fx= i end))
+      #;(if (OpenFn/toplevel? fn)
+        (emit fn 'pop))
+    )
+
     body)
 
   (emit fn 'return)
@@ -662,7 +672,10 @@
     body)
 
   (compile fn body)
+  ;(print fn)
   (compile-finish fn)
+
+  ;(print "toplevel stack size" (OpenFn/stack-size fn))
 
   (OpenFn->procedure fn))
 
@@ -743,35 +756,4 @@
       "functions")
 )))
 
-#;(let ((unsuccessful #f))
-  (top-level-for-each
-    (lambda (k v)
-      (when (eq? (value-type v) 13)
-        (set! unsuccessful #t))))
-
-  (when unsuccessful
-    (print "Bootstrap unsuccessful")))
-
-;; Print some intermediate value and return it
-(define (pi i)
-  (print i)
-  i)
-
-(define (main)
-
-  (define fn 
-    (compile-toplevel
-      (pi (expand
-        '((lambda (b)
-           (case #t
-             ((thing) b)
-             (else #f)))) #f))
-  ))
-
-
-  (let ((subfn (fn)))
-    (print subfn)
-    (print (subfn #t)))
-
-)
-
+(set-top-level-value! 'compiler compile-toplevel)

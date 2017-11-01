@@ -836,7 +836,7 @@ struct Exception : HeapValue {
 };
 
 inline bool Value::is_active_exception() const {
-  return type() == EXCEPTION;
+  return type() == EXCEPTION && heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT);
 }
 
 inline Value Value::exception_tag() const {
@@ -2084,6 +2084,8 @@ struct XReader {
 };
 
 std::ostream& operator<<(std::ostream& os, Value v);
+
+Value load_sdl(State&);
 
 // MISC! Various inline functions 
 

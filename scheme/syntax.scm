@@ -254,7 +254,7 @@
 
     ;(set! body (caddr x))
     (set! expanded-body (expand body env))
-    (set! fn (eval expanded-body env))
+    (set! fn (eval expanded-body))
 
     (if (not (procedure? fn))
       (raise 'expand "define-syntax body did not result in a function" (list x)))

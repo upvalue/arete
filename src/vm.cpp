@@ -390,9 +390,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       VM_CASE(OP_GLOBAL_SET): {
         size_t err_on_undefined = VM_CODE()[code_offset++];
+        size_t constant_id = VM_CODE()[code_offset++];
         AR_ASSERT(f.stack_i >= 2);
 
-        Value val = f.stack[f.stack_i - 2], key = f.stack[f.stack_i - 1];
+        //Value val = f.stack[f.stack_i - 2], key = f.stack[f.stack_i - 1];
+        Value val = f.stack[f.stack_i - 1];
+        Value key = f.fn->constants->data[constant_id];
         AR_ASSERT(key.type() == SYMBOL);
         AR_LOG_VM("global-set (" << (err_on_undefined ? "set!" : "define") << ") " << key << " = " << val);
         if(err_on_undefined) {
@@ -407,7 +410,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           os << "attempt to set! immutable symbol " << key;
           return eval_error(os.str());
         }
-        f.stack_i -= 2;
+        f.stack_i -= 1;
         key.set_symbol_value(val);
         VM_DISPATCH();
       }

@@ -155,6 +155,7 @@ Value State::make_exception(Value tag, Value message, Value irritants) {
   AR_FRAME(this, tag, message, irritants, exc);
   Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
   exc.heap = heap;
+  heap->set_header_bit(Value::EXCEPTION_ACTIVE_BIT);
   heap->tag = tag;
   heap->message = message;
   heap->irritants = irritants;

@@ -2,8 +2,8 @@
 CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
 CFLAGS := $(CFLAGS) -g3 -O3
-CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
-LDFLAGS :=  
+CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) $(shell pkg-config --cflags sdl2) 
+LDFLAGS := $(shell pkg-config --libs sdl2)
 
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
@@ -45,7 +45,7 @@ all: arete
 # Link 
 arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
-	$(CXX)  -o $@ $^ $(LDFLAGS)
+	$(CXX) $(LDFLAGS) -o $@ $^ 
 
 arete.html: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")
