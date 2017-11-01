@@ -1336,12 +1336,8 @@ struct Block {
   char* data;
   size_t size;
 
-  Block(size_t size_, unsigned char mark_bit): size(size_) {
-    data = static_cast<char*>(calloc(1, size));
-    ((HeapValue*) data)->initialize(BLOCK, !mark_bit, size_);
-  }
-
-  ~Block() { free(data); }
+  Block(size_t size_, unsigned char mark_bit);
+  ~Block();
 
   /** Returns true if there is room in a block for a given allocation */
   bool has_room(size_t position, size_t room) const {
@@ -1450,6 +1446,7 @@ struct GCSemispace : GCCommon {
 
     allocations++;
     HeapValue* v = (HeapValue*) (active->data + block_cursor);
+    memset(v, 0, size);
     v->initialize(type, 0, size);
     block_cursor += size;
     // Assert that pointer is aligned properly.

@@ -1,5 +1,8 @@
 // gc.cpp - Garbage collection
 
+// TODO: Reduction of code duplication between collectors. Specifically, walking the roots
+// at the very least seems like it should be shared between both;
+
 #include <chrono>
 
 #include "arete.hpp"
@@ -31,6 +34,15 @@ struct GCTimer {
   ~GCTimer() {}
 };
 #endif
+
+Block::Block(size_t size_, unsigned char mark_bit): size(size_) {
+  data = static_cast<char*>(malloc(size));
+  ((HeapValue*) data)->initialize(BLOCK, !mark_bit, size_);
+}
+
+Block::~Block() {
+  free(data);
+}
 
 void State::print_gc_stats(std::ostream& os) {
   os << (gc.heap_size / 1024) << "kb in use after " << gc.collections << " collections and "
@@ -105,10 +117,12 @@ void GCSemispace::collect(size_t request, bool force) {
 
   size_t new_heap_size = heap_size;
   size_t pressure = (live_memory_after_collection * 100) / heap_size;
+  bool gc_grew = false;
 
   ARETE_LOG_GC("gc pressure " << pressure);
   // If we need to grow
   if((pressure >= ARETE_GC_LOAD_FACTOR) || force) {
+    gc_grew = true;
     new_heap_size *= 2;
     if(new_heap_size <= request) {
       new_heap_size = (heap_size * 2) + request;
@@ -116,14 +130,25 @@ void GCSemispace::collect(size_t request, bool force) {
   }
 
   heap_size = new_heap_size = align(ARETE_BLOCK_SIZE, new_heap_size);
-  ARETE_LOG_GC("allocating new space of " << new_heap_size << "b");
 
-  other = new Block(new_heap_size, 0);
+  if(other == 0 || gc_grew) {
+    // If we need to grow the heap, delete the existing semispace.
+    if(other != 0) {
+      ARETE_LOG_GC("deleting existing space");
+      delete other;
+      other = 0;
+    }
+    ARETE_LOG_GC("allocating new space of " << new_heap_size << "b");
+    other = new Block(new_heap_size, 0);
+  }
+
   other_cursor = other->data;
 
   copy_roots();
 
   char* sweep = other->data;
+
+  AR_ASSERT(sweep != other_cursor);
   while(sweep != other_cursor) {
     HeapValue* obj = (HeapValue*) sweep;
     size_t size = obj->size;
@@ -216,11 +241,29 @@ void GCSemispace::collect(size_t request, bool force) {
 
   // All done
   block_cursor = other_cursor - other->data;
-  live_memory_after_collection = block_cursor;
+  live_memory_after_collection = (block_cursor);
 
   run_finalizers(false);
-  delete active;
+
+  // TODO: It probably makes sense to hold onto this memory unless the heap has grown. 
+
+  Block* swap = active;
   active = other;
+  other = swap;
+
+  // TODO: Currently, Arete holds onto both semispaces during program execution; it's not clear
+  // whether this is the best course of action in terms of performance and memory usage.
+
+  // It means Arete is always holding 2x working memory, but ensures we aren't allocating and
+  // receiving different x megabyte address spaces from the system allocator for every collection
+
+  // if(true) here can force deletion after every collect.
+  // This could become an option in the future.
+
+  if(gc_grew) {
+    delete other; 
+    other = 0;
+  }
 }
 
 void GCSemispace::copy_roots() {
@@ -479,14 +522,14 @@ void GCIncremental::collect() {
   }
 }
 
-  void GCIncremental::grow_heap() {
-    block_size *= 2;
-    Block* b = new Block(block_size, mark_bit);
-    AR_ASSERT(b->size == block_size);
-    AR_ASSERT(!marked((HeapValue*)b->data));
-    heap_size += block_size;
-    blocks.push_back(b);
-  }
+void GCIncremental::grow_heap() {
+  block_size *= 2;
+  Block* b = new Block(block_size, mark_bit);
+  AR_ASSERT(b->size == block_size);
+  AR_ASSERT(!marked((HeapValue*)b->data));
+  heap_size += block_size;
+  blocks.push_back(b);
+}
 
 HeapValue* GCIncremental::allocate(Type type, size_t size) {
   GCTimer timer(gc_alloc_timer);
@@ -548,7 +591,9 @@ retry:
           block_cursor += sz;
         }
 
-        memset(memory, 0, sz);
+        // Zero out memory after the header, which will always be initialized by the
+        // HeapValue::initialize call
+        memset((char*)memory + (sizeof(HeapValue)), 0, sz - sizeof(HeapValue));
         HeapValue* ret = (HeapValue *) memory;
         ret->initialize(type, mark_bit, sz);
         AR_ASSERT(marked(ret));

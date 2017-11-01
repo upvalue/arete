@@ -2,8 +2,8 @@
 CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
 CFLAGS := $(CFLAGS) -g3 -O3
-CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) $(shell pkg-config --cflags sdl2) -flto
-LDFLAGS := $(shell pkg-config --libs sdl2) -flto
+CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) $(shell pkg-config --cflags sdl2) 
+LDFLAGS := $(shell pkg-config --libs sdl2) 
 
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
@@ -50,6 +50,13 @@ arete: $(CXXOBJS) src/main.o
 arete.html: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")
 	$(ECXX) $(LDFLAGS) -o $@ $^
+
+arete-distilled.cpp: $(wildcard src/*.cpp)
+	$(call colorecho "arete.cpp")
+	echo "// Automatically generated combination of Arete source files; do not edit" > $@
+	cat vendor/linenoise/*.h src/*.cpp vendor/linenoise/*.cpp >> $@
+	sed -e "s/#include \"ConvertUTF.h\"//g" -i $@
+	sed -e "s/#include \"linenoise.h\"//g" -i $@
 
 tests/test-semispace: $(CXXOBJS) tests/test-semispace.o
 	$(call colorecho, "LD $@ ")

@@ -85,6 +85,12 @@ OPV(fn_div, "/", /, false, true)
         } else { \
           if(!(argv[i].fixnum_value() operator argv[i+1].flonum_value())) return C_FALSE; \
         } \
+      } else if(argv[i].type() == FLONUM) { \
+        if(argv[i+1].type() == FLONUM) { \
+          if(!(argv[i].flonum_value() operator argv[i+1].flonum_value())) return C_FALSE; \
+        } else { \
+          if(!(argv[i].flonum_value() operator (double) argv[i+1].fixnum_value())) return C_FALSE; \
+        } \
       } \
     } \
     Value lhs = argv[argc-2], rhs = argv[argc-1]; \
@@ -99,7 +105,8 @@ OPV(fn_div, "/", /, false, true)
     return C_TRUE; \
   }
 
-// After writing all this out I see why the Lua/JS guys gave up and used floating point math only
+// After writing all this out I see why the Lua/JS guys gave up and used floating point math only.
+// What fun.
 
 OPV_BOOL(fn_num_equal, "=", ==)
 OPV_BOOL(fn_lt, "<", <)

@@ -8,7 +8,7 @@
 #include "arete.hpp"
 
 #if AR_LINENOISE
-# include "linenoise.h"
+#include "linenoise.h"
 #endif
 
 using namespace arete;
