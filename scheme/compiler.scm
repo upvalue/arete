@@ -665,7 +665,7 @@
       ;; It is possible for #<unspecified> 
       ;; to occur in toplevel bodies because it is returned by the expander.
       (unless (eq? x unspecified)
-        (if (eq? (car x) 'define)
+        (if (and (pair? x) (eq? (car x) 'define))
           (let ((var (Var/make 0 (cadr x))))
             (compiler-log fn "registering global variable" (cadr x))
             (table-set! (OpenFn/env fn) (cadr x) var)))))

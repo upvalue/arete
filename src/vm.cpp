@@ -389,7 +389,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       VM_CASE(OP_GLOBAL_SET): {
         size_t err_on_undefined = VM_CODE()[code_offset++];
         size_t constant_id = VM_CODE()[code_offset++];
-        AR_ASSERT(f.stack_i >= 2);
+        AR_ASSERT(f.stack_i >= 1);
 
         //Value val = f.stack[f.stack_i - 2], key = f.stack[f.stack_i - 1];
         Value val = f.stack[f.stack_i - 1];

@@ -1583,6 +1583,7 @@ struct State {
     S_EXPAND_ERROR,
     S_SYNTAX_ERROR,
     // Global variables
+    G_COMMAND_LINE,
     G_EXPANDER_PRINT,
     G_EXPANDER,
     G_COMPILER,
@@ -1927,7 +1928,6 @@ struct State {
   ///// MODULES
 
   Value slurp_file(const std::string& path);
-  Value load_stream(std::istream&, size_t source = 0);
   Value load_file(const std::string&);
   Value load_module(const std::string&);
 

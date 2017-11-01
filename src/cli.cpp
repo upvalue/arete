@@ -20,9 +20,10 @@ static const char* help[] = {
   "Note: Arguments are evaluated left to right, e.g. arete <file1> --repl <file2>",
   "will cause <file1> to be loaded, a REPL to be opened, and <file2> to be loaded after it is closed.\n",
   "  --help: Print this message",
+  "  -- <arguments...>: Arguments after -- will be pass to Scheme as a list of strings named *command-line*",
   "  --set <variable> <expr>: Set a top-level variable to an expression (only read, not evaluated)",
-  "  Important variable variables:",
-  "     --set \"*show-expand*\" #t ",
+  "  Helpful top-level variables:",
+  "     --set EXPANDER-PRINT t ",
   "        Print all expansions to current output port as they occur",
   "  --read <file>: Read and print S-expressions from a file without expanding or evaluating them",
   "  --read --repl: Same but with REPL",
@@ -96,7 +97,6 @@ static bool do_repl(State& state, bool read_only) {
     if(!line || feof(stdin)) break;
 
 		std::cout << "Read me a line " << line << std::endl;
-
     
     // std::cout << prompt;
     // std::string line;
@@ -126,7 +126,8 @@ static bool do_repl(State& state, bool read_only) {
         continue;
       }
 
-      tmp = state.eval_toplevel(x);
+      tmp = state.make_pair(x, C_NIL);
+      tmp = state.eval_toplevel_list(tmp);
 
       if(tmp.is_active_exception()) {
         state.print_exception(std::cerr, tmp);
@@ -200,12 +201,36 @@ int State::enter_cli(int argc_, char* argv[]) {
   static std::string set("--set");
   static std::string eval("--eval");
   static std::string stats("--stats");
+  static std::string rest("--");
 
   if(argc == 1) {
     if(do_repl(*this, false) == false) {
       return EXIT_FAILURE;
     }
   }
+
+  // Find Scheme *command-line* arguments after --
+  for(size_t i = 1; i != argc; i++) {
+    if(rest.compare(argv[i]) == 0) {
+
+      Value lst = C_NIL, tmp;
+      AR_FRAME(*this, lst, tmp);
+      for(size_t j = argc - 1; j != i; j--) {
+        tmp = make_string(argv[j]);
+        lst = make_pair(tmp, lst);
+      }
+
+      set_global_value(G_COMMAND_LINE, lst);
+
+      argc = i;
+      break;
+    } 
+  }
+
+  // Prepend program name to *command-line*
+  Value tmp = make_string(argv[0]);
+  tmp = make_pair(tmp, get_global_value(G_COMMAND_LINE));
+  set_global_value(G_COMMAND_LINE, tmp);
 
   for(size_t i = 1; i != argc; i++) {
     const char* arg = argv[i];
@@ -250,7 +275,8 @@ int State::enter_cli(int argc_, char* argv[]) {
 
         if(x == C_EOF) break;
 
-        x = eval_toplevel(x);
+        x = make_pair(x, C_NIL);
+        x = eval_toplevel_list(x);
 
         if(x.is_active_exception()) 
           return cli_exception(this, x, "--eval argument resulted in an evaluation error");

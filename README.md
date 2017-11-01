@@ -42,3 +42,4 @@ future.
 - Optimizing native code compilation *without* LLVM or large hairy dependencies.
 - Generational garbage collection
 - Gradual typing, static typing, a new programming language
+

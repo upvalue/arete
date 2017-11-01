@@ -49,6 +49,7 @@ void State::boot() {
     // Tags for errors that may be thrown by the runtime
     "file", "read", "eval", "type", "expand", "syntax",
     // Various variables
+    "*command-line*",
     "EXPANDER-PRINT",
     "expander",
     "compiler",
@@ -83,6 +84,7 @@ void State::boot() {
   load_file_functions();
   load_numeric_functions();
 
+  set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
   set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
 

@@ -11,33 +11,6 @@
 
 namespace arete {
 
-Value State::load_stream(std::istream& input, size_t source) {
-  XReader reader(*this, input, false);
-  Value x;
-  AR_FRAME(this, x);
-
-  if(source > 0) {
-    reader.source = source;
-  }
-
-  while(true) {
-    x = reader.read();
-    if(x == C_EOF) {
-      break;
-    }
-
-    if(x.is_active_exception()) {
-      return x;
-    } else {
-      x = eval_toplevel(x);
-      if(x.is_active_exception()) {
-        return x;
-      }
-    }
-  }
-  return x;
-}
-
 Value State::load_file(const std::string& path) {
   Value x, tmp;
   AR_FRAME(*this, x, tmp);
@@ -96,41 +69,6 @@ Value fn_string_append(State& state, size_t argc, Value* argv) {
 
   return state.make_string(os.str());
 }
-
-#if 0
-static Value fn_load_file(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "load";
-  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
-
-  std::string path(argv[0].string_data());
-  std::ifstream fs(path);
-  
-  if(!fs.good()) {
-    std::ostringstream os;
-    os << "could not open file " << argv[0].string_data();
-    return state.make_exception(state.globals[State::S_READ_ERROR], os.str());
-  }
-
-  Value x, last;
-
-  AR_FRAME(state, x, last);
-
-  XReader reader(state, fs, true, path);
-  while(true) {
-    x = reader.read();
-
-    if(x.is_active_exception()) {
-      return x;
-    }
-
-    if(x == C_EOF) break;
-
-    last = state.eval_toplevel(x);
-  }
-
-  return last;
-}
-#endif
 
 ///// PREDICATES
 
@@ -1481,4 +1419,4 @@ void State::load_builtin_functions() {
 
 }
 
-}
+} // namespace arete
