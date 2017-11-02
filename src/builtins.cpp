@@ -801,12 +801,13 @@ Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
 
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-function-name!";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
 
-  Function* fn = argv[0].as<Function>();
-  fn->name = argv[1];
-
+  switch(argv[0].type()) {
+    case FUNCTION: argv[0].as_unsafe<Function>()->name = argv[0]; break;
+    case VMFUNCTION: argv[0].as_unsafe<VMFunction>()->name = argv[1]; break;
+    default: break;
+  }
   return C_UNSPECIFIED;
 }
 
@@ -1009,7 +1010,11 @@ Value fn_rename_gensym(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
-  return state.eval(argv[1], argv[0]);
+  Value env = argv[1], exp = argv[0];
+  AR_FRAME(state, env, exp);
+  exp = state.make_pair(exp, C_NIL);
+  return state.eval_toplevel_list(exp);
+  //return state.eval(C_FALSE, argv[0]);
 }
 
 ///// MISC
