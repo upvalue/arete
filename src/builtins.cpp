@@ -52,6 +52,9 @@ Value fn_eq(State& state, size_t argc, Value* argv) {
 Value fn_eqv(State& state, size_t argc, Value* argv) {
   if(argv[0].type() == FLONUM && argv[1].type() == FLONUM)
     return Value::make_boolean(argv[0].flonum_value() == argv[1].flonum_value());
+  if(argv[0].type() == CHARACTER && argv[1].type() == CHARACTER) {
+    return Value::make_boolean(argv[0].character() == argv[1].character());
+  }
   return fn_eq(state, argc, argv);
 }
 

@@ -51,7 +51,7 @@
   if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg); \
   }
-// #define AR_LOG_VM(msg)
+//#define AR_LOG_VM(msg)
 
 #if 0
 #define AR_PRINT_STACK() \
@@ -745,8 +745,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         ptrdiff_t result = 0;
         for(size_t j = 0; j != argc; j++) {
           Value num = f.stack[f.stack_i - argc + j];
-          if(num.type() == FIXNUM) {
-            result += num.fixnum_value();
+          switch(num.type()) {
+            case FIXNUM: {
+              result += num.fixnum_value(); 
+              break;
+            }
+            default: break;
           }
         }
         f.stack_i -= argc;
@@ -768,7 +772,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         ptrdiff_t result = f.stack[f.stack_i - argc].fixnum_value();
 
         size_t i = 1;
-        for(i; i != argc; i++) {
+        for(; i != argc; i++) {
           // f.stack_i - 1
           Value num = f.stack[f.stack_i - argc + i];
           if(num.type() == FIXNUM) {

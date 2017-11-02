@@ -5,6 +5,14 @@
 
 ;; TODO Cannot use a macro defined in advance. Toplevel needs to behave like letrec-syntax, I think.
 
+;; TODO: Problem
+;; Something like this
+;; (let loop ()
+;;   (error))
+
+;; Does not result in super-descriptive error messages because the name is gensym'd by the compiler
+;; How can we propagate information about where a lambda was introduced through the expander to the compiler?
+
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
 (define cddr (lambda (x) (cdr (cdr x))))
@@ -576,12 +584,17 @@
             ;; Lists will be memv'd
             `(,#'memv ,#'result (,#'quote ,(car clause))))))
 
+      (define branch
+        (if (and (c (car clause) #'else) (c (cadr clause) #'=>))
+          `(,(list-ref clause 2) ,#'result)
+          (cadr clause)))
+
       (if (null? (cdr clauses))
         `(,#'if ,condition
-          (,#'begin ,(cadr clause))
+          (,#'begin ,branch)
           unspecified)
         `(,#'if ,condition
-          (,#'begin ,(cadr clause))
+          (,#'begin ,branch)
           ,(loop (cadr clauses) (cdr clauses))))
       ))
 

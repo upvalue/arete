@@ -17,7 +17,7 @@
 (define (main)
   ;(pull-up-bootstraps)
   (print "do it!")
-  (load "examples/fib.scm")
+  (load "examples/bf.scm")
 )
 
 ;(set-top-level-value! 'COMPILER-LOG #t)

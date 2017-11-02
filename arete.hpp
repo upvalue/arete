@@ -89,10 +89,8 @@
 // TODO: It's possible, though expensive and more complex, to do this with the incremental
 // collector. However, it shouldn't be necessary.
 #if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE && ARETE_GC_DEBUG == 1
-# ifndef ARETE_ASSERT_LIVE
-#  define ARETE_ASSERT_LIVE(obj) \
+# define ARETE_ASSERT_LIVE(obj) \
    AR_ASSERT("attempt to invoke method on non-live object" && (arete::current_state->gc.live((obj)) == true));
-# endif
 #endif
 
 #ifndef ARETE_ASSERT_LIVE
@@ -378,10 +376,11 @@ struct Value {
   inline bool eqv(const Value &rhs) const {
     if (bits == rhs.bits)
       return true;
-    if (type() == FLONUM && rhs.type() == FLONUM) {
-      return flonum_value() == rhs.flonum_value();
+    switch(type()) {
+      case FLONUM: return flonum_value() == rhs.flonum_value();
+      case CHARACTER: return character() == rhs.character();
+      default: return (*this) == rhs;
     }
-    return false;
   }
 
   bool hashable() const {

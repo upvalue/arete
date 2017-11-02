@@ -25,7 +25,9 @@
 
 ;; Compiler parameters
 
-(set-top-level-value! 'COMPILER-MICROCODE #t)
+;; If #t, will generate opcodes in place of functions like +, -, etc.
+
+(set-top-level-value! 'COMPILER-MICROCODE #f)
 
 ;; OpenFn is a record representing a function in the process of being compiled.
 
@@ -219,7 +221,7 @@
 
   ;; Stack size sanity check
   (when (fx< (OpenFn/stack-size fn) 0)
-    (raise 'compile "stack underflow" (list fn insns (OpenFn/stack-size fn))))
+    (raise 'compile "stack underflow" (list insns (OpenFn/stack-size fn) fn)))
 
   (for-each
     (lambda (insn) 
@@ -547,6 +549,11 @@
 
   (emit fn 'jump-if-false then-branch-end 1)
   (compile-expr fn then-branch (list-tail x 2) tail?)
+
+  ;; Something side-effecty happened in a value context so we'll push unspecified on the stack
+  ;; e.g. (if #t (set! x #t))
+  (if (eq? (OpenFn/stack-size fn) 0)
+    (emit fn 'push-immediate (value-bits unspecified)))
 
   (emit fn 'jump else-branch-end)
   (register-label fn then-branch-end)
