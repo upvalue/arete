@@ -4,6 +4,8 @@
 (load "scheme/syntax.scm")
 (load "scheme/compiler.scm")
 
+;((compile-toplevel (slurp-file compiler-test-file)))
+
 (define fn (OpenFn/make (string->symbol compiler-test-file)))
 (define fn-body (slurp-file compiler-test-file))
 
@@ -13,4 +15,3 @@
 (define proc (OpenFn->procedure fn))
 
 (pretty-print (proc))
-

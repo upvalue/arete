@@ -364,7 +364,7 @@ Value State::eval(Value env, Value exp, Value fn_name) {
 
   switch(exp.type()) {
     case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING: case CHARACTER:
-    case RECORD: case RECORD_TYPE: case FUNCTION: case CFUNCTION:
+    case RECORD: case RECORD_TYPE: case FUNCTION: case CFUNCTION: case TABLE:
       return exp;
     case PAIR: {
       size_t length = exp.list_length();

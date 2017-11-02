@@ -1270,7 +1270,6 @@ void State::defun_core(const std::string& cname, c_function_t addr, size_t min_a
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);
 
-  // Prevent collection of the function
   // sym.heap->set_header_bit(Value::SYMBOL_IMMUTABLE_BIT);
 }
 

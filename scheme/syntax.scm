@@ -38,7 +38,7 @@
 
 (define self-evaluating?
   (lambda (v)
-    (or (character? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v))))
+    (or (character? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v))))
 
 (define unspecified (if #f #f))
 

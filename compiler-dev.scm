@@ -15,7 +15,7 @@
 ;; We'd need the source information of where the arguments were generated...
 
 (define (main)
-  (pull-up-bootstraps)
+  ;(pull-up-bootstraps)
   (print "do it!")
   (load "examples/fib.scm")
 )

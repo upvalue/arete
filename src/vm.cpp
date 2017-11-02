@@ -24,7 +24,7 @@
 #endif
 
 #ifndef AR_USE_C_STACK
-# define AR_USE_C_STACK 0
+# define AR_USE_C_STACK 1
 #endif
 
 // If true, will use "computed goto" instead of a normal switch statement
@@ -203,8 +203,10 @@ enum {
   OP_JUMP_IF_FALSE = 15,
   OP_JUMP_IF_TRUE = 16,
 
-  // Instructions below this point are "open-coded" versions of the builtin C++ routines for speed;
-  // they are not necessary for the VM to function.
+  // Instructions below this point are "microcoded" versions of the builtin C++ routines for speed;
+  // they are not necessary for code to execute correctly.
+  OP_ADD = 17,
+  OP_SUB = 18,
 };
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
@@ -218,7 +220,11 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     
     &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
 
-    &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_JUMP_IF_TRUE
+    &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_JUMP_IF_TRUE,
+
+    // Microcode
+    &&LABEL_OP_ADD, &&LABEL_OP_SUB,
+    &&LABEL_OP_LT,
   };
 #endif
   // Frames lost due to tail call optimization
@@ -603,7 +609,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             AR_ASSERT(f.stack_i > 0);
 
             if(f.stack[f.stack_i - 1].is_active_exception()) {
-              std::cerr << "Exception, get after it!" << std::endl;
               f.exception = f.stack[f.stack_i - 1];
               goto exception;
             }
@@ -615,7 +620,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             std::ostringstream os;
             AR_PRINT_STACK();
             os << "vm: attempt to apply non-applicable value " << afn;
-            return eval_error(os.str());
+            f.exception = eval_error(os.str());
+            goto exception;
         }
         VM_DISPATCH();
       }
@@ -730,6 +736,67 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         if(pop) {
           f.stack_i--;
         }
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ADD): {
+        size_t argc = VM_CODE()[code_offset++];
+        AR_LOG_VM("add " << argc);
+        ptrdiff_t result = 0;
+        for(size_t j = 0; j != argc; j++) {
+          Value num = f.stack[f.stack_i - argc + j];
+          if(num.type() == FIXNUM) {
+            result += num.fixnum_value();
+          }
+        }
+        f.stack_i -= argc;
+        f.stack_i += 1;
+        f.stack[f.stack_i - 1] = Value::make_fixnum(result);
+        //std::cout << "OP_PLUS :)" << std::endl;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_SUB): {
+        size_t argc = VM_CODE()[code_offset++];
+        AR_LOG_VM("sub " << argc);
+        // Iterate from left to right
+        if(argc == 1) {
+          f.stack_i -= argc - 1;
+          f.stack[f.stack_i - 1] = Value::make_fixnum(-f.stack[f.stack_i - 1].fixnum_value());
+        }
+        
+        ptrdiff_t result = f.stack[f.stack_i - argc].fixnum_value();
+
+        size_t i = 1;
+        for(i; i != argc; i++) {
+          // f.stack_i - 1
+          Value num = f.stack[f.stack_i - argc + i];
+          if(num.type() == FIXNUM) {
+            // std::cout << "subtract number: " << num.fixnum_value() << std::endl;
+            result -= num.fixnum_value();
+          }
+        }
+
+        f.stack_i -= argc - 1;
+        f.stack[f.stack_i - 1] = Value::make_fixnum(result);
+        // std::cout << "PUSH " << f.stack[f.stack_i - 1] << std::endl;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_LT): {
+        size_t argc = VM_CODE()[code_offset++];
+        AR_LOG_VM("< " << argc);
+        Value last = f.stack[f.stack_i - 2];
+        bool result = false;
+        for(size_t j = 0; j != argc - 1; j++) {
+          Value num = f.stack[f.stack_i - argc + j];
+          AR_ASSERT(num.type() == FIXNUM);
+          if(num.bits < last.bits)
+            result = true;
+        }
+        f.stack_i -= argc;
+        f.stack_i += 1;
+        f.stack[f.stack_i - 1] = Value::make_boolean(result);
         VM_DISPATCH();
       }
 

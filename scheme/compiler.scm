@@ -23,6 +23,10 @@
 ;; eg (define (myfn) (let loop () #t))
 ;; an error in let-loop should give more information than it does.
 
+;; Compiler parameters
+
+(set-top-level-value! 'COMPILER-MICROCODE #t)
+
 ;; OpenFn is a record representing a function in the process of being compiled.
 
 ;; Note: Internal structure is manipulated by openfn_to_procedure in builtins.cpp and that must be updated
@@ -180,6 +184,10 @@
         (jump-if-false 15)
         (jump-if-true 16)
 
+        (+ 17)
+        (- 18)
+        (< 19)
+
         (else (raise 'compile "unknown named instruction" (list insn)))))))
 
 ;; Adjust the stack size while recalculating the stack max if necessary
@@ -202,7 +210,9 @@
       ((upvalue-set local-set) 2) ;; TODO: Omitting the two here causes a horrific expansion error
       ;; Only pops stack if argument is 1
       ((jump-if-false jump-if-true) (if (fx= (list-ref insns 2) 1) -1 0))
-      ;; Remove arguments from stack, but push a single result
+      ;; Variable microcode: Remove arguments from stack, and re-use one of the argument slots to push results
+      ((+ - <) (fx+ (fx- (cadr insns)) 1))
+      ;; Remove arguments from stack, but push a single result in the place of the function on the stack
       ((apply apply-tail) (fx- (cadr insns)))
       (else (raise 'compile (print-string "unknown instruction" (car insns)) (list fn (car insns) insns)))
     ))
@@ -229,14 +239,46 @@
   (aif (list-get-source x)
     (vector-append! (OpenFn/sources fn) it)))
 
+(define (alist->table alist)
+  (let ((table (make-table)))
+    (let loop ((cell (car alist))
+               (rest (cdr alist)))
+      (table-set! table (car cell) cell)
+      (if (null? rest)
+        table
+        (loop (car rest) (cdr rest))))))
+
+(define microcode-table
+  (alist->table '(
+    ;; name min-argc max-argc variable-arity
+    (+ 1 #t)
+    (- 1 #t)
+  ))
+)
+
+;(define microcode-table
+;  '((car 2)))
+
 (define (compile-apply fn x tail?)
   (define stack-check #f)
   (define argc (length (cdr x)))
+  (define microcode #f)
 
   (compiler-log fn "compiling application" x)
   ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
   ;(compile-expr fn (car x) (and (eq? argc 0) #f))
-  (compile-expr fn (car x) x #f)
+
+  ;; Compiling specific opcodes
+  ;; +, -, (?) display, newline 
+
+  
+  (aif (and (top-level-value 'COMPILER-MICROCODE)
+            (symbol? (car x))
+            (eq? (car (fn-lookup fn (car x) x)) 'global)
+            (table-ref microcode-table (car x)))
+
+    (set! microcode it)
+    (compile-expr fn (car x) x #f))
 
   (set! stack-check (OpenFn/stack-size fn))
 
@@ -252,7 +294,11 @@
                                   "to match 0 + function arguments" stack-check) (list fn x)))
 
 
-  (emit fn (if tail? 'apply-tail 'apply) (length (cdr x)))
+  (if microcode
+    (begin
+      (emit fn (car microcode) (length (cdr x)))
+    )
+    (emit fn (if tail? 'apply-tail 'apply) (length (cdr x))))
   )
 
 ;; This is the free-variable handling, it's necessarily somewhat complex
@@ -681,7 +727,9 @@
 
   ;(print "toplevel stack size" (OpenFn/stack-size fn))
 
-  (OpenFn->procedure fn))
+  (let ((result (OpenFn->procedure fn)))
+    #;(set-vmfunction-log! result #t)
+    result))
 
 ;; A copying append that uses source information
 (define (append-source src lst elt)
