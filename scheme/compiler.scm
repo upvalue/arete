@@ -27,7 +27,29 @@
 
 ;; If #t, will generate opcodes in place of functions like +, -, etc.
 
-(set-top-level-value! 'COMPILER-MICROCODE #f)
+;; Most basic inlining
+;; ((lambda (x) x) 5)
+;; How do we do this simply? We have to gensym x somehow. There has to be an analysis pass that generates information
+;; about variables, whether they are set! or not.
+
+;; ((lambda (x) x) #t)
+;; ((lambda (<Binding original: 'x name: '#:x0 mutated: #f>) x) #t)
+;; ((lambda (<Binding original: 'x name: '#:x0 mutated: #f>) '#:x0) #t)
+
+;; Then fn-lookup will have to use this new Binding struct.
+
+;;  lookup X and replace with NAME
+
+;; We could do a simple analysis pass like over code, replacing introduced bindings (in define, and in lambda args)
+;; with a binding structure like this. Without building a full AST or intermediate language
+
+;; This would enable (1) display closures and (2) simple inlining, because each binding will now have a unique gensym'd
+;; name and knowledge about mutation.
+
+;; Really, we'd just like to inline lambda in the CAR position. That should provide a good speedup by optimizing let
+;; and let* expressions.
+
+(set-top-level-value! 'COMPILER-VM-PRIMITIVES #t)
 
 ;; OpenFn is a record representing a function in the process of being compiled.
 
@@ -189,6 +211,9 @@
         (+ 17)
         (- 18)
         (< 19)
+        (car 20)
+        (list-ref 21)
+        (eq? 22)
 
         (else (raise 'compile "unknown named instruction" (list insn)))))))
 
@@ -206,8 +231,8 @@
     (case (car insns)
       ;; A note: jump does not actually pop the stack, but because it's always generated after a jump-if-false
       ;; expression and conditionally evaluated, saying it does makes it simpler to check the stack size
-      ((jump pop global-set) -1)
-      ((words close-over return) 0)
+      ((jump pop global-set eq? list-ref) -1)
+      ((words close-over return car) 0)
       ((push-immediate push-constant global-get local-get upvalue-get) 1)
       ((upvalue-set local-set) 2) ;; TODO: Omitting the two here causes a horrific expansion error
       ;; Only pops stack if argument is 1
@@ -250,11 +275,14 @@
         table
         (loop (car rest) (cdr rest))))))
 
-(define microcode-table
+(define primitive-table
   (alist->table '(
     ;; name min-argc max-argc variable-arity
-    (+ 1 #t)
-    (- 1 #t)
+    (+ 1 1 #t)
+    (- 1 1 #t)
+    (car 1 1 #f)
+    (eq? 2 2 #f)
+    (list-ref 2 2 #f)
   ))
 )
 
@@ -264,22 +292,36 @@
 (define (compile-apply fn x tail?)
   (define stack-check #f)
   (define argc (length (cdr x)))
-  (define microcode #f)
+  (define primitive #f)
+  ;; If true, argument count will be emitted after the primitive thing
+  (define primitive-args #f)
+  ;; strip renames at this point
+  (define kar (if (rename? (car x)) (rename-expr (car x)) (car x)))
 
   (compiler-log fn "compiling application" x)
-  ;; (print) => OP_GLOBAL_GET 'print OP_APPLY 0
-  ;(compile-expr fn (car x) (and (eq? argc 0) #f))
 
   ;; Compiling specific opcodes
-  ;; +, -, (?) display, newline 
+  ;; +, -, etc
+  (aif (and (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
+            (symbol? kar)
+            (eq? (car (fn-lookup fn kar x)) 'global)
+            (table-ref primitive-table kar))
+    (begin
+      ;; Check primitive function arguments at compile-time when possible
+      (let ((min-argc (list-ref it 1))
+            (max-argc (list-ref it 2))
+            (var-argc (list-ref it 3))
+            (argc (length (cdr x))))
+        (when (< argc min-argc)
+          (raise 'compile (print-string "function call" (car x) "requires at least" min-argc "arguments but only got" argc) (list x )))
 
-  
-  (aif (and (top-level-value 'COMPILER-MICROCODE)
-            (symbol? (car x))
-            (eq? (car (fn-lookup fn (car x) x)) 'global)
-            (table-ref microcode-table (car x)))
+        (when (and (not var-argc) (> argc max-argc))
+          (raise 'compile (print-string "function call" (car x) "expects at most" min-argc "arguments but got" argc) (list x )))
 
-    (set! microcode it)
+        (when var-argc
+          (set! primitive-args #t))
+
+      (set! primitive it)))
     (compile-expr fn (car x) x #f))
 
   (set! stack-check (OpenFn/stack-size fn))
@@ -296,9 +338,11 @@
                                   "to match 0 + function arguments" stack-check) (list fn x)))
 
 
-  (if microcode
+  (if primitive
     (begin
-      (emit fn (car microcode) (length (cdr x)))
+      (if primitive-args
+        (emit fn (car primitive) (length (cdr x)))
+        (emit fn (car primitive)))
     )
     (emit fn (if tail? 'apply-tail 'apply) (length (cdr x))))
   )
@@ -605,6 +649,8 @@
   )
 )
 
+;; (or a b c)
+;; (if a a (if b b (if c c #f)))
 (define (compile-or fn x tail?)
   (define x-len (length x))
   (if (fx= x-len 1)
@@ -711,6 +757,20 @@
       (vector-set! (OpenFn/insns fn) i (insn->byte fn (vector-ref (OpenFn/insns fn) i)))
       (loop (fx+ i 1)))))
 
+(define (scan-defines fn body)
+  (for-each
+    (lambda (x)
+      ;; It is possible for #<unspecified> 
+      ;; to occur in toplevel bodies because it is returned by the expander.
+      (unless (eq? x unspecified)
+        (if (and (pair? x) (env-compare #f (car x) 'define))
+          (let ((var (Var/make 0 (cadr x))))
+            (compiler-log fn "registering global variable" (cadr x))
+            (table-set! (OpenFn/env fn) (cadr x) var))
+          (if (and (pair? x) (env-compare #f (car x) 'begin))
+            (scan-defines fn (cdr x))))))
+    body))
+
 ;; This is where most expressions will enter the compiler, it creates a function on-the-fly and returns it for
 ;; execution
 (define (compile-toplevel body)
@@ -718,7 +778,9 @@
 
   (OpenFn/toplevel?! fn #t)
 
-  (for-each
+  (scan-defines fn body)
+
+  #;(for-each
     (lambda (x)
       ;; It is possible for #<unspecified> 
       ;; to occur in toplevel bodies because it is returned by the expander.

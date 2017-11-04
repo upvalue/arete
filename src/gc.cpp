@@ -214,8 +214,9 @@ void GCSemispace::collect(size_t request, bool force) {
         RecordType rt(*static_cast<Record*>(obj)->type);
 
         AR_COPY(Record, type);
+        size_t fc = rt.field_count;
 
-        for(size_t i = 0; i != rt.field_count; i++) {
+        for(size_t i = 0; i != fc; i++) {
           AR_COPY(Record, fields[i]);
         }
         break;

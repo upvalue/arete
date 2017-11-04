@@ -13,6 +13,7 @@
 ;; Does not result in super-descriptive error messages because the name is gensym'd by the compiler
 ;; How can we propagate information about where a lambda was introduced through the expander to the compiler?
 
+(define caar (lambda (x) (car (car x))))
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
 (define cddr (lambda (x) (cdr (cdr x))))

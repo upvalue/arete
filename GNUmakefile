@@ -54,6 +54,8 @@ arete.html: $(ECXXOBJS) src/main.em.o
 arete-distilled.cpp: $(wildcard src/*.cpp)
 	$(call colorecho "arete.cpp")
 	echo "// Automatically generated combination of Arete source files; do not edit" > $@
+	echo "// See https://github.com/upvalue/arete for details" >> $@
+	echo "// Generated on $(shell date)" >> $@
 	cat vendor/linenoise/*.h src/*.cpp vendor/linenoise/*.cpp >> $@
 	sed -e "s/#include \"ConvertUTF.h\"//g" -i $@
 	sed -e "s/#include \"linenoise.h\"//g" -i $@

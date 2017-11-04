@@ -8,13 +8,13 @@
 
 #include "arete.hpp"
 
-// If true, will allocate Scheme stack values, local variables, and upvalues on the C stack.
-// Improves performances, but relies on non-standard C++ dynamically sized stack arrays.
-// May also cause issues with multithreaded programs.
-
 // TODO: Non C-stack improvement. There's no need to malloc every function call. Rather we should
 // use more intelligent allocation. The problem is that realloc'ing on the fly is rather complex as
 // the existing pointers need to be updated; I tried this approach and couldn't get it to work.
+
+// TODO: Are there more optimizations that can be done? With a little trouble, for example, we could
+// use variables outside the VMFrame struct. Does putting everything in VMFrame prevent the compiler
+// from storing them in registers?
 
 // Another approach might be to just chain together malloc'd blocks
 
@@ -22,6 +22,10 @@
 # define AR_USE_C_STACK 0
 # define AR_COMPUTED_GOTO 0
 #endif
+
+// If true, will allocate Scheme stack values, local variables, and upvalues on the C stack.
+// Improves performances, but relies on non-standard C++ dynamically sized stack arrays.
+// May also cause issues with multithreaded programs.
 
 #ifndef AR_USE_C_STACK
 # define AR_USE_C_STACK 1
@@ -41,6 +45,10 @@
 # define VM_DISPATCH() break ;
 # define VM_SWITCH() switch(f.code[code_offset++])
 #endif
+
+#define VM_EXCEPTION(type, msg) \
+  { std::ostringstream __os; __os << msg ; f.exception = make_exception(type, __os.str()); \
+    goto exception;}
 
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
 #define VM_CODE() (f.code)
@@ -203,10 +211,14 @@ enum {
   OP_JUMP_IF_FALSE = 15,
   OP_JUMP_IF_TRUE = 16,
 
-  // Instructions below this point are "microcoded" versions of the builtin C++ routines for speed;
+  // Instructions below this point are primitive versions of the builtin C++ routines for speed;
   // they are not necessary for code to execute correctly.
   OP_ADD = 17,
   OP_SUB = 18,
+  OP_LT = 19,
+  OP_CAR = 20,
+  OP_LIST_REF = 21,
+  OP_EQ = 22,
 };
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
@@ -222,9 +234,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
     &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_JUMP_IF_TRUE,
 
-    // Microcode
+    // Primitives implemented directly in the VM
     &&LABEL_OP_ADD, &&LABEL_OP_SUB,
     &&LABEL_OP_LT,
+    &&LABEL_OP_CAR,
+    &&LABEL_OP_LIST_REF,
+    &&LABEL_OP_EQ,
   };
 #endif
   // Frames lost due to tail call optimization
@@ -242,11 +257,11 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 #if AR_USE_C_STACK
   size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;     
 
+  // Add storage to VM frame
   void* stack[f.fn->stack_max];
   void* locals[f.fn->local_count];
   void* upvalues[upvalue_count];
 
-  // Add storage to VM frame
   f.stack = (Value*) stack;
   f.locals = (Value*) locals;
   f.upvalues = upvalue_count ? (Value*) upvalues : 0;
@@ -484,7 +499,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             } else if(fargc > max_arity && !var_arity) {
               std::ostringstream os;
               os << "function " << afn << " expected at most " << max_arity << " arguments " <<
-                "but  " << fargc;
+                "but got " << fargc;
               f.exception = eval_error(os.str());
               goto exception;
             } 
@@ -646,6 +661,10 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
           if(is_enclosed) {
             AR_LOG_VM("enclosing free variable " << i << " from closure idx " << idx);
+            if(f.closure->upvalues->data[idx].type() != UPVALUE) {
+              std::cout << f.closure->upvalues->data[idx].type() << std::endl;
+              std::cout << f.closure->upvalues->data[idx] << std::endl;
+            }
             AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
             vector_storage_append(temps[0], f.closure->upvalues->data[idx]);
           } else {
@@ -742,48 +761,115 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       VM_CASE(OP_ADD): {
         size_t argc = VM_CODE()[code_offset++];
         AR_LOG_VM("add " << argc);
-        ptrdiff_t result = 0;
-        for(size_t j = 0; j != argc; j++) {
-          Value num = f.stack[f.stack_i - argc + j];
-          switch(num.type()) {
-            case FIXNUM: {
-              result += num.fixnum_value(); 
-              break;
-            }
-            default: break;
+        ptrdiff_t fxresult = 0;
+        Value num;
+        size_t j = 0;
+        // Fast path for fixnums
+        for(j = 0; j != argc; j++) {
+          num = f.stack[f.stack_i - argc + j];
+          if(num.fixnump())  {
+            fxresult += num.fixnum_value();
+          } else {
+            break;
           }
         }
+
+        if(j == argc) {
+          f.stack_i -= argc;
+          f.stack_i += 1;
+          f.stack[f.stack_i - 1] = Value::make_fixnum(fxresult);
+          VM_DISPATCH();
+        }
+
+        double flresult = (double) fxresult;
+
+        // Check flonum, check error
+        for(; j != argc; j++) {
+          num = f.stack[f.stack_i - argc + j];
+          switch(num.type()) {
+            case FLONUM:
+              flresult += num.flonum_value(); continue;
+            case FIXNUM:
+              flresult += (double) num.fixnum_value(); continue;
+            default:
+              VM_EXCEPTION("type", "primitive + expected fixnums or flonums as arguments but got " << num.type());
+              break;
+          }
+        }
+
         f.stack_i -= argc;
         f.stack_i += 1;
-        f.stack[f.stack_i - 1] = Value::make_fixnum(result);
-        //std::cout << "OP_PLUS :)" << std::endl;
+        f.stack[f.stack_i - 1] = make_flonum(flresult);
         VM_DISPATCH();
       }
 
       VM_CASE(OP_SUB): {
         size_t argc = VM_CODE()[code_offset++];
         AR_LOG_VM("sub " << argc);
-        // Iterate from left to right
-        if(argc == 1) {
-          f.stack_i -= argc - 1;
-          f.stack[f.stack_i - 1] = Value::make_fixnum(-f.stack[f.stack_i - 1].fixnum_value());
+
+        ptrdiff_t fxresult = 0;
+        bool flonum = false;
+
+        double flresult = 0.0;
+
+        // Get initial argument
+        switch(f.stack[f.stack_i - argc].type()) {
+          case FIXNUM:
+            if(argc == 1) {
+              f.stack[f.stack_i - 1] = Value::make_fixnum(-f.stack[f.stack_i - 1].fixnum_value());
+              f.stack_i -= argc - 1;
+              VM_DISPATCH();
+            }
+            fxresult = f.stack[f.stack_i - argc].fixnum_value();
+            flresult = (double) fxresult;
+            break;
+          case FLONUM:
+            if(argc == 1) {
+              f.stack[f.stack_i - 1] = make_flonum(-f.stack[f.stack_i - 1].flonum_value());
+              f.stack_i -= argc - 1;
+              VM_DISPATCH();
+            }
+            flresult = f.stack[f.stack_i - argc].flonum_value();
+            flonum = true;
+            break;
+          default:
+            VM_EXCEPTION("type", "primitive - expected fixnum or flonum as argument but got " << f.stack[f.stack_i-argc+1].type());
+            break;
         }
-        
-        ptrdiff_t result = f.stack[f.stack_i - argc].fixnum_value();
 
         size_t i = 1;
+        if(!flonum) {
+          for(; i != argc; i++) {
+            if(f.stack[f.stack_i - argc + i].fixnump()) {
+              fxresult -= f.stack[f.stack_i - argc + i].fixnum_value();
+            } else {
+              break;
+            }
+          }
+        }
+
+        if(i == argc) {
+          f.stack_i -= argc - 1;
+          f.stack[f.stack_i - 1] = Value::make_fixnum(fxresult);
+          VM_DISPATCH();
+        }
+
         for(; i != argc; i++) {
-          // f.stack_i - 1
           Value num = f.stack[f.stack_i - argc + i];
-          if(num.type() == FIXNUM) {
-            // std::cout << "subtract number: " << num.fixnum_value() << std::endl;
-            result -= num.fixnum_value();
+          switch(num.type()) {
+            case FIXNUM:
+              flresult -= (double) f.stack[f.stack_i - argc + i].fixnum_value();
+              break;
+            case FLONUM:
+              flresult -= f.stack[f.stack_i - argc + i].flonum_value();
+              break;
+            default:
+              VM_EXCEPTION("type", "primitive - expected fixnum or flonum as argument but got " << f.stack[f.stack_i-argc+i]);
           }
         }
 
         f.stack_i -= argc - 1;
-        f.stack[f.stack_i - 1] = Value::make_fixnum(result);
-        // std::cout << "PUSH " << f.stack[f.stack_i - 1] << std::endl;
+        f.stack[f.stack_i - 1] = make_flonum(flresult);
         VM_DISPATCH();
       }
 
@@ -804,6 +890,69 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         VM_DISPATCH();
       }
 
+      VM_CASE(OP_CAR): {
+        if(f.stack[f.stack_i-1].type() != PAIR) {
+          VM_EXCEPTION("type", "vm primitive car expected a pair as its argument but got " << f.stack[f.stack_i - 1].type());
+        }
+        f.stack[f.stack_i-1] = f.stack[f.stack_i-1].as_unsafe<Pair>()->data_car;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_LIST_REF): {
+        Value lst = f.stack[f.stack_i - 2], idx = f.stack[f.stack_i - 1];
+        // std::cout << lst << std::endl;
+        // std::cout << idx << std::endl;
+
+        if(!idx.fixnump()) {
+          VM_EXCEPTION("type", "vm primitive list-ref expected a fixnum as its second argument but got " << idx.type());
+        }
+
+        if(lst.type() != PAIR) {
+          VM_EXCEPTION("type", "vm primitive list-ref expected a list as its first argument but got " << lst.type());
+        }
+
+        ptrdiff_t index = idx.fixnum_value(), i = 0;
+
+        f.stack_i -= 1;
+
+        if(index == 0) {
+          f.stack[f.stack_i-1] = lst.car();
+        } else {
+          while(lst.type() == PAIR) {
+            if(i == index) {
+              f.stack[f.stack_i - 1] = lst.car();
+              break;
+            }
+
+            lst = lst.cdr();
+
+            i++;
+
+            if(lst.type() != PAIR) {
+              if(lst == C_NIL) {
+                if(i == index) {
+                  VM_EXCEPTION("type", "vm primitive list-ref asked to get element " << index << " in a list of length " << i);
+                }
+                break;
+              }
+              VM_EXCEPTION("type", "vm primitive list-ref ran into a dotted list");
+            }
+          }
+        }
+        
+        if(i != index) {
+          VM_EXCEPTION("type", "vm primitive list-ref asked to get element " << index << " in a list of length " << i);
+        }
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_EQ): {
+        f.stack[f.stack_i - 2] = Value::make_boolean(f.stack[f.stack_i - 2].bits == f.stack[f.stack_i - 1].bits);
+        f.stack_i--;
+        VM_DISPATCH();
+      }
+
       VM_CASE(OP_BAD): {
 #ifndef AR_COMPUTED_GOTO
       default:
@@ -817,7 +966,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   std::cerr << "This should never be reached" << std::endl; 
 
-  return f.stack[f.stack_i];
+  return f.stack[f.stack_i-1];
 
   exception:
     // Create VM tracebacks
@@ -875,8 +1024,6 @@ void State::disassemble(std::ostream& os, Value fn) {
   while(true) {
 
   }
-
-
 }
 
 }

@@ -50,10 +50,14 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       }
     case RECORD: {
       RecordType* rt = v.as<Record>()->type;
-      os << "#<" << rt->name.string_data() << ' ';
+      os << "#<" << rt->name.string_data();
+      if(rt->field_count > 0) os << ' ';
       for(unsigned i = 0; i != rt->field_count; i++) {
         os << v.record_ref(i);
         if(i != rt->field_count - 1) os << ' ';
+      }
+      if(v.record_type().record_type_data_size() > 0) {
+        os << " +" << v.record_type().record_type_data_size() << "b";
       }
       return os << '>';
     }
@@ -336,6 +340,10 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
 
       os << type.record_type_field_names().list_ref(i) << ": ";
       (void) pretty_print_sub(os, v.record_ref(i), printed);
+    }
+
+    if(type.as_unsafe<RecordType>()->data_size > 0) {
+      os << " " << type.as_unsafe<RecordType>()->data_size << "b udata";
     }
     os << '>';
   } else if(v.type() == VECTOR) {

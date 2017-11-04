@@ -403,6 +403,11 @@ struct Value {
 
   // FIXNUMS
 
+  /** Quick fixnum check. */
+  bool fixnump() {
+    return bits & 1;
+  }
+
   ptrdiff_t fixnum_value() const {
     AR_ASSERT(type_unsafe() == FIXNUM);
     
@@ -626,6 +631,7 @@ struct Value {
   Value record_type_print() const;
   Value record_type_parent() const;
   unsigned record_type_field_count() const;
+  unsigned record_type_data_size() const;
   Value record_type_field_names() const;
 
   // PORTS
@@ -1167,6 +1173,10 @@ inline unsigned Value::record_type_field_count() const {
   return as<RecordType>()->field_count;
 }
 
+inline unsigned Value::record_type_data_size() const {
+  return as<RecordType>()->data_size;
+}
+
 inline Value Value::record_type_field_names() const {
   return as<RecordType>()->field_names;
 
@@ -1705,11 +1715,20 @@ struct State {
 
   // Records
 
-  /** Register a new type of record */
+  /** Register a new type of record. Returns an index into the globals array. */
   size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
       Value field_names = C_FALSE, Value parent = C_FALSE);
 
   void record_set(Value rec_, unsigned field, Value value);
+
+  template <class T>
+  T* record_data(size_t tag, Value record) {
+    Value rtd = globals.at(tag);
+    AR_ASSERT(rtd.type() == RECORD_TYPE);
+    AR_ASSERT(record.record_isa(rtd));
+    size_t data_offset = sizeof(Record) + (rtd.record_type_field_count() * sizeof(Value)) - sizeof(Value);
+     return ((T*) (((char*) record.heap) + data_offset));
+  }
 
   Value make_string(const std::string& body);
 
@@ -2170,6 +2189,17 @@ inline Handle::~Handle() {
     os << fn_name << " expected argument " << (arg) << " to be applicable but got a non-applicable " << (argv)[(arg)].type(); \
     AR_FN_STACK_TRACE(state); \
     return state.type_error(os.str()); \
+  }
+
+#define AR_FN_EXPECT_RECORD_ISA(state, argv, arg, tag_index) \
+  if((argv)[(arg)].type() != RECORD) { \
+    std::ostringstream __os; \
+    __os << fn_name << " expected argument " << (arg) << " to be a record but got " << ((argv)[(arg)].type()); \
+    return state.type_error(__os.str()); \
+  } else if((argv)[(arg)].record_type() != (state).globals.at((tag_index))) { \
+    std::ostringstream __os; \
+    __os << fn_name << " expected argument " << (arg) << " to be a record of type " << (state).globals.at((tag_index)).record_type_name() << " but got " << ((argv)[(arg)].record_type().record_type_name()); \
+    return state.type_error(__os.str()); \
   }
 
 #endif // ARETE_HPP
