@@ -668,7 +668,6 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
     if(argc == 4 && argv[3] == C_TRUE) {
       name.as<Symbol>()->value = value;
     }
-
   } else {
     state.vector_append(env, name);
     state.vector_append(env, value);
@@ -712,6 +711,7 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
     if(env.type() != TABLE) {
       if(argv[1].type() == RENAME) {
         if(rename_key != C_FALSE) {
+          AR_ASSERT(rename_key.rename_gensym() != C_FALSE);
           return rename_key.rename_gensym();
         }
       }

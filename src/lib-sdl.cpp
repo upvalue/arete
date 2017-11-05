@@ -20,7 +20,6 @@
 
 static SDL_Window* window = 0;
 static size_t sdl_event_record_tag = 0;
-static SDL_Event* event = 0;
 
 namespace arete {
 

@@ -105,7 +105,12 @@
     (if (env-syntax? env name)
       (raise 'expand (print-string "definition of" name "shadows syntax") (list x)))
 
+    (if (rename? name)
+      (rename-gensym! name))
+
     ;; Handle module stuff
+    (env-define env name 'variable)
+    #|
     (if (table? env)
       (begin
         ;; Table-level renames
@@ -119,8 +124,12 @@
         (env-define env name (env-resolve env name) #f)
         (set! name (env-resolve env name)))
       (env-define env name 'variable))
+    |#
 
-    (set! result (list-source x (car x) name (expand value env)))
+    (set! result (list-source x (car x)
+                              ;; We'll replace name with the actual gensym here if there is one
+                              (if (and (rename? name) (rename-gensym name)) (rename-gensym name) name)
+                              (expand value env)))
 
     result))
 
@@ -178,6 +187,7 @@
     (define new-env (env-make env))
     (define bindings #f)
 
+
     (if (fx< (length x) 3)
       (raise 'expand "lambda has no body" (list x)))
 
@@ -206,7 +216,6 @@
       (if (identifier? bindings)
         (if (and (rename? bindings) (rename-gensym bindings)) (rename-gensym bindings) bindings)
         (map-improper (lambda (x) (if (and (rename? x) (rename-gensym x)) (rename-gensym x) x)) bindings)))
-
 
     (cons-source x (car x) (cons-source x bindings (expand-map (cddr x) new-env)))))
 
@@ -242,7 +251,8 @@
     (cond
       ((self-evaluating? x) x)
       ((identifier? x) (expand-identifier x env))
-      (else (expand-apply x env)))))
+      (else (begin
+              (expand-apply x env))))))
 
 (define expand-toplevel
   (lambda (x env)
@@ -424,7 +434,7 @@
     (if (fx< (length x) 3)
       (raise 'expand "let has no body" (list x)))
 
-    (if (symbol? (list-ref x 1))
+    (if (identifier? (list-ref x 1))
       (begin
         (set! let-fn-name (list-ref x 1))
         (set! bindings (list-ref x 2))
@@ -432,6 +442,9 @@
       (begin
         (set! bindings (list-ref x 1))
         (set! body (cddr x))))
+
+    ;(print let-fn-name)
+    ;(print "crashy crashy: " let-fn-name)
 
     (set! names
       (map (lambda (binding)
@@ -761,3 +774,14 @@
 (define (assq obj alist) (assoc-impl eq? obj alist))
 (define (assv obj alist) (assoc-impl eqv? obj alist))
 (define (assoc obj alist) (assoc-impl equal? obj alist))
+
+;; While loop
+
+(define-syntax while
+  (lambda (x)
+    (unless (> (length x) 2)
+      (raise 'syntax "while loop expected at least two arguments: condition and body" (list x)))
+    `(,#'let ,#'loop ((,#'condition ,(cadr x)))
+        (,#'when ,#'condition
+          ,@(cddr x)
+          (,#'loop ,(cadr x))))))

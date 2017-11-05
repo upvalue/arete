@@ -85,11 +85,16 @@ Value State::env_lookup_impl(Value& env, Value name, Value& rename_key, bool& re
   if(name.type() == RENAME) {
     env = name.rename_env();
     name = name.rename_expr();
+
+    AR_ASSERT("rename non-symbol" && name.type() == SYMBOL);
   }
 
   reached_toplevel = true;
 
-  AR_ASSERT(name.type() == SYMBOL);
+  if(name.type() != SYMBOL) {
+    std::cout << name << std::endl;
+  }
+  AR_ASSERT("reached toplevel on rename" && name.type() == SYMBOL);
 
   return name.as<Symbol>()->value;
 }
