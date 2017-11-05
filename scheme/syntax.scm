@@ -485,9 +485,9 @@
     ;; let return
     result))
 
-(define (list-concat x y)
+(define (append x y)
   (if (pair? x)
-      (cons (car x) (list-concat (cdr x) y))
+      (cons (car x) (append (cdr x) y))
       y))
 
 (define (qq-list c lst)
@@ -495,7 +495,7 @@
     (let ((obj (car lst)))
       (if (and (pair? obj) (c #'unquote-splicing (car obj)))
         (if (cdr lst)
-          (list #'list-concat (cadr obj) (qq-list c (cdr lst)))
+          (list #'append (cadr obj) (qq-list c (cdr lst)))
           (cadr obj))
         ;; TODO: This could be replaced with cons* for less calls and less confusing output
         (list #'cons (qq-object c obj) (qq-list c (cdr lst)))

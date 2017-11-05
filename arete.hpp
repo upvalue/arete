@@ -146,6 +146,8 @@ extern State* current_state;
 
 typedef Value (*c_function_t)(State&, size_t, Value*);
 
+typedef void (*c_finalizer_t)(State&, Value);
+
 std::ostream& operator<<(std::ostream& os,  Value);
 
 ///// TYPE! Internal value representation and basic operations
@@ -623,6 +625,15 @@ struct Value {
 
   bool record_applicable() const;
   bool record_isa(Value) const;
+
+  bool record_finalized() const { return heap->get_header_bit(RECORD_FINALIZED_BIT); }
+
+  void record_set_finalized() {
+    AR_ASSERT(type() == RECORD) ;
+    if(!record_finalized()) heap->set_header_bit(RECORD_FINALIZED_BIT);
+  }
+
+  static const unsigned RECORD_FINALIZED_BIT = 1 << 9;
 
   // RECORD TYPES
 
@@ -1148,6 +1159,8 @@ struct RecordType : HeapValue {
 
   /** Field names */
   Value field_names;
+
+  c_finalizer_t finalizer;
 
   /** Count of garbage-collected data stored in the record */
   unsigned field_count;
@@ -1718,6 +1731,8 @@ struct State {
   /** Register a new type of record. Returns an index into the globals array. */
   size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
       Value field_names = C_FALSE, Value parent = C_FALSE);
+
+  void record_type_set_finalizer(size_t global_id, c_finalizer_t finalizer);
 
   void record_set(Value rec_, unsigned field, Value value);
 

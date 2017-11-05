@@ -122,6 +122,11 @@ size_t State::register_record_type(const std::string& cname, unsigned field_coun
   return idx;
 }
 
+void State::record_type_set_finalizer(size_t idx, c_finalizer_t finalizer) {
+  RecordType* rtd = globals.at(idx).as<RecordType>();
+  rtd->finalizer = finalizer;
+}
+
 void State::record_set(Value rec_, unsigned field, Value value) {
   Record* rec = rec_.as<Record>();
 
@@ -189,6 +194,8 @@ Value State::make_record(Value tipe) {
 
   unsigned field_count = tipe.as<RecordType>()->field_count;
   unsigned data_size = tipe.as<RecordType>()->data_size;
+
+
   Value record = static_cast<Record*>(
     gc.allocate(RECORD, sizeof(Record) + 
       ((field_count * sizeof(Value)) - sizeof(Value))
@@ -197,6 +204,10 @@ Value State::make_record(Value tipe) {
   record.as<Record>()->type = tipe.as<RecordType>();
   for(unsigned i = 0; i != field_count; i++) {
     record.as<Record>()->fields[i] = C_FALSE;
+  }
+
+  if(tipe.as_unsafe<RecordType>()->finalizer) {
+    gc.finalizers.push_back(record);
   }
 
   return record;

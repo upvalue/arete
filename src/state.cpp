@@ -105,5 +105,58 @@ std::string State::source_info(const SourceLocation loc, Value fn_name,
   return ss.str();
 }
 
+void State::finalize(Type object_type, Value object, bool called_by_gc) {
+  bool needed_finalization = false;
+  std::string needed_finalization_desc;
+
+  switch(object_type) {
+    case FILE_PORT: {
+      needed_finalization_desc = "files";
+      FilePort* fp = object.as_unsafe<FilePort>();
+      if(fp->reader) {
+        delete fp->reader;
+        fp->reader = 0;
+        // We won't yell at the user if they've inadvertently created a heap-allocated XReader
+        // for stdin
+        if(!fp->get_header_bit(Value::FILE_PORT_NEVER_CLOSE_BIT))
+          needed_finalization = true;
+      } 
+
+      if(fp->get_header_bit(Value::FILE_PORT_NEVER_CLOSE_BIT))
+        break;
+
+      if(object.file_port_readable() && fp->input_handle) {
+        delete fp->input_handle;
+        fp->input_handle = 0;
+        needed_finalization = true;
+      } else if(object.file_port_writable() && fp->output_handle) {
+        delete fp->output_handle;
+        needed_finalization = true;
+        fp->output_handle = 0;
+      }
+
+      break;
+    }
+    case RECORD: {
+      if(!object.record_finalized()) {
+        needed_finalization = true;
+        RecordType* rtd = object.record_type().as<RecordType>();
+        if(rtd->finalizer) {
+          (rtd->finalizer)(*this, object);
+        }
+        needed_finalization_desc = rtd->name.string_data();
+        object.record_set_finalized();
+      }
+      break;
+    }
+    default: 
+      warn() << "don't know how to finalize object of type " << object_type << std::endl;
+      break;
+  }
+
+  if(called_by_gc && needed_finalization) {
+    warn() << "finalizer called by GC. " << needed_finalization_desc << " should always be closed in program code." << std::endl;;
+  }
+}
 
 }

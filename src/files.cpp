@@ -73,44 +73,6 @@ Value State::make_output_file_port(Value path) {
   return res;
 }
 
-void State::finalize(Type object_type, Value object, bool called_by_gc) {
-  bool needed_finalization = false;
-
-  switch(object_type) {
-    case FILE_PORT: {
-      FilePort* fp = object.as_unsafe<FilePort>();
-      if(fp->reader) {
-        delete fp->reader;
-        fp->reader = 0;
-        // We won't yell at the user if they've inadvertently created a heap-allocated XReader
-        // for stdin
-        if(!fp->get_header_bit(Value::FILE_PORT_NEVER_CLOSE_BIT))
-          needed_finalization = true;
-      } 
-
-      if(fp->get_header_bit(Value::FILE_PORT_NEVER_CLOSE_BIT))
-        break;
-
-      if(object.file_port_readable() && fp->input_handle) {
-        delete fp->input_handle;
-        fp->input_handle = 0;
-        needed_finalization = true;
-      } else if(object.file_port_writable() && fp->output_handle) {
-        delete fp->output_handle;
-        needed_finalization = true;
-        fp->output_handle = 0;
-      }
-
-      break;
-    }
-    default: break;
-  }
-
-  if(called_by_gc && needed_finalization) {
-    std::cerr << "arete: warning: finalizer called by GC. Files and other objects should always be closed in program code." << std::endl;;
-  }
-}
-
 Value fn_open_output_file(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "open-output-file";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);

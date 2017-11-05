@@ -829,7 +829,7 @@
                  fn-proper-args))))
 
          #;(fn (OpenFn/make fn-name))
-         (fn-expr (list-concat (list-source fn-body 'lambda fn-args) fn-body))
+         (fn-expr (append (list-source fn-body 'lambda fn-args) fn-body))
          
          ;(fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
          (fn-exxxpr
