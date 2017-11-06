@@ -145,10 +145,6 @@
   (lambda (x env)
     (cons-source x (car x) (expand-map (cdr x) env))))
 
-(define expand-cond-expand
-  (lambda (x env)
-    unspecified))
-
 ;; Expand an application. Could be a special form, a macro, or a normal function application
 (define expand-apply
   (lambda (x env)
@@ -174,7 +170,7 @@
         ((eq? kar 'set!) (expand-set x env))
         ((eq? kar 'cond) (expand-cond x env))
         ((eq? kar 'quote) x)
-        ((eq? kar 'cond-expand) (expand-cond-expand x env))
+        #;((eq? kar 'cond-expand) (expand-cond-expand x env))
         (else (begin 
                 (expand-macro x env))))
       ;; Normal function application
@@ -775,9 +771,72 @@
 (define (assv obj alist) (assoc-impl eqv? obj alist))
 (define (assoc obj alist) (assoc-impl equal? obj alist))
 
+(define (reduce fn lst)
+  (if (null? lst)
+    '()
+    (let ((len (length lst)))
+      (let loop ((i 0)
+                 (result (car lst)))
+        (if (fx= i (fx- len 1))
+          result
+          (begin
+            (loop (fx+ i 1) (fn result (list-ref lst (fx+ i 1))))))))))
+
+(define (filter fn lst)
+  (if (null? lst)
+    '()
+    (if (fn (car lst))
+      (cons (car lst) (filter fn (cdr lst)))
+      (filter fn (cdr lst)))))
+
+;; SRFI-0
+
+(define (cond-expand-check-feature x form)
+  (unless (and (list? form) (not (null? form)))
+    (raise 'syntax "cond-expand feature requirement must be a list with at least one element" (list form)))
+
+  (case (car form)
+    ((and)
+     (reduce (lambda (a b) (and a b)) (map (lambda (x) (if (memq x *features*) #t #f)) (cdr form))))
+    ((or)
+     (reduce (lambda (a b) (or a b)) (map (lambda (x) (if (memq x *features*) #t #f)) (cdr form))))
+    ((else) #t)
+    ((library) (raise 'syntax "cond-expand does not support library yet" (list form))))
+)
+
+(define (pi x)
+  (print x)
+  x)
+
+(define-syntax cond-expand
+  (lambda (x)
+
+    (if (null? (cdr x))
+      (if #f #f)
+
+      (cons-source x #'begin
+            (let loop ((clause (cadr x))
+                 (clauses (cddr x))
+                 (results '()))
+
+              (unless (= (length clause) 2)
+                (begin
+                  (raise 'syntax "cond-expand clause length must be exactly 2 (feature list and command or definition)"))
+              )
+
+              (let* ((feature-list (car clause))
+                     (commands (cadr clause))
+                     (new-results
+                      (if (cond-expand-check-feature x feature-list)
+                        (cons-source x commands results)
+                        results)))
+                (if (null? clauses)
+                  new-results
+                  (loop (cadr clauses) (cddr clauses) new-results)
+                  )))))))
 ;; While loop
 
-(define-syntax while
+#;(define-syntax while
   (lambda (x)
     (unless (> (length x) 2)
       (raise 'syntax "while loop expected at least two arguments: condition and body" (list x)))

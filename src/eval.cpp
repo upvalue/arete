@@ -481,7 +481,8 @@ Value State::eval(Value env, Value exp, Value fn_name) {
         std::ostringstream os;
         os << "reference to undefined variable " << exp;
         EVAL_TRACE(car, fn_name);
-        return eval_error(os.str(), exp);
+        Value ret= eval_error(os.str(), exp);
+        return ret;
       }
 
       if(res == C_SYNTAX) {
@@ -489,7 +490,7 @@ Value State::eval(Value env, Value exp, Value fn_name) {
         os << "attempt to use syntax " << exp << " as value";
         if(exp == globals[S_DEFINE_SYNTAX]) {
           // if this happened, it's probably because the macroexpander has not been loaded
-          os << " (did you load boot.scm?)";
+          os << " (did you load syntax.scm?)";
         }
         EVAL_TRACE(car, fn_name);
         return eval_error(os.str(), exp);
@@ -508,6 +509,7 @@ Value State::eval(Value env, Value exp, Value fn_name) {
 
 Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp,
     Value calling_fn_name, bool eval_args) {
+
   Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
   Value fn_name;
 
@@ -689,6 +691,7 @@ Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value 
       EVAL_CHECK(tmp, src_exp, fn_name);
     } else {
       tmp = args.car();
+      EVAL_CHECK(tmp, src_exp, fn_name);
     }
     vector_append(fn_args, tmp);
     argc++;

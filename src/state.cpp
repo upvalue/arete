@@ -38,7 +38,7 @@ void State::boot() {
 
   static const char* _symbols[] = {
     // C_SYNTAX values
-    "quote", "begin", "define", "lambda", "if", "cond", "cond-expand", "and", "or", "set!",
+    "quote", "begin", "define", "lambda", "if", "cond",  "and", "or", "set!",
     "define-syntax", "let-syntax", "letrec-syntax", "define-library", "import",
     // Used by interpreter
     "else",
@@ -49,6 +49,7 @@ void State::boot() {
     // Tags for errors that may be thrown by the runtime
     "file", "read", "eval", "type", "expand", "syntax",
     // Various variables
+    "*features*",
     "*command-line*",
     "EXPANDER-PRINT",
     "expander",
@@ -83,13 +84,18 @@ void State::boot() {
   load_builtin_functions();
   load_file_functions();
   load_numeric_functions();
+
 #if AR_LIB_SDL
   load_sdl(*this);
+  register_feature("sdl");
 #endif
 
   set_global_value(G_COMMAND_LINE, C_NIL);
+  set_global_value(G_FEATURES, C_NIL);
   set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
   set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
+
+  register_feature("arete");
 
   // Uncomment to see allocations after boot
   // gc.allocations = 0;
@@ -107,58 +113,12 @@ std::string State::source_info(const SourceLocation loc, Value fn_name,
   return ss.str();
 }
 
-void State::finalize(Type object_type, Value object, bool called_by_gc) {
-  bool needed_finalization = false;
-  std::string needed_finalization_desc;
-
-  switch(object_type) {
-    case FILE_PORT: {
-      needed_finalization_desc = "files";
-      FilePort* fp = object.as_unsafe<FilePort>();
-      if(fp->reader) {
-        delete fp->reader;
-        fp->reader = 0;
-        // We won't yell at the user if they've inadvertently created a heap-allocated XReader
-        // for stdin
-        if(!fp->get_header_bit(Value::FILE_PORT_NEVER_CLOSE_BIT))
-          needed_finalization = true;
-      } 
-
-      if(fp->get_header_bit(Value::FILE_PORT_NEVER_CLOSE_BIT))
-        break;
-
-      if(object.file_port_readable() && fp->input_handle) {
-        delete fp->input_handle;
-        fp->input_handle = 0;
-        needed_finalization = true;
-      } else if(object.file_port_writable() && fp->output_handle) {
-        delete fp->output_handle;
-        needed_finalization = true;
-        fp->output_handle = 0;
-      }
-
-      break;
-    }
-    case RECORD: {
-      if(!object.record_finalized()) {
-        needed_finalization = true;
-        RecordType* rtd = object.record_type().as<RecordType>();
-        if(rtd->finalizer) {
-          (rtd->finalizer)(*this, object);
-        }
-        needed_finalization_desc = rtd->name.string_data();
-        object.record_set_finalized();
-      }
-      break;
-    }
-    default: 
-      warn() << "don't know how to finalize object of type " << object_type << std::endl;
-      break;
-  }
-
-  if(called_by_gc && needed_finalization) {
-    warn() << "finalizer called by GC. " << needed_finalization_desc << " should always be closed in program code." << std::endl;;
-  }
+void State::register_feature(const std::string& name) {
+  Value pare, sym;
+  AR_FRAME(*this, pare, sym);
+  pare = get_global_value(G_FEATURES);
+  sym = get_symbol(name);
+  set_global_value(G_FEATURES, make_pair(sym, pare));
 }
 
 }

@@ -2,7 +2,7 @@
 CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
 CFLAGS := $(CFLAGS) -g3 -O3
-CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) -m32
+CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS)
 LDFLAGS := 
 
 ECXX := em++
@@ -21,8 +21,9 @@ ARETE_LIBS := sdl test
 
 ifeq ($(findstring sdl,$(ARETE_LIBS)),sdl)
 	CXXFLAGS := $(CXXFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) -DAR_LIB_SDL=1
+	LDFLAGS := $(LDFLAGS) $(shell pkg-config --libs sdl2 SDL2_ttf)
 else
-	CXXFLAGS := $(CXXFLAGS) $(shell pkg-config --libs sdl2 SDL2_ttf) -DAR_LIB_SDL=0
+	CXXFLAGS := $(CXXFLAGS) -DAR_LIB_SDL=0
 endif
 
 # Fancy color compilation

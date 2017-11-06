@@ -1604,7 +1604,6 @@ struct State {
     S_LAMBDA,
     S_IF,
     S_COND,
-    S_COND_EXPAND,
     S_AND,
     S_OR,
     S_SET,
@@ -1635,6 +1634,7 @@ struct State {
     S_EXPAND_ERROR,
     S_SYNTAX_ERROR,
     // Global variables
+    G_FEATURES,
     G_COMMAND_LINE,
     G_EXPANDER_PRINT,
     G_EXPANDER,
@@ -1663,6 +1663,11 @@ struct State {
     globals.push_back(glob);
     return globals.size() - 1;
   }
+
+  /** Register a feature for the global *features* list, 
+   * which is used in cond-expand 
+   */
+  void register_feature(const std::string& name);
 
   /** Create a Flonum */
   Value make_flonum(double number);

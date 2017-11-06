@@ -802,7 +802,7 @@ Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
 
   switch(argv[0].type()) {
-    case FUNCTION: argv[0].as_unsafe<Function>()->name = argv[0]; break;
+    case FUNCTION: argv[0].as_unsafe<Function>()->name = argv[1]; break;
     case VMFUNCTION: argv[0].as_unsafe<VMFunction>()->name = argv[1]; break;
     default: break;
   }
