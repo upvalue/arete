@@ -59,8 +59,8 @@
 #endif
 
 #ifndef AR_LINENOISE
-# ifdef _MSC_VER
-#  define AR_LINENOISE 1
+# ifdef __EMSCRIPTEN__
+#  define AR_LINENOISE 0
 # else
 #  define AR_LINENOISE 1
 # endif

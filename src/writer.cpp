@@ -108,7 +108,6 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       if(name == C_FALSE) {
         os << (void*) v.bits;
       } else {
-        AR_ASSERT(name.type() == STRING);
         os << name;
       }
       return os << '>';
@@ -171,7 +170,7 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os << '>';
     default: 
-      return os << "<unknown>";
+      return os << "#<unknown value type " << v.type() << " bits: " << v.bits << ">";
   }
   return os;
 }

@@ -836,7 +836,7 @@
                   )))))))
 ;; While loop
 
-#;(define-syntax while
+(define-syntax while
   (lambda (x)
     (unless (> (length x) 2)
       (raise 'syntax "while loop expected at least two arguments: condition and body" (list x)))

@@ -2,12 +2,12 @@
 CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
 CFLAGS := $(CFLAGS) -g3 -O3
-CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS)
+CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
 LDFLAGS := 
 
-ECXX := em++
+ECXX := SAFE_HEAP=1 STACK_OVERFLOW_CHECK=2 em++
 ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
-ECXXFLAGS := $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions 
+ECXXFLAGS := $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -s ALLOW_MEMORY_GROWTH=1 #TOTAL_MEMORY=33554432
 
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
@@ -82,7 +82,7 @@ test-all: tests/test-semispace
 .PHONY: count clean cleaner
 
 count:
-	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard *.scm)
+	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard scheme/*.scm)
 
 clean:
 	rm -f arete test $(wildcard src/*.o tests/*.o)
