@@ -163,7 +163,7 @@ void GCSemispace::collect(size_t request, bool force) {
           // There is no need to do anything here as the local will be updated by copy_roots
           break;
         } else {
-          AR_COPY(Upvalue, converted);
+          AR_COPY(Upvalue, U.converted);
           break;
         }
       case VECTOR:
@@ -362,7 +362,7 @@ void GCIncremental::mark(HeapValue* v) {
         // There is no need to do anything here as the local will be updated by copy_roots
         break;
       } else {
-        v = static_cast<Upvalue*>(v)->converted.heap;
+        v = static_cast<Upvalue*>(v)->U.converted.heap;
         goto again;
       }
     // One pointer

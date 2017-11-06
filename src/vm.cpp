@@ -353,7 +353,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       f.upvalues[i] = gc.allocate(UPVALUE, sizeof(Upvalue));
       size_t idx = ((size_t*) f.fn->free_variables->data)[i];
       AR_LOG_VM("tying free variable " << i << " to local idx " << idx);
-      f.upvalues[i].as<Upvalue>()->local = &f.locals[idx];
+      f.upvalues[i].as<Upvalue>()->U.local = &f.locals[idx];
     }
   }
 

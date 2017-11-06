@@ -4,7 +4,7 @@
 
 namespace arete {
 
-static const char MAGIC_STRING[] = "ARETE-IMAGE";
+static const char MAGIC_STRING[] = "ARETE-IMAGE\n";
 
 struct ImageHeader {
   char magic[sizeof(MAGIC_STRING)];
@@ -12,5 +12,9 @@ struct ImageHeader {
   // globals
   // cfunction pointer addresses
 };
+
+void State::dump_image(const std::string& path) {
+
+}
 
 }

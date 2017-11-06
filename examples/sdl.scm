@@ -12,14 +12,17 @@
 (while (not done)
   (when (sdl:poll-event event)
     (case (sdl:event-type event)
-      ((quit) (set! done #t))))
+      ((quit) (set! done #t))
+      
+    )
+  )
 
   (sdl:clear)
-  (sdl:fill-rect 0 0 640 480 0 0 0)
+
   (sdl:draw-text font "hello world")
+
   (sdl:render)
 )
-
 
 (print "Quit normally.")
 

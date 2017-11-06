@@ -24,10 +24,6 @@ Value State::load_file(const std::string& path) {
   return x;
 }
 
-Value State::load_module(const std::string& identifier) {
-  return C_FALSE;
-}
-
 // Conversions
 Value fn_string_to_symbol(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string->symbol";
@@ -1273,6 +1269,15 @@ Value fn_current_millisecond(State& state, size_t argc, Value* argv) {
 #endif
 }
 
+Value fn_exit(State& state, size_t argc, Value* argv) {
+  if(argv[1] == C_TRUE) {
+    exit(EXIT_SUCCESS);
+  } else {
+    exit(EXIT_FAILURE);
+  }
+  return C_UNSPECIFIED;
+}
+
 void State::defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
   Value cfn, sym, name;
 
@@ -1426,10 +1431,12 @@ void State::load_builtin_functions() {
   defun_core("list-get-source", fn_list_get_source, 1);
   defun_core("OpenFn->procedure", fn_openfn_to_procedure, 1);
 
+
   // Garbage collector
   defun_core("gc:collect", fn_gc_collect, 0);
 
   // Misc
+  defun_core("exit", fn_exit, 1);
   defun_core("current-millisecond", fn_current_millisecond, 0);
 
 }

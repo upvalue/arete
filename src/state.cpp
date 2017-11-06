@@ -83,7 +83,9 @@ void State::boot() {
   load_builtin_functions();
   load_file_functions();
   load_numeric_functions();
+#if AR_LIB_SDL
   load_sdl(*this);
+#endif
 
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));

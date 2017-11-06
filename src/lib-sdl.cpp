@@ -1,5 +1,7 @@
 // lib-sdl.cpp - SDL bindings for Arete.
 
+#if AR_LIB_SDL
+
 // TODO: This is tossing away the re-entrant quality of the runtime. While it doesn't matter for 
 // SDL, it would be good to think about how to construct a more modular interface for when R7RS
 // modules exist
@@ -29,6 +31,7 @@ static SDL_Window* window = 0;
 static SDL_Renderer *renderer = 0;
 static size_t sdl_event_record_tag = 0;
 static size_t sdl_ttf_font_tag = 0;
+static SDL_Color draw_color = {0, 0, 0, 255};
 
 #define CHECK_SDL(expr) \
   if((expr) == 0) return sdl_error(state);
@@ -63,11 +66,16 @@ Value sdl_init(State& state, size_t argc, Value* argv) {
 
   CHECK_SDL(renderer);
 
+  //SDL_RenderSetLogicalSize(renderer, (int) argv[0].fixnum_value(), (int) argv[1].fixnum_value());
+  SDL_RenderSetLogicalSize(renderer, (int) argv[0].fixnum_value(), (int) argv[1].fixnum_value());
+
   return C_TRUE;
 }
 
 Value sdl_clear(State& state, size_t argc, Value* argv) {
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
   SDL_RenderClear(renderer);
+
   return C_UNSPECIFIED;
 }
 
@@ -117,6 +125,24 @@ Value sdl_render(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+Value sdl_set_color(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:set-color";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
+
+  if(argc == 4) {
+    AR_FN_EXPECT_TYPE(state, argv, 3, FIXNUM);
+  }
+  
+  unsigned char r = (unsigned char) argv[0].fixnum_value(), g = (unsigned char) argv[1].fixnum_value(),
+    b = (unsigned char)argv[2].fixnum_value(), a = (unsigned char) ((argc == 4) ? argv[3].fixnum_value() : 255);
+
+  draw_color = {r, g, b, a};
+  SDL_SetRenderDrawColor(renderer, draw_color.r, draw_color.g, draw_color.b, draw_color.a);
+  return C_UNSPECIFIED;
+}
+
 Value sdl_fill_rect(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "sdl:fill-rect";
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -124,23 +150,11 @@ Value sdl_fill_rect(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 3, FIXNUM);
 
-  AR_FN_EXPECT_TYPE(state, argv, 4, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 5, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 6, FIXNUM);
-  int alpha = 255;
-
-  if(argc == 8) {
-    AR_FN_EXPECT_TYPE(state, argv, 7, FIXNUM);
-    alpha = argv[7].fixnum_value();
-  }
-
-  int r = argv[4].fixnum_value(), g = argv[5].fixnum_value(), b = argv[6].fixnum_value();
-
-  SDL_SetRenderDrawColor(renderer, r, g, b, alpha);
   SDL_Rect rect = {(int)argv[0].fixnum_value(), (int)argv[1].fixnum_value(),
     (int)argv[2].fixnum_value(), (int)argv[3].fixnum_value()};
 
-  SDL_RenderDrawRect(renderer, &rect);
+  AR_ASSERT(&rect);
+  SDL_RenderFillRect(renderer, &rect);
 
   return C_UNSPECIFIED;
 }
@@ -194,12 +208,11 @@ Value sdl_draw_text(State& state, size_t argc, Value* argv) {
     SDL_Surface* solid = TTF_RenderText_Blended(cfont, argv[1].string_data(), white);
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, solid);
 
-    SDL_Rect rect = {0, 0, 0, 0,};
+    SDL_Rect rect = {0, 0, 0, 0};
     SDL_QueryTexture(texture, 0, 0, &rect.w, &rect.h);
 
     SDL_RenderCopy(renderer, texture, 0, &rect);
     SDL_FreeSurface(solid);
-
   }
 
   return C_UNSPECIFIED;
@@ -234,7 +247,8 @@ Value load_sdl(State& state) {
 
   state.defun_core("sdl:delay", sdl_delay, 1);
 
-  state.defun_core("sdl:fill-rect", sdl_fill_rect, 7, 8);
+  state.defun_core("sdl:set-color", sdl_set_color, 3, 4);
+  state.defun_core("sdl:fill-rect", sdl_fill_rect, 4);
 
   state.defun_core("sdl:open-font", sdl_open_font, 2);
   state.defun_core("sdl:close-font", sdl_close_font, 1);
@@ -245,9 +259,10 @@ Value load_sdl(State& state) {
   // Font handling
   sdl_ttf_font_tag = state.register_record_type("sdl:font", 0, sizeof(TTF_Font*));
   state.record_type_set_finalizer(sdl_ttf_font_tag, ttf_font_finalizer);
-
   
   return C_UNSPECIFIED;
 }
 
 }
+
+#endif

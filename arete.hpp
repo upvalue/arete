@@ -13,6 +13,7 @@
 // MISC! Various inline functions 
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
@@ -34,6 +35,12 @@
 #  define ARETE_ASSERTION_LEVEL 2
 # endif
 # define ARETE_BENCH_GC 1
+#endif
+
+#if UINTPTR_MAX == 0xffffffff
+# define ARETE_64_BIT 0
+#elif UINTPTR_MAX == 0xffffffffffffffff
+# define ARETE_64_BIT 1
 #endif
 
 #ifndef ARETE_ASSERTION_LEVEL
@@ -106,17 +113,26 @@
 #define ARETE_LOG_TAG_VM (1 << 2)
 
 #ifdef _MSC_VER
-# define ARETE_COLOR_BLUE ""
-# define ARETE_COLOR_YELLOW ""
-# define ARETE_COLOR_GREEN ""
-# define ARETE_COLOR_RED ""
-# define ARETE_COLOR_RESET ""
-#else
+# define ARETE_COLOR 0
+#endif
+
+#ifdef __EMSCRIPTEN__
+# define ARETE_COLOR 0
+#endif
+
+
+#if ARETE_COLOR
 # define ARETE_COLOR_BLUE "\033[1;34m"
 # define ARETE_COLOR_YELLOW "\33[1;33m"
 # define ARETE_COLOR_GREEN "\033[1;32m"
 # define ARETE_COLOR_RED "\033[1;31m"
 # define ARETE_COLOR_RESET "\033[0m"
+#else
+# define ARETE_COLOR_BLUE ""
+# define ARETE_COLOR_YELLOW ""
+# define ARETE_COLOR_GREEN ""
+# define ARETE_COLOR_RED ""
+# define ARETE_COLOR_RESET ""
 #endif
 
 #ifndef ARETE_LOG
@@ -125,6 +141,11 @@
     std::cerr << ARETE_COLOR_RED << "arete:" << prefix << ": " << ARETE_COLOR_RESET << msg << std::endl; \
   }
 #endif 
+
+// Included libraries
+#ifndef AR_LIB_SDL
+# define AR_LIB_SDL 0
+#endif
 
 namespace arete {
 
@@ -221,10 +242,13 @@ enum {
 struct HeapValue {
   // Heap value headers are formatted like this:
 
-  // ...m tttt tttt
-  // m = mark bit
+  // .... .... .... ....
+  // ffff fffm tttt tttt
+  // . = an integer (32-bit on 64-bit systems, 16-bit on 32-bit systems) used for
+  //     writing objects with shared references
+  // f = object-specific flags
+  // m = mark bit for incremental GC
   // t = type
-  // . = object-specific flags
   size_t header;
 
   /** Size of the object. In the moving collector, this field is also used to store a pointer to
@@ -249,17 +273,22 @@ struct HeapValue {
   }
 
   unsigned get_shared_count() const {
-    return header >> 32;
+    return header >> HEADER_INT_SHIFT;
   }
 
   void set_shared_count(unsigned count) {
     // Extract header only
-    header = header & ((size_t)((size_t)1 << 32) - 1);
-    header += ((size_t)count << 32);
-    // header = header & 255;
+    header = header & ((size_t)((size_t)1 << HEADER_INT_SHIFT) - 1);
+    header += ((size_t)count << HEADER_INT_SHIFT);
   }
 
   void flip_mark_bit() { header += get_mark_bit() ? -256 : 256; }
+#if ARETE_64_BIT
+  static const unsigned HEADER_INT_SHIFT = 32;
+#else
+  static const unsigned HEADER_INT_SHIFT = 16;
+#endif
+
 };
 
 /**
@@ -980,10 +1009,12 @@ inline VectorStorage* Value::vm_function_constants() const {
 }
 
 struct Upvalue : HeapValue {
-  union {
+  union U {
+    U(): converted(C_FALSE) {}
+
     Value* local;
     Value converted;
-  };
+  } U;
 
   static const unsigned CLASS_TYPE = UPVALUE;
 };
@@ -996,9 +1027,9 @@ inline bool Value::upvalue_closed() const {
 inline void Value::upvalue_set(const Value rhs) {
   AR_TYPE_ASSERT(type() == UPVALUE);
   if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
-    static_cast<Upvalue*>(heap)->converted = rhs;
+    static_cast<Upvalue*>(heap)->U.converted = rhs;
   } else {
-    (*static_cast<Upvalue*>(heap)->local) = rhs;
+    (*static_cast<Upvalue*>(heap)->U.local) = rhs;
     AR_ASSERT(rhs.type() != UPVALUE);
   }
 }
@@ -1007,10 +1038,10 @@ inline Value Value::upvalue() {
   AR_TYPE_ASSERT(type() == UPVALUE);
   if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
     //return static_cast<Upvalue*>(heap)->converted;
-    return as<Upvalue>()->converted;
+    return as<Upvalue>()->U.converted;
   } else {
     // return *(static_cast<Upvalue*>(heap)->local);
-    return *(as<Upvalue>()->local);
+    return *(as<Upvalue>()->U.local);
   }
 }
 
@@ -1018,7 +1049,7 @@ inline void Value::upvalue_close() {
   AR_TYPE_ASSERT(type() == UPVALUE);
   AR_TYPE_ASSERT(!upvalue_closed());
   heap->set_header_bit(UPVALUE_CLOSED_BIT);
-  as<Upvalue>()->converted = (*as<Upvalue>()->local);
+  as<Upvalue>()->U.converted = (*as<Upvalue>()->U.local);
   AR_ASSERT(upvalue_closed());
 }
 
@@ -1915,8 +1946,7 @@ struct State {
   // interpreted, c++ and virtual machine functions to all be able to call eachother.
 
   // Moreover, C++ and virtual machine functions use a different calling convention: argc/argv
-  // style
-  // whereas the interpreter takes a list and converts it into an environment for evaluation.
+  // style whereas the interpreter takes a list and converts it into an environment for evaluation.
 
   // The functions below should only be called by the interpreter and can optionally evaluate
   // their arguments 
@@ -1941,7 +1971,7 @@ struct State {
    * This is the primary application function, and the only one that should be called by C++
    * functions. Argv can be evaluated on the stack or a pointer to the temps vector.
    *
-   * NOTE: This should not be called against State::temps, as it is used to construct a list when
+   * NOTE: This should never be called against State::temps, as it is used to construct a list when
    * interpreter functions are called.
    */
   Value apply(Value fn, size_t argc, Value* argv);
@@ -1952,27 +1982,13 @@ struct State {
    */
   Value apply_vector_storage(Value fn, Value vec);
 
-
   ///// MODULES
 
   Value slurp_file(const std::string& path);
   Value load_file(const std::string&);
-  Value load_module(const std::string&);
 
-  ///// VIRUTAL MACHINE
-
-  size_t vm_stack_size, vm_stack_i;
-  void** vm_stack;
-
-  void vm_initialize();
-  void vm_destroy();
-
+  ///// Virtual machine
   Value apply_vm(Value fn, size_t argc, Value* argv);
-
-  /** Shortcut: apply a VM function to something in the temps array */
-  Value apply_vm_temps(Value fn) {
-    return apply_vm(fn, temps.size(), &temps[0]);
-  }
 
   /** Print a readable version of a function's bytecode. */
   void disassemble(std::ostream&, Value);
@@ -1981,9 +1997,14 @@ struct State {
 
   /**
    * Allow Arete's command line interface to run.
-   * @return A normal exit code
+   * @return EXIT_SUCCESS or EXIT_FAILURE
    */
   int enter_cli(int argc, char* argv[]);
+
+  // Image saving and loading
+
+  /** Dump an image. Must exit after calling. */
+  void dump_image(const std::string& path);
 };
 
 ///// READ! S-Expression reader

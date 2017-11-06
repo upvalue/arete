@@ -2,20 +2,28 @@
 CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
 CFLAGS := $(CFLAGS) -g3 -O3
-CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) 
-LDFLAGS := $(shell pkg-config --libs sdl2 SDL2_ttf) 
+CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) -m32
+LDFLAGS := 
 
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
-ECXXFLAGS := $(ECPPFLAGS)
+ECXXFLAGS := $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions 
 
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
 CXXOBJS := $(CXXOBJS) $(patsubst %.cpp,%.o,$(wildcard vendor/linenoise/*.cpp))
 DEPS := $(CXXOBJS:.o=.d) src/main.d
 
+ARETE_LIBS := sdl test
+
 # site.mk allows the user to override settings
 -include site.mk
+
+ifeq ($(findstring sdl,$(ARETE_LIBS)),sdl)
+	CXXFLAGS := $(CXXFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) -DAR_LIB_SDL=1
+else
+	CXXFLAGS := $(CXXFLAGS) $(shell pkg-config --libs sdl2 SDL2_ttf) -DAR_LIB_SDL=0
+endif
 
 # Fancy color compilation
 define colorecho
@@ -29,7 +37,8 @@ endef
 	$(call colorecho, "CC $< ")
 	$(CXX) $(CXXFLAGS) -MMD -MF $(patsubst %.o,%.d,$@) -c -o $@ $< 
 
-%.em.o: %.cpp
+%.em.o: CPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
+%.em.o: %.cpp 
 	$(call colorecho, "CC $< ")
 	$(ECXX) $(ECXXFLAGS) -MMD -MF $(patsubst %.o,%.d,$@) -c -o $@ $<
 
@@ -49,7 +58,7 @@ arete: $(CXXOBJS) src/main.o
 
 arete.html: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")
-	$(ECXX) $(LDFLAGS) -o $@ $^
+	$(ECXX) -O3 $(LDFLAGS) -o $@ $^ $(addprefix --preload-file ,$(wildcard *.scm scheme/*.scm examples/*.scm))
 
 arete-distilled.cpp: $(wildcard src/*.cpp)
 	$(call colorecho "arete.cpp")
