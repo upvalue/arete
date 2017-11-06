@@ -1,5 +1,10 @@
 // eval.cpp - Interpreter & related functionality
 
+// TODO: Because of no TCO, this thing is super stack-hungry and I've had to increase
+// it with configuration on emscripten and MSVC
+
+// TCO would not be unmanageable here, but it would require a bit of a rewrite.
+
 #include "arete.hpp"
 
 #define EVAL_TRACE(exp, fn_name) \
@@ -766,7 +771,7 @@ Value State::expand_expr(Value exp) {
       os2 << "Error while expanding expression: " << std::endl << os1.str().substr(0, 120);
       if(os1.str().size() > 120) os2 << " ... ";
       os2 << std::endl;
-      print_src_pair(os2, saved);
+      //print_src_pair(os2, saved);
       stack_trace.insert(stack_trace.begin(), os2.str());
       return exp;
     }

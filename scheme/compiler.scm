@@ -142,7 +142,7 @@
 ;; This function returns the "cell" at a given I.
 ;; For example, (list-tail '(1 2 3) 1) returns (2 3)
 ;; This is useful for getting source code information attached to lists.
-(define (list-tail lst i)
+#;(define (list-tail lst i)
   (if (or (null? lst) (not (pair? lst)))
     (raise 'type "list-tail expects a list with at least one element as its argument" (list lst)))
   (if (fx= i 0)
@@ -214,7 +214,7 @@
         (list-ref 21)
         (eq? 22)
 
-        (else (raise 'compile "unknown named instruction" (list insn)))))))
+        (else (raise 'compile-internal "unknown named instruction" (list insn)))))))
 
 ;; Adjust the stack size while recalculating the stack max if necessary
 (define (fn-adjust-stack fn size)
@@ -240,12 +240,12 @@
       ((+ - <) (fx+ (fx- (cadr insns)) 1))
       ;; Remove arguments from stack, but push a single result in the place of the function on the stack
       ((apply apply-tail) (fx- (cadr insns)))
-      (else (raise 'compile (print-string "unknown instruction" (car insns)) (list fn (car insns) insns)))
+      (else (raise 'compile-internal (print-string "unknown instruction" (car insns)) (list fn (car insns) insns)))
     ))
 
   ;; Stack size sanity check
   (when (fx< (OpenFn/stack-size fn) 0)
-    (raise 'compile "stack underflow" (list insns (OpenFn/stack-size fn) fn)))
+    (raise 'compile-internal "stack underflow" (list insns (OpenFn/stack-size fn) fn)))
 
   (for-each
     (lambda (insn) 
@@ -312,10 +312,10 @@
             (var-argc (list-ref it 3))
             (argc (length (cdr x))))
         (when (< argc min-argc)
-          (raise 'compile (print-string "function call" (car x) "requires at least" min-argc "arguments but only got" argc) (list x )))
+          (raise-source x 'compile (print-string "function call" (car x) "requires at least" min-argc "arguments but only got" argc) (list x )))
 
         (when (and (not var-argc) (> argc max-argc))
-          (raise 'compile (print-string "function call" (car x) "expects at most" min-argc "arguments but got" argc) (list x )))
+          (raise-source x 'compile (print-string "function call" (car x) "expects at most" min-argc "arguments but got" argc) (list x )))
 
         (when var-argc
           (set! primitive-args #t))
@@ -333,8 +333,8 @@
   ;; Stack size sanity check
   ;; Except for toplevel functions
   (unless (or (OpenFn/toplevel? fn) (eq? (fx- (OpenFn/stack-size fn) argc) stack-check))
-    (raise 'compile (print-string "expected function stack size" (OpenFn/stack-size fn)
-                                  "to match 0 + function arguments" stack-check) (list fn x)))
+    (raise 'compile-internal (print-string "expected function stack size" (OpenFn/stack-size fn)
+                                           "to match 0 + function arguments" stack-check) (list fn x)))
 
 
   (if primitive
@@ -368,7 +368,7 @@
         (closure (OpenFn/closure fn)))
 
     (if (OpenFn/toplevel? parent-fn)
-      (raise 'compile "register-free-variable reached toplevel somehow" (list parent-fn)))
+      (raise 'compile-internal "register-free-variable reached toplevel somehow" (list parent-fn)))
 
     (aif (table-ref (OpenFn/env parent-fn) x)
       ;; If this was successful, we've found either a function that has already captured this free variable or the
@@ -438,7 +438,7 @@
     (local (emit fn 'local-get (cdr result)))
     (global (emit fn 'global-get (register-constant fn x)))
     (upvalue (emit fn 'upvalue-get (cdr result)))
-    (else (raise 'compiler ":(" (list x))))
+    (else (raise 'compile-internal ":(" (list x))))
 )
 
 ;; This function gives us the number of proper arguments to a function
@@ -700,12 +700,12 @@
     (or (compile-or fn x tail?))
     (quote (compile-quote fn x))
     (begin (compile-begin fn x tail?))
-    (else (raise 'compile "unknown special form" (list x)))))
+    (else (raise 'compile-internal "unknown special form" (list x)))))
 
 (define (special-form x)
   (when (rename? x)
     (if (rename-env x) 
-      (raise 'compile "compiler encountered non-toplevel rename" (list x)))
+      (raise 'compile-internal "compiler encountered non-toplevel rename" (list x)))
 
     (set! x (rename-expr x)))
 
@@ -725,7 +725,7 @@
      (aif (special-form (car x))
        (compile-special-form fn x src it tail?)
        (compile-apply fn x tail?)))
-    (else (raise 'compile "don't know how to compile expression" (list x)))))
+    (else (raise 'compile-internal "don't know how to compile expression" (list x)))))
 
 ;; Compiler entry point; compiles a list of expressions and adds them to a function
 (define (compile fn body)
@@ -866,7 +866,7 @@
         (lambda (k v)
           (if (and (eq? (value-type v) 13) (not (memq k '( define-record))))
             (begin
-              (print ";; compiling" k)
+              ;(print ";; compiling" k)
               (let ((is-macro (env-syntax? #f k)))
                 (recompile-function k)
                 )

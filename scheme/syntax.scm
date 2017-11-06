@@ -51,6 +51,22 @@
 
 (define unspecified (if #f #f))
 
+(define list-tail
+  (lambda (lst i)
+    (if (or (null? lst) (not (pair? lst)))
+      (raise 'type "list-tail expects a list with at least one element as its argument" (list lst)))
+
+    (if (= i 0)
+      lst
+      ((lambda (loop)
+        (loop loop (cdr lst) 1))
+       (lambda (loop rest ii)
+         (if (null? rest)
+           (raise 'type "list-tail bounds error" (list lst (length lst) i)))
+         (if (= ii i)
+           rest
+           (loop loop (cdr rest) (+ ii 1))))))))
+
 (define rename
   (lambda (name)
     (define env (top-level-value '*current-rename-env*))
@@ -79,19 +95,20 @@
     (define result #f)
 
     (if (fx< len 2)
-      (raise 'expand "define is missing first argument (name)" (list x)))
+      (raise-source x 'expand "define is missing first argument (name)" (list x)))
+;      (raise 'expand "define is missing first argument (name)" (list x)))
 
     (if (fx< len 3)
-      (raise 'expand "define is missing second argument (value)" (list x)))
+      (raise-source x 'expand "define is missing second argument (value)" (list x)))
 
     (set! kar (cadr x))
 
     (if (not (or (identifier? kar) (pair? kar)))
-      (raise 'expand "define first argument must be a name or a list" (list x (cdr x))))
+      (raise-source (cdr x) 'expand "define first argument must be a name or a list" (list x)))
 
     (if (identifier? kar)
       (if (not (fx= len 3))
-        (raise 'expand "define expects exactly two arguments (name and value)" (list x))
+        (raise-source x 'expand "define expects exactly two arguments (name and value)" (list x))
         (begin
           (set! name kar)
           (set! value (caddr x))))
@@ -103,7 +120,7 @@
             (cons-source x (make-rename #f 'begin) (cddr x))))))
 
     (if (env-syntax? env name)
-      (raise 'expand (print-string "definition of" name "shadows syntax") (list x)))
+      (raise-source x 'expand (print-string "definition of" name "shadows syntax") (list x)))
 
     (if (rename? name)
       (rename-gensym! name))
@@ -137,7 +154,7 @@
 (define expand-identifier
   (lambda (x env)
     (if (env-syntax? env x)
-      (raise 'expand (print-string "used syntax" x "as value") (list x)))
+      (raise-source x 'expand (print-string "used syntax" x "as value") (list x)))
     (env-resolve env x)))
 
 ;; Expand and/or
@@ -183,17 +200,16 @@
     (define new-env (env-make env))
     (define bindings #f)
 
-
     (if (fx< (length x) 3)
-      (raise 'expand "lambda has no body" (list x)))
+      (raise-source x 'expand "lambda has no body" (list x)))
 
     (set! bindings (cadr x))
 
     (if (or (null? bindings) (pair? bindings))
-      (for-each-improper
-        (lambda (arg)
+      (for-each-improper-i
+        (lambda (i arg)
           (if (not (identifier? arg))
-            (raise 'expand "non-identifier in lambda argument list" (list bindings)))
+            (raise-source (list-tail bindings i) 'expand "non-identifier in lambda argument list" (list x)))
           ;; If a rename is encountered here, env-define will add a gensym
           ;; then env-resolve will search for that gensym with env-lookup
           ;; then bindings are map'd to remove renames
@@ -204,7 +220,7 @@
         bindings)
       ;; Argument is a single symbol or rename (e.g. rest arguments only)
       (if (not (identifier? bindings))
-        (raise 'expand "non-identifier as lambda rest argument" (list x (cdr x)))
+        (raise-source (cdr x) 'expand "non-identifier as lambda rest argument" (list x))
         (env-define new-env bindings 'variable)))
 
     ;; If bindings are renames, they should be gensym'd 
@@ -221,7 +237,7 @@
     (define else-branch unspecified)
 
     (if (fx< len 3)
-      (raise 'expand "if expression needs at least two arguments" (list x))
+      (raise-source x 'expand "if expression needs at least two arguments" (list x))
       (if (fx= len 4)
         (set! else-branch (list-ref x 3))))
 
@@ -233,12 +249,12 @@
     (define name #f)
 
     (if (not (fx= len 3))
-      (raise 'expand "set! expression needs exactly two arguments" (list x)))
+      (raise-source x 'expand "set! expression needs exactly two arguments" (list x)))
 
     (set! name (cadr x))
 
     (if (not (identifier? name))
-      (raise 'expand "set! expects an identifier as its first argument" (list x (cdr x))))
+      (raise-source (cdr x) 'expand "set! expects an identifier as its first arguments" (list x)))
 
     (list-source x (car x) (expand (list-ref x 1) env) (expand (list-ref x 2) env))))
 
@@ -261,7 +277,7 @@
     (define fn-arity #f)
 
     (if (not (symbol? name))
-      (raise 'expand "define-syntax first argument (macro name) must be a symbol" (list x (cdr x))))
+      (raise-source (cdr x) 'expand "define-syntax first argument (macro name) must be a symbol" (list x (cdr x))))
 
     (if (table? env)
       (if (table-ref env "module-export-all")
@@ -272,12 +288,12 @@
     (set! fn (eval expanded-body #f))
 
     (if (not (procedure? fn))
-      (raise 'expand "define-syntax body did not result in a function" (list x)))
+      (raise-source (cddr x) 'expand "define-syntax body did not evaluate to a function" (list x)))
 
     (set! fn-arity (function-min-arity fn))
 
     (if (fx< fn-arity 1)
-      (raise 'expand "transformer must take at least one argument" (list x (cdr x))))
+      (raise-source (caddr x) 'expand "define-syntax body must evaluate to a function that takes one argument" (list x)))
 
     (set-function-name! fn name)
     (set-function-macro-bit! fn)
@@ -293,7 +309,7 @@
     (define body #f)
 
     (if (fx< len 3)
-      (raise 'expand "define-syntax expects at least two arguments: a name and a body" (list x)))
+      (raise-source x 'expand "define-syntax expects at least two arguments: a name and a body" (list x)))
 
     (set! name (cadr x))
     (set! body (caddr x))
@@ -309,13 +325,13 @@
     (define body #f)
 
     (if (fx< (length x) 3)
-      (raise 'expand "let-syntax expands at least three arguments" (list x)))
+      (raise-source x 'expand "let-syntax expands at least three arguments" (list x)))
 
     (set! bindings (cadr x))
     (set! body (cddr x))
 
     (if (not (list? bindings))
-      (raise 'expand "let-syntax bindings list must be a valid list" (list x (cadr x))))
+      (raise-source (cadr x) 'expand "let-syntax bindings list must be a valid list" (list x (cadr x))))
 
     (for-each
       (lambda (x)
@@ -323,7 +339,7 @@
         (define body #f)
 
         (if (not (fx= (length x) 2))
-          (raise 'expand "let-syntax bindings should have two values: a name and a transformer" (list x)))
+          (raise-source x 'expand "let-syntax bindings should have two values: a name and a transform" (list x)))
 
         (set! name (car x))
         (set! body (cadr x))
@@ -371,12 +387,12 @@
     (define body #f)
 
     (if (not (list? clause))
-      (raise 'expand "cond clause should be a list" (list clause)))
+      (raise-source clause 'expand "cond clause should be a list" (list clause)))
 
     (set! len (length clause))
 
-    (if (not (fx> len 1))
-      (raise 'expand "cond clause should have two members: condition and body" (list x clause)))
+    (if (not (> len 1))
+      (raise-source clause 'expand "cond clause should have two members: condition and body" (list x clause)))
 
     (set! condition (car clause))
     (set! body (cdr clause))
@@ -395,7 +411,6 @@
       (if (null? rest)
         unspecified
         (expand-cond-full-clause x env (car rest) (cdr rest))))
-
     )
 
     result))
@@ -427,8 +442,8 @@
     (define vals #f)
     (define result #f)
 
-    (if (fx< (length x) 3)
-      (raise 'expand "let has no body" (list x)))
+    (if (< (length x) 3)
+      (raise-source x 'syntax "let must have at least two arguments (bindings and body)" (list x)))
 
     (if (identifier? (list-ref x 1))
       (begin
@@ -443,19 +458,18 @@
     ;(print "crashy crashy: " let-fn-name)
 
     (set! names
-      (map (lambda (binding)
+      (map-i (lambda (i binding)
              (define name #f)
              (if (not (list? binding))
-               (raise 'syntax "let binding should be a list with a name and a value" (list x)))
+               (raise-source (list-tail bindings i) 'syntax "let binding should be a list with a name and a value" (list x)))
 
              (if (not (fx= (length binding) 2))
-               (raise 'syntax "let binding should have exactly 2 elements (name and value)" (list binding)))
+               (raise-source binding 'syntax "let binding should have exactly 2 elements (name and value)" (list binding)))
 
              (set! name (car binding))
 
              (if (not (identifier? name))
-               (raise 'syntax "let binding name should be an identifier" (list binding)))
-
+               (raise-source binding 'syntax "let binding name should be an identifier" (list binding)))
              name)
            bindings))
 
@@ -519,7 +533,7 @@
 (define-syntax when
   (lambda (x)
     (if (fx< (length x) 3)
-      (raise 'syntax "when expects a condition and a body" (list x)))
+      (raise-source x 'syntax "when expects a condition and a body" (list x)))
 
     `(,#'if ,(list-ref x 1)
         (,#'begin ,@(cddr x)))))
@@ -527,7 +541,7 @@
 (define-syntax unless
   (lambda (x)
     (if (fx< (length x) 3)
-      (raise 'syntax "when expects a condition and a body" (list x)))
+      (raise-source x 'syntax "unless expects a condition and a body" (list x)))
 
     `(,#'if (,#'not ,(list-ref x 1))
         (,#'begin ,@(cddr x)))))
@@ -564,13 +578,13 @@
     (define clauses #f)
 
     (if (fx< (length x) 3)
-      (raise 'syntax "case expects at least three arguments (a key and a clause)" x))
+      (raise-source x 'syntax "case expects at least three arguments (a key and a clause)" x))
 
     (set! key (cadr x))
     (set! clauses (cddr x))
 
     (if (not (list? clauses))
-      (raise 'syntax "case expects a list of clauses" x))
+      (raise-source x 'syntax "case expects a list of clauses" x))
 
     (define code (let loop ((clause (car clauses))
                (clauses clauses))
@@ -621,15 +635,15 @@
 
 (define-syntax let*
   (lambda (x)
-    (unless (fx> (length x) 2)
-      (raise 'syntax "let* expects at least two arguments (bindings and body)" (list x)))
+    (unless (> (length x) 2)
+      (raise-source x 'syntax "let* expects at least two arguments (bindings and body)" (list x)))
 
     (let ((bindings (list-ref x 1))
           (body (cddr x)))
-      (for-each
-        (lambda (binding)
+      (for-each-i
+        (lambda (i binding)
           (unless (and (list? binding) (fx= (length binding) 2))
-            (raise 'syntax "let* binding must be a list with two elements" (list x binding))))
+            (raise-source (list-tail (cadr x) i) 'syntax "let* binding must be a list with two elements" (list binding))))
         bindings)
 
     `(,#'let (,@(map (lambda (b) (list-source b (car b) #'unspecified)) bindings))
@@ -667,12 +681,12 @@
     (define predicate #f)
 
     (unless (fx> (length x) 1)
-      (raise 'syntax "define-record expects at least one argument: a record name" (list x)))
+      (raise-source x 'syntax "define-record expects at least one argument: a record name" (list x)))
 
     (set! name (cadr x))
 
     (unless (symbol? name)
-      (raise 'syntax (print-string "define-record name must be a symbol but got" name) (list x)))
+      (raise-source (cdr x) 'syntax (print-string "define-record name must be a symbol but got" name) (list x)))
 
     (set! name-string (symbol->string name))
 
@@ -680,22 +694,24 @@
       (if (list? (list-ref x 2))
         (begin
           (when (null? (list-ref x 2))
-            (raise 'syntax "define-record inheritance argument must be a list with exactly one symbol but got none" (list x (cddr x))))
+            (raise-source (caddr x) 'syntax "define-record inheritance argument must be a list with exactly one symbol but got none" (list x (cddr x))))
+          (when (> (length (list-ref x 2)) 1)
+            (raise-source (caddr x) 'syntax "define-record inheritance argument must be a list with exactly one symbol but more than one" (list x (cddr x))))
           (set! parent (car (list-ref x 2)))
           (set! fields (cdddr x)))
         (set! fields (cddr x))))
 
     (unless (or (symbol? parent) (not parent))
-      (raise 'syntax "define-record inheritance argument should be a list with exactly one symbol" (list x (caddr x))))
+      (raise-source (caddr x) 'syntax "define-record inheritance argument should be a list with exactly one symbol" (list x (caddr x))))
 
     (set! accessors
-      (map
-        (lambda (field-name)
+      (map-i
+        (lambda (i field-name)
           (define getter #f)
           (define setter #f)
 
           (unless (symbol? field-name)
-            (raise 'syntax "define-record fields must be symbols" (list x name)))
+            (raise-source (list-tail fields i) 'syntax "define-record fields must be symbols" (list x name)))
 
           (set! getter (string->symbol (string-append name-string "/" (symbol->string field-name))))
           (set! getter `(,#'define (,getter ,#'rec) (,#'record-ref ,name ,#'rec ,field-count)))
@@ -733,12 +749,6 @@
       )
     
   )) ;; lambda (x)
-
-;; (define-record Box asdf)
-;; (Box/asdf)
-;; (Box/asdf!)
-;; (Box/set-asdf!)
-;; (Box/update-asdf) 
 
 ;; PORTS
 
@@ -793,7 +803,7 @@
 
 (define (cond-expand-check-feature x form)
   (unless (and (list? form) (not (null? form)))
-    (raise 'syntax "cond-expand feature requirement must be a list with at least one element" (list form)))
+    (raise-source form 'syntax "cond-expand feature requirement must be a list with at least one element" (list form)))
 
   (case (car form)
     ((and)
@@ -839,7 +849,7 @@
 (define-syntax while
   (lambda (x)
     (unless (> (length x) 2)
-      (raise 'syntax "while loop expected at least two arguments: condition and body" (list x)))
+      (raise-source x 'syntax "while loop expected at least two arguments: condition and body" (list x)))
     `(,#'let ,#'loop ((,#'condition ,(cadr x)))
         (,#'when ,#'condition
           ,@(cddr x)

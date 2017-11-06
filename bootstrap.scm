@@ -6,7 +6,6 @@
 ;(set-top-level-value! 'compiler compile-toplevel)
 
 (pull-up-bootstraps)
-#|
 
 (time-function "full expand & compile on VM"
   (lambda ()
@@ -16,4 +15,3 @@
       (compile-toplevel (expand compiler #f))
     )))
 
-|#

@@ -254,19 +254,6 @@ void State::print_exception(std::ostream& os, Value exc) {
 
     os << ARETE_COLOR_BLUE << exc.exception_message().string_data() << ARETE_COLOR_RESET << std::endl;
 
-    bool source_printed = false;
-
-    if(irritants.list_length() == 1) {
-      source_printed = print_src_pair(os, irritants.list_ref(0));
-    } else if(irritants.list_length() == 2) {
-      source_printed = print_src_pair(os, irritants.list_ref(1));
-    }
-
-    os << std::endl;
-
-    if(!source_printed) {
-      os << "Offending expression: " << irritants.list_ref(0) << std::endl;
-    }
   } else {
     os << exc << std::endl;
   }

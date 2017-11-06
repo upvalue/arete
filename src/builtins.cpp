@@ -337,8 +337,13 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
   // Optionally handle an improper list
   if(lst != C_NIL) {
     if(improper) {
-      Value argv[1] = {lst};
-      tmp = state.apply(fn, 1, argv);
+      if(indice) {
+        Value argv[2] = {Value::make_fixnum(i), lst};
+        tmp = state.apply(fn, 2, argv);
+      } else {
+        Value argv[1] = {lst};
+        tmp = state.apply(fn, 1, argv);
+      }
 
       if(tmp.is_active_exception()) return tmp;
       if(ret) {
@@ -368,6 +373,10 @@ Value fn_foreach_proper(State& state, size_t argc, Value* argv) {
 
 Value fn_foreach_improper(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "for-each-improper", true, false, false);
+}
+
+Value fn_foreach_improper_i(State& state, size_t argc, Value* argv) {
+  return fn_map_impl(state, argc, argv, "for-each-improper", true, false, true);
 }
 
 Value fn_map_proper_i(State& state, size_t argc, Value* argv) {
@@ -684,7 +693,7 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
   Value env = argv[0], name, rename_key, result, renames, qname, imports, arg1 = argv[1], mname;
   AR_FRAME(state, env, name, rename_key, result, renames, qname, imports, arg1, mname);
 
-  //Value env = argv[0];
+  // Value env = argv[0];
 
   // (env-resolve (<table> vars) name)
 
@@ -1028,6 +1037,27 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   return exc;
 }
 
+Value fn_raise_source(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "raise-source";
+
+  AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
+  AR_FN_EXPECT_TYPE(state, argv, 2, STRING);
+
+  Value tag = argv[1], message = argv[2], irritants = argv[3], exc;
+
+  std::ostringstream os;
+
+  if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
+    state.print_src_pair(os, argv[0]);
+  }
+
+  os << std::endl << message.string_data();
+
+  exc = state.make_exception(tag, os.str(), irritants);
+
+  return exc;
+}
+
 ///// RECORDS
 Value fn_register_record_type(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "register-record-type";
@@ -1337,6 +1367,7 @@ void State::load_builtin_functions() {
   defun_core("map-improper", fn_map_improper, 2);
   defun_core("for-each", fn_foreach_proper, 2);
   defun_core("for-each-improper", fn_foreach_improper, 2);
+  defun_core("for-each-improper-i", fn_foreach_improper_i, 2);
 
   defun_core("memq", fn_memq, 2);
   defun_core("memv", fn_memv, 2);
@@ -1376,6 +1407,7 @@ void State::load_builtin_functions() {
 
   // Exceptions
   defun_core("raise", fn_raise, 3);
+  defun_core("raise-source", fn_raise_source, 4);
 
   ///// Expansion support functionality
   defun_core("cons-source", fn_cons_source, 3);

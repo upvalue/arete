@@ -5,9 +5,9 @@ CFLAGS := $(CFLAGS) -g3 -O3
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
 LDFLAGS := 
 
-ECXX := SAFE_HEAP=1 STACK_OVERFLOW_CHECK=2 em++
+ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
-ECXXFLAGS := $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -s ALLOW_MEMORY_GROWTH=1 #TOTAL_MEMORY=33554432
+ECXXFLAGS := $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions 
 
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
@@ -47,7 +47,6 @@ endef
 	$(call colorecho, "CC $< ")
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-#all: arete.html
 all: arete
 
 -include $(DEPS)
@@ -57,7 +56,7 @@ arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^ 
 
-arete.html: $(ECXXOBJS) src/main.em.o
+arete.js: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")
 	$(ECXX) -O3 $(LDFLAGS) -o $@ $^ $(addprefix --preload-file ,$(wildcard *.scm scheme/*.scm examples/*.scm))
 
