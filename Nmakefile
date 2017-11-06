@@ -1,8 +1,9 @@
+# Note: Stack size has to be massively increased for bootstrap to work.
 LINK = link $(LDFLAGS) /out:$@ $**
 
 SRCS=src\cli.cpp src\gc.cpp src\builtins.cpp src\eval.cpp src\state.cpp src\reader.cpp src\vm.cpp src\writer.cpp src\main.cpp src\table.cpp src\values.cpp src\numbers.cpp src\files.cpp vendor\linenoise\linenoise.cpp vendor\linenoise\wcwidth.cpp vendor\linenoise\ConvertUTF.cpp
 OBJS=src\cli.obj src\gc.obj src\builtins.obj src\eval.obj src\state.obj src\reader.obj src\vm.obj src\writer.obj src\main.obj src\table.obj src\values.obj src\numbers.obj src\files.obj vendor\linenoise\linenoise.obj vendor\linenoise\wcwidth.obj vendor\linenoise\ConvertUTF.obj
-LDFLAGS = /nologo 
+LDFLAGS = /nologo /Stack:8000000
 CFLAGS = /Ivendor\linenoise /nologo /W3 /D_CRT_SECURE_NO_WARNINGS /DARETE_DEV  /DARETE_GC_STRATEGY="(ARETE_GC_SEMISPACE)" /DARETE_LOG_TAGS="(ARETE_LOG_TAG_VM)" 
 
 .cpp.obj:

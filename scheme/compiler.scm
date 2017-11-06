@@ -182,7 +182,6 @@
           (loop (fx+ i 1)))))))
 
 ;; This converts symbols into their equivalent fixnums
-
 (define (insn->byte fn insn)
   (cond
     ((fixnum? insn) insn)
@@ -865,9 +864,9 @@
       (print ";; compiled"
       (top-level-for-each
         (lambda (k v)
-          (if (eq? (value-type v) 13)
+          (if (and (eq? (value-type v) 13) (not (memq k '( define-record))))
             (begin
-              ;(print ";; compiling" k)
+              (print ";; compiling" k)
               (let ((is-macro (env-syntax? #f k)))
                 (recompile-function k)
                 )
