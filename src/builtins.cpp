@@ -46,11 +46,14 @@ Value fn_eq(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_eqv(State& state, size_t argc, Value* argv) {
-  if(argv[0].type() == FLONUM && argv[1].type() == FLONUM)
+  if(argv[0].type() == FLONUM && argv[1].type() == FLONUM) {
     return Value::make_boolean(argv[0].flonum_value() == argv[1].flonum_value());
+  }
+
   if(argv[0].type() == CHARACTER && argv[1].type() == CHARACTER) {
     return Value::make_boolean(argv[0].character() == argv[1].character());
   }
+
   return fn_eq(state, argc, argv);
 }
 
@@ -496,7 +499,6 @@ Value fn_make_vector(State& state, size_t argc, Value* argv) {
       fill = argv[1];
     }
   }
-
 
   vec = state.make_vector(size < capacity ? capacity : size);
   vec.vector_storage().as<VectorStorage>()->length = size;
@@ -1333,11 +1335,18 @@ Value fn_integer_to_char(State& state, size_t argc, Value* argv) {
   return state.make_char(argv[0].fixnum_value());
 }
 
+Value fn_char_numeric(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "char-numeric?";
+  AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
+  return argv[0].character() >= '0' && argv[0].character() <= '9';
+}
+
 void State::load_builtin_functions() {
   // Conversion
   defun_core("string->symbol", fn_string_to_symbol, 1);
   defun_core("symbol->string", fn_symbol_to_string, 1);
   defun_core("char->integer", fn_char_to_integer, 1);
+  defun_core("char-numeric?", fn_char_numeric, 1);
   defun_core("integer->char", fn_integer_to_char, 1);
 
   // Predicates

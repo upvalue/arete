@@ -22,6 +22,7 @@ static const char* help[] = {
   "  --help: Print this message",
   "  -- <arguments...>: Arguments after -- will be pass to Scheme as a list of strings named *command-line*",
   "  --set <variable> <expr>: Set a top-level variable to an expression (only read, not evaluated)",
+  "  --image-save <path>: Save a heap image",
   "  Helpful top-level variables:",
   "     --set EXPANDER-PRINT t ",
   "        Print all expansions to current output port as they occur",
@@ -198,6 +199,7 @@ int State::enter_cli(int argc_, char* argv[]) {
   static std::string repl("--repl");
   static std::string bad("--");
   static std::string debug_gc("--debug-gc");
+  static std::string save_image("--save-image");
   static std::string set("--set");
   static std::string eval("--eval");
   static std::string stats("--stats");
@@ -325,6 +327,9 @@ int State::enter_cli(int argc_, char* argv[]) {
       }
     } else if(debug_gc.compare(arg) == 0) {
       gc.collect_before_every_allocation = true;
+    } else if(save_image.compare(arg) == 0) {
+      std::string path(argv[++i]);
+      State::save_image(path);
     } else {
       std::string cxxarg(arg);
       std::string badc(cxxarg.substr(0, bad.size()));

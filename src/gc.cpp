@@ -3,6 +3,9 @@
 // TODO: Reduction of code duplication between collectors. Specifically, walking the roots
 // at the very least seems like it should be shared between both;
 
+// TODO: Finalizers should probably simply be disabled in production builds; this should be used
+// for warnings only.
+
 #include <chrono>
 
 #include "arete.hpp"
@@ -136,6 +139,23 @@ void GCSemispace::copy(HeapValue** ref) {
   obj->header = RESERVED;
 
   (*ref) = cpy;
+}
+
+GCSemispace::~GCSemispace() {
+  delete active;
+  if(other != 0) delete other;
+
+}
+
+void GCSemispace::allocation_failed(size_t size) {
+  collect(size);
+  if(!has_room(size)) {
+    collect(size, true);
+    if(!has_room(size)) {
+      std::cerr << "arete:gc: semispace allocation of size " << size << " failed with heap of size " << heap_size << std::endl;
+      AR_ASSERT(!"arete:gc: semispace allocation failed");
+    }
+  }
 }
 
 extern bool thing;

@@ -27,7 +27,6 @@
       )))
 
 (define (get-cell g x y)
-  ;(print x y)
   (cond 
     ((< x 0) 0)
     ((< y 0) 0)

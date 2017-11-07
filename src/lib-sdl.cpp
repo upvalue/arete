@@ -99,11 +99,7 @@ Value sdl_poll_event(State& state, size_t argc, Value* argv) {
 
   SDL_Event* e = state.record_data<SDL_Event>(sdl_event_record_tag, argv[0]);
 
-  // TODO HERE: EVENT TYPES.
-
   return Value::make_boolean(SDL_PollEvent(e));
-
-  return C_UNSPECIFIED;
 }
 
 Value sdl_event_type(State& state, size_t argc, Value* argv) {
@@ -114,11 +110,30 @@ Value sdl_event_type(State& state, size_t argc, Value* argv) {
   switch(e->type) {
     case SDL_QUIT:
       return state.get_symbol("quit");
+    case SDL_KEYDOWN:
+      return state.get_symbol("key-down");
     default:
       return C_FALSE;
   }
 }
 
+Value sdl_event_key(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:event-key";
+  AR_FN_EXPECT_RECORD_ISA(state, argv, 0, sdl_event_record_tag);
+
+  SDL_Event* e = state.record_data<SDL_Event>(sdl_event_record_tag, argv[0]);
+
+  std::cout << "Scancode: " << e->key.keysym.scancode << std::endl;
+  switch(e->key.keysym.scancode) {
+    case SDL_SCANCODE_RETURN:
+      return state.get_symbol("return");
+    case SDL_SCANCODE_BACKSPACE:
+      return state.get_symbol("backspace");
+    default: break;
+  }
+
+  return state.make_char((char) e->key.keysym.sym);
+}
 
 Value sdl_render(State& state, size_t argc, Value* argv) {
   SDL_RenderPresent(renderer);
@@ -153,9 +168,36 @@ Value sdl_fill_rect(State& state, size_t argc, Value* argv) {
   SDL_Rect rect = {(int)argv[0].fixnum_value(), (int)argv[1].fixnum_value(),
     (int)argv[2].fixnum_value(), (int)argv[3].fixnum_value()};
 
-  AR_ASSERT(&rect);
   SDL_RenderFillRect(renderer, &rect);
 
+  return C_UNSPECIFIED;
+}
+
+Value sdl_draw_rect(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:draw-rect";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 3, FIXNUM);
+
+  SDL_Rect rect = {(int)argv[0].fixnum_value(), (int)argv[1].fixnum_value(),
+    (int)argv[2].fixnum_value(), (int)argv[3].fixnum_value()};
+
+  SDL_RenderDrawRect(renderer, &rect);
+
+  return C_UNSPECIFIED;
+}
+
+Value sdl_draw_line(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:draw-line";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 3, FIXNUM);
+
+  SDL_RenderDrawLine(renderer, (int)argv[0].fixnum_value(), (int)argv[1].fixnum_value(),
+    (int) argv[2].fixnum_value(), (int) argv[3].fixnum_value());
+  
   return C_UNSPECIFIED;
 }
 
@@ -200,15 +242,17 @@ Value sdl_draw_text(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "sdl:draw-text";
   AR_FN_EXPECT_RECORD_ISA(state, argv, 0, sdl_ttf_font_tag);
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
+  AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 3, FIXNUM);
 
   TTF_Font* cfont = (*state.record_data<TTF_Font*>(sdl_ttf_font_tag, argv[0]));
 
   if(cfont) {
-    SDL_Color white = {255,255,255,255};
-    SDL_Surface* solid = TTF_RenderText_Blended(cfont, argv[1].string_data(), white);
+    SDL_Surface* solid = TTF_RenderText_Blended(cfont, argv[1].string_data(), draw_color);
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, solid);
 
-    SDL_Rect rect = {0, 0, 0, 0};
+    std::cout << argv[2].fixnum_value() << ' ' << argv[3].fixnum_value() << std::endl;
+    SDL_Rect rect = {(int)argv[2].fixnum_value(), (int)argv[3].fixnum_value(), 0, 0};
     SDL_QueryTexture(texture, 0, 0, &rect.w, &rect.h);
 
     SDL_RenderCopy(renderer, texture, 0, &rect);
@@ -231,14 +275,15 @@ Value sdl_close_font(State& state, size_t argc, Value* argv) {
   argv[0].record_set_finalized();
 
   return C_UNSPECIFIED;
-
 }
+
 Value load_sdl(State& state) {
   state.defun_core("sdl:init", sdl_init, 2);
   state.defun_core("sdl:quit", sdl_quit, 0);
   state.defun_core("sdl:make-event", sdl_make_event, 0);
   state.defun_core("sdl:poll-event", sdl_poll_event, 1);
   state.defun_core("sdl:event-type", sdl_event_type, 1);
+  state.defun_core("sdl:event-key", sdl_event_key, 1);
 
   state.defun_core("sdl:event-type-descriptor", sdl_event_type_descriptor, 0);
 
@@ -249,10 +294,12 @@ Value load_sdl(State& state) {
 
   state.defun_core("sdl:set-color", sdl_set_color, 3, 4);
   state.defun_core("sdl:fill-rect", sdl_fill_rect, 4);
+  state.defun_core("sdl:draw-rect", sdl_draw_rect, 4);
+  state.defun_core("sdl:draw-line", sdl_draw_line, 4);
 
   state.defun_core("sdl:open-font", sdl_open_font, 2);
   state.defun_core("sdl:close-font", sdl_close_font, 1);
-  state.defun_core("sdl:draw-text", sdl_draw_text, 2);
+  state.defun_core("sdl:draw-text", sdl_draw_text, 4, 6);
 
   sdl_event_record_tag = state.register_record_type("sdl:event", 0, sizeof(SDL_Event));
 

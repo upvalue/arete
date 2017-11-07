@@ -1,5 +1,7 @@
 // numbers.cpp - Numeric functionality
 
+#include <math.h>
+
 #include "arete.hpp"
 
 namespace arete {
@@ -180,6 +182,16 @@ Value fn_fx_div(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(argv[0].fixnum_value() / argv[1].fixnum_value());
 }
 
+Value fn_floor(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "floor";
+
+  AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
+
+  if(argv[0].fixnump()) return argv[0];
+
+  return state.make_flonum(floor(argv[0].flonum_value()));
+}
+
 void State::load_numeric_functions() {
   // defun_core("fixnum?", fn_fixnump, 1);
   // defun_core("flonum?", fn_flonump, 1);
@@ -202,6 +214,8 @@ void State::load_numeric_functions() {
   defun_core(">", fn_gt, 2, 2, true);
   defun_core("<=", fn_lte, 2, 2, true);
   defun_core(">=", fn_gte, 2, 2, true);
+
+  defun_core("floor", fn_floor, 1);
 }
 
 }

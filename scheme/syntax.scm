@@ -26,7 +26,7 @@
 (define flonum? (lambda (v) (eq? (value-type v) 4)))
 (define constant? (lambda (v) (eq? (value-type v) 2)))
 (define boolean? (lambda (v) (or (eq? v #t) (eq? v #f))))
-(define character? (lambda (v) (eq? (value-type v) 6)))
+(define char? (lambda (v) (eq? (value-type v) 6)))
 (define pair? (lambda (v) (eq? (value-type v) 11)))
 (define table? (lambda (v) (eq? (value-type v) 15)))
 (define string? (lambda (v) (eq? (value-type v) 5)))
@@ -47,7 +47,7 @@
 
 (define self-evaluating?
   (lambda (v)
-    (or (character? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v))))
+    (or (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v))))
 
 (define unspecified (if #f #f))
 
@@ -571,7 +571,6 @@
       (memv obj (cdr lst)))))
 
 ;; case
-;; TODO =>
 (define-syntax case
   (lambda (x c)
     (define key #f)
@@ -595,9 +594,6 @@
       ;; (case 5 (5 #t))
       (unless (or (symbol? (car clause)) (list? (car clause)) (self-evaluating? (car clause)))
         (raise 'syntax "case expects an else clause, a literal, or a list of literals as its datum"))
-        #;(if (eq? (car clause) 'else)
-          (raise 'syntax "case expected an else clause, but it seems else has been redefined" x)
-          (raise 'syntax "case expected a list or else clause as its datum" x))
 
       (define condition
         (if (c (car clause) #'else)
@@ -611,7 +607,7 @@
       (define branch
         (if (and (c (car clause) #'else) (c (cadr clause) #'=>))
           `(,(list-ref clause 2) ,#'result)
-          (cadr clause)))
+          `(,#'begin ,@(cdr clause))))
 
       (if (null? (cdr clauses))
         `(,#'if ,condition

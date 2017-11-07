@@ -407,7 +407,9 @@ struct Value {
   inline bool eqv(const Value &rhs) const {
     if (bits == rhs.bits)
       return true;
-    switch(type()) {
+    Type lhs_type = type(), rhs_type = rhs.type();
+    if(lhs_type != rhs_type) return false;
+    switch(lhs_type) {
       case FLONUM: return flonum_value() == rhs.flonum_value();
       case CHARACTER: return character() == rhs.character();
       default: return (*this) == rhs;
@@ -1449,9 +1451,7 @@ struct GCSemispace : GCCommon {
     active = new Block(heap_size, 0);
   }
 
-  ~GCSemispace() {
-    delete active;
-  }
+  ~GCSemispace();
 
   void copy(HeapValue** ref);
 
@@ -1478,6 +1478,8 @@ struct GCSemispace : GCCommon {
     return active->has_room(block_cursor, size);
   }
 
+  void allocation_failed(size_t size);
+
   HeapValue* allocate(Type type, size_t size) {
     size = align(8, size);
 
@@ -1486,24 +1488,17 @@ struct GCSemispace : GCCommon {
 
     // Bump allocation possible
     if(!has_room(size) || collect_before_every_allocation) {
-      collect(size);
-      if(!has_room(size)) {
-        collect(size, true);
-        if(!has_room(size)) {
-          std::cerr << "arete:gc: semispace allocation of size " << size << " failed with heap of size " << heap_size << std::endl;
-          AR_ASSERT(!"arete:gc: semispace allocation failed");
-        }
-      }
+      allocation_failed(size);
     }
 
     allocations++;
     HeapValue* v = (HeapValue*) (active->data + block_cursor);
-    memset(v, 0, size);
+    memset((((char*)v) + sizeof(HeapValue)), 0, size - sizeof(HeapValue));
     v->initialize(type, 0, size);
     block_cursor += size;
     // Assert that pointer is aligned properly.
-    AR_ASSERT(!Value(v).immediatep());
-    AR_ASSERT(v->size == size);
+    // AR_ASSERT(!Value(v).immediatep());
+    // AR_ASSERT(v->size == size);
     return v;
   }
 };
@@ -2008,8 +2003,8 @@ struct State {
 
   // Image saving and loading
 
-  /** Dump an image. Must exit after calling. */
-  void dump_image(const std::string& path);
+  /** Save an image. Must exit after calling. */
+  void save_image(const std::string& path);
 };
 
 ///// READ! S-Expression reader

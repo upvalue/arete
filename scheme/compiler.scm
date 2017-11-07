@@ -1,7 +1,6 @@
 ;; compiler.scm - Arete bytecode compiler
 
-;; If you have a function with ten parameters
-;; you probably missed a few.
+;; If you have a function with ten parameters, you probably missed a few.
 
 ;; - Alan Perlis.
 
@@ -544,7 +543,6 @@
 
   (if (OpenFn/toplevel? fn)
     (begin
-      ;(emit fn 'push-constant (register-constant fn name))
       (emit fn 'global-set 0 (register-constant fn name)))
     (begin
       (emit fn 'local-set (Var/idx var))))
@@ -559,7 +557,6 @@
   (case (car result)
     (global
       (begin
-        ;(emit fn 'push-constant (register-constant fn name))
         (emit fn 'global-set 1 (register-constant fn name))))
     (local
       (emit fn 'local-set (cdr result)))
@@ -621,7 +618,7 @@
   ;; then we need a pop instruction
 
   (if (fx= x-len 1)
-    (compile-constant fn #t) #;(emit fn 'push-constant (register-constant fn #t))
+    (compile-constant fn #t) 
     (begin
       (for-each-i 
         (lambda (i sub-x)
@@ -642,7 +639,7 @@
       (emit fn 'pop)
       (register-label fn and-fail)
 
-      (emit fn 'push-constant (register-constant fn #f))
+      (compile-constant fn #f)
       (register-label fn and-end)
     )
   )
@@ -654,6 +651,7 @@
   (define x-len (length x))
   (if (fx= x-len 1)
     (compile-constant fn #f)
+
     (let ((or-success (gensym 'or-success))
           (or-fail-pop (gensym 'or-fail-pop))
           (or-fail (gensym 'or-fail))
@@ -668,7 +666,7 @@
       (emit fn 'jump or-success)
       (register-label fn or-fail-pop)
 
-      (emit fn 'push-constant (register-constant fn #f))
+      (compile-constant fn #f)
       (register-label fn or-success)
     )
 
@@ -676,7 +674,7 @@
 )
 
 (define (compile-quote fn x)
-  (emit fn 'push-constant (register-constant fn (cadr x))))
+  (compile-constant fn (cadr x)))
 
 ;; Compiling a begin is fairly simple -- just need to make sure the last expression is considered a tail call.
 (define (compile-begin fn x tail?)
@@ -736,7 +734,7 @@
       (register-source fn (list-tail body i))
       ;; No tail calls in toplevel programs, so that something like
       ;; (define x (vm-function)) at REPL will work.
-      (compile-expr fn x #f (and (not (OpenFn/toplevel? fn)) (fx= i end)))
+      (compile-expr fn x (list-tail body i) (and (not (OpenFn/toplevel? fn)) (fx= i end)))
       #;(if (OpenFn/toplevel? fn)
         (emit fn 'pop))
     )
@@ -877,3 +875,4 @@
 )))
 
 (set-top-level-value! 'compiler compile-toplevel)
+
