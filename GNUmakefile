@@ -8,6 +8,7 @@ LDFLAGS := -lm
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
 ECXXFLAGS := $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions 
+ELDFLAGS :=
 
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
@@ -21,7 +22,9 @@ ARETE_LIBS := sdl test
 
 ifeq ($(findstring sdl,$(ARETE_LIBS)),sdl)
 	CXXFLAGS := $(CXXFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) -DAR_LIB_SDL=1
+	ECXXFLAGS := $(CXXFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) -DAR_LIB_SDL=1 -s USE_SDL=2 -s USE_SDL_TTF=2
 	LDFLAGS := $(LDFLAGS) $(shell pkg-config --libs sdl2 SDL2_ttf)
+	ELDFLAGS := -s USE_SDL=2 -s USE_SDL_TTF=2
 else
 	CXXFLAGS := $(CXXFLAGS) -DAR_LIB_SDL=0
 endif
@@ -56,9 +59,9 @@ arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^ 
 
-arete.js: $(ECXXOBJS) src/main.em.o
+arete.html: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")
-	$(ECXX) -O3 $(LDFLAGS) -o $@ $^ $(addprefix --preload-file ,$(wildcard *.scm scheme/*.scm examples/*.scm))
+	$(ECXX) -O3 $(ELDFLAGS) -o $@ $^ $(addprefix --preload-file ,$(wildcard bootstrap.scm scheme/*.scm examples/*.scm))
 
 arete-distilled.cpp: $(wildcard src/*.cpp)
 	$(call colorecho "arete.cpp")

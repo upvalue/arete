@@ -7,3 +7,8 @@
 /tests/test-semispace
 vgcore*
 /site.mk
+/web/arete.js
+/web/arete.js.mem
+/web/arete.html.mem
+/web/arete.js
+

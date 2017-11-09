@@ -246,6 +246,8 @@ void State::print_exception(std::ostream& os, Value exc) {
 
     Value irritants = exc.exception_irritants();
 
+    (void) irritants;
+
     if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]) {
       os << std::endl << "Error during expansion: ";
     } else if(exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {

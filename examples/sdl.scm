@@ -119,6 +119,7 @@
 (define (State/finish-entering!)
   (let ((n (State/entering-number state)))
     (State/grid-size! state n)
+    (State/grid! state (make-grid n n))
     (State/entering-number! state #f)
     (set! state-dirty #t)))
 
@@ -179,6 +180,20 @@
     (print "drawing grid with tile dimension" tile-dimension " x " tile-dimension)
   #t))
 
+(define (click-grid grid x y width height grid-width grid-height mouse-x mouse-y)
+  (let* ((mx (- mouse-x x))
+         (my (- mouse-y y))
+         (tile-height (/ height grid-height))
+         (tile-width (/ width  grid-width))
+         (tile-dimension (min (floor tile-height) (floor tile-width))))
+    (when (and (> mx 0) (> my 0) (< mx width) (< my height))
+      (let ((x-tile (/ mx tile-dimension))
+            (y-tile (/ my tile-dimension)))
+        (when (and (< x-tile grid-width) (< y-tile grid-height))
+          (set-cell! (State/grid state) x-tile y-tile (if (= (get-cell (State/grid state) x-tile y-tile) 0) 1 0))
+          (set! state-dirty #t))))))
+
+
 (sdl:clear)
 (sdl:render)
 
@@ -189,6 +204,8 @@
 
       ((mouse-down) 
        
+       (click-grid #f 5 5 (- *width* 10) (- *height* 40) (State/grid-size state) (State/grid-size state)
+                   (sdl:event-mouse-x event) (sdl:event-mouse-y event))
        (print (sdl:event-mouse-x event)  (sdl:event-mouse-y event))
        (print "mouse click"))
 
@@ -213,10 +230,14 @@
          ;; normal input
          (case (sdl:event-key event)
            ((#\d) (set! state-dirty #t))
-           ((#\o) (state/toggle-overlay!))
            ((#\s) (State/begin-entering!))
            ((#\r) (repl))
            ((#\a) (set! autorun (not autorun)))
+           ((#\c) (begin
+                    (State/turn! state 0)
+                    (State/grid! state (make-grid (State/grid-size state) (State/grid-size state)))
+                    (set! state-dirty #t)))
+
            ((#\i)
             (unless autorun
               (state/next-turn!))
@@ -278,19 +299,7 @@
           (sdl:draw-text font (print-string "size:" (State/entering-number state)) 10 (- *height* 40)))))
 
     (sdl:set-color 255 255 255)
-    (sdl:draw-text font (print-string "turn:" (State/turn state) "controls: (o) show overlay (i) iterate one step (a) auto-iterate (mouse-down): flip cell state") 10 (- *height* 20))
-
-    (when (State/overlay-visible state)
-      (sdl:set-color 55 55 55)
-      (sdl:fill-rect 5 5 400 200)
-      (sdl:set-color 255 255 255)
-      (sdl:draw-text font "Preset (p/n to change)" 10 10)
-      (sdl:draw-text font "8x8 Glider" 10 30)
-
-      (sdl:draw-text font (print-string "Grid size: " (State/grid-size state) "x" (State/grid-size state)) 10 50)
-      (sdl:draw-text font "s to enter grid size" 10 70)
-    )
-
+    (sdl:draw-text font (print-string "turn:" (State/turn state) "controls: (c) clear (i) iterate one step (a) auto-iterate (mouse-down): flip cell state") 10 (- *height* 20))
     ;; Draw grid
 
     (sdl:render)

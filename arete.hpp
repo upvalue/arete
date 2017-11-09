@@ -144,7 +144,7 @@
 
 // Included libraries
 #ifndef AR_LIB_SDL
-# define AR_LIB_SDL 0
+# define AR_LIB_SDL 1
 #endif
 
 namespace arete {

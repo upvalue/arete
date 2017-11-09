@@ -1,0 +1,1 @@
+// arete.js - utility functions for embedding Emscripten-compiled Arete into a webpage
