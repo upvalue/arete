@@ -144,6 +144,8 @@
 ;(define *tile-height* (/ *grid-display-height* (grid-height grid)))
 (define *tile-height* (/ *height* (grid-height grid)))
 
+(define timer (sdl:add-timer 'tick 1000))
+
 (sdl:init *width* *height*)
 
 (define event (sdl:make-event))
@@ -182,6 +184,14 @@
   (when (sdl:poll-event event)
     (case (sdl:event-type event)
       ((quit) (set! done #t))
+
+      ((mouse-down) 
+       
+       (print (sdl:event-mouse-x event)  (sdl:event-mouse-y event))
+       (print "mouse click"))
+
+      ((timer)
+       (print (sdl:event-timer-tag event)))
 
       ((key-down)
        (State/error-message! state #f)
@@ -284,6 +294,7 @@
 
 (print "Quit normally.")
 
+(sdl:free-timer timer)
 (sdl:close-font font)
 
 (sdl:quit)

@@ -1203,7 +1203,6 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   // because it allocates
   free_vars = rec.record_ref(15);
 
-
   if(free_vars.type() == VECTOR && free_vars.vector_length() > 0) {
     size_t length = free_vars.vector_length();
     free_vars_blob = state.make_blob<size_t>(length);
@@ -1271,6 +1270,15 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
 
 Value fn_value_bits(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(argv[0].bits);
+}
+
+Value fn_value_copy(State& state, size_t argc, Value* argv) {
+  Value v1 = argv[0], v2;
+  if(v1.immediatep()) return v1;
+  AR_FRAME(state, v1, v2);
+  v2 = state.gc.allocate(BLOB, v1.heap->size);
+  memcpy(v2.heap, v1.heap, v1.heap->size);
+  return v2;
 }
 
 Value fn_value_header_bit(State& state, size_t argc, Value* argv) {
@@ -1360,6 +1368,7 @@ void State::load_builtin_functions() {
   // Operations on raw objects
   defun_core("value-type", fn_value_type, 1);
   defun_core("value-bits", fn_value_bits, 1);
+  defun_core("value-copy", fn_value_copy, 1);
   defun_core("value-header-bit?", fn_value_header_bit, 2);
 
   // Strings

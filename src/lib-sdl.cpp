@@ -21,6 +21,19 @@
 // involve modifying other code, OTOH that's it for extensibility...maybe we should support
 // two sorts of cfunction calling conventions.
 
+// This would also make it easier to store GC'd variables. We could have something like
+
+// struct MyModule : ExtensibleRecord {}
+
+// And then just put the Values up at the top.
+
+// TODO: Also, there's a lot to unpack here...if my C++Fu were better and I had the time
+// I'd much rather have something ike
+// accessor(FIXNUM, "sdl:event-mouse-x", &SDL_Event->button.x) or something magical like that, rather than
+// writing all these out by hand, which is pretty tedious!
+
+#include <stdint.h>
+
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_opengl.h"
 #include "SDL2/SDL_ttf.h"
@@ -30,6 +43,7 @@
 static SDL_Window* window = 0;
 static SDL_Renderer *renderer = 0;
 static size_t sdl_event_record_tag = 0;
+static size_t sdl_timer_tag = 0;
 static size_t sdl_ttf_font_tag = 0;
 static SDL_Color draw_color = {0, 0, 0, 255};
 
@@ -49,7 +63,7 @@ Value sdl_init(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
 
-  if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) != 0) {
+  if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS | SDL_INIT_TIMER) != 0) {
     return sdl_error(state);
   }
 
@@ -112,9 +126,46 @@ Value sdl_event_type(State& state, size_t argc, Value* argv) {
       return state.get_symbol("quit");
     case SDL_KEYDOWN:
       return state.get_symbol("key-down");
+    case SDL_MOUSEBUTTONDOWN:
+      return state.get_symbol("mouse-down");
+    case SDL_USEREVENT: {
+      return state.get_symbol("timer");
+    }
     default:
       return C_FALSE;
   }
+}
+
+Value sdl_event_mouse_x(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:event-mouse-x";
+  AR_FN_EXPECT_RECORD_ISA(state, argv, 0, sdl_event_record_tag);
+
+  SDL_Event* e = state.record_data<SDL_Event>(sdl_event_record_tag, argv[0]);
+
+  return Value::make_fixnum(e->button.x);
+}
+
+Value sdl_event_mouse_y(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:event-mouse-y";
+  AR_FN_EXPECT_RECORD_ISA(state, argv, 0, sdl_event_record_tag);
+
+  SDL_Event* e = state.record_data<SDL_Event>(sdl_event_record_tag, argv[0]);
+
+  return Value::make_fixnum(e->button.y);
+}
+
+Value sdl_event_timer_tag(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:event-timer-tag";
+  AR_FN_EXPECT_RECORD_ISA(state, argv, 0, sdl_event_record_tag);
+
+  SDL_Event* e = state.record_data<SDL_Event>(sdl_event_record_tag, argv[0]);
+  Handle* h = static_cast<Handle*>(e->user.data1);
+
+  if(e->type != SDL_USEREVENT || &h->state != &state) {
+    return state.make_exception("sdl", "sdl:event-timer-tag called against bad event");
+  }
+  
+  return h->ref;
 }
 
 Value sdl_event_key(State& state, size_t argc, Value* argv) {
@@ -222,6 +273,7 @@ void ttf_font_finalizer(State& state, Value sfont) {
   }
 }
 
+
 Value sdl_open_font(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "sdl:open-font";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
@@ -277,14 +329,80 @@ Value sdl_close_font(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+uint32_t sdl_timer_callback(uint32_t interval, void* parameter) {
+  SDL_Event event;
+  SDL_UserEvent userevent;
+
+  userevent.type = SDL_USEREVENT;
+  userevent.code = 0;
+  userevent.data1 = parameter;
+  userevent.data2 = 0;
+
+  event.type = SDL_USEREVENT;
+  event.user = userevent;
+
+  SDL_PushEvent(&event);
+  
+  return interval;
+}
+
+
+Value sdl_add_timer(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:add-timer";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+
+  ptrdiff_t milliseconds = argv[1].fixnum_value();
+  Handle *symbol_handle = new Handle(state, argv[0]);
+  SDL_AddTimer((uint32_t) milliseconds, sdl_timer_callback, symbol_handle);
+
+  Value rec = state.make_record(sdl_timer_tag);
+
+  Handle** ptr = state.record_data<Handle*>(sdl_timer_tag, rec);
+  (*ptr) = symbol_handle;
+
+  return rec;
+}
+
+Value sdl_free_timer(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:free-timer";
+
+  AR_FN_EXPECT_RECORD_ISA(state, argv, 0, sdl_timer_tag);
+
+  Handle** ptr = state.record_data<Handle*>(sdl_timer_tag, argv[0]);
+
+  if(*ptr != 0) {
+    delete *ptr;
+    (*ptr) = 0;
+  }
+
+  argv[0].record_set_finalized();
+
+  return C_UNSPECIFIED;
+}
+
+void timer_finalizer(State& state, Value timer) {
+  Handle** handle = state.record_data<Handle*>(sdl_timer_tag, timer);
+  if(*handle) {
+    delete (*handle);
+    (*handle) = 0;
+  }
+}
+
 Value load_sdl(State& state) {
   state.defun_core("sdl:init", sdl_init, 2);
   state.defun_core("sdl:quit", sdl_quit, 0);
   state.defun_core("sdl:make-event", sdl_make_event, 0);
   state.defun_core("sdl:poll-event", sdl_poll_event, 1);
   state.defun_core("sdl:event-type", sdl_event_type, 1);
+  state.defun_core("sdl:event-timer-tag", sdl_event_timer_tag, 1);
   state.defun_core("sdl:event-key", sdl_event_key, 1);
+  state.defun_core("sdl:event-mouse-x", sdl_event_mouse_x, 1);
+  state.defun_core("sdl:event-mouse-y", sdl_event_mouse_y, 1);
   state.defun_core("sdl:event-type-descriptor", sdl_event_type_descriptor, 0);
+
+  state.defun_core("sdl:add-timer", sdl_add_timer, 2);
+  state.defun_core("sdl:free-timer", sdl_free_timer, 1);
 
   state.defun_core("sdl:clear", sdl_clear, 0);
   state.defun_core("sdl:render", sdl_render, 0);
@@ -302,8 +420,11 @@ Value load_sdl(State& state) {
 
   sdl_event_record_tag = state.register_record_type("sdl:event", 0, sizeof(SDL_Event));
 
+  sdl_timer_tag = state.register_record_type("#<sdl:timer>", 0, sizeof(Handle*));
+  state.record_type_set_finalizer(sdl_timer_tag, timer_finalizer);
+
   // Font handling
-  sdl_ttf_font_tag = state.register_record_type("sdl:font", 0, sizeof(TTF_Font*));
+  sdl_ttf_font_tag = state.register_record_type("#<sdl:font>", 0, sizeof(TTF_Font*));
   state.record_type_set_finalizer(sdl_ttf_font_tag, ttf_font_finalizer);
   
   return C_UNSPECIFIED;
