@@ -49,26 +49,65 @@ static void  print_help() {
   arg2 = argv[++i];
 
 static bool do_repl(State& state, bool read_only) {
-  Value x = C_FALSE, tmp;
-  AR_FRAME(state, x, tmp);
-
   std::cout << ";; arete 0.1" << std::endl;
   std::cout << ";; Everything is a nail." << std::endl;
+  return state.enter_repl(read_only, "/.arete_history") == 0 ? true : false;
+}
+
+bool do_file(State& state, std::string path, bool read_only) {
+  Value x = C_FALSE, tmp = C_FALSE;
+
+  AR_FRAME(state, x, tmp);
+
+  if(read_only) {
+    x = state.slurp_file(path);
+    while(x.type() == PAIR) {
+      if(x.car().is_active_exception()) {
+        break;
+      }
+      std::cout << x.car() << std::endl;
+      x = x.cdr();
+    }
+  } else {
+    x = state.load_file(path);
+  }
+
+
+  if(x.is_active_exception()) {
+    state.print_exception(std::cerr, x);
+    return false;
+  }
+
+  return true;
+}
+
+static int cli_exception(State* state, Value exc, const std::string& desc) {
+  state->print_exception(std::cerr, exc);
+  std::cerr << desc << std::endl;
+  return EXIT_FAILURE;
+}
+
+bool State::enter_repl(bool read_only, const char* history_file) {
+  Value x = C_FALSE, tmp;
+  AR_FRAME(*this, x, tmp);
 
   std::ostringstream hist_file;
 
-	if(getenv("HOME")) {
-		hist_file << getenv("HOME") << "/.arete_history";
-	} else if(getenv("HOMEPATH")) {
-		hist_file << getenv("HOMEPATH") << "/.arete_history";
-	}
-
-
+  if(history_file) {
+    if(getenv("HOME")) {
+      hist_file << getenv("HOME") << history_file;
+    } else if(getenv("HOMEPATH")) {
+      hist_file << getenv("HOMEPATH") << history_file;
+    }
+  }
+  
   size_t i = 0;
 
 #if AR_LINENOISE
-  linenoiseHistorySetMaxLen(1024);
-  linenoiseHistoryLoad(hist_file.str().c_str());
+  if(history_file) {
+    linenoiseHistorySetMaxLen(1024);
+    linenoiseHistoryLoad(hist_file.str().c_str());
+  }
 #endif
 
   static const char* prompt = "> ";
@@ -108,7 +147,7 @@ static bool do_repl(State& state, bool read_only) {
 #endif
     liness << line;
 
-    XReader reader(state, liness, true, line_name.str());
+    XReader reader(*this, liness, true, line_name.str());
 
     x = reader.read();
     // Don't add comments/expressionless lines to history
@@ -127,16 +166,16 @@ static bool do_repl(State& state, bool read_only) {
         continue;
       }
 
-      tmp = state.make_pair(x, C_NIL);
-      tmp = state.eval_toplevel_list(tmp);
+      tmp = make_pair(x, C_NIL);
+      tmp = eval_toplevel_list(tmp);
 
       if(tmp.is_active_exception()) {
-        state.print_exception(std::cerr, tmp);
+        print_exception(std::cerr, tmp);
         continue;
       }
 
       if(tmp != C_UNSPECIFIED) {
-        state.pretty_print(std::cout, tmp);
+        pretty_print(std::cout, tmp);
         std::cout << std::endl;
       }
 
@@ -150,46 +189,12 @@ static bool do_repl(State& state, bool read_only) {
 #endif
   }
 
-  state.print_gc_stats(std::cout);
-
 #if AR_LINENOISE
-  linenoiseHistorySave(hist_file.str().c_str());
-  linenoiseHistoryFree();
+  if(history_file) {
+    linenoiseHistorySave(hist_file.str().c_str());
+  }
 #endif
   return true;
-}
-
-bool do_file(State& state, std::string path, bool read_only) {
-  Value x = C_FALSE, tmp = C_FALSE;
-
-  AR_FRAME(state, x, tmp);
-
-  if(read_only) {
-    x = state.slurp_file(path);
-    while(x.type() == PAIR) {
-      if(x.car().is_active_exception()) {
-        break;
-      }
-      std::cout << x.car() << std::endl;
-      x = x.cdr();
-    }
-  } else {
-    x = state.load_file(path);
-  }
-
-
-  if(x.is_active_exception()) {
-    state.print_exception(std::cerr, x);
-    return false;
-  }
-
-  return true;
-}
-
-static int cli_exception(State* state, Value exc, const std::string& desc) {
-  state->print_exception(std::cerr, exc);
-  std::cerr << desc << std::endl;
-  return EXIT_FAILURE;
 }
 
 int State::enter_cli(int argc_, char* argv[]) {
@@ -206,7 +211,9 @@ int State::enter_cli(int argc_, char* argv[]) {
   static std::string rest("--");
 
   if(argc == 1) {
+
     if(do_repl(*this, false) == false) {
+      print_gc_stats(std::cout);
       return EXIT_FAILURE;
     }
   }
@@ -245,6 +252,8 @@ int State::enter_cli(int argc_, char* argv[]) {
       if(repl.compare(arg2) == 0) {
         if(!do_repl(*this, true))
           return EXIT_FAILURE;
+        else
+          print_gc_stats(std::cout);
       } else {
         if(!do_file(*this, arg2, true))
           return EXIT_FAILURE;

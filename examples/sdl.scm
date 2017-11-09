@@ -89,7 +89,7 @@
 (set-cell! grid 2 2 1)
 (set-cell! grid 3 2 1)
 
-;; PART 2
+;; PART 2: STATE MANAGEMENT
 
 (define-record State grid-size overlay-visible grid
                entering-number entering-number-field
@@ -202,6 +202,7 @@
            ((#\d) (set! state-dirty #t))
            ((#\o) (state/toggle-overlay!))
            ((#\s) (State/begin-entering!))
+           ((#\r) (repl))
            ((#\i)
             (state/next-turn!)
             

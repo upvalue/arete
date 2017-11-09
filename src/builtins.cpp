@@ -1341,6 +1341,10 @@ Value fn_char_numeric(State& state, size_t argc, Value* argv) {
   return argv[0].character() >= '0' && argv[0].character() <= '9';
 }
 
+Value fn_repl(State& state, size_t argc, Value* argv) {
+  return Value::make_boolean(state.enter_repl());
+}
+
 void State::load_builtin_functions() {
   // Conversion
   defun_core("string->symbol", fn_string_to_symbol, 1);
@@ -1472,9 +1476,10 @@ void State::load_builtin_functions() {
   defun_core("list-get-source", fn_list_get_source, 1);
   defun_core("OpenFn->procedure", fn_openfn_to_procedure, 1);
 
-
   // Garbage collector
   defun_core("gc:collect", fn_gc_collect, 0);
+
+  defun_core("repl", fn_repl, 0);
 
   // Misc
   defun_core("exit", fn_exit, 1);

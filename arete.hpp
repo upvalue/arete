@@ -2001,6 +2001,16 @@ struct State {
    */
   int enter_cli(int argc, char* argv[]);
 
+  /**
+   * Allow Arete's REPL to run.
+   * @param read_only If true, do not evaluate expressions, just read and print them back.
+   * @param history_file path to a history file (relative to home directory)
+   * @return false if errors occurred, true otherwise
+   */
+  bool enter_repl(bool read_only, const char* history_file);
+
+  bool enter_repl() { return enter_repl(false, 0); }
+
   // Image saving and loading
 
   /** Save an image. Must exit after calling. */

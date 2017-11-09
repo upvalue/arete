@@ -284,7 +284,6 @@ Value load_sdl(State& state) {
   state.defun_core("sdl:poll-event", sdl_poll_event, 1);
   state.defun_core("sdl:event-type", sdl_event_type, 1);
   state.defun_core("sdl:event-key", sdl_event_key, 1);
-
   state.defun_core("sdl:event-type-descriptor", sdl_event_type_descriptor, 0);
 
   state.defun_core("sdl:clear", sdl_clear, 0);

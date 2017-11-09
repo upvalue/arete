@@ -638,7 +638,25 @@
           (body (cddr x)))
       (for-each-i
         (lambda (i binding)
-          (unless (and (list? binding) (fx= (length binding) 2))
+          (unless (and (list? binding) (fx= (length binding) 2) (identifier? (car binding)))
+            (raise-source (list-tail (cadr x) i) 'syntax "let* binding must be a list with two elements" (list binding))))
+        bindings)
+
+    `(,#'let (,@(map (lambda (b) (list-source b (car b) #'unspecified)) bindings))
+      ,@(map (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
+      ,@body))))
+
+;; TODO: letrec restrictions.
+(define-syntax letrec
+  (lambda (x)
+    (unless (> (length x) 2)
+      (raise-source x 'syntax "let* expects at least two arguments (bindings and body)" (list x)))
+
+    (let ((bindings (list-ref x 1))
+          (body (cddr x)))
+      (for-each-i
+        (lambda (i binding)
+          (unless (and (list? binding) (fx= (length binding) 2) (identifier? (car binding)))
             (raise-source (list-tail (cadr x) i) 'syntax "let* binding must be a list with two elements" (list binding))))
         bindings)
 
@@ -651,17 +669,6 @@
 
 (define (values . rest)
   (cons (list 'values) rest))
-
-#;(define (vector . rest)
-  (let ((vec (make-vector)))
-    (if (null? rest)
-      vec
-      (let loop ((rest (cdr rest))
-                 (this (car rest)))
-        (vector-append! vec this)
-        (unless (null? rest)
-          (loop (cdr rest))
-          )))))
 
 ;; Records.
 
