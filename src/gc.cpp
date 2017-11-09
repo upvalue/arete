@@ -6,6 +6,9 @@
 // TODO: Finalizers should probably simply be disabled in production builds; this should be used
 // for warnings only.
 
+// They'll all be searched after every collection. Depending on how many persistent finalizable
+// objects are in a program, this could be a source of slowdowns.
+
 #include <chrono>
 
 #include "arete.hpp"

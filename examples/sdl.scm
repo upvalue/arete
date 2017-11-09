@@ -128,10 +128,11 @@
   (set! state-dirty #t))
 
 (define (State/backspace-number!)
-  (unless (eq? (State/entering-number state) 0)
+  (if (eq? (State/entering-number state) 0)
+    (State/entering-number! state #f)
     (let ((n2 (floor (/ (State/entering-number state) 10))))
-      (State/entering-number! state n2))
-    (set! state-dirty #t)))
+        (State/entering-number! state n2)))
+  (set! state-dirty #t))
 
 ;; PART 3 RENDERING
 
@@ -144,12 +145,13 @@
 ;(define *tile-height* (/ *grid-display-height* (grid-height grid)))
 (define *tile-height* (/ *height* (grid-height grid)))
 
-(define timer (sdl:add-timer 'tick 1000))
+(define timer (sdl:add-timer 'tick 500))
 
 (sdl:init *width* *height*)
 
 (define event (sdl:make-event))
 (define done #f)
+(define autorun #f)
 
 (define font (sdl:open-font "examples/assets/DroidSans.ttf" 12))
 
@@ -191,7 +193,8 @@
        (print "mouse click"))
 
       ((timer)
-       (print (sdl:event-timer-tag event)))
+       (when autorun
+         (state/next-turn!)))
 
       ((key-down)
        (State/error-message! state #f)
@@ -213,8 +216,10 @@
            ((#\o) (state/toggle-overlay!))
            ((#\s) (State/begin-entering!))
            ((#\r) (repl))
+           ((#\a) (set! autorun (not autorun)))
            ((#\i)
-            (state/next-turn!)
+            (unless autorun
+              (state/next-turn!))
             
             )
            (else => (lambda (k) (print k))))))
@@ -270,7 +275,7 @@
       (if (State/entering-number state)
         (begin
           (sdl:set-color 255 255 255)
-          (sdl:draw-text font (print-string (case (State/entering-number-field state) ((0) 'width) ((1) 'height)) ":" (State/entering-number state)) 10 (- *height* 40)))))
+          (sdl:draw-text font (print-string "size:" (State/entering-number state)) 10 (- *height* 40)))))
 
     (sdl:set-color 255 255 255)
     (sdl:draw-text font (print-string "turn:" (State/turn state) "controls: (o) show overlay (i) iterate one step (a) auto-iterate (mouse-down): flip cell state") 10 (- *height* 20))

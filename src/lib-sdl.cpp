@@ -180,6 +180,8 @@ Value sdl_event_key(State& state, size_t argc, Value* argv) {
       return state.get_symbol("return");
     case SDL_SCANCODE_BACKSPACE:
       return state.get_symbol("backspace");
+    case SDL_SCANCODE_ESCAPE:
+      return state.get_symbol("escape");
     default: break;
   }
 
@@ -263,7 +265,9 @@ Value sdl_delay(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+//
 ///// FONTS
+//
 
 void ttf_font_finalizer(State& state, Value sfont) {
   TTF_Font** font = state.record_data<TTF_Font*>(sdl_ttf_font_tag, sfont);
@@ -328,6 +332,10 @@ Value sdl_close_font(State& state, size_t argc, Value* argv) {
 
   return C_UNSPECIFIED;
 }
+
+//
+///// TIMERS
+//
 
 uint32_t sdl_timer_callback(uint32_t interval, void* parameter) {
   SDL_Event event;
