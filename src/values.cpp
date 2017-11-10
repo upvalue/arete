@@ -271,8 +271,6 @@ Value State::make_vector_storage(size_t capacity) {
   size_t size = (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity);
   VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE, size));
 
-  storage->length = 0;
-
   return storage;
 }
 
@@ -304,7 +302,6 @@ void State::vector_storage_append(Value sstore, Value value) {
   store->data[store->length++] = value;
   AR_ASSERT("attempted to append to vector-storage past capacity" &&
     store->length <= (store->size - sizeof(VectorStorage) + sizeof(Value)) / sizeof(Value*));
-  //AR_ASSERT(store->length <= store->capacity);
 }
 
 /** Mutating vector append */

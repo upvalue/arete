@@ -360,7 +360,7 @@ Value State::pretty_print_mark(Value v, unsigned& printed_count,
   // std::cout << v << ' ' << v.heap->get_shared_count() << std::endl;
 
   // TODO Check for initial shared object
-  if(cyc > shared_objects_begin) {
+  if(cyc >= shared_objects_begin) {
     print_table_t::iterator it = printed->find(cyc);
 
     if(it != printed->end()) {
@@ -368,6 +368,11 @@ Value State::pretty_print_mark(Value v, unsigned& printed_count,
       // This object has been seen twice and therefore is a cyclic object
       it->second.second = true;
     } else {
+      // This isn't quite right. We don't want to print all objects that may be shared e.g.
+      // (#<Obj1> #<Obj1> #<Obj1>) shouldn't result in the shared structure stuff
+      // (although it is still re-readable like that, so maybe that's fine...)
+
+      // If we wanted to do this differently, we'd have to branch off print tables somehow.
       printed->insert(std::make_pair(cyc, std::make_pair(printed_count++, false)));
     }
 
@@ -383,7 +388,6 @@ Value State::pretty_print_mark(Value v, unsigned& printed_count,
     v.heap->set_shared_count(shared_objects_i++);
     AR_ASSERT(v.heap->get_shared_count() == shared_objects_i - 1);
   }
-
 
   if(v.type() == PAIR) {
     (void) pretty_print_mark(v.car(), printed_count, printed);
@@ -424,12 +428,14 @@ Value State::pretty_print(std::ostream& os, Value v) {
     }
     */
 
+
     std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator it = printed->find(cyc);
 
     if(it != printed->end() && it->second.second == true) {
       os << "#" << it->second.first << "=";
       it->second.second = true;
-    }
+    } else if(it != printed->end()) {
+    } 
   }
 
   for(print_table_t::iterator i = printed->begin(); i != printed->end(); i++) {

@@ -1,13 +1,11 @@
 * Refactoring
-  - [ ] Method calling conventions.
+  - [ ] Method calling conventions revamp.
     Right now, we use argc/argv style, which is convenient for the VM design but probably problematic from a performance
     standpoint and is awkward to use from C++.
-  - 
 
 * Language
   - [ ] Gradual typing
   - [ ] SRFI 89: Optional arguments
-  - [ ] 
 
 * Interpreter
   - [ ] Tail-call optimization.
@@ -16,6 +14,7 @@
     include a precompiled bytecode image for most use cases.
 
 * Memory management
+  - [ ] Symbol collection
   - [ ] Generational garbage collection
 
 * Compiler
@@ -23,6 +22,10 @@
     Replace symbol usage with unique eq? based "bindings." Display closures and most basic inlining,
     e.g. car in the application position.
 
+* I/O
+  - [ ] Tables and structs should have read/write support
+    Structs and other high-level objects may not be READ by any Arete instance, depending on code being loaded, but
+    it'd still be good to have.
+
 * Various optimizations that probably won't make a difference
-  - heap_type_equals() primitive, for when we want to check whether the type of a heap object matches a type.
-* 
+  - [x] heap_type_equals() primitive, for when we want to check whether the type of a heap object matches a type.

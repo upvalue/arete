@@ -353,17 +353,10 @@ void GCSemispace::collect(size_t request, bool force) {
     delete other; 
     other = 0;
   }
+
 }
 
 void GCSemispace::copy_roots() {
-  /*
-  for(size_t i = 0; i != frames.size(); i++) {
-    Frame* f = frames[i];
-    for(size_t j = 0; j != f->size; j++) {
-      copy(f->values[j]);
-    }
-  }
-  */
   for(Frame* f = frames; f != 0; f = f->previous) {
     for(size_t j = 0; j != f->size; j++) {
       copy(f->values[j]);

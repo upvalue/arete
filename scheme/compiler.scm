@@ -94,6 +94,8 @@
   labels ;; 16
   ;; #t if this is top-level code and variables are therefore global
   toplevel? ;; 17
+  ;; function body after analysis pass
+  body ;; 18
   )
 
 (define %OpenFn/make OpenFn/make)
@@ -101,7 +103,7 @@
 (set! OpenFn/make
   (lambda (name)
     (%OpenFn/make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f (make-table)
-                  #f)))
+                  #f #f)))
 
 ;; Although this is called Var, it might be more proper to think of it as a Binding that can be propagated through the
 ;; call stack
@@ -116,11 +118,20 @@
   ;; If #t, this is a reference to a free variable
   upvalue?
   ;; If not #f, index in f.fn->upvalues. Mutually exclusive with upvalue?
-  free-variable-id)
+  free-variable-id
+  ;; #t if variable is ever set!
+  mutated?
+  ;; OpenFn/depth the variable was defined at.
+  scope
+  )
 
 (define %Var/make Var/make)
 (set! Var/make
-  (lambda (id name) (%Var/make id name #f #f)))
+  (lambda (id name) (%Var/make id name #f #f #f #f)))
+
+(define AVar/make
+  (lambda (id name fn)
+    (%Var/make id name #f #f #f (OpenFn/depth fn))))
 
 (define (compiler-log fn . rest)
   (when (not (eq? (top-level-value 'COMPILER-LOG) unspecified))
@@ -133,26 +144,6 @@
     (display " ")
 
     (apply pretty-print rest)))
-
-(define (print-function fn)
-  (print (OpenFn/name fn))
-  (print (OpenFn/insns fn)))
-
-;; This function returns the "cell" at a given I.
-;; For example, (list-tail '(1 2 3) 1) returns (2 3)
-;; This is useful for getting source code information attached to lists.
-#;(define (list-tail lst i)
-  (if (or (null? lst) (not (pair? lst)))
-    (raise 'type "list-tail expects a list with at least one element as its argument" (list lst)))
-  (if (fx= i 0)
-    lst
-    (let loop ((rest lst)
-               (ii 0))
-      (if (null? rest)
-        (raise 'type "list-tail bounds error" (list lst (length lst) i)))
-      (if (fx= ii i)
-        rest
-        (loop (cdr rest) (fx+ ii 1))))))
 
 ;; This function registers the source of a particular expression, by creating a vector with the offset of its code
 ;; and its source code information (see SourceLocation in arete.hpp).
@@ -283,9 +274,6 @@
     (list-ref 2 2 #f)
   ))
 )
-
-;(define microcode-table
-;  '((car 2)))
 
 (define (compile-apply fn x tail?)
   (define stack-check #f)
@@ -796,6 +784,199 @@
   (let ((result (OpenFn->procedure fn)))
     #;(set-vmfunction-log! result #t)
     result))
+
+;; Analysis pass
+
+;; What this does:
+
+;; ((lambda (a)
+;;   ((lambda (b)
+;;     (set! a 5)
+;;     (+ a b)) 10)) 5)
+
+;; Becomes
+
+;; (#<OpenFn env: (#<Binding name: #:a47 mutated: #t>)
+;;   (#<OpenFn env: (#<Binding name: #:b47 mutated: #f>) body:
+;;      (set! #<Binding name: #:a47 mutated: #t>))
+;;      etc...
+
+;; This allows the compiler to (a) inline these functions without causing a name conflict and (b) generate cheaper
+;; OP_CLOSURE_REF instructions in the case that a variable is never mutated.
+
+(define (special-form=? x type)
+  (and (pair? x) (rename? (car x)) (eq? (rename-env (car x)) #f) (eq? (rename-expr (car x)) type)))
+
+;; (define a 5)
+;; ((lambda (b) (+ a b))
+;; Analysis pass does this
+;; (#<OpenFn body: (+ #<Binding name: a depth: 0> #<Binding name: b depth: 1>)
+;; When this is encountered during the code generation pass in the CAR position
+;; We add the bindings from the sub-function to the function, and generate the code directly in that function.
+
+;; A binding of depth 0 is a global, a binding of depth equal to current function is a local...
+
+;; When inlining, we have to adjust all Vars which are shared in the source code, right?
+
+;; Increase local-count by arguments of inlined function.
+;; Adjust all variables > current location
+
+;; This is the free-variable handling, it's necessarily somewhat complex
+
+;; It works like this: when a reference to a free-variable is encountered, this free variable is copied into the
+;; "closure" vector of each function in the call chain between the function where the variable was defined (and where
+;; it is a local variable). This "closure" field is used to generate the close-over instruction, whose arguments tell
+;; the virtual machine to save these free variables either from its locals array (if it was where the free variable
+;; occurred, or from its closure (and so on up the line).
+
+;; These free variables are saved in the form of Upvalues, heap-allocated values which point at the locals array of a 
+;; function until it returns, at which point they are "converted" and function essentially as pointers. 
+
+;; We also have to keep track of the amount of free variables in each function, because a special array is allocated on
+;; the stack to store these Upvalues during function execution.
+(define (analyze-register-free-variable fn x)
+  ;; Go up through function stack, adding variable X to environment as necessary
+  (unless (OpenFn/closure fn)
+    (OpenFn/closure! fn (make-vector)))
+
+  (let ((parent-fn (OpenFn/parent fn))
+        (closure (OpenFn/closure fn)))
+
+    (if (OpenFn/toplevel? parent-fn)
+      (raise 'compile-internal "register-free-variable reached toplevel somehow" (list parent-fn)))
+
+    (aif (table-ref (OpenFn/env parent-fn) x)
+      ;; If this was successful, we've found either a function that has already captured this free variable or the
+      ;; function where it was defined
+      (let ((var (Var/make 0 x)))
+        (compiler-log fn (OpenFn/name fn) "registered free variable" x)
+        ;; Calculate index in closure from closure length
+        ;(Var/idx! var (fx/ (vector-length closure) 2))
+        ;(print closure)
+
+        (Var/idx! var (vector-length closure))
+        ;(Var/idx! var (fx/ (vector-length closure) 2))
+        ;; This is an upvalue
+        (Var/upvalue?! var #t)
+        ;; Add to function environment
+        (table-set! (OpenFn/env fn) x var)
+
+        #;(when (Var/free-variable-id it)
+          (raise 'compile "duplicate free variable" (list it)))
+
+        ;; If this is a free variable and it hasn't been noted as such, do so now
+        (unless (or (Var/upvalue? it) (Var/free-variable-id it))
+          (Var/free-variable-id! it (OpenFn/free-variable-count parent-fn))
+          (OpenFn/free-variable-count! parent-fn (fx+ (OpenFn/free-variable-count parent-fn) 1))
+          (unless (OpenFn/free-variables parent-fn)
+            (OpenFn/free-variables! parent-fn (make-vector)))
+
+          ;; Append to vector of free variables
+          (vector-append! (OpenFn/free-variables parent-fn) (Var/idx it))
+
+          (compiler-log fn "noting free variable" it))
+        ;; Append to closure
+        (vector-append! closure it))
+      (analyze-register-free-variable parent-fn x))))
+
+(define (analyze-lookup fn x src)
+  (let loop ((search-fn fn))
+    (if (eq? search-fn #f)
+      x
+      (if (OpenFn/toplevel? search-fn)
+        (begin
+          (unless (or (top-level-bound? x) (table-ref (OpenFn/env search-fn) x))
+            (print-source src "Warning: reference to undefined global variable" x))
+          x)
+        (aif (table-ref (OpenFn/env search-fn) x)
+          (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
+            it
+            ;; This is an upvalue
+            (if (eq? fn search-fn)
+              ;; This upvalue has already been added to the closure
+              (begin
+                (compiler-log fn "found existing upvalue" it)
+                it)
+              (begin
+                (analyze-register-free-variable fn x)
+                (analyze-lookup fn x src))))
+          (loop (OpenFn/parent search-fn)))))))
+
+;; By the time compiler reaches VARs, the inlining decision is already made.
+;; how does this effect upvalues and upvalue generation?
+
+(define (analyze-expr fn x)
+  (cond
+    ((self-evaluating? x) x)
+    ((identifier? x)
+     #;(pretty-print "analysis:" (analyze-lookup fn x #f))
+
+     (analyze-lookup fn x #f))
+
+    ((special-form=? x 'define)
+     (if (OpenFn/toplevel? fn)
+       x
+       (let* ((name (cadr x)) (var (AVar/make (OpenFn/local-count fn) name fn)))
+         (table-set! (OpenFn/env fn) name var)
+         (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))
+         (list-source x (car x) var (cddr x)))))
+
+    ((special-form=? x 'set!)
+     (let ((var (analyze-lookup fn (cadr x) #f)))
+       (Var/mutated?! var #t)
+       (cons-source x (car x) (cons-source x var (cddr x)))))
+     
+    ((special-form=? x 'lambda)
+     (let* ((sub-fn (OpenFn/make (gensym 'lambda)))
+            (args (cadr x))
+            (arg-len (args-length args))
+            (varargs (or (not (list? args)) (identifier? args))))
+        (OpenFn/parent! sub-fn fn)
+        (OpenFn/depth! sub-fn (if fn (fx+ (OpenFn/depth fn) 1) 0))
+        (OpenFn/min-arity! sub-fn arg-len)
+        (OpenFn/max-arity! sub-fn arg-len)
+        (OpenFn/var-arity! sub-fn varargs)
+
+        ;; Calculate argument count
+        (OpenFn/local-count! sub-fn (if (identifier? args) 1 (fx+ arg-len (if (OpenFn/var-arity sub-fn) 1 0))))
+
+        (unless (null? args)
+          (if (identifier? args)
+            ;; (lambda args args)
+            (table-set! (OpenFn/env sub-fn) args (Var/make 0 args))
+
+            ;; Handle arguments, including varargs
+            (let loop ((rest (cdr args))
+                       (item (car args))
+                       (i 0))
+              (table-set! (OpenFn/env sub-fn) item (AVar/make i item sub-fn ))
+              (unless (null? rest)
+
+                (if (pair? rest)
+                  (loop (cdr rest) (car rest) (+ i 1))
+                  ;; We've hit the varargs
+                  (begin
+                    (table-set! (OpenFn/env sub-fn) rest (AVar/make (+ i 1) rest sub-fn))))))))
+
+        (OpenFn/body! sub-fn (analyze-body sub-fn (cddr x)))
+
+        sub-fn))
+    (else 
+      (map (lambda (sub-x) (analyze-expr fn sub-x)) x)
+      )))
+
+(define (analyze-body fn body)
+  (map (lambda (sub-x) (analyze-expr fn sub-x)) body))
+
+(define (analyze-toplevel body)
+  (define fn (OpenFn/make 'vm-toplevel))
+  (OpenFn/toplevel?! fn #t)
+
+  (scan-defines fn body)
+
+  (OpenFn/body! fn (analyze-body fn body))
+
+  fn)
 
 ;; A copying append that uses source information
 (define (append-source src lst elt)

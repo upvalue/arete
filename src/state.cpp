@@ -16,8 +16,8 @@ State::State():
   globals(),
   temps(),
 
-  shared_objects_begin(0),
-  shared_objects_i(0) {
+  shared_objects_begin(1),
+  shared_objects_i(1) {
 
   symbol_table = new symbol_table_t();
   current_state = this;

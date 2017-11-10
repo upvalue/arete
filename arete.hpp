@@ -1852,6 +1852,7 @@ struct State {
   // Print out a table's internal structure for debugging purposes
   void print_table_verbose(Value tbl);
 
+  //
   Value pretty_print(std::ostream& os, Value v);
   bool pretty_print_shared_obj(std::ostream& os, Value v, print_table_t* printed);
   Value pretty_print_mark(Value v, unsigned&, print_table_t* printed);
@@ -1867,7 +1868,7 @@ struct State {
   bool print_src_pair(std::ostream& os, Value pair, const char* color = ARETE_COLOR_RED);
 
    /**
-   * Print an erroneous line of source code with offending information highlighted
+   * Print an line of source code with a specific source object highlighted
    */
   void print_src_line(std::ostream& os, const SourceLocation& src,
     const char* color = ARETE_COLOR_RED);

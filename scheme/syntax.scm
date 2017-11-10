@@ -227,7 +227,7 @@
         (if (and (rename? bindings) (rename-gensym bindings)) (rename-gensym bindings) bindings)
         (map-improper (lambda (x) (if (and (rename? x) (rename-gensym x)) (rename-gensym x) x)) bindings)))
 
-    (cons-source x (car x) (cons-source x bindings (expand-map (cddr x) new-env)))))
+    (cons-source x (make-rename #f 'lambda) (cons-source x bindings (expand-map (cddr x) new-env)))))
 
 (define expand-if
   (lambda (x env)

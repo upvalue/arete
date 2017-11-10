@@ -16,9 +16,13 @@
 
 (define (main)
   ;(pull-up-bootstraps)
-  (print "do it!")
+  (pretty-print 
+    (analyze-toplevel (list (list (list (make-rename #f 'lambda) '(a) 'a 
+                                        (list (make-rename #f 'set!) 'a #t)
+                                        'a
+                                        )))))
   ;(load "lab.scm")
-  (load "examples/fib.scm")
+  ;(load "examples/fib.scm")
 )
 
 ;(set-top-level-value! 'COMPILER-LOG #t)
