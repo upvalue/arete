@@ -271,31 +271,30 @@ Value State::make_vector_storage(size_t capacity) {
   size_t size = (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity);
   VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE, size));
 
-  storage->capacity = capacity;
   storage->length = 0;
 
   return storage;
 }
 
 Value State::make_vector(size_t capacity) {
-  Value vec(C_FALSE), storage(C_FALSE);
+  Value storage(C_FALSE);
 
-  AR_FRAME(this, vec, storage);
+  AR_FRAME(this, storage);
   storage = make_vector_storage(capacity);
-  vec = gc.allocate(VECTOR, sizeof(Vector));
-  static_cast<Vector*>(vec.heap)->storage = storage;
+  Value vec = gc.allocate(VECTOR, sizeof(Vector));
+  vec.as_unsafe<Vector>()->storage = storage;
+  vec.as_unsafe<Vector>()->capacity = capacity;
 
   return vec;
 }
 
 Value State::make_vector(Value vector_storage) {
-  Value vec(C_FALSE);
+  AR_FRAME(this, vector_storage);
 
-  AR_FRAME(this, vec, vector_storage);
-
-  vec = gc.allocate(VECTOR, sizeof(Vector));
+  Value vec = gc.allocate(VECTOR, sizeof(Vector));
 
   vec.as_unsafe<Vector>()->storage = vector_storage;
+  vec.as_unsafe<Vector>()->capacity = vector_storage.as_unsafe<VectorStorage>()->length;
 
   return vec;
 }
@@ -303,7 +302,9 @@ Value State::make_vector(Value vector_storage) {
 void State::vector_storage_append(Value sstore, Value value) {
   VectorStorage* store = sstore.as<VectorStorage>();
   store->data[store->length++] = value;
-  AR_ASSERT(store->length <= store->capacity);
+  AR_ASSERT("attempted to append to vector-storage past capacity" &&
+    store->length <= (store->size - sizeof(VectorStorage) + sizeof(Value)) / sizeof(Value*));
+  //AR_ASSERT(store->length <= store->capacity);
 }
 
 /** Mutating vector append */
@@ -314,13 +315,16 @@ void State::vector_append(Value vector, Value value) {
 
   store->data[store->length++] = value;
   
-  AR_ASSERT(store->length <= store->capacity);
-  if(store->length == store->capacity) {
+  AR_ASSERT(store->length <= vector.as_unsafe<Vector>()->capacity);
+  if(store->length == vector.as_unsafe<Vector>()->capacity) {
 
     Value storage = store, new_storage;
     AR_FRAME(this, vector, value, storage, new_storage);
 
-    new_storage = make_vector_storage(store->capacity * 2);
+    size_t ncap = vector.as_unsafe<Vector>()->capacity * 2;
+
+    new_storage = make_vector_storage(ncap);
+    vector.as_unsafe<Vector>()->capacity = ncap;
     store = static_cast<VectorStorage*>(vector.vector_storage().heap);
     static_cast<VectorStorage*>(new_storage.heap)->length = store->length;
     

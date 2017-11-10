@@ -429,9 +429,24 @@ struct Value {
   
   ;
   Type type_unsafe() const {
+    if((bits & 3) == 0) {
+      if(bits == 0) return CONSTANT;
+      return (Type)heap->get_type();
+    } else {
+      return (bits & 1) ? FIXNUM : CONSTANT;
+    }
+    // So this is a pretty interesting bit of optimization... the above code
+    // shaves a solid 10ms off bootstrap time compared to the code below.
+    /*
     if(bits & 1) return FIXNUM;
     else if(bits & 2 || bits == 0) return CONSTANT;    
     else return (Type) heap->get_type();
+    */
+  }
+
+  bool heap_type_equals(Type tipe) const {
+    if((bits & 3) == 0 && (bits != 0)) return (heap->get_type() == tipe);
+    return false;
   }
 
   // FIXNUMS
@@ -529,6 +544,14 @@ struct Value {
   bool symbol_immutable() const {
     AR_TYPE_ASSERT(type() == SYMBOL);
     return heap->get_header_bit(SYMBOL_IMMUTABLE_BIT);
+  } 
+  
+  /**
+   * @return true if a symbol has been seen by the reader
+   */
+  bool symbol_was_read() const {
+    AR_TYPE_ASSERT(type() == SYMBOL);
+    return heap->get_header_bit(SYMBOL_READ_BIT);
   }
 
   /** Quickly compare symbol to string */
@@ -539,6 +562,7 @@ struct Value {
 
   static const unsigned SYMBOL_IMMUTABLE_BIT = 1 << 9;
   static const unsigned SYMBOL_GENSYM_BIT = 1 << 10;
+  static const unsigned SYMBOL_READ_BIT = 1 << 11;
 
   // Syntactic closures
   Value rename_expr() const;
@@ -802,17 +826,22 @@ inline Value Value::car() const {
 
 inline size_t Value::list_length() const {
   Value check(bits);
-  if(check == C_NIL) return 0;
-  //AR_TYPE_ASSERT(type() == PAIR);
+  if(check == C_NIL || !check.heap_type_equals(PAIR)) return 0;
   size_t len = 0;
-  Type tipe = check.type();
-  while(tipe == PAIR) {
+  while(true) {
+    if(check == C_NIL) break;
+    else if(!check.heap_type_equals(PAIR)) return 0;
+    else {
+      ++len, check = check.cdr();
+    }
+  }
+  /*
+  while(check.heap_type_equals(PAIR)) {
     ++len;
     check = check.cdr();
     if(check == C_NIL) break;
-    tipe = check.type();
-    if(tipe != PAIR) return 0;
   }
+  */
   return len;
 }
 
@@ -885,7 +914,7 @@ struct Exception : HeapValue {
 };
 
 inline bool Value::is_active_exception() const {
-  return type() == EXCEPTION && heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT);
+  return heap_type_equals(EXCEPTION) && heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT);
 }
 
 inline Value Value::exception_tag() const {
@@ -1080,7 +1109,7 @@ inline VMFunction* Value::closure_function() const {
 /** Backing storage for vectors. These are also used internally when the size
  * of a vector-like object is known in advance */
 struct VectorStorage : HeapValue {
-  size_t length, capacity;
+  size_t length;
   Value data[1];
 
   static const unsigned CLASS_TYPE = VECTOR_STORAGE;
@@ -1088,6 +1117,7 @@ struct VectorStorage : HeapValue {
 
 struct Vector : HeapValue {
   Value storage;
+  size_t capacity;
 
   static const unsigned CLASS_TYPE = VECTOR;
 };
@@ -2147,9 +2177,11 @@ Value load_sdl(State&);
 // MISC! Various inline functions 
 
 inline Type Value::type() const {
+#if ARETE_DEV
   if(!immediatep()) {
     ARETE_ASSERT_LIVE(heap);
   }
+#endif
   return type_unsafe();
 }
 

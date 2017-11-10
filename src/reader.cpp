@@ -435,8 +435,13 @@ Value XReader::read_expr(TokenType tk) {
 
     case TK_STRING: 
       return state.make_string(buffer);
-    case TK_SYMBOL:
-      return state.get_symbol(buffer);
+    case TK_SYMBOL: {
+      Value sym = state.get_symbol(buffer);
+      if(sym.symbol_was_read()) {
+        sym.heap->set_header_bit(Value::SYMBOL_READ_BIT);
+      }
+      return sym;
+    }
     case TK_CHARACTER:
       if(buffer.compare("space") == 0) {
         return state.make_char(' ');

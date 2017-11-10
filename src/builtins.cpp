@@ -223,14 +223,14 @@ Value fn_length(State& state, size_t argc, Value* argv) {
 
   size_t length = 0;
 
-  Value head = argv[0], next;
-  while(head != C_NIL) {
-    next = head.cdr();
-    if(next != C_NIL && next.type() != PAIR) {
+  Value next = argv[0];
+  while(true) {
+    next = next.cdr();
+    length++;
+    if(next == C_NIL) break;
+    if(!next.heap_type_equals(PAIR)) {
       return state.type_error("length got a dotted list as its argument");
     }
-    length++;
-    head = next;
   }
 
   return Value::make_fixnum(length);
@@ -239,7 +239,7 @@ Value fn_length(State& state, size_t argc, Value* argv) {
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
   if(argv[0] == C_NIL) return C_TRUE;
-  while(argv[0].type() == PAIR) {
+  while(argv[0].heap_type_equals(PAIR)) {
     if(argv[0].cdr() == C_NIL) return C_TRUE;
     argv[0] = argv[0].cdr();
   }
@@ -256,7 +256,7 @@ Value fn_list_ref(State& state, size_t argc, Value* argv) {
   size_t idx = argv[1].fixnum_value();
   
   while(idx--) {
-    if(h.cdr().type() != PAIR) {
+    if(!h.cdr().heap_type_equals(PAIR)) {
       return state.type_error("list-ref ran into a dotted list");
     }
     h = h.cdr();
@@ -307,7 +307,7 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
   
   size_t i = 0;
 
-  while(lst.type() == PAIR) {
+  while(lst.heap_type_equals(PAIR)) {
     if(indice) {
       Value argv[2] = {Value::make_fixnum(i), lst.car()};
       tmp = state.apply(fn, 2, argv);
@@ -400,7 +400,7 @@ Value fn_mem_impl(const char* fn_name, Mem method, State& state, size_t argc, Va
   }
 
   Value lst = argv[1], obj = argv[0];
-  while(lst.type() == PAIR) {
+  while(lst.heap_type_equals(PAIR)) {
     switch(method) {
       case MEMQ:
         if(lst.car() == obj) return lst;
@@ -423,7 +423,16 @@ Value fn_memq(State& state, size_t argc, Value* argv) {
 }
 
 Value fn_memv(State& state, size_t argc, Value* argv) {
-  return fn_mem_impl("memv", MEMV, state, argc, argv);
+  static const char* fn_name = "memv";
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
+
+  Value lst = argv[1], obj = argv[0];
+  while(lst.heap_type_equals(PAIR)) {
+    if(lst.car().eqv(obj)) return lst;
+    lst = lst.cdr();
+  }
+
+  return C_FALSE;
 }
 
 Value fn_member(State& state, size_t argc, Value* argv) {

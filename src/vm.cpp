@@ -24,7 +24,7 @@
 #endif
 
 // If true, will allocate Scheme stack values, local variables, and upvalues on the C stack.
-// Improves performances, but relies on non-standard C++ dynamically sized stack arrays.
+// Improves performance, but relies on non-standard C++ dynamically sized stack arrays.
 // May also cause issues with multithreaded programs.
 
 #ifndef AR_USE_C_STACK
@@ -357,11 +357,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     }
   }
 
-  //gc.collect();
-
   size_t code_offset = 0;
 
-  //f.code = (size_t*) ((char*) (f.fn) + sizeof(VMFunction));
 	f.code = (size_t*) f.fn->code_pointer();
 
   AR_ASSERT(gc.live((HeapValue*) f.code));
@@ -547,25 +544,16 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               f.exception = eval_error(os.str());
               goto exception;
             } else if(var_arity) {
-              temps.clear();
-              // We have to save to_apply on temps because it might be collected during make_pair
-              temps.push_back(to_apply);
-              temps.push_back(C_NIL);
+              Value rest = C_NIL;
+
+              AR_FRAME(this, to_apply, rest);
 
               for(size_t i = 0; i != fargc - min_arity; i++) {
-                // Say we have something like
-                // (define (a b . c) #t)
-                // min_arity is 1
-                // fargc is 2
-                // so we want to grab the values at f._stack
-                temps[1] = make_pair(f.stack[f.stack_i - i - 1], temps[1]);
-                // std::cout << temps[1] << std::endl;
+                rest = make_pair(f.stack[f.stack_i - i - 1], rest);
               }
 
-              to_apply = f.stack[f.stack_i - fargc - 1];
-
-              // Replace beginning of varargs with 
-              f.stack[(f.stack_i - fargc - 1) + min_arity + 1] = temps[1];
+              // Replace beginning of varargs with list
+              f.stack[(f.stack_i - fargc - 1) + min_arity + 1] = rest;
 
               // Pop additional arguments off of stack, but leave mandatory arguments plus
               // new rest list on stack
@@ -580,8 +568,9 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               temps.clear();
               temps.insert(temps.end(), &f.stack[f.stack_i - fargc], &f.stack[f.stack_i]);
 
-              argc = fargc;
               argv = &temps[0];
+
+              argc = fargc;
               fn = to_apply;
               
               f.close_over();
@@ -661,10 +650,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
           if(is_enclosed) {
             AR_LOG_VM("enclosing free variable " << i << " from closure idx " << idx);
-            if(f.closure->upvalues->data[idx].type() != UPVALUE) {
-              std::cout << f.closure->upvalues->data[idx].type() << std::endl;
-              std::cout << f.closure->upvalues->data[idx] << std::endl;
-            }
             AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
             vector_storage_append(temps[0], f.closure->upvalues->data[idx]);
           } else {
@@ -734,12 +719,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         }
 
         f.stack_i -= pop;
-
-/*
-        if(pop) {
-          f.stack_i--;
-        }
-        */
 
         VM_DISPATCH();
       }
@@ -895,7 +874,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       VM_CASE(OP_CAR): {
-        if(f.stack[f.stack_i-1].type() != PAIR) {
+        if(!(f.stack[f.stack_i-1].heap_type_equals(PAIR))) {
           VM_EXCEPTION("type", "vm primitive car expected a pair as its argument but got " << f.stack[f.stack_i - 1].type());
         }
         f.stack[f.stack_i-1] = f.stack[f.stack_i-1].as_unsafe<Pair>()->data_car;
@@ -922,7 +901,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         if(index == 0) {
           f.stack[f.stack_i-1] = lst.car();
         } else {
-          while(lst.type() == PAIR) {
+          while(lst.heap_type_equals(PAIR)) {
             if(i == index) {
               f.stack[f.stack_i - 1] = lst.car();
               break;

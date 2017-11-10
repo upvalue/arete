@@ -113,7 +113,11 @@ void State::print_gc_stats(std::ostream& os) {
 # if ARETE_GC_STRATEGY == ARETE_GC_INCREMENTAL
   std::cout << (gc_alloc_timer / 1000) << "ms in allocation" << std::endl;
   std::cout << ((gc_collect_timer + gc_alloc_timer) / 1000) << " ms total" << std::endl;
-# endif 
+# else
+  std::cout << ((size_t)((((char*)gc.active->data + gc.block_cursor) - (char*)gc.active->data)) / 1024) << "kb allocated" << std::endl;
+
+# endif
+
 #endif
 }
 
@@ -536,16 +540,6 @@ void GCIncremental::collect() {
       mark(*f->values[j]);
     }
   }
-  /*
-  for(size_t i = 0; i != frames.size(); i++) {
-    Frame* f = frames[i];
-    for(size_t j = 0; j != f->size; j++) {
-      if(f->values[j]) {
-        mark(*(f->values[j]));
-      }
-    }
-  }
-  */
 
   VMFrame* link = vm_frames;
   while(link != 0) {
