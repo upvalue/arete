@@ -197,13 +197,11 @@
 
 (define expand-lambda
   (lambda (x env)
-    (define new-env (env-make env))
-    (define bindings #f)
-
     (if (fx< (length x) 3)
       (raise-source x 'expand "lambda has no body" (list x)))
 
-    (set! bindings (cadr x))
+    (define bindings (cadr x))
+    (define new-env (env-make env))
 
     (if (or (null? bindings) (pair? bindings))
       (for-each-improper-i
@@ -857,3 +855,9 @@
         (,#'when ,#'condition
           ,@(cddr x)
           (,#'loop ,(cadr x))))))
+
+;; compatibility
+
+(define-syntax er-macro-transformer
+  (lambda (x)
+    (cadr x)))

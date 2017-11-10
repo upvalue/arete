@@ -968,8 +968,9 @@ Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
     if(tst == C_TRUE) count++;
   }
 
+
   if(count > 0) return Value::make_fixnum(count);
-  return Value::make_fixnum(keys.size());
+  return Value::make_fixnum(0);
 }
 
 Value fn_set_top_level_value(State& state, size_t argc, Value* argv) {
@@ -1164,21 +1165,20 @@ Value fn_record_isa(State& state, size_t argc, Value* argv) {
 
 // Compiler
 Value fn_list_get_source(State& state, size_t argc, Value* argv) {
- //  static const char* fn_name = "list-get-source";
-  Value vec, lst = argv[0];
   if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
-    AR_FRAME(state, lst, vec);
+    Value storage;
+    AR_FRAME(state, storage);
 
-    vec = state.make_vector();
+    SourceLocation src(argv[0].pair_src());
+    storage = state.make_vector_storage(4);
 
-    SourceLocation src(lst.pair_src());
 
-    state.vector_append(vec, Value::make_fixnum(src.source));
-    state.vector_append(vec, Value::make_fixnum(src.line));
-    state.vector_append(vec, Value::make_fixnum(src.begin));
-    state.vector_append(vec, Value::make_fixnum(src.length));
+    state.vector_storage_append(storage, Value::make_fixnum(src.source));
+    state.vector_storage_append(storage, Value::make_fixnum(src.line));
+    state.vector_storage_append(storage, Value::make_fixnum(src.begin));
+    state.vector_storage_append(storage, Value::make_fixnum(src.length));
 
-    return vec;
+    return state.make_vector(storage);
   }
   return C_FALSE;
 }

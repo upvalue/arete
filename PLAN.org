@@ -1,0 +1,24 @@
+* Refactoring
+  - [ ] Method calling conventions.
+    Right now, we use argc/argv style, which is convenient for the VM design but probably problematic from a performance
+    standpoint and is awkward to use from C++.
+  - 
+
+* Language
+  - [ ] Gradual typing
+  - [ ] SRFI 89: Optional arguments
+  - [ ] 
+
+* Interpreter
+  - [ ] Tail-call optimization.
+    This may not be a big deal, but I've had to bump the stack size manually on Emscripten/Windows builds because it's
+    so stack hungry. (AR_FRAME may also be a part of this as much as the lack of TCO). It might be simpler to just
+    include a precompiled bytecode image for most use cases.
+
+* Memory management
+  - [ ] Generational garbage collection
+
+* Compiler
+  - [ ] Analysis pass.
+    Replace symbol usage with unique eq? based "bindings." Display closures and most basic inlining,
+    e.g. car in the application position.

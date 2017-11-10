@@ -22,10 +22,10 @@
 
 namespace arete {
 
-Value State::make_env(Value parent) {
+Value State::make_env(Value parent, size_t size) {
   Value vec;
   AR_FRAME(this, vec, parent);
-  vec = make_vector(3);
+  vec = make_vector(3 + size);
   vector_append(vec, parent);
   vector_append(vec, C_FALSE);
   return vec;
@@ -402,9 +402,9 @@ Value State::eval(Value env, Value exp, Value fn_name) {
         } else if(car == globals[S_LAMBDA]) {
           return eval_lambda(env, exp);
         } else if(car == globals[S_SET]) {
-          return eval_set(env,  exp, fn_name);
+          return eval_set(env, exp, fn_name);
         } else if(car == globals[S_BEGIN]) {
-          return eval_begin(env,  exp, fn_name);
+          return eval_begin(env, exp, fn_name);
         } else if(car == globals[S_COND]) {
           return eval_cond(env,  exp, fn_name);
           // add fn name
@@ -523,12 +523,13 @@ Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp,
 
   fn_name = fn.function_name();
 
-  new_env = make_env(fn.function_parent_env());
+  size_t given_args = args.list_length();
+  // Allocating some space in advance here provides a modest speedup by avoiding some collections
+  new_env = make_env(fn.function_parent_env(), given_args + 1);
   // bool eval_args = fn.function_eval_args();
 
   fn_args = fn.function_arguments();
   size_t arity = fn_args.list_length();
-  size_t given_args = args.list_length();
 
   if(given_args < arity) {
     std::ostringstream os;
@@ -604,6 +605,7 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
   size_t given_args = args.list_length();
   size_t min_arity = fn.as<VMFunction>()->min_arity;
   size_t max_arity = fn.as<VMFunction>()->max_arity;
+  bool varargs = fn.vm_function_variable_arity();
 
   if(given_args < min_arity) {
     std::ostringstream os;
@@ -618,7 +620,7 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
   }
 
   size_t argc = 0;
-  vec = make_vector();
+  vec = make_vector_storage(given_args+(varargs?1:0));
   while(args.type() == PAIR) {
     if(argc == max_arity) {
       break;
@@ -628,8 +630,7 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
       tmp = eval(env, args.car());
       EVAL_CHECK(tmp, src_exp, fn_name);
     } 
-    vector_append(vec, tmp);
-    // temps.push_back(tmp);
+    vector_storage_append(vec, tmp);
     argc++;
     args = args.cdr();
   }
@@ -651,7 +652,7 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
       }
       args = args.cdr();
     }
-    vector_append(vec, varargs_begin);
+    vector_storage_append(vec, varargs_begin);
     argc++;
   }
 
@@ -661,7 +662,7 @@ Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value
   }
   AR_ASSERT(gc.live(fn));
   AR_ASSERT(fn.type() == VMFUNCTION);
-  tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &vec.vector_storage().vector_storage_data()[0]);
+  tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &vec.vector_storage_data()[0]);
 
   EVAL_CHECK(tmp, src_exp, fn_name);
   return tmp;
@@ -688,7 +689,7 @@ Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value 
     return eval_error(os.str(), src_exp);
   }
 
-  fn_args = make_vector();
+  fn_args = make_vector_storage(given_args);
   size_t argc = 0;
   while(args.type() == PAIR) {
     if(eval_args) {
@@ -698,12 +699,12 @@ Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value 
       tmp = args.car();
       EVAL_CHECK(tmp, src_exp, fn_name);
     }
-    vector_append(fn_args, tmp);
+    vector_storage_append(fn_args, tmp);
     argc++;
     args = args.cdr();
   }
   
-  tmp = fn.c_function_addr()(*this, argc, fn_args.vector_storage().vector_storage_data());
+  tmp = fn.c_function_addr()(*this, argc, fn_args.vector_storage_data());
   EVAL_CHECK(tmp, src_exp, fn_name);
   return tmp;
 }

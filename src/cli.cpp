@@ -11,7 +11,6 @@
 #include "linenoise.h"
 #endif
 
-using namespace arete;
 using namespace std;
 
 namespace arete {

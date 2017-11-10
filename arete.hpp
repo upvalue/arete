@@ -805,12 +805,13 @@ inline size_t Value::list_length() const {
   if(check == C_NIL) return 0;
   //AR_TYPE_ASSERT(type() == PAIR);
   size_t len = 0;
-  while(check.type() == PAIR) {
+  Type tipe = check.type();
+  while(tipe == PAIR) {
     ++len;
     check = check.cdr();
-    if(check.type() != PAIR && check != C_NIL) {
-      return 0;
-    }
+    if(check == C_NIL) break;
+    tipe = check.type();
+    if(tipe != PAIR) return 0;
   }
   return len;
 }
@@ -1337,6 +1338,7 @@ struct Frame {
   State& state;
   size_t size;
   HeapValue*** values;
+  Frame *previous;
 
   Frame(State& state, size_t size, HeapValue*** values);
   Frame(State* state, size_t size, HeapValue*** values);
@@ -1404,7 +1406,8 @@ struct Block {
 /** Common GC variables */
 struct GCCommon {
   State& state;
-  std::vector<Frame*> frames;
+  //std::vector<Frame*> frames;
+  Frame* frames;
   std::list<Handle*> handles;
 
   /** Vector of obejcts that need to be finalized */
@@ -1420,6 +1423,7 @@ struct GCCommon {
   size_t block_size;
 
   GCCommon(State& state_, size_t heap_size_ = ARETE_HEAP_SIZE): state(state_), 
+    frames(0),
     vm_frames(0),
     collect_before_every_allocation(false),
     allocations(0),
@@ -1445,12 +1449,7 @@ struct GCSemispace : GCCommon {
   char* other_cursor;
   bool collect_before_every_allocation;
 
-  GCSemispace(State& state_): GCCommon(state_), active(0), other(0), block_cursor(0),
-      collect_before_every_allocation(false) {
-
-    active = new Block(heap_size, 0);
-  }
-
+  GCSemispace(State&);
   ~GCSemispace();
 
   void copy(HeapValue** ref);
@@ -1706,6 +1705,8 @@ struct State {
    * in advance
    */
   Value make_vector(size_t capacity = 2);
+
+  Value make_vector(Value vector_storage);
   /**
    * In-place vector append.
    */ 
@@ -1898,7 +1899,7 @@ struct State {
 
   static const size_t VECTOR_ENV_FIELDS = 2;
 
-  Value make_env(Value parent = C_FALSE);
+  Value make_env(Value parent = C_FALSE, size_t size = 0);
 
   void env_set(Value env, Value name, Value val);
 
@@ -2152,17 +2153,19 @@ inline Type Value::type() const {
   return type_unsafe();
 }
 
-inline Frame::Frame(State& state_, size_t size_, HeapValue*** ptrs): state(state_), size(size_), values(ptrs) {
-  state.gc.frames.push_back(this);
+inline Frame::Frame(State& state_, size_t size_, HeapValue*** ptrs): state(state_), size(size_),
+  values(ptrs), previous(state_.gc.frames) {
+  state.gc.frames = this;
 }
 
-inline Frame::Frame(State* state_, size_t size_, HeapValue*** ptrs): state(*state_), size(size_), values(ptrs) {
-  state.gc.frames.push_back(this);
+inline Frame::Frame(State* state_, size_t size_, HeapValue*** ptrs): state(*state_), size(size_),
+  values(ptrs), previous(state_->gc.frames) {
+  state.gc.frames = this;
 }
 
 inline Frame::~Frame() {
-  AR_ASSERT(state.gc.frames.back() == this);
-  state.gc.frames.pop_back();
+  AR_ASSERT(state.gc.frames == this);
+  state.gc.frames = previous;
 }
 
 inline Handle::Handle(State& state_): state(state_), ref(C_FALSE) { initialize(); }

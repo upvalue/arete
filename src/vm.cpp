@@ -733,9 +733,13 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           AR_LOG_VM("jump-if-false not jumping" << jmp_offset);
         }
 
+        f.stack_i -= pop;
+
+/*
         if(pop) {
           f.stack_i--;
         }
+        */
 
         VM_DISPATCH();
       }
@@ -996,7 +1000,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       std::ostringstream os;
       os << source_info(loc, f.fn->name);
       if(frames_lost > 0) {
-        os << std::endl << "<" << frames_lost << " frames lost due to tail call optimization>";
+        os << std::endl << "-- " << frames_lost << " frames lost due to tail call optimization";
       }
       stack_trace.push_back(os.str());
     }

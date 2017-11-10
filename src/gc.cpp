@@ -117,6 +117,21 @@ void State::print_gc_stats(std::ostream& os) {
 #endif
 }
 
+GCSemispace::GCSemispace(State& state_): GCCommon(state_),  active(0), other(0),
+    block_cursor(0),
+    collect_before_every_allocation(false) {
+
+  active = new Block(heap_size, 0);
+}
+
+
+GCSemispace::~GCSemispace() {
+  delete active;
+  if(other != 0) delete other;
+
+}
+
+
 void GCSemispace::copy(HeapValue** ref) {
   // If this is a null ptr or immediate value, nothing is necessary
   if(ref == 0 || Value::immediatep(*ref))
@@ -142,12 +157,6 @@ void GCSemispace::copy(HeapValue** ref) {
   obj->header = RESERVED;
 
   (*ref) = cpy;
-}
-
-GCSemispace::~GCSemispace() {
-  delete active;
-  if(other != 0) delete other;
-
 }
 
 void GCSemispace::allocation_failed(size_t size) {
@@ -343,8 +352,15 @@ void GCSemispace::collect(size_t request, bool force) {
 }
 
 void GCSemispace::copy_roots() {
+  /*
   for(size_t i = 0; i != frames.size(); i++) {
     Frame* f = frames[i];
+    for(size_t j = 0; j != f->size; j++) {
+      copy(f->values[j]);
+    }
+  }
+  */
+  for(Frame* f = frames; f != 0; f = f->previous) {
     for(size_t j = 0; j != f->size; j++) {
       copy(f->values[j]);
     }
@@ -515,7 +531,12 @@ void GCIncremental::collect() {
   mark_bit = !mark_bit;
 
   // Mark all live objects
-  ARETE_LOG_GC("scanning " << frames.size() << " frames for roots");
+  for(Frame* f = frames; f != 0; f = f->previous) {
+    for(size_t j = 0; j != f->size; j++) {
+      mark(*f->values[j]);
+    }
+  }
+  /*
   for(size_t i = 0; i != frames.size(); i++) {
     Frame* f = frames[i];
     for(size_t j = 0; j != f->size; j++) {
@@ -524,6 +545,7 @@ void GCIncremental::collect() {
       }
     }
   }
+  */
 
   VMFrame* link = vm_frames;
   while(link != 0) {

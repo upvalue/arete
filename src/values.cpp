@@ -288,6 +288,18 @@ Value State::make_vector(size_t capacity) {
   return vec;
 }
 
+Value State::make_vector(Value vector_storage) {
+  Value vec(C_FALSE);
+
+  AR_FRAME(this, vec, vector_storage);
+
+  vec = gc.allocate(VECTOR, sizeof(Vector));
+
+  vec.as_unsafe<Vector>()->storage = vector_storage;
+
+  return vec;
+}
+
 void State::vector_storage_append(Value sstore, Value value) {
   VectorStorage* store = sstore.as<VectorStorage>();
   store->data[store->length++] = value;
