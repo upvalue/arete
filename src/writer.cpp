@@ -4,6 +4,15 @@
 
 namespace arete {
 
+typedef std::pair<unsigned, bool> print_info_t;
+typedef std::unordered_map<unsigned, print_info_t> print_table_t;
+
+struct PrintState {
+  print_table_t* table;
+  std::vector<unsigned>* table_keys_printed;
+  unsigned indent_level;
+};
+
 std::ostream& operator<<(std::ostream& os, Type type) {
   switch(type) {
     case FIXNUM: return os << "fixnum";
@@ -161,8 +170,24 @@ std::ostream& operator<<(std::ostream& os, Value v) {
         return os << "#R:local:" << sym;
       }
     }
-    case TABLE:
-      return os << "#<table entries: " << v.as<Table>()->entries << '>';
+    case TABLE: {
+      os << '{';
+      for(size_t i = 0; i != v.as<Table>()->chains->length; i++) {
+        Value chain = v.as<Table>()->chains->data[i];
+        if(chain != C_FALSE) {
+          while(chain != C_NIL) {
+            Value cell = chain.car();
+            os << cell.car() << ' ' << cell.cdr();
+            
+            os << " , ";
+            chain = chain.cdr();
+          }
+        }
+      }
+      os << '}';
+      return os;
+    }
+      //return os << "#<table entries: " << v.as<Table>()->entries << '>';
     case EXCEPTION:
       os << "#<exception '" << v.exception_tag() << " " << v.exception_message();
       if(v.exception_irritants() != C_UNSPECIFIED) {
@@ -273,7 +298,7 @@ void State::print_stack_trace(std::ostream& os, bool clear) {
 
 /** Print simple objects, print already-printed shared references, print the opening part of
  * a structure that refers to some shared object */
-bool State::pretty_print_shared_obj(std::ostream& os, Value v,
+static bool pretty_print_shared_obj(State& state, std::ostream& os, Value v,
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
 
   if(!v.print_recursive()) {
@@ -300,24 +325,23 @@ bool State::pretty_print_shared_obj(std::ostream& os, Value v,
 }
 
 
-Value State::pretty_print_sub(std::ostream& os, Value v, 
+Value pretty_print_sub(State& state, std::ostream& os, Value v, 
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
 
-  if(pretty_print_shared_obj(os, v, printed)) {
+  if(pretty_print_shared_obj(state, os, v, printed)) {
     return C_UNSPECIFIED;
   }
-  // AR_ASSERT(cyc >= shared_objects_begin);
 
   if(v.type() == PAIR) {
     os << '(';
     Value v2;
     for(v2 = v; v2.type() == PAIR; v2 = v2.cdr()) {
-      pretty_print_sub(os, v2.car(), printed);
+      pretty_print_sub(state, os, v2.car(), printed);
       if(v2.cdr().type() == PAIR) os << ' ';
     }
     if(v2 != C_NIL) {
       os << " . ";
-      (void) pretty_print_sub(os, v2, printed);
+      (void) pretty_print_sub(state, os, v2, printed);
     }
     os << ')';
   } else if(v.type() == RECORD) {
@@ -328,7 +352,7 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
       os << ' ';
 
       os << type.record_type_field_names().list_ref(i) << ": ";
-      (void) pretty_print_sub(os, v.record_ref(i), printed);
+      (void) pretty_print_sub(state, os, v.record_ref(i), printed);
     }
 
     if(type.as_unsafe<RecordType>()->data_size > 0) {
@@ -338,7 +362,7 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
   } else if(v.type() == VECTOR) {
     os << "#(";
     for(size_t i = 0; i != v.vector_length(); i++) {
-      (void) pretty_print_sub(os, v.vector_ref(i), printed);
+      (void) pretty_print_sub(state, os, v.vector_ref(i), printed);
       if(i != v.vector_length() - 1)
         os << ' ';
     }
@@ -348,7 +372,7 @@ Value State::pretty_print_sub(std::ostream& os, Value v,
   return C_UNSPECIFIED;
 }
 
-Value State::pretty_print_mark(Value v, unsigned& printed_count,
+static Value pretty_print_mark(State& state, Value v, unsigned& printed_count,
     std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
 
   if(!v.print_recursive()) {
@@ -360,7 +384,7 @@ Value State::pretty_print_mark(Value v, unsigned& printed_count,
   // std::cout << v << ' ' << v.heap->get_shared_count() << std::endl;
 
   // TODO Check for initial shared object
-  if(cyc >= shared_objects_begin) {
+  if(cyc >= state.shared_objects_begin) {
     print_table_t::iterator it = printed->find(cyc);
 
     if(it != printed->end()) {
@@ -385,21 +409,21 @@ Value State::pretty_print_mark(Value v, unsigned& printed_count,
     */
     return C_UNSPECIFIED;
   } else {
-    v.heap->set_shared_count(shared_objects_i++);
-    AR_ASSERT(v.heap->get_shared_count() == shared_objects_i - 1);
+    v.heap->set_shared_count(state.shared_objects_i++);
+    AR_ASSERT(v.heap->get_shared_count() == state.shared_objects_i - 1);
   }
 
   if(v.type() == PAIR) {
-    (void) pretty_print_mark(v.car(), printed_count, printed);
-    (void) pretty_print_mark(v.cdr(), printed_count, printed);
+    (void) pretty_print_mark(state, v.car(), printed_count, printed);
+    (void) pretty_print_mark(state, v.cdr(), printed_count, printed);
   } else if(v.type() == RECORD) {
     for(size_t i = 0; i != v.record_field_count(); i++) {
-      (void) pretty_print_mark(v.record_ref(i), printed_count, printed);
+      (void) pretty_print_mark(state, v.record_ref(i), printed_count, printed);
     }
   } else if(v.type() == VECTOR) {
     // std::cout << "marking a vector" << std::endl;
     for(size_t i = 0; i != v.vector_length(); i++) {
-      (void) pretty_print_mark(v.vector_ref(i), printed_count, printed);
+      (void) pretty_print_mark(state, v.vector_ref(i), printed_count, printed);
     }
   } else {
     std::cerr << "pretty printer doesn't know how to mark object of type " << v.type() << std::endl;
@@ -413,7 +437,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
   std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed = new std::unordered_map<unsigned, std::pair<unsigned, bool> >();
   shared_objects_i = shared_objects_begin;
   unsigned mark_count = 0;
-  Value _ = pretty_print_mark(v, mark_count, printed);
+  Value _ = pretty_print_mark(*this, v, mark_count, printed);
 
   if(!(v.atomic() || v.type() == SYMBOL || v.type() == TABLE)) {
     unsigned cyc = v.heap->get_shared_count();
@@ -428,7 +452,6 @@ Value State::pretty_print(std::ostream& os, Value v) {
     }
     */
 
-
     std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator it = printed->find(cyc);
 
     if(it != printed->end() && it->second.second == true) {
@@ -442,7 +465,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
     i->second.second = false;
   }
 
-  _ = pretty_print_sub(os, v, printed);
+  _ = pretty_print_sub(*this, os, v, printed);
 
   shared_objects_begin = shared_objects_i + 1;
   delete printed;

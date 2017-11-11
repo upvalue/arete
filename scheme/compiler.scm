@@ -823,61 +823,21 @@
 
 ;; This is the free-variable handling, it's necessarily somewhat complex
 
-;; It works like this: when a reference to a free-variable is encountered, this free variable is copied into the
-;; "closure" vector of each function in the call chain between the function where the variable was defined (and where
-;; it is a local variable). This "closure" field is used to generate the close-over instruction, whose arguments tell
-;; the virtual machine to save these free variables either from its locals array (if it was where the free variable
-;; occurred, or from its closure (and so on up the line).
+;; ((lambda (a) a) 5)
 
-;; These free variables are saved in the form of Upvalues, heap-allocated values which point at the locals array of a 
-;; function until it returns, at which point they are "converted" and function essentially as pointers. 
+;; #<Binding name: a idx: 0>
 
-;; We also have to keep track of the amount of free variables in each function, because a special array is allocated on
-;; the stack to store these Upvalues during function execution.
-(define (analyze-register-free-variable fn x)
-  ;; Go up through function stack, adding variable X to environment as necessary
-  (unless (OpenFn/closure fn)
-    (OpenFn/closure! fn (make-vector)))
+;; (can we just replace function env entirely while compiling the body?)
+;; ((lambda (a) a) 5)
+;; ((lambda (a) (lambda (b) (+ a b)) 5) 5)
 
-  (let ((parent-fn (OpenFn/parent fn))
-        (closure (OpenFn/closure fn)))
+;; ((lambda (a) 5) 5)
+;; Inline a function in the CAR. We compile it backwards: evaluate and local-set the arguments, then compile the
+;; function body as though it were there.
 
-    (if (OpenFn/toplevel? parent-fn)
-      (raise 'compile-internal "register-free-variable reached toplevel somehow" (list parent-fn)))
+;; What makes this hard: name conflicts. Our current upvalue handling is also built into the name lookup process.
 
-    (aif (table-ref (OpenFn/env parent-fn) x)
-      ;; If this was successful, we've found either a function that has already captured this free variable or the
-      ;; function where it was defined
-      (let ((var (Var/make 0 x)))
-        (compiler-log fn (OpenFn/name fn) "registered free variable" x)
-        ;; Calculate index in closure from closure length
-        ;(Var/idx! var (fx/ (vector-length closure) 2))
-        ;(print closure)
-
-        (Var/idx! var (vector-length closure))
-        ;(Var/idx! var (fx/ (vector-length closure) 2))
-        ;; This is an upvalue
-        (Var/upvalue?! var #t)
-        ;; Add to function environment
-        (table-set! (OpenFn/env fn) x var)
-
-        #;(when (Var/free-variable-id it)
-          (raise 'compile "duplicate free variable" (list it)))
-
-        ;; If this is a free variable and it hasn't been noted as such, do so now
-        (unless (or (Var/upvalue? it) (Var/free-variable-id it))
-          (Var/free-variable-id! it (OpenFn/free-variable-count parent-fn))
-          (OpenFn/free-variable-count! parent-fn (fx+ (OpenFn/free-variable-count parent-fn) 1))
-          (unless (OpenFn/free-variables parent-fn)
-            (OpenFn/free-variables! parent-fn (make-vector)))
-
-          ;; Append to vector of free variables
-          (vector-append! (OpenFn/free-variables parent-fn) (Var/idx it))
-
-          (compiler-log fn "noting free variable" it))
-        ;; Append to closure
-        (vector-append! closure it))
-      (analyze-register-free-variable parent-fn x))))
+;; Considering a name itself equivalent to a location is the source of some confusion
 
 (define (analyze-lookup fn x src)
   (let loop ((search-fn fn))
@@ -889,17 +849,7 @@
             (print-source src "Warning: reference to undefined global variable" x))
           x)
         (aif (table-ref (OpenFn/env search-fn) x)
-          (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
-            it
-            ;; This is an upvalue
-            (if (eq? fn search-fn)
-              ;; This upvalue has already been added to the closure
-              (begin
-                (compiler-log fn "found existing upvalue" it)
-                it)
-              (begin
-                (analyze-register-free-variable fn x)
-                (analyze-lookup fn x src))))
+          it
           (loop (OpenFn/parent search-fn)))))))
 
 ;; By the time compiler reaches VARs, the inlining decision is already made.
@@ -909,8 +859,6 @@
   (cond
     ((self-evaluating? x) x)
     ((identifier? x)
-     #;(pretty-print "analysis:" (analyze-lookup fn x #f))
-
      (analyze-lookup fn x #f))
 
     ((special-form=? x 'define)

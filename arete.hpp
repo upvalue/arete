@@ -1583,6 +1583,12 @@ struct State {
   typedef std::pair<unsigned, bool> print_info_t;
   typedef std::unordered_map<unsigned, print_info_t> print_table_t;
 
+  struct PrintState {
+    print_table_t* table;
+    std::vector<unsigned>* table_keys_printed;
+    unsigned indent_level;
+  };
+
   /** Counts how many times gensym has been called; appended to the end of gensyms to ensure
    * their uniqueness */ 
   size_t gensym_counter;
@@ -1852,11 +1858,8 @@ struct State {
   // Print out a table's internal structure for debugging purposes
   void print_table_verbose(Value tbl);
 
-  //
+  /** Pretty print an object. Expensive */
   Value pretty_print(std::ostream& os, Value v);
-  bool pretty_print_shared_obj(std::ostream& os, Value v, print_table_t* printed);
-  Value pretty_print_mark(Value v, unsigned&, print_table_t* printed);
-  Value pretty_print_sub(std::ostream& os, Value v, print_table_t*);
 
   // Source code location tracking
   unsigned register_source(const std::string& path, std::istream& is);
