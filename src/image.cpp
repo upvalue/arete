@@ -13,7 +13,10 @@
 //   offsets into the file
 // After that
 // Globals
-// Symbol table (pair of strings and pointers)
+
+// TODO here: We cannot modify the internal globals table and keep compatibilty with images. This
+// could present a problem if we abandon the interpreter. Another approach might be to just
+// initialize globals separately.
 
 namespace arete {
 
@@ -22,6 +25,8 @@ static const char MAGIC_STRING[] = "ARETE-IMAGE\n";
 struct ImageHeader {
   char magic[sizeof(MAGIC_STRING)];
   size_t heap_size;
+  bool is_64_bit;
+  size_t global_count;
 };
 
 struct CString {
@@ -46,12 +51,13 @@ struct PointerUpdater {
   Value update_value(Value v) {
     if(v.immediatep()) return v;
     Value nv(update_heapvalue(v.heap));
+    AR_IMG_LOG("updated pointer from " << (size_t)v.heap << " to " << (size_t) nv.heap);
     return nv;
   }
 
   void update_pointers(HeapValue* heap) {
     switch(heap->get_type()) {
-      case STRING: 
+      case FLONUM: case STRING: case CHARACTER:
         break;
       case PAIR: {
         static_cast<Pair*>(heap)->data_car = update_value(static_cast<Pair*>(heap)->data_car);
@@ -70,7 +76,6 @@ struct PointerUpdater {
       case SYMBOL:
         static_cast<Symbol*>(heap)->name = update_value(static_cast<Symbol*>(heap)->name);
         static_cast<Symbol*>(heap)->value = update_value(static_cast<Symbol*>(heap)->value);
-
         break;
       default:
         std::cerr << "don't know how to write type " << (Type) heap->get_type() << std::endl;
@@ -88,24 +93,19 @@ struct ImageWriter {
 
   }
 
-  HeapValue* update_heapvalue(HeapValue* v) {
-    char* ptr = (char*) v;
-    ptr -= (size_t)state.gc.active->data;
-    return (HeapValue*)(heap_offset + ptr);
-  }
-
-  Value update_value(Value v) {
-    if(v.immediatep()) {
-      return v;
-    } 
-    Value nv(update_heapvalue(v.heap));
-    AR_IMG_LOG("write ptr " << ((size_t) v.heap) << " as " << ((size_t) nv.heap));
-    return nv;
-  }
-
   void serialize_value(HeapValue* heap) {
     updater.update_pointers(heap);
     fwrite(heap, heap->size, 1, f);
+  }
+
+  void write_globals() {
+    for(size_t i = 0; i != state.globals.size(); i++) {
+      Value v = updater.update_value(state.globals[i]);
+      fwrite(&v.heap, sizeof(HeapValue*), 1, f);
+      AR_IMG_LOG("writing global " << i);
+      //fwrite(&globals[i], sizeof(ptrdiff_t), 1, f);
+    }
+    AR_IMG_LOG("wrote " << state.globals.size() << " globals");
   }
 
   void walk_heap() {
@@ -128,23 +128,18 @@ struct ImageReader {
   ImageReader(State& state_, FILE* f_): state(state_), f(f_) {}
   ~ImageReader() {}
 
-  HeapValue* update_heapvalue(HeapValue* v) {
-    char* ptr = (char*) v;
-    ptr -= heap_offset;
-    return (HeapValue*)(state.gc.active->data + (size_t)ptr);
-    //return (HeapValue*)(state.gc.active->data + (size_t)(((char*) v) - heap_offset));
-  }
-
-  Value update_value(Value v) {
-    if(v.immediatep()) return v;
-    Value nv(update_heapvalue(v.heap));
-    AR_IMG_LOG("read " << ((size_t) v.heap) << " to " << ((size_t) nv.heap));
-    return nv;
+  void read_globals() {
+    for(size_t i = 0; i != hdr.global_count; i++) {
+      Value ptr;
+      fread(&ptr.heap, sizeof(HeapValue*), 1, f);
+      ptr = updater.update_value(ptr);
+      state.globals.push_back(ptr);
+    }
   }
 
   void walk_heap() {
     char* sweep = state.gc.active->data;
-    while(state.gc.block_cursor != heap_size) {
+    while(state.gc.block_cursor != hdr.heap_size) {
       int place = ftell(f);
 
       // allocating a HeapValue on the stack...how naughty
@@ -159,17 +154,30 @@ struct ImageReader {
 
       updater.update_pointers(heap);
 
-      Value vug(heap);
-      std::cout << vug << std::endl;
+      Value valu(heap);
 
       state.gc.block_cursor += v.size;
       sweep += v.size;
     }
+
+    // Rebuild symbol table
+    sweep = state.gc.active->data;
+    size_t symbols_loaded = 0;
+    while(sweep != (state.gc.active->data + state.gc.block_cursor)) {
+      Value valu((HeapValue*) sweep);
+      if(valu.heap_type_equals(SYMBOL)) {
+        std::string key(valu.symbol_name_data());
+        state.symbol_table->insert(std::make_pair(key, valu.as<Symbol>()));
+        symbols_loaded++;
+      }
+      sweep += valu.heap->size;
+    }
+
+    AR_IMG_LOG(symbols_loaded << " symbols loaded");
   }
 
+  ImageHeader hdr;
   PointerUpdater updater;
-  size_t heap_size;
-  size_t heap_offset;
   State& state;
   FILE* f;
 };
@@ -179,16 +187,20 @@ void State::save_image(const std::string& path) {
   assert(f);
 
   ImageHeader hdr;
+  memset(&hdr, 0, sizeof(ImageHeader));
   strncpy((char*) &hdr.magic, (char*)MAGIC_STRING, sizeof(MAGIC_STRING));
   hdr.heap_size = gc.block_cursor;
+  hdr.is_64_bit = ARETE_64_BIT;
+  hdr.global_count = globals.size();
 
   size_t heap_begin = sizeof(ImageHeader);
   fwrite(&hdr, sizeof(ImageHeader), 1, f);
 
   ImageWriter writer(*this, f);
-  writer.heap_offset = heap_begin;
   writer.updater.begin = (size_t)gc.active->data;
-  writer.updater.offset = heap_begin;
+  writer.updater.offset = ftell(f) + (globals.size() * sizeof(size_t));
+  writer.write_globals();
+  AR_IMG_LOG("writing heap beginning at " << writer.updater.offset);
   writer.walk_heap();
 
   fclose(f);
@@ -204,6 +216,9 @@ const char* State::load_image(const std::string& path) {
   ImageHeader hdr;
   fread(&hdr, sizeof(ImageHeader), 1, f);
 
+  AR_IMG_LOG((hdr.is_64_bit ? "64-bit" : "32-bit") << " image with " << hdr.global_count
+    << " globals");
+
   if(strncmp(hdr.magic, MAGIC_STRING, 13) != 0) {
     return "failed to read image header";
   }
@@ -212,10 +227,11 @@ const char* State::load_image(const std::string& path) {
 
   ImageReader reader(*this, f);
 
-  reader.heap_size = hdr.heap_size;
-  reader.heap_offset = sizeof(ImageHeader);
-  reader.updater.begin = sizeof(ImageHeader);
+  reader.hdr = hdr;
   reader.updater.offset = (size_t)gc.active->data;
+  reader.updater.begin = ftell(f) + (hdr.global_count * sizeof(size_t));
+  AR_IMG_LOG("reading heap beginning at " << reader.updater.begin << " into " << (size_t)gc.active->data);
+  reader.read_globals();
   reader.walk_heap();
 
   fclose(f);

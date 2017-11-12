@@ -27,13 +27,24 @@ int main(int argc, char *argv[]) {
   state->get_symbol("okay");
   Value vec2 = state->make_vector(vec);
 
+  state->globals.push_back(state->get_symbol("okay"));
+
+  state->globals.push_back(Value::make_fixnum(5));
+  //std::cout << "glbole: " << state->globals.at(1) << std::endl;
+
   state->save_image("heap.boot");
 
+/*
   delete state;
 
   state = new arete::State();
+  */
+  state->globals.clear();
+  state->gc.block_cursor = 0;
 
   const char* result = state->load_image("heap.boot");
+
+  //std::cout << "globals: " << state->globals.at(0) << std::endl;
 
   if(result) std::cerr << result << std::endl;
 
