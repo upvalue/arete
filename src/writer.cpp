@@ -41,6 +41,8 @@
 // of heap allocation. They should probably only be used for debugging purposes and for
 // serialization of objects with shared structure.
 
+#include <math.h>
+
 #include "arete.hpp"
 
 namespace arete {
@@ -88,8 +90,14 @@ typedef std::pair<unsigned, bool> print_info_t;
 typedef std::unordered_map<unsigned, print_info_t> print_table_t;
 
 struct PrintState {
-  print_table_t* printed;
+  PrintState(): try_pretty(true), print_shared(true),
+    shared_objects_begin(1), shared_objects_i(1) {}
+  ~PrintState() {}
+
   bool try_pretty;
+  bool print_shared;
+  size_t shared_objects_begin, shared_objects_i;
+  print_table_t* printed;
   unsigned printed_count;
   size_t row_width;
   size_t indent;
@@ -123,6 +131,8 @@ std::ostream& operator<<(std::ostream& os, Type type) {
     default: return os << "unknown";
   }
 }
+
+// Simple writer. Will choke on objects with cyclic structure.
 
 std::ostream& operator<<(std::ostream& os, Value v) {
   switch(v.type()) {
@@ -158,7 +168,19 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       return os << "#<record-type " << v.as<RecordType>()->name.string_data() << ' ' <<
         v.as<RecordType>()->field_count << ' ' << v.as<RecordType>()->data_size << '>';
     }
-    case FLONUM:
+    case FLONUM: {
+      double flo = v.flonum_value();
+      // C++ prints 5.0 as 5, we want to print it with the decimal point always
+      // so it's clear what type the value has
+      if(floor(flo) == flo) {
+        os << flo << ".0";
+      } else {
+        os << flo;
+      }
+      return os;
+    }
+
+    
       return os << v.flonum_value(); 
     case SYMBOL:
       return os << v.symbol_name_data();
@@ -444,7 +466,6 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
     } else if(v.type() == TABLE) {
       os2 << '{';
       TableIterator ti(v);
-      size_t normal_indent = ps.indent;
       ps.indent += ps.indent_level;
       while(++ti) {
         os2 << '\0';
@@ -464,11 +485,7 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
 
       Value type = v.record_type();
 
-      std::streampos pos = os2.tellp();
-
       os2 << type.record_type_name().string_data();
-
-      std::streampos pos2 = os2.tellp();
 
       os2 << '\0';
 
@@ -499,7 +516,6 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
       os2 << ')';
     }
   }
-
 
   std::string str(os2.str());
 
@@ -555,10 +571,39 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
   return C_UNSPECIFIED;
 }
 
-static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
+static Value pretty_print_clear_mark(State& state, Value v, PrintState& ps) {
+  if(!v.print_recursive()) return C_UNSPECIFIED;
 
+  if(v.heap->get_shared_count() == 0) {
+    return C_UNSPECIFIED;    
+  }
+
+  v.heap->set_shared_count(0);
+
+  if(v.type() == PAIR) {
+    (void) pretty_print_clear_mark(state, v.car(), ps);
+    (void) pretty_print_clear_mark(state, v.cdr(), ps);
+  } else if(v.type() == RECORD) {
+    for(size_t i = 0; i != v.record_field_count(); i++) {
+      (void) pretty_print_clear_mark(state, v.record_ref(i), ps);
+    }
+  } else if(v.type() == VECTOR) {
+    // std::cout << "marking a vector" << std::endl;
+    for(size_t i = 0; i != v.vector_length(); i++) {
+      (void) pretty_print_clear_mark(state, v.vector_ref(i), ps);
+    }
+  } else if(v.type() == TABLE) {
+    TableIterator ti(v);
+    while(++ti) {
+      pretty_print_clear_mark(state, ti.value(), ps);
+    }
+  }
+
+  return C_UNSPECIFIED;
+}
+
+static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
   if(!v.print_recursive()) {
-    AR_ASSERT(v.type() != VECTOR);
     return C_UNSPECIFIED;
   }
 
@@ -566,7 +611,7 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
   // std::cout << v << ' ' << v.heap->get_shared_count() << std::endl;
 
   // TODO Check for initial shared object
-  if(cyc >= state.shared_objects_begin) {
+  if(cyc >= ps.shared_objects_begin) {
     print_table_t::iterator it = ps.printed->find(cyc);
 
     if(it != ps.printed->end()) {
@@ -593,8 +638,8 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
     */
     return C_UNSPECIFIED;
   } else {
-    v.heap->set_shared_count(state.shared_objects_i++);
-    AR_ASSERT(v.heap->get_shared_count() == state.shared_objects_i - 1);
+    v.heap->set_shared_count(ps.shared_objects_i++);
+    AR_ASSERT(v.heap->get_shared_count() == ps.shared_objects_i - 1);
   }
 
   if(v.type() == PAIR) {
@@ -610,7 +655,6 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
       (void) pretty_print_mark(state, v.vector_ref(i), ps);
     }
   } else if(v.type() == TABLE) {
-
     TableIterator ti(v);
     while(++ti) {
       pretty_print_mark(state, ti.value(), ps);
@@ -625,39 +669,30 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
 
 Value State::pretty_print(std::ostream& os, Value v) {
   std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed = new std::unordered_map<unsigned, std::pair<unsigned, bool> >();
-  shared_objects_i = shared_objects_begin;
 
   PrintState ps;
 
-  ps.printed = printed;
   ps.printed_count = 0;
   ps.indent_level = 2;
   ps.row_width = 120;
   ps.indent = 0;
-  ps.try_pretty = true;
 
-  Value _ = pretty_print_mark(*this, v, ps);
+  ps.printed = printed;
+  // Right now printing can't return an exception, but it might if we allow users to extend this
+  Value _;
 
+  _ = pretty_print_mark(*this, v, ps);
+
+  // Print a toplevel repeated object object.
   if(!(v.atomic() || v.type() == SYMBOL || v.type() == TABLE)) {
     unsigned cyc = v.heap->get_shared_count();
-    /*
-    if(cyc > shared_objects_begin) {
-      os << "#" << cyc << '=';
-    }
-
-    std::cout << "CYC: " << cyc << std::endl;
-    for(std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator ig = printed->begin(); ig != printed->end(); ig++) {
-      std::cout << ig->first << std::endl;
-    }
-    */
 
     std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator it = printed->find(cyc);
 
     if(it != printed->end() && it->second.second == true) {
       os << "#" << it->second.first << "=";
       it->second.second = true;
-    } else if(it != printed->end()) {
-    } 
+    }
   }
 
   for(print_table_t::iterator i = printed->begin(); i != printed->end(); i++) {
@@ -665,8 +700,8 @@ Value State::pretty_print(std::ostream& os, Value v) {
   }
 
   _ = pretty_print_sub(*this, os, v, ps);
+  _ = pretty_print_clear_mark(*this, v, ps);
 
-  shared_objects_begin = shared_objects_i + 1;
   delete printed;
   return _;
 

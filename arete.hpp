@@ -1601,10 +1601,6 @@ struct State {
   /** A GC-tracked array of temporary values. May be cleared by function calls. */
   std::vector<Value> temps;
 
-  /** Used to mark objects when printing shared structure */
-  unsigned shared_objects_begin;
-  unsigned shared_objects_i;
-
   /** A stack trace. */
   std::vector<std::string> stack_trace;
 
