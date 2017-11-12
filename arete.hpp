@@ -1580,14 +1580,6 @@ struct State {
 #endif 
 
   typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
-  typedef std::pair<unsigned, bool> print_info_t;
-  typedef std::unordered_map<unsigned, print_info_t> print_table_t;
-
-  struct PrintState {
-    print_table_t* table;
-    std::vector<unsigned>* table_keys_printed;
-    unsigned indent_level;
-  };
 
   /** Counts how many times gensym has been called; appended to the end of gensyms to ensure
    * their uniqueness */ 

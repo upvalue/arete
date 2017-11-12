@@ -1,4 +1,45 @@
 // writer.cpp - Output of Scheme objects and source code
+// Includes printing of pretty and cyclic objects
+
+// A quick explanation of how the fancy printing works
+
+// Cyclic printing
+
+// Each object has a 16 or 32 bit int in its header that can be used for this purpose. We
+// dive through the object tree recursively setting this int to a value that is unique to each
+// print. (Currently, we use State::shared_object_begin and State::shared_object_i for this purpose)
+// In the future, we should probably just reset all values before each pretty-print and use 
+// stack-allocated ints. This is more expensive but would avoid the issue of an overflow.
+
+// This is conceptually similar to a garbage collector mark, but we have to use the ints to keep
+// track of the order in which objects will actually be printed. 
+
+// When actual printing occurs, we use a hash table that relates these unique ints to whether or
+// not they've already been printed, as well as an integer that tells the user (or reader) which
+// object they are.
+
+// A value which has not been printed is printed fully along with this int, i.e. #0= 
+// A value which has already been printed is simply printed as #0#
+
+// Pretty printing
+
+// We try to indent things nicely so that source code and large tables/records are more readable
+// for the user. The printer does this by outputting \0 at places that are likely candidates for
+// a line break + indent
+
+// e.x. (define (a)\0 something-really-long)
+// or 
+// #<Record\0field1: "value1"\0field2: "value2">
+
+// If an object's contents do not fit on a single line easily, we'll do a line break + indent
+// at these points. However, past a certain point (e.g. if we've used up a lot of horizontal space)
+// It will give up and print them as a giant blob like a naive printer.
+
+// Both of these combine to mean that pretty-printing is fairly expensive and causes a fair amount
+// of heap allocation. They should probably only be used for debugging purposes and when values
+// with cyclic references are serialized for re-reading
+
+// TODO: More user control over printing process. Disable pretty or cyclic printing.
 
 #include "arete.hpp"
 
@@ -8,9 +49,10 @@ typedef std::pair<unsigned, bool> print_info_t;
 typedef std::unordered_map<unsigned, print_info_t> print_table_t;
 
 struct PrintState {
-  print_table_t* table;
-  std::vector<unsigned>* table_keys_printed;
-  unsigned indent_level;
+  print_table_t* printed;
+  unsigned printed_count;
+  size_t row_width;
+  size_t indent;
 };
 
 std::ostream& operator<<(std::ostream& os, Type type) {
@@ -325,55 +367,135 @@ static bool pretty_print_shared_obj(State& state, std::ostream& os, Value v,
 }
 
 
-Value pretty_print_sub(State& state, std::ostream& os, Value v, 
-    std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
-
-  if(pretty_print_shared_obj(state, os, v, printed)) {
+Value pretty_print_sub(State& state, std::ostream& os, Value v,  PrintState& ps) {
+  if(pretty_print_shared_obj(state, os, v, ps.printed)) {
     return C_UNSPECIFIED;
   }
 
+  std::ostringstream os2;
+
+  // std::cout << "indenty" << ps.indent << std::endl;
+
+  size_t start_indent1 = ps.indent;
+
   if(v.type() == PAIR) {
-    os << '(';
+    // LISTS
+
+    os2 << '(';
     Value v2;
+
+    unsigned indent_after = 0, attempt_indent = 0;
+
+    if(v.car() == state.globals[State::S_DEFINE] || v.car() == state.globals[State::S_LAMBDA] ||
+      v.car() == state.globals[State::S_IF]) {
+      attempt_indent = 1;
+      indent_after = 2;
+    } else {
+      attempt_indent = 1;
+      indent_after = 1;
+
+    }
+
     for(v2 = v; v2.type() == PAIR; v2 = v2.cdr()) {
-      pretty_print_sub(state, os, v2.car(), printed);
-      if(v2.cdr().type() == PAIR) os << ' ';
+      pretty_print_sub(state, os2, v2.car(), ps);
+      if(attempt_indent) {
+        if(attempt_indent++ >= indent_after && v2.cdr() != C_NIL) {
+          ps.indent = start_indent1 + 1;
+          os2 << '\0';
+        }
+      }
+
+      if(v2.cdr().type() == PAIR) os2 << ' ';
     }
     if(v2 != C_NIL) {
-      os << " . ";
-      (void) pretty_print_sub(state, os, v2, printed);
+      os2 << " . ";
+      (void) pretty_print_sub(state, os2, v2, ps);
     }
-    os << ')';
-  } else if(v.type() == RECORD) {
-    os << "#<";
-    Value type = v.record_type();
-    os << type.record_type_name().string_data();
-    for(unsigned i = 0; i != v.record_field_count(); i++) {
-      os << ' ';
+    os2 << ')';
 
-      os << type.record_type_field_names().list_ref(i) << ": ";
-      (void) pretty_print_sub(state, os, v.record_ref(i), printed);
+  } else if(v.type() == RECORD) {
+    // RECORDS
+
+    os2 << "#<";
+    Value type = v.record_type();
+    os2 << type.record_type_name().string_data();
+    for(unsigned i = 0; i != v.record_field_count(); i++) {
+      os2 << ' ';
+
+      os2 << type.record_type_field_names().list_ref(i) << ": ";
+      (void) pretty_print_sub(state, os2, v.record_ref(i), ps);
     }
 
     if(type.as_unsafe<RecordType>()->data_size > 0) {
-      os << " " << type.as_unsafe<RecordType>()->data_size << "b udata";
+      os2 << " " << type.as_unsafe<RecordType>()->data_size << "b udata";
     }
-    os << '>';
+    os2 << '>';
   } else if(v.type() == VECTOR) {
-    os << "#(";
+    // VECTORS
+
+    os2 << "#(";
     for(size_t i = 0; i != v.vector_length(); i++) {
-      (void) pretty_print_sub(state, os, v.vector_ref(i), printed);
+      (void) pretty_print_sub(state, os2, v.vector_ref(i), ps);
       if(i != v.vector_length() - 1)
-        os << ' ';
+        os2 << ' ';
     }
-    os << ')';
+    os2 << ')';
   }
+
+  ps.indent = start_indent1;
+
+  std::string str(os2.str());
+  if(str.size() > ps.row_width || ps.row_width < 80) {
+    size_t start_indent = ps.indent;
+    size_t start_row_width = ps.row_width;
+
+    for(size_t i = 0; i != str.size(); i++) {
+      if(str[i] == '\0') {
+        os << '\n';
+        ps.indent = start_indent + 1;
+        ps.row_width = start_row_width - 2;
+
+        // Eat whitespace so it doesn't effect our indent.
+        while(i != str.size()) {
+          if(str[i] == '\0' || isspace(str[i])) {
+            i++;
+            continue;
+          }
+          i--;
+          break;
+        }
+
+        for(size_t i = 0; i != start_indent + 1; i++) {
+          os << ' ' << ' ';
+        }
+        continue;
+      } else {
+        os << str[i];
+      }
+    }
+
+    ps.indent = start_indent;
+    ps.row_width = start_row_width;
+  } else {
+    // Give up and just write it out as a big blob!
+    for(size_t i = 0; i != str.size(); i++) {
+      if(str[i] == '\0') {
+        continue;
+      } else {
+        os << str[i];
+      }
+    }
+  }
+
+  // if os2.size() > ps.row_width OR if row_width has gone down because we're running out of room
+  // (say 80 or something)...
+
+  // go through os2's string
 
   return C_UNSPECIFIED;
 }
 
-static Value pretty_print_mark(State& state, Value v, unsigned& printed_count,
-    std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
+static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
 
   if(!v.print_recursive()) {
     AR_ASSERT(v.type() != VECTOR);
@@ -385,9 +507,9 @@ static Value pretty_print_mark(State& state, Value v, unsigned& printed_count,
 
   // TODO Check for initial shared object
   if(cyc >= state.shared_objects_begin) {
-    print_table_t::iterator it = printed->find(cyc);
+    print_table_t::iterator it = ps.printed->find(cyc);
 
-    if(it != printed->end()) {
+    if(it != ps.printed->end()) {
       // std::cout << "marking " << cyc << "as seen twice" << std::endl;
       // This object has been seen twice and therefore is a cyclic object
       it->second.second = true;
@@ -397,7 +519,7 @@ static Value pretty_print_mark(State& state, Value v, unsigned& printed_count,
       // (although it is still re-readable like that, so maybe that's fine...)
 
       // If we wanted to do this differently, we'd have to branch off print tables somehow.
-      printed->insert(std::make_pair(cyc, std::make_pair(printed_count++, false)));
+      ps.printed->insert(std::make_pair(cyc, std::make_pair(ps.printed_count++, false)));
     }
 
     /*
@@ -414,16 +536,16 @@ static Value pretty_print_mark(State& state, Value v, unsigned& printed_count,
   }
 
   if(v.type() == PAIR) {
-    (void) pretty_print_mark(state, v.car(), printed_count, printed);
-    (void) pretty_print_mark(state, v.cdr(), printed_count, printed);
+    (void) pretty_print_mark(state, v.car(), ps);
+    (void) pretty_print_mark(state, v.cdr(), ps);
   } else if(v.type() == RECORD) {
     for(size_t i = 0; i != v.record_field_count(); i++) {
-      (void) pretty_print_mark(state, v.record_ref(i), printed_count, printed);
+      (void) pretty_print_mark(state, v.record_ref(i), ps);
     }
   } else if(v.type() == VECTOR) {
     // std::cout << "marking a vector" << std::endl;
     for(size_t i = 0; i != v.vector_length(); i++) {
-      (void) pretty_print_mark(state, v.vector_ref(i), printed_count, printed);
+      (void) pretty_print_mark(state, v.vector_ref(i), ps);
     }
   } else {
     std::cerr << "pretty printer doesn't know how to mark object of type " << v.type() << std::endl;
@@ -436,8 +558,12 @@ static Value pretty_print_mark(State& state, Value v, unsigned& printed_count,
 Value State::pretty_print(std::ostream& os, Value v) {
   std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed = new std::unordered_map<unsigned, std::pair<unsigned, bool> >();
   shared_objects_i = shared_objects_begin;
-  unsigned mark_count = 0;
-  Value _ = pretty_print_mark(*this, v, mark_count, printed);
+  PrintState ps;
+  ps.printed = printed;
+  ps.printed_count = 0;
+  ps.row_width = 120;
+  ps.indent = 0;
+  Value _ = pretty_print_mark(*this, v, ps);
 
   if(!(v.atomic() || v.type() == SYMBOL || v.type() == TABLE)) {
     unsigned cyc = v.heap->get_shared_count();
@@ -465,7 +591,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
     i->second.second = false;
   }
 
-  _ = pretty_print_sub(*this, os, v, printed);
+  _ = pretty_print_sub(*this, os, v, ps);
 
   shared_objects_begin = shared_objects_i + 1;
   delete printed;
