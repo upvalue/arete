@@ -56,8 +56,6 @@ struct TableIterator {
 
   bool operator++() {
   try_again:
-    if(i == table.as<Table>()->chains->length) return false;
-
     // If we have a current chain
     if(chain != C_FALSE && chain != C_NIL) {
       cell = chain.car();
@@ -65,13 +63,14 @@ struct TableIterator {
       return true;      
     }
 
-    // Go to the next chain
-    for(; i != table.as<Table>()->chains->length; i++) {
-      chain = table.as<Table>()->chains->data[i++];
-      goto try_again;
+    if(i == table.as<Table>()->chains->length) {
+      chain = C_FALSE;
+      return false;
     }
 
-    AR_ASSERT(!"this should never be reached");
+    // Go to the next chain
+    chain = table.as<Table>()->chains->data[i++];
+    goto try_again;
   }
 
   Value operator*() const {
@@ -374,9 +373,7 @@ void State::print_stack_trace(std::ostream& os, bool clear) {
 
 /** Print simple objects, print already-printed shared references, print the opening part of
  * a structure that refers to some shared object */
-static bool pretty_print_shared_obj(State& state, std::ostream& os, Value v,
-    std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed) {
-
+static bool pretty_print_shared_obj(State& state, std::ostream& os, Value v, PrintState& ps) {
   if(!v.print_recursive()) {
     os << v;
     return true;
@@ -387,9 +384,9 @@ static bool pretty_print_shared_obj(State& state, std::ostream& os, Value v,
   //std::cout << "CHECKING fOR SHARED OBJECT " << cyc << std::endl;
 
   // std::cout << cyc << ' ' << shared_objects_begin << std::endl;
-  print_table_t::iterator it = printed->find(cyc);
+  print_table_t::iterator it = ps.printed->find(cyc);
 
-  if(it != printed->end()) {
+  if(it != ps.printed->end()) {
     if(it->second.second) {
       os << "#" << it->second.first << "#";
       return true;
@@ -400,117 +397,126 @@ static bool pretty_print_shared_obj(State& state, std::ostream& os, Value v,
   return false;
 }
 
-
-Value pretty_print_sub(State& state, std::ostream& os, Value v,  PrintState& ps) {
-  if(pretty_print_shared_obj(state, os, v, ps.printed)) {
-    return C_UNSPECIFIED;
-  }
-
+static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintState& ps) {
   std::ostringstream os2;
 
   // std::cout << "indenty" << ps.indent << std::endl;
 
   size_t start_indent1 = ps.indent;
+  size_t start_row_width = ps.row_width;
+  ps.row_width -= ps.indent;
 
-  if(v.type() == PAIR) {
-    // LISTS
+  if(!pretty_print_shared_obj(state, os2, v, ps)) {
+    if(v.type() == PAIR) {
+      // LISTS
 
-    os2 << '(';
-    Value v2;
+      os2 << '(';
+      Value v2;
 
-    unsigned indent_after = 0, attempt_indent = 0;
+      unsigned indent_after = 0, attempt_indent = 0;
 
-    if(v.car() == state.globals[State::S_DEFINE] || v.car() == state.globals[State::S_LAMBDA] ||
-      v.car() == state.globals[State::S_IF]) {
-      attempt_indent = 1;
-      indent_after = 2;
-    } else {
-      attempt_indent = 1;
-      indent_after = 1;
-    }
-
-    for(v2 = v; v2.type() == PAIR; v2 = v2.cdr()) {
-      pretty_print_sub(state, os2, v2.car(), ps);
-      if(attempt_indent) {
-        if(attempt_indent++ >= indent_after && v2.cdr() != C_NIL) {
-          ps.indent = start_indent1 + ps.indent_level;
-          os2 << '\0';
-        }
+      if(v.car() == state.globals[State::S_DEFINE] || v.car() == state.globals[State::S_LAMBDA] ||
+        v.car() == state.globals[State::S_IF]) {
+        attempt_indent = 1;
+        indent_after = 2;
+      } else {
+        attempt_indent = 1;
+        indent_after = 1;
       }
 
-      if(v2.cdr().type() == PAIR) os2 << ' ';
-    }
-    if(v2 != C_NIL) {
-      os2 << " . ";
-      (void) pretty_print_sub(state, os2, v2, ps);
-    }
-    os2 << ')';
+      for(v2 = v; v2.type() == PAIR; v2 = v2.cdr()) {
+        pretty_print_sub(state, os2, v2.car(), ps);
+        if(attempt_indent) {
+          if(attempt_indent++ >= indent_after && v2.cdr() != C_NIL) {
+            ps.indent = start_indent1 + ps.indent_level;
+            os2 << '\0';
+          }
+        }
 
-  } else if(v.type() == TABLE) {
-    os2 << '{';
-    TableIterator ti(v);
-    while(++ti) {
-      os2 << '\0';
-      std::streampos pos = os2.tellp();
-      pretty_print_sub(state, os2, ti.key(), ps);
-      std::streampos pos2 = os2.tellp();
-      //std::cout << (pos2 - pos) << std::endl;
-      os2 << ' ';
-      size_t maybe_indent = ps.indent;
-      ps.indent += ((pos2 - pos)) + 1;
-      pretty_print_sub(state, os2, ti.value(), ps);
-      ps.indent = maybe_indent;
-      os2 << " , ";
-    }
-    os2 << '}';
-  } else if(v.type() == RECORD) {
-    // RECORDS
-    os2 << "#<";
-    Value type = v.record_type();
-    std::streampos pos = os2.tellp();
-    os2 << type.record_type_name().string_data();
-    std::streampos pos2 = os2.tellp();
-    os2 << '\0';
-    size_t maybe_indent = ps.indent;
-    ps.indent += ((pos2 - pos)) + ps.indent_level;
-    for(unsigned i = 0; i != v.record_field_count(); i++) {
-      os2 << ' ';
+        if(v2.cdr().type() == PAIR) os2 << ' ';
+      }
+      if(v2 != C_NIL) {
+        os2 << " . ";
+        (void) pretty_print_sub(state, os2, v2, ps);
+      }
+      os2 << ')';
 
-      os2 << type.record_type_field_names().list_ref(i) << ": ";
-      (void) pretty_print_sub(state, os2, v.record_ref(i), ps);
-      os2 << '\0';
-    }
-
-    maybe_indent = ps.indent;
-
-    if(type.as_unsafe<RecordType>()->data_size > 0) {
-      os2 << " " << type.as_unsafe<RecordType>()->data_size << "b udata";
-    }
-    os2 << '>';
-  } else if(v.type() == VECTOR) {
-    // VECTORS
-
-    os2 << "#(";
-    for(size_t i = 0; i != v.vector_length(); i++) {
-      (void) pretty_print_sub(state, os2, v.vector_ref(i), ps);
-      if(i != v.vector_length() - 1)
+    } else if(v.type() == TABLE) {
+      os2 << '{';
+      TableIterator ti(v);
+      size_t normal_indent = ps.indent;
+      ps.indent += ps.indent_level;
+      while(++ti) {
+        os2 << '\0';
+        //for(size_t i = 0; i != start_indent1; i++) os2 << ' ';
+        pretty_print_sub(state, os2, ti.key(), ps);
         os2 << ' ';
+        pretty_print_sub(state, os2, ti.value(), ps);
+        os2 << " , ";
+      }
+      os2 << '\0';
+      os2 << '\b';
+      //for(size_t i = 0; i != start_indent1; i++) os2 << ' ';
+      os2 << '}';
+    } else if(v.type() == RECORD) {
+      // RECORDS
+      os2 << "#<";
+
+      Value type = v.record_type();
+
+      std::streampos pos = os2.tellp();
+
+      os2 << type.record_type_name().string_data();
+
+      std::streampos pos2 = os2.tellp();
+
+      os2 << '\0';
+
+      //ps.indent = ((pos2 - pos)) + ps.indent_level;
+      ps.indent += ps.indent_level;
+      // ps.indent += ps.indent_level;
+      for(unsigned i = 0; i != v.record_field_count(); i++) {
+        os2 << ' ';
+
+        os2 << type.record_type_field_names().list_ref(i) << ": ";
+        (void) pretty_print_sub(state, os2, v.record_ref(i), ps);
+        os2 << '\0';
+      }
+
+      if(type.as_unsafe<RecordType>()->data_size > 0) {
+        os2 << " " << type.as_unsafe<RecordType>()->data_size << "b udata";
+      }
+      os2 << "\b>";
+    } else if(v.type() == VECTOR) {
+      // VECTORS
+
+      os2 << "#(";
+      for(size_t i = 0; i != v.vector_length(); i++) {
+        (void) pretty_print_sub(state, os2, v.vector_ref(i), ps);
+        if(i != v.vector_length() - 1)
+          os2 << ' ';
+      }
+      os2 << ')';
     }
-    os2 << ')';
   }
 
-  ps.indent = start_indent1;
 
   std::string str(os2.str());
-  if(str.size() > ps.row_width || ps.row_width < 80) {
 
+  if(ps.try_pretty && (str.size() > ps.row_width && ps.row_width > 60)) {
     for(size_t i = 0; i != str.size(); i++) {
       if(str[i] == '\0') {
         os << '\n';
+        
+        bool dedent = false;
 
         // Eat whitespace so it doesn't effect our indent.
         while(i != str.size()) {
           if(str[i] == '\0' || isspace(str[i])) {
+            i++;
+            continue;
+          } else if(str[i] == '\b') {
+            dedent = true;
             i++;
             continue;
           }
@@ -518,7 +524,7 @@ Value pretty_print_sub(State& state, std::ostream& os, Value v,  PrintState& ps)
           break;
         }
 
-        for(size_t i = 0; i != ps.indent + ps.indent_level; i++) {
+        for(size_t i = 0; i != (dedent ? start_indent1 : ps.indent); i++) {
           os << ' ';
         }
         continue;
@@ -537,6 +543,9 @@ Value pretty_print_sub(State& state, std::ostream& os, Value v,  PrintState& ps)
       }
     }
   }
+
+  ps.indent = start_indent1;
+  ps.row_width = start_row_width;
 
   // if os2.size() > ps.row_width OR if row_width has gone down because we're running out of room
   // (say 80 or something)...

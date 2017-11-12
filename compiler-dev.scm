@@ -17,7 +17,7 @@
 (define (main)
   ;(pull-up-bootstraps)
   (pretty-print 
-    (analyze-toplevel (list (list (list (make-rename #f 'lambda) '(a) 'a 
+    (analyze-toplevel (list (list (list (make-rename #f 'lambda) '(a b) 'a 
                                         (list (make-rename #f 'set!) 'a #t)
                                         'a
                                         )))))
