@@ -75,7 +75,7 @@
 #endif
 
 #ifndef ARETE_HEAP_SIZE 
-# define ARETE_HEAP_SIZE (1024 * 1024)
+# define ARETE_HEAP_SIZE (1024)
 #endif 
 
 #ifndef ARETE_GC_LOAD_FACTOR
@@ -111,6 +111,7 @@
 #define ARETE_LOG_TAG_GC (1 << 0)
 #define ARETE_LOG_TAG_READER (1 << 1)
 #define ARETE_LOG_TAG_VM (1 << 2)
+#define ARETE_LOG_TAG_IMAGE (1 << 3)
 
 #ifdef _MSC_VER
 # define ARETE_COLOR 0
@@ -2036,6 +2037,7 @@ struct State {
 
   /** Save an image. Must exit after calling. */
   void save_image(const std::string& path);
+  const char* load_image(const std::string& path);
 };
 
 ///// READ! S-Expression reader

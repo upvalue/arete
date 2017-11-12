@@ -1,6 +1,8 @@
 // main.cpp - Entry point for standalone builds
 #include "arete.hpp"
 
+using namespace arete;
+
 int do_main(int argc, char* argv[]) {
   arete::State* state = new arete::State();
   state->boot();
@@ -10,5 +12,22 @@ int do_main(int argc, char* argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-  return do_main(argc, argv);
+  //return do_main(argc, argv);
+  arete::State* state = new arete::State();
+
+  Value v1 = state->make_pair(C_FALSE, C_FALSE);
+  state->make_pair(v1, Value::make_fixnum(10));
+  state->save_image("heap.boot");
+
+  delete state;
+
+  state = new arete::State();
+
+  const char* result = state->load_image("heap.boot");
+
+  if(result) std::cerr << result << std::endl;
+
+  delete state;
+
+  return 0;
 }
