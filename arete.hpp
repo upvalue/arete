@@ -373,9 +373,7 @@ struct Value {
   /** Returns true if object's visible representation may have shared structure */
   bool print_recursive() const {
     switch(type()) {
-      case PAIR:
-      case RECORD:
-      case VECTOR:
+      case PAIR: case RECORD: case VECTOR: case TABLE:
         return true;
       default:
         return false;

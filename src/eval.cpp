@@ -431,7 +431,9 @@ Value State::eval(Value env, Value exp, Value fn_name) {
 
       if(car.is_active_exception()) {
         if(exp.car().type() == SYMBOL) {
-          return eval_error("attempt to apply undefined function", exp);
+          std::ostringstream os;
+          os << "attempt to apply undefined function " << exp.car();
+          return eval_error(os.str(), exp);
         }
         return car;
       }

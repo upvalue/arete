@@ -1,6 +1,8 @@
 // writer.cpp - Output of Scheme objects and source code
 // Includes printing of pretty and cyclic objects
 
+// TODO: More user control over printing process. Disable pretty or cyclic printing.
+
 // A quick explanation of how the fancy printing works
 
 // Cyclic printing
@@ -36,23 +38,63 @@
 // It will give up and print them as a giant blob like a naive printer.
 
 // Both of these combine to mean that pretty-printing is fairly expensive and causes a fair amount
-// of heap allocation. They should probably only be used for debugging purposes and when values
-// with cyclic references are serialized for re-reading
-
-// TODO: More user control over printing process. Disable pretty or cyclic printing.
+// of heap allocation. They should probably only be used for debugging purposes and for
+// serialization of objects with shared structure.
 
 #include "arete.hpp"
 
 namespace arete {
+
+/** 
+ * An object for easily iterating over the keys/values of a table. Assumes no insertion 
+ * takes place
+ */
+struct TableIterator {
+  TableIterator(Value table_): i(0), table(table_), chain(C_NIL), cell(C_FALSE) {}
+
+  ~TableIterator() {}
+
+  bool operator++() {
+  try_again:
+    if(i == table.as<Table>()->chains->length) return false;
+
+    // If we have a current chain
+    if(chain != C_FALSE && chain != C_NIL) {
+      cell = chain.car();
+      chain = chain.cdr();
+      return true;      
+    }
+
+    // Go to the next chain
+    for(; i != table.as<Table>()->chains->length; i++) {
+      chain = table.as<Table>()->chains->data[i++];
+      goto try_again;
+    }
+
+    AR_ASSERT(!"this should never be reached");
+  }
+
+  Value operator*() const {
+    return cell;
+  }
+
+  Value key() const { AR_ASSERT(cell != C_FALSE); return cell.car(); }
+  Value value() const { AR_ASSERT(cell != C_FALSE); return cell.cdr(); }
+
+  size_t i;
+  Value table, chain, cell;
+};
 
 typedef std::pair<unsigned, bool> print_info_t;
 typedef std::unordered_map<unsigned, print_info_t> print_table_t;
 
 struct PrintState {
   print_table_t* printed;
+  bool try_pretty;
   unsigned printed_count;
   size_t row_width;
   size_t indent;
+  unsigned indent_level;
 };
 
 std::ostream& operator<<(std::ostream& os, Type type) {
@@ -214,17 +256,9 @@ std::ostream& operator<<(std::ostream& os, Value v) {
     }
     case TABLE: {
       os << '{';
-      for(size_t i = 0; i != v.as<Table>()->chains->length; i++) {
-        Value chain = v.as<Table>()->chains->data[i];
-        if(chain != C_FALSE) {
-          while(chain != C_NIL) {
-            Value cell = chain.car();
-            os << cell.car() << ' ' << cell.cdr();
-            
-            os << " , ";
-            chain = chain.cdr();
-          }
-        }
+      TableIterator ti(v);
+      while(++ti) {
+        os << ti.key() << ' ' << ti.value() << " , ";
       }
       os << '}';
       return os;
@@ -393,14 +427,13 @@ Value pretty_print_sub(State& state, std::ostream& os, Value v,  PrintState& ps)
     } else {
       attempt_indent = 1;
       indent_after = 1;
-
     }
 
     for(v2 = v; v2.type() == PAIR; v2 = v2.cdr()) {
       pretty_print_sub(state, os2, v2.car(), ps);
       if(attempt_indent) {
         if(attempt_indent++ >= indent_after && v2.cdr() != C_NIL) {
-          ps.indent = start_indent1 + 1;
+          ps.indent = start_indent1 + ps.indent_level;
           os2 << '\0';
         }
       }
@@ -413,18 +446,42 @@ Value pretty_print_sub(State& state, std::ostream& os, Value v,  PrintState& ps)
     }
     os2 << ')';
 
+  } else if(v.type() == TABLE) {
+    os2 << '{';
+    TableIterator ti(v);
+    while(++ti) {
+      os2 << '\0';
+      std::streampos pos = os2.tellp();
+      pretty_print_sub(state, os2, ti.key(), ps);
+      std::streampos pos2 = os2.tellp();
+      //std::cout << (pos2 - pos) << std::endl;
+      os2 << ' ';
+      size_t maybe_indent = ps.indent;
+      ps.indent += ((pos2 - pos)) + 1;
+      pretty_print_sub(state, os2, ti.value(), ps);
+      ps.indent = maybe_indent;
+      os2 << " , ";
+    }
+    os2 << '}';
   } else if(v.type() == RECORD) {
     // RECORDS
-
     os2 << "#<";
     Value type = v.record_type();
+    std::streampos pos = os2.tellp();
     os2 << type.record_type_name().string_data();
+    std::streampos pos2 = os2.tellp();
+    os2 << '\0';
+    size_t maybe_indent = ps.indent;
+    ps.indent += ((pos2 - pos)) + ps.indent_level;
     for(unsigned i = 0; i != v.record_field_count(); i++) {
       os2 << ' ';
 
       os2 << type.record_type_field_names().list_ref(i) << ": ";
       (void) pretty_print_sub(state, os2, v.record_ref(i), ps);
+      os2 << '\0';
     }
+
+    maybe_indent = ps.indent;
 
     if(type.as_unsafe<RecordType>()->data_size > 0) {
       os2 << " " << type.as_unsafe<RecordType>()->data_size << "b udata";
@@ -446,14 +503,10 @@ Value pretty_print_sub(State& state, std::ostream& os, Value v,  PrintState& ps)
 
   std::string str(os2.str());
   if(str.size() > ps.row_width || ps.row_width < 80) {
-    size_t start_indent = ps.indent;
-    size_t start_row_width = ps.row_width;
 
     for(size_t i = 0; i != str.size(); i++) {
       if(str[i] == '\0') {
         os << '\n';
-        ps.indent = start_indent + 1;
-        ps.row_width = start_row_width - 2;
 
         // Eat whitespace so it doesn't effect our indent.
         while(i != str.size()) {
@@ -465,8 +518,8 @@ Value pretty_print_sub(State& state, std::ostream& os, Value v,  PrintState& ps)
           break;
         }
 
-        for(size_t i = 0; i != start_indent + 1; i++) {
-          os << ' ' << ' ';
+        for(size_t i = 0; i != ps.indent + ps.indent_level; i++) {
+          os << ' ';
         }
         continue;
       } else {
@@ -474,8 +527,6 @@ Value pretty_print_sub(State& state, std::ostream& os, Value v,  PrintState& ps)
       }
     }
 
-    ps.indent = start_indent;
-    ps.row_width = start_row_width;
   } else {
     // Give up and just write it out as a big blob!
     for(size_t i = 0; i != str.size(); i++) {
@@ -518,6 +569,8 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
       // (#<Obj1> #<Obj1> #<Obj1>) shouldn't result in the shared structure stuff
       // (although it is still re-readable like that, so maybe that's fine...)
 
+      // Actually, that seems to be how most Schemes behave, so it's fine.
+
       // If we wanted to do this differently, we'd have to branch off print tables somehow.
       ps.printed->insert(std::make_pair(cyc, std::make_pair(ps.printed_count++, false)));
     }
@@ -547,6 +600,12 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
     for(size_t i = 0; i != v.vector_length(); i++) {
       (void) pretty_print_mark(state, v.vector_ref(i), ps);
     }
+  } else if(v.type() == TABLE) {
+
+    TableIterator ti(v);
+    while(++ti) {
+      pretty_print_mark(state, ti.value(), ps);
+    }
   } else {
     std::cerr << "pretty printer doesn't know how to mark object of type " << v.type() << std::endl;
     AR_ASSERT(!"pretty printer doesn't know how to mark object");
@@ -558,11 +617,16 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
 Value State::pretty_print(std::ostream& os, Value v) {
   std::unordered_map<unsigned, std::pair<unsigned, bool> >* printed = new std::unordered_map<unsigned, std::pair<unsigned, bool> >();
   shared_objects_i = shared_objects_begin;
+
   PrintState ps;
+
   ps.printed = printed;
   ps.printed_count = 0;
+  ps.indent_level = 2;
   ps.row_width = 120;
   ps.indent = 0;
+  ps.try_pretty = true;
+
   Value _ = pretty_print_mark(*this, v, ps);
 
   if(!(v.atomic() || v.type() == SYMBOL || v.type() == TABLE)) {
