@@ -29,6 +29,57 @@ struct CString {
   char data[1];
 };
 
+// Updates pointers as they are read or written
+struct PointerUpdater {
+  size_t begin, offset;
+
+  PointerUpdater(size_t begin_, size_t offset_): begin(begin_), offset(offset_) {}
+  PointerUpdater() {}
+  ~PointerUpdater() {}
+
+  HeapValue* update_heapvalue(HeapValue* v) {
+    char* ptr = (char*) v;
+    ptr -= (size_t) begin;
+    return (HeapValue*)(offset + ptr);
+  }
+
+  Value update_value(Value v) {
+    if(v.immediatep()) return v;
+    Value nv(update_heapvalue(v.heap));
+    return nv;
+  }
+
+  void update_pointers(HeapValue* heap) {
+    switch(heap->get_type()) {
+      case STRING: 
+        break;
+      case PAIR: {
+        static_cast<Pair*>(heap)->data_car = update_value(static_cast<Pair*>(heap)->data_car);
+        static_cast<Pair*>(heap)->data_cdr = update_value(static_cast<Pair*>(heap)->data_cdr);
+        break;
+      }
+      case VECTOR:
+        static_cast<Vector*>(heap)->storage = update_value(static_cast<Vector*>(heap)->storage);
+        break;
+      case VECTOR_STORAGE:
+        for(size_t i = 0; i != static_cast<VectorStorage*>(heap)->length; i++) {
+          static_cast<VectorStorage*>(heap)->data[i] =
+            update_value(static_cast<VectorStorage*>(heap)->data[i]);
+        }
+        break;
+      case SYMBOL:
+        static_cast<Symbol*>(heap)->name = update_value(static_cast<Symbol*>(heap)->name);
+        static_cast<Symbol*>(heap)->value = update_value(static_cast<Symbol*>(heap)->value);
+
+        break;
+      default:
+        std::cerr << "don't know how to write type " << (Type) heap->get_type() << std::endl;
+        AR_ASSERT(!"image writer/reader doesn't know how to write type");
+        break;
+    }
+  }
+};
+
 struct ImageWriter {
   ImageWriter(State& state_, FILE* f_): state(state_), f(f_) {}
   ~ImageWriter() {}
@@ -52,15 +103,9 @@ struct ImageWriter {
     return nv;
   }
 
-  void serialize_value(HeapValue* v) {
-    switch(v->get_type()) {
-      case PAIR: {
-        static_cast<Pair*>(v)->data_car = update_value(static_cast<Pair*>(v)->data_car);
-        static_cast<Pair*>(v)->data_cdr = update_value(static_cast<Pair*>(v)->data_cdr);
-        break;
-      }
-    }
-    fwrite(v, v->size, 1, f);
+  void serialize_value(HeapValue* heap) {
+    updater.update_pointers(heap);
+    fwrite(heap, heap->size, 1, f);
   }
 
   void walk_heap() {
@@ -73,6 +118,7 @@ struct ImageWriter {
   }
 
   /** Offset of heap data in the file */
+  PointerUpdater updater;
   size_t heap_offset;
   State& state;
   FILE* f;
@@ -111,12 +157,7 @@ struct ImageReader {
 
       fread(heap, v.size, 1, f);
 
-      switch(heap->get_type()) {
-        case PAIR:
-          static_cast<Pair*>(heap)->data_car = update_value(static_cast<Pair*>(heap)->data_car);
-          static_cast<Pair*>(heap)->data_cdr = update_value(static_cast<Pair*>(heap)->data_cdr);
-          break;
-      }
+      updater.update_pointers(heap);
 
       Value vug(heap);
       std::cout << vug << std::endl;
@@ -126,6 +167,7 @@ struct ImageReader {
     }
   }
 
+  PointerUpdater updater;
   size_t heap_size;
   size_t heap_offset;
   State& state;
@@ -143,9 +185,10 @@ void State::save_image(const std::string& path) {
   size_t heap_begin = sizeof(ImageHeader);
   fwrite(&hdr, sizeof(ImageHeader), 1, f);
 
-  //walk_heap(*this, heap_begin);
   ImageWriter writer(*this, f);
   writer.heap_offset = heap_begin;
+  writer.updater.begin = (size_t)gc.active->data;
+  writer.updater.offset = heap_begin;
   writer.walk_heap();
 
   fclose(f);
@@ -171,6 +214,8 @@ const char* State::load_image(const std::string& path) {
 
   reader.heap_size = hdr.heap_size;
   reader.heap_offset = sizeof(ImageHeader);
+  reader.updater.begin = sizeof(ImageHeader);
+  reader.updater.offset = (size_t)gc.active->data;
   reader.walk_heap();
 
   fclose(f);

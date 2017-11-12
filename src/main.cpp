@@ -16,7 +16,17 @@ int main(int argc, char *argv[]) {
   arete::State* state = new arete::State();
 
   Value v1 = state->make_pair(C_FALSE, C_FALSE);
-  state->make_pair(v1, Value::make_fixnum(10));
+  Value v2 = state->make_pair(v1, Value::make_fixnum(2));
+  state->make_pair(v2, Value::make_fixnum(3));
+  Value vec = state->make_vector_storage(4);
+  state->vector_storage_append(vec, Value::make_fixnum(0));
+  state->vector_storage_append(vec, Value::make_fixnum(1));
+  state->vector_storage_append(vec, Value::make_fixnum(2));
+  state->vector_storage_append(vec, v2);
+
+  state->get_symbol("okay");
+  Value vec2 = state->make_vector(vec);
+
   state->save_image("heap.boot");
 
   delete state;
