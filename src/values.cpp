@@ -239,7 +239,7 @@ Value State::make_record(size_t tag) {
 Value Value::c_function_apply(State& state, size_t argc, Value* argv) {
   AR_TYPE_ASSERT(type() == CFUNCTION);
   if(c_function_is_closure()) {
-    return c_function_closure_addr()(state, argc, c_function_closure_data(), argv);
+    return c_function_closure_addr()(state, c_function_closure_data(), argc, argv);
   } else {
     return c_function_addr()(state, argc, argv);
   }

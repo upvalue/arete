@@ -804,6 +804,7 @@
 ;; This allows the compiler to (a) inline these functions without causing a name conflict and (b) generate cheaper
 ;; OP_CLOSURE_REF instructions in the case that a variable is never mutated.
 
+#|
 (define (special-form=? x type)
   (and (pair? x) (rename? (car x)) (eq? (rename-env (car x)) #f) (eq? (rename-expr (car x)) type)))
 
@@ -925,6 +926,7 @@
   (OpenFn/body! fn (analyze-body fn body))
 
   fn)
+|#
 
 ;; A copying append that uses source information
 (define (append-source src lst elt)

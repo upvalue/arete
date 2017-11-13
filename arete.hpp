@@ -167,8 +167,7 @@ extern size_t gc_collect_timer;
 extern State* current_state;
 
 typedef Value (*c_function_t)(State&, size_t, Value*);
-typedef Value (*c_closure_t)(State&, size_t, Value, Value*);
-
+typedef Value (*c_closure_t)(State&, Value, size_t, Value*);
 typedef void (*c_finalizer_t)(State&, Value);
 
 std::ostream& operator<<(std::ostream& os,  Value);
@@ -697,6 +696,8 @@ struct Value {
     AR_ASSERT(type() == RECORD) ;
     if(!record_finalized()) heap->set_header_bit(RECORD_FINALIZED_BIT);
   }
+
+  template <class T> T* record_data();
 
   static const unsigned RECORD_FINALIZED_BIT = 1 << 9;
 
@@ -1298,6 +1299,24 @@ struct Record : HeapValue {
   static const unsigned CLASS_TYPE = RECORD;
 };
 
+template <class T>
+inline T* Value::record_data() {
+  Value rtd = record_type();
+  AR_ASSERT(rtd.type() == RECORD_TYPE);
+  AR_ASSERT(record_isa(rtd));
+  size_t data_offset = sizeof(Record) + (rtd.record_type_field_count() * sizeof(Value)) - sizeof(Value);
+  return ((T*) (((char*) heap) + data_offset));
+ }
+
+/** 
+ * Dummy class to be extended by C++ code
+ */
+struct CRecord : HeapValue {
+  RecordType* type;
+
+  static const unsigned CLASS_TYPE = RECORD;
+};
+
 inline Value Value::record_type() const {
   return as<Record>()->type;
 }
@@ -1824,7 +1843,7 @@ struct State {
     AR_ASSERT(rtd.type() == RECORD_TYPE);
     AR_ASSERT(record.record_isa(rtd));
     size_t data_offset = sizeof(Record) + (rtd.record_type_field_count() * sizeof(Value)) - sizeof(Value);
-     return ((T*) (((char*) record.heap) + data_offset));
+    return ((T*) (((char*) record.heap) + data_offset));
   }
 
   Value make_string(const std::string& body);

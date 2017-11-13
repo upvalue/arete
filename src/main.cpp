@@ -12,11 +12,12 @@ int do_main(int argc, char* argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-  /*
+#if 0
   arete::State* state = new arete::State();
 
   state->boot();
 
+/*
   Value v1 = state->make_pair(C_FALSE, C_FALSE);
   Value v2 = state->make_pair(v1, Value::make_fixnum(2));
   state->make_pair(v2, Value::make_fixnum(3));
@@ -35,6 +36,7 @@ int main(int argc, char *argv[]) {
     state->print_exception(std::cerr, exc);
     return EXIT_FAILURE;
   }
+  */
 
   state->save_image("heap.boot");
 
@@ -55,6 +57,6 @@ int main(int argc, char *argv[]) {
   state->enter_repl();
 
   return 0;
-  */
+#endif
   return do_main(argc, argv);
 }

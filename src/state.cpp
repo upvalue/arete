@@ -88,12 +88,8 @@ void State::boot() {
   load_file_functions();
   load_numeric_functions();
 
-#if 0
-#if AR_LIB_SDL
   load_sdl(*this);
   register_feature("sdl");
-#endif
-#endif
 
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_FEATURES, C_NIL);

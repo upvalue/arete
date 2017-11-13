@@ -1382,10 +1382,6 @@ Value fn_repl(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(state.enter_repl());
 }
 
-Value fn_closure_test(State& state, size_t argc, Value closure, Value* argv) {
-  return closure;
-}
-
 void State::load_builtin_functions() {
   //std::cout << (size_t)((char*)aslr_address - (size_t)fn_string_to_symbol);
   // Conversion
@@ -1527,9 +1523,6 @@ void State::load_builtin_functions() {
   // Misc
   defun_core("exit", fn_exit, 1);
   defun_core("current-millisecond", fn_current_millisecond, 0);
-
-  Value something = make_string("hello closure world");
-  defun_core_closure("closure-test", something, fn_closure_test, 0);
 }
 
 } // namespace arete

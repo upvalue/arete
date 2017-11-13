@@ -9,6 +9,8 @@
 
 // Probably more trouble than it's worth
 
+// TODO: Need to read RecordType->size
+
 #include <assert.h>
 
 #include "arete.hpp"
@@ -106,9 +108,7 @@ struct PointerUpdater {
         static_cast<RecordType*>(heap)->parent = update_value(static_cast<RecordType*>(heap)->parent);
         static_cast<RecordType*>(heap)->field_names = update_value(static_cast<RecordType*>(heap)->field_names);
         static_cast<RecordType*>(heap)->finalizer = update_function_pointer(static_cast<RecordType*>(heap)->finalizer);
-
         break;
-
       }
 
       case FUNCTION:
@@ -119,6 +119,19 @@ struct PointerUpdater {
         static_cast<Function*>(heap)->body = update_value(static_cast<Function*>(heap)->body);
         break;
 
+      case RECORD: {
+        RecordType* rt = static_cast<Record*>(heap)->type;
+
+        size_t fc = rt->field_count;
+        static_cast<Record*>(heap)->type =
+          (RecordType*) update_heapvalue(static_cast<Record*>(heap)->type);
+
+        for(size_t i = 0; i != fc; i++) {
+          static_cast<Record*>(heap)->fields[i] =
+            update_value(static_cast<Record*>(heap)->fields[i]);
+        }
+        break;
+      }
       case FILE_PORT:
         static_cast<FilePort*>(heap)->path = C_FALSE;
         static_cast<FilePort*>(heap)->input_handle = 0;

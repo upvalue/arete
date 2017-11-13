@@ -138,7 +138,6 @@ GCSemispace::~GCSemispace() {
 
 }
 
-
 void GCSemispace::copy(HeapValue** ref) {
   // If this is a null ptr or immediate value, nothing is necessary
   if(ref == 0 || Value::immediatep(*ref))
