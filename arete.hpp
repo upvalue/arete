@@ -75,7 +75,7 @@
 #endif
 
 #ifndef ARETE_HEAP_SIZE 
-# define ARETE_HEAP_SIZE (1024)
+# define ARETE_HEAP_SIZE (1024 * 1024)
 #endif 
 
 #ifndef ARETE_GC_LOAD_FACTOR

@@ -61,6 +61,9 @@ void State::finalize(Type object_type, Value object, bool called_by_gc) {
       }
       break;
     }
+    case BLOB: {
+      break;
+    }
     default: 
       warn() << "don't know how to finalize object of type " << object_type << std::endl;
       break;

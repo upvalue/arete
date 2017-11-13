@@ -11,6 +11,10 @@
 
 namespace arete {
 
+static void aslr_address() {
+
+}
+
 Value State::load_file(const std::string& path) {
   Value x, tmp;
   AR_FRAME(*this, x, tmp);
@@ -1363,6 +1367,7 @@ Value fn_repl(State& state, size_t argc, Value* argv) {
 }
 
 void State::load_builtin_functions() {
+  //std::cout << (size_t)((char*)aslr_address - (size_t)fn_string_to_symbol);
   // Conversion
   defun_core("string->symbol", fn_string_to_symbol, 1);
   defun_core("symbol->string", fn_symbol_to_string, 1);

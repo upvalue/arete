@@ -50,6 +50,14 @@ static SDL_Color draw_color = {0, 0, 0, 255};
 #define CHECK_SDL(expr) \
   if((expr) == 0) return sdl_error(state);
 
+struct SDLModule {
+  SDL_Window* window;
+  SDL_Renderer* renderer;
+  size_t event_tag;
+  size_t timer_tag;
+  size_t font_tag; 
+};
+
 namespace arete {
 
 static Value sdl_error(State& state) {
