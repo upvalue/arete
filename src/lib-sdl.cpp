@@ -74,8 +74,8 @@ Value sdl_clear(State& state, SDLModule* module, size_t argc, Value* argv) {
 
 Value sdl_quit(State& state, SDLModule* module, size_t argc, Value* argv) {
   if(module->data.window != 0) {
-    SDL_DestroyWindow(module->data.window);
     SDL_DestroyRenderer(module->data.renderer);
+    SDL_DestroyWindow(module->data.window);
     module->data.window = 0;
   }
   SDL_Quit();

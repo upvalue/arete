@@ -1628,10 +1628,10 @@ struct State {
    * their uniqueness */ 
   size_t gensym_counter;
 
+  bool booted;
+
   /** The symbol table */
   symbol_table_t* symbol_table;
-
-  std::vector<RecordType> what;
 
   /** A list of the names of various sources; mostly filenames but these can also be descriptors
    * of C++ strings and REPL lines */
@@ -1648,7 +1648,7 @@ struct State {
 
   /** A stack trace. */
   std::vector<std::string> stack_trace;
-
+  
   State();
   ~State();
 

@@ -10,11 +10,13 @@ State* current_state = 0;
 State::State():
   gc(*this),
   gensym_counter(0),
+  booted(false),
   symbol_table(),
   source_names(),
   source_contents(),
   globals(),
-  temps()
+  temps(),
+  stack_trace()
   {
 
   symbol_table = new symbol_table_t();
@@ -29,6 +31,8 @@ State::~State() {
 }
 
 void State::boot_common() {
+  AR_ASSERT(!booted);
+
   source_names.push_back("unknown");
   source_names.push_back("anonymous");
   source_contents.push_back("");
@@ -36,9 +40,13 @@ void State::boot_common() {
 
   set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
   set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
+  
+  booted = true;
 }
   
 void State::boot() {
+  AR_ASSERT(!booted);
+
   static const char* _symbols[] = {
     // C_SYNTAX values
     "quote", "begin", "define", "lambda", "if", "cond",  "and", "or", "set!",

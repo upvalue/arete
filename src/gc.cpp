@@ -189,9 +189,10 @@ void GCSemispace::run_finalizers(bool finalize_all) {
     // heap-allocated type should now be reserved
     if(f.heap->get_type() == RESERVED) {
       f.heap = reinterpret_cast<HeapValue*>(f.heap->size);
-      finalizers2.push_back(f);
-      if(!finalize_all)
+      if(!finalize_all) {
+        finalizers2.push_back(f);
         continue;
+      }
     }
     // This object is dead, finalize it
     state.finalize((Type)f.heap->get_type(), f.heap, true);

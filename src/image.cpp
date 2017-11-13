@@ -4,12 +4,12 @@
 
 // TODO: Cross-platformity
 
-// Is it possible to make 32-bit and 64-bit images from the same 64-bit compile,
-// assuming we don't do things like store numbers over the 32-bit INTPTR_MAX &etc?
-
-// Probably more trouble than it's worth
-
-// TODO: Need to read RecordType->size
+// TODO: Support for non-semispace collectors. We need to be able to walk the entire heap, which
+// is more complex for the incremental collector. Since we're dumping everything, one option
+// might be to just create a GCSemispace and compact the entire heap once. However, this would
+// still require the semispace collector to walk the incremental heap; it would also be ideal
+// if we had a way to compact incremental and possibly inefficient allocations. However, we don't
+// always know what the correct size for an object should be.
 
 #include <assert.h>
 
@@ -38,6 +38,7 @@ struct ImageHeader {
   size_t heap_size;
   bool is_64_bit;
   size_t global_count;
+  size_t gensym_counter;
 };
 
 struct CString {
@@ -55,6 +56,7 @@ struct PointerUpdater {
   ~PointerUpdater() {}
 
   HeapValue* update_heapvalue(HeapValue* v) {
+    if(v == 0) return 0;
     char* ptr = (char*) v;
     ptr -= (size_t) begin;
     return (HeapValue*)(offset + ptr);
@@ -69,6 +71,7 @@ struct PointerUpdater {
 
   template <class T>
   T update_function_pointer(T addr) {
+    if(addr == 0) return (T) 0;
     if(reading) {
       return (T)(((char*) aslr_address) + ((size_t) addr));
     } else {
@@ -119,12 +122,28 @@ struct PointerUpdater {
         static_cast<Function*>(heap)->body = update_value(static_cast<Function*>(heap)->body);
         break;
 
+      case VMFUNCTION: {
+        static_cast<VMFunction*>(heap)->name = update_value(static_cast<VMFunction*>(heap)->name);
+        static_cast<VMFunction*>(heap)->constants = (VectorStorage*)update_heapvalue(static_cast<VMFunction*>(heap)->constants);
+        static_cast<VMFunction*>(heap)->macro_env = update_value(static_cast<VMFunction*>(heap)->macro_env);
+        static_cast<VMFunction*>(heap)->sources = (Blob*)update_heapvalue(static_cast<VMFunction*>(heap)->sources);
+        static_cast<VMFunction*>(heap)->free_variables = (Blob*)update_heapvalue(static_cast<VMFunction*>(heap)->free_variables);
+        break;
+      }
+
       case RECORD: {
         RecordType* rt = static_cast<Record*>(heap)->type;
 
+        if(reading) {
+          static_cast<Record*>(heap)->type =
+            (RecordType*) update_heapvalue(static_cast<Record*>(heap)->type);
+          rt = static_cast<Record*>(heap)->type;
+        }
         size_t fc = rt->field_count;
-        static_cast<Record*>(heap)->type =
-          (RecordType*) update_heapvalue(static_cast<Record*>(heap)->type);
+        if(!reading) {
+          static_cast<Record*>(heap)->type =
+            (RecordType*) update_heapvalue(static_cast<Record*>(heap)->type);
+        }
 
         for(size_t i = 0; i != fc; i++) {
           static_cast<Record*>(heap)->fields[i] =
@@ -138,11 +157,12 @@ struct PointerUpdater {
         static_cast<FilePort*>(heap)->reader = 0;
         break;
 
-      case CFUNCTION: 
+      case CFUNCTION:  {
         static_cast<CFunction*>(heap)->addr = update_function_pointer(static_cast<CFunction*>(heap)->addr);
         static_cast<CFunction*>(heap)->name = update_value(static_cast<CFunction*>(heap)->name);
         static_cast<CFunction*>(heap)->closure = update_value(static_cast<CFunction*>(heap)->closure);
         break;
+      }
 
       case VECTOR_STORAGE:
         for(size_t i = 0; i != static_cast<VectorStorage*>(heap)->length; i++) {
@@ -175,6 +195,9 @@ struct ImageWriter {
 
   void serialize_value(HeapValue* heap) {
     updater.update_pointers(heap);
+    if(heap->header == BLOB) {
+      //std::cout << "Writing blob of size " << heap->size << std::endl;
+    }
     fwrite(heap, heap->size, 1, f);
   }
 
@@ -218,7 +241,14 @@ struct ImageReader {
   }
 
   void walk_heap() {
+    // Load all data into heap so that things like e.g. record type field count can be referenced
+    // before everything is fully loaded
+    int b = ftell(f);
+    fread(state.gc.active->data, hdr.heap_size, 1, f);
+    fseek(f, b, SEEK_SET);
+
     char* sweep = state.gc.active->data;
+
     while(state.gc.block_cursor != hdr.heap_size) {
       int place = ftell(f);
 
@@ -287,6 +317,7 @@ void State::save_image(const std::string& path) {
   hdr.heap_size = gc.block_cursor;
   hdr.is_64_bit = ARETE_64_BIT;
   hdr.global_count = globals.size();
+  hdr.gensym_counter = gensym_counter;
 
   size_t heap_begin = sizeof(ImageHeader);
   fwrite(&hdr, sizeof(ImageHeader), 1, f);
@@ -303,10 +334,15 @@ void State::save_image(const std::string& path) {
 }
 
 const char* State::boot_from_image(const std::string& path) {
+  AR_ASSERT(!booted);
+
+  // TODO: Grow heap to fit boot image. Just delete the existing block and
+  // allocate a new one.
   FILE* f = fopen(path.c_str(), "rb");
 
   AR_IMG_LOG("loading " << path);
 
+  if(!f) return "failed to load image file";
   assert(f);
 
   ImageHeader hdr;
@@ -314,6 +350,8 @@ const char* State::boot_from_image(const std::string& path) {
 
   AR_IMG_LOG((hdr.is_64_bit ? "64-bit" : "32-bit") << " image with " << hdr.global_count
     << " globals");
+
+  gensym_counter = hdr.gensym_counter;
 
   if(strncmp(hdr.magic, MAGIC_STRING, 13) != 0) {
     return "failed to read image header";
@@ -324,6 +362,7 @@ const char* State::boot_from_image(const std::string& path) {
   ImageReader reader(*this, f);
 
   reader.hdr = hdr;
+  reader.updater.reading = true;
   reader.updater.offset = (size_t)gc.active->data;
   reader.updater.begin = ftell(f) + (hdr.global_count * sizeof(size_t));
   AR_IMG_LOG("reading heap beginning at " << reader.updater.begin << " into " << (size_t)gc.active->data);

@@ -255,6 +255,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   // Allocate function's required storage
 #if AR_USE_C_STACK
+  AR_ASSERT(gc.live(f.fn->name));
+  AR_ASSERT(gc.live(f.fn->constants));
+  AR_ASSERT(gc.live(f.fn->macro_env));
+  if(f.fn->sources) {
+    AR_ASSERT(gc.live(f.fn->sources));
+  }
+  if(f.fn->free_variables) {
+    AR_ASSERT(gc.live(f.fn->free_variables));
+  }
   size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;     
 
   // Add storage to VM frame

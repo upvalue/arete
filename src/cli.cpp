@@ -19,9 +19,10 @@ static const char* help[] = {
   "Note: Arguments are evaluated left to right, e.g. arete <file1> --repl <file2>",
   "will cause <file1> to be loaded, a REPL to be opened, and <file2> to be loaded after it is closed.\n",
   "  --help: Print this message",
+  "  --image-save <path>: Save a heap image. Program exits after this.",
+  "  --image-load <path>: Load a heap image. MUST be the first argument."
   "  -- <arguments...>: Arguments after -- will be pass to Scheme as a list of strings named *command-line*",
   "  --set <variable> <expr>: Set a top-level variable to an expression (only read, not evaluated)",
-  "  --image-save <path>: Save a heap image",
   "  Helpful top-level variables:",
   "     --set EXPANDER-PRINT t ",
   "        Print all expansions to current output port as they occur",
@@ -50,7 +51,7 @@ static void  print_help() {
 static bool do_repl(State& state, bool read_only) {
   std::cout << ";; arete 0.1" << std::endl;
   std::cout << ";; Everything is a nail." << std::endl;
-  return state.enter_repl(read_only, "/.arete_history") == 0 ? true : false;
+  return state.enter_repl(read_only, "/.arete_history"); //== 0 ? true : false;
 }
 
 bool do_file(State& state, std::string path, bool read_only) {
@@ -135,14 +136,6 @@ bool State::enter_repl(bool read_only, const char* history_file) {
 
     if(!line || feof(stdin)) break;
 
-		std::cout << "Read me a line " << line << std::endl;
-    
-    // std::cout << prompt;
-    // std::string line;
-
-    //std::getline(std::cin, line);
-    // if(std::cin.eof())
-    //  break;
 #endif
     liness << line;
 
@@ -191,6 +184,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
 #if AR_LINENOISE
   if(history_file) {
     linenoiseHistorySave(hist_file.str().c_str());
+    linenoiseHistoryFree();
   }
 #endif
   return true;
@@ -198,19 +192,34 @@ bool State::enter_repl(bool read_only, const char* history_file) {
 
 int State::enter_cli(int argc_, char* argv[]) {
   unsigned argc = (unsigned) argc_;
-  static std::string read("--read");
-  static std::string help("--help");
-  static std::string repl("--repl");
-  static std::string bad("--");
-  static std::string debug_gc("--debug-gc");
-  static std::string save_image("--save-image");
-  static std::string set("--set");
-  static std::string eval("--eval");
-  static std::string stats("--stats");
-  static std::string rest("--");
+  static const std::string read("--read");
+  static const std::string help("--help");
+  static const std::string repl("--repl");
+  static const std::string bad("--");
+  static const std::string debug_gc("--debug-gc");
+  static const std::string save_image("--save-image");
+  static const std::string load_image("--load-image");
+  static const std::string set("--set");
+  static const std::string eval("--eval");
+  static const std::string stats("--stats");
+  static const std::string rest("--");
+
+  size_t i = 1;
+
+  // Load a boot image
+  if(argc > 2 && load_image.compare(argv[1]) == 0) {
+    std::string image_path(argv[2]);
+    const char* result = boot_from_image(image_path);
+    if(result) {
+      std::cerr << "arete: failed to load image: " << result << std::endl;
+      return EXIT_FAILURE;
+    }
+    i = 3;
+  } else {
+    boot();
+  }
 
   if(argc == 1) {
-
     if(do_repl(*this, false) == false) {
       print_gc_stats(std::cout);
       return EXIT_FAILURE;
@@ -240,19 +249,23 @@ int State::enter_cli(int argc_, char* argv[]) {
   tmp = make_pair(tmp, get_global_value(G_COMMAND_LINE));
   set_global_value(G_COMMAND_LINE, tmp);
 
-  for(size_t i = 1; i != argc; i++) {
+  for(; i != argc; i++) {
     const char* arg = argv[i];
 
     if(help.compare(arg) == 0) {
       print_help();
       return EXIT_SUCCESS;
+    } else if(load_image.compare(arg) == 0) {
+      std::cerr << "--load-image must be the first argument to CLI" << std::endl;
+      return EXIT_FAILURE;
     } else if(read.compare(arg) == 0) {
       EXPECT_NEXT_ARG();
       if(repl.compare(arg2) == 0) {
-        if(!do_repl(*this, true))
+        if(!do_repl(*this, true)) {
           return EXIT_FAILURE;
-        else
+        } else {
           print_gc_stats(std::cout);
+        }
       } else {
         if(!do_file(*this, arg2, true))
           return EXIT_FAILURE;
@@ -336,8 +349,14 @@ int State::enter_cli(int argc_, char* argv[]) {
     } else if(debug_gc.compare(arg) == 0) {
       gc.collect_before_every_allocation = true;
     } else if(save_image.compare(arg) == 0) {
+      if((i + 1) >= argc) {
+        std::cerr << "Expected at least one argument after --save-image" << std::endl;
+        return EXIT_FAILURE;
+      }
       std::string path(argv[++i]);
+      std::cout << path << std::endl;
       State::save_image(path);
+      return EXIT_SUCCESS;
     } else {
       std::string cxxarg(arg);
       std::string badc(cxxarg.substr(0, bad.size()));
