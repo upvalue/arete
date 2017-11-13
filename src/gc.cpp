@@ -260,12 +260,12 @@ void GCSemispace::collect(size_t request, bool force) {
           break;
         }
       case VECTOR:
-      case CFUNCTION:
       case TABLE:
       case FILE_PORT:
         AR_COPY(Vector, storage);
         break;
       // Two pointers 
+      case CFUNCTION:
       case CLOSURE:
       case SYMBOL:
       case PAIR:
@@ -460,11 +460,11 @@ void GCIncremental::mark(HeapValue* v) {
       }
     // One pointer
     case VECTOR:
-    case CFUNCTION:
     case TABLE:
       v = static_cast<CFunction*>(v)->name.heap;
       goto again;
     // Two pointers
+    case CFUNCTION:
     case SYMBOL:
     case CLOSURE:
     case PAIR:

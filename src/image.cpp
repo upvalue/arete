@@ -16,6 +16,8 @@
 
 namespace arete {
 
+static void aslr_address() {}
+
 static const char MAGIC_STRING[] = "ARETE-IMAGE\n";
 
 struct ImageHeader {
@@ -57,22 +59,32 @@ struct PointerUpdater {
       case FLONUM: case STRING: case CHARACTER: case BLOB: 
         break;
 
+      // One pointer
+      case TABLE:
+      case VECTOR:
+        static_cast<Vector*>(heap)->storage = update_value(static_cast<Vector*>(heap)->storage);
+        break;
+
+      // Two pointers
       case PAIR: {
         static_cast<Pair*>(heap)->data_car = update_value(static_cast<Pair*>(heap)->data_car);
         static_cast<Pair*>(heap)->data_cdr = update_value(static_cast<Pair*>(heap)->data_cdr);
         break;
       }
 
-      case VECTOR:
-        static_cast<Vector*>(heap)->storage = update_value(static_cast<Vector*>(heap)->storage);
+      case RENAME: {
+        static_cast<Rename*>(heap)->env = update_value(static_cast<Rename*>(heap)->env);
+        static_cast<Rename*>(heap)->expr = update_value(static_cast<Rename*>(heap)->expr);
+        static_cast<Rename*>(heap)->gensym = update_value(static_cast<Rename*>(heap)->gensym);
         break;
+      }
 
       case FUNCTION:
         static_cast<Function*>(heap)->name = update_value(static_cast<Function*>(heap)->name);
-        static_cast<Function*>(heap)->parent_env = update_value(static_cast<Function*>(heap)->name);
-        static_cast<Function*>(heap)->arguments = update_value(static_cast<Function*>(heap)->name);
-        static_cast<Function*>(heap)->rest_arguments = update_value(static_cast<Function*>(heap)->name);
-        static_cast<Function*>(heap)->body = update_value(static_cast<Function*>(heap)->name);
+        static_cast<Function*>(heap)->parent_env = update_value(static_cast<Function*>(heap)->parent_env);
+        static_cast<Function*>(heap)->arguments = update_value(static_cast<Function*>(heap)->arguments);
+        static_cast<Function*>(heap)->rest_arguments = update_value(static_cast<Function*>(heap)->rest_arguments);
+        static_cast<Function*>(heap)->body = update_value(static_cast<Function*>(heap)->body);
         break;
 
       case FILE_PORT:
@@ -80,11 +92,17 @@ struct PointerUpdater {
         static_cast<FilePort*>(heap)->input_handle = 0;
         static_cast<FilePort*>(heap)->reader = 0;
         break;
-      case CFUNCTION: 
-        static_cast<CFunction*>(heap)->name = C_FALSE;
-        static_cast<CFunction*>(heap)->addr = 0;
 
+      case CFUNCTION: 
+        if(reading) {
+          static_cast<CFunction*>(heap)->addr = (c_function_t)(((char*) aslr_address) + ((size_t) static_cast<CFunction*>(heap)->addr));
+        } else {
+          static_cast<CFunction*>(heap)->addr = (c_function_t)(((char*) static_cast<CFunction*>(heap)->addr) - ((size_t) aslr_address));
+        }
+        static_cast<CFunction*>(heap)->name = update_value(static_cast<CFunction*>(heap)->name);
+        static_cast<CFunction*>(heap)->closure = update_value(static_cast<CFunction*>(heap)->closure);
         break;
+
       case VECTOR_STORAGE:
         for(size_t i = 0; i != static_cast<VectorStorage*>(heap)->length; i++) {
           static_cast<VectorStorage*>(heap)->data[i] =
@@ -123,7 +141,6 @@ struct ImageWriter {
     for(size_t i = 0; i != state.globals.size(); i++) {
       Value v = updater.update_value(state.globals[i]);
       fwrite(&v.heap, sizeof(HeapValue*), 1, f);
-      AR_IMG_LOG("writing global " << i);
       //fwrite(&globals[i], sizeof(ptrdiff_t), 1, f);
     }
     AR_IMG_LOG("wrote " << state.globals.size() << " globals");
@@ -171,8 +188,7 @@ struct ImageReader {
       fseek(f, place, SEEK_SET);
 
       switch(v.get_type()) {
-        case FILE_PORT: 
-        case CFUNCTION: {
+        case FILE_PORT: {
           HeapValue* heap = (HeapValue*) sweep;
           heap->header = BLOB;
           heap->size = v.size;
@@ -233,16 +249,17 @@ void State::save_image(const std::string& path) {
   fwrite(&hdr, sizeof(ImageHeader), 1, f);
 
   ImageWriter writer(*this, f);
+  writer.updater.reading = false;
   writer.updater.begin = (size_t)gc.active->data;
-  writer.updater.offset = ftell(f); // + (globals.size() * sizeof(size_t));
-  //writer.write_globals();
+  writer.updater.offset = ftell(f)  + (globals.size() * sizeof(size_t));
+  writer.write_globals();
   AR_IMG_LOG("writing heap beginning at " << writer.updater.offset);
   writer.walk_heap();
 
   fclose(f);
 }
 
-const char* State::load_image(const std::string& path) {
+const char* State::boot_from_image(const std::string& path) {
   FILE* f = fopen(path.c_str(), "rb");
 
   AR_IMG_LOG("loading " << path);
@@ -265,12 +282,14 @@ const char* State::load_image(const std::string& path) {
 
   reader.hdr = hdr;
   reader.updater.offset = (size_t)gc.active->data;
-  reader.updater.begin = ftell(f); // + (hdr.global_count * sizeof(size_t));
+  reader.updater.begin = ftell(f) + (hdr.global_count * sizeof(size_t));
   AR_IMG_LOG("reading heap beginning at " << reader.updater.begin << " into " << (size_t)gc.active->data);
-  // reader.read_globals();
+  reader.read_globals();
   reader.walk_heap();
 
   fclose(f);
+
+  boot_common();
 
   return 0;
 }

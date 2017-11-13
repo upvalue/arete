@@ -626,6 +626,7 @@ struct Value {
   static const unsigned CFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
 
   c_function_t c_function_addr() const;
+  Value c_function_closure() const;
   Value c_function_name() const;
   bool c_function_variable_arity() const;
 
@@ -970,7 +971,7 @@ inline bool Value::function_is_macro() const {
  * Scheme. 
  */
 struct CFunction : HeapValue {
-  Value name;
+  Value name, closure;
   c_function_t addr;
   size_t min_arity, max_arity;
 
@@ -980,6 +981,11 @@ struct CFunction : HeapValue {
 inline Value Value::c_function_name() const {
   AR_TYPE_ASSERT(type() == CFUNCTION);
   return as<CFunction>()->name;
+}
+
+inline Value Value::c_function_closure() const {
+  AR_TYPE_ASSERT(type() == CFUNCTION);
+  return as<CFunction>()->closure;
 }
 
 inline c_function_t Value::c_function_addr() const {
@@ -1665,6 +1671,8 @@ struct State {
     * this is separate so the uninitialized State can be unit tested in various ways */
   void boot();
 
+  void boot_common();
+
   // Value operations
 
   /**
@@ -1822,8 +1830,8 @@ struct State {
 
   Value make_record(size_t tag);
 
-  Value make_c_function(Value name, c_function_t addr, size_t min_arity, size_t max_arity,
-    bool variable_arity);
+  Value make_c_function(Value name, Value closure,
+    c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity);
 
   Value make_input_file_port(Value path);
   Value make_input_file_port(const char* cpath, std::istream* is);
@@ -1909,6 +1917,9 @@ struct State {
 
   /** Defines a built-in function */
   void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
+  void defun_core_closure(const std::string& cname, Value closure, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
+
+
  
   std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
 
@@ -2037,7 +2048,9 @@ struct State {
 
   /** Save an image. Must exit after calling. */
   void save_image(const std::string& path);
-  const char* load_image(const std::string& path);
+
+  /** Load an image. Cannot be called after boot(). */
+  const char* boot_from_image(const std::string& path);
 };
 
 ///// READ! S-Expression reader

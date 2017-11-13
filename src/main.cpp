@@ -12,10 +12,10 @@ int do_main(int argc, char* argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-  //return do_main(argc, argv);
   arete::State* state = new arete::State();
 
   state->boot();
+  /*
 
   Value v1 = state->make_pair(C_FALSE, C_FALSE);
   Value v2 = state->make_pair(v1, Value::make_fixnum(2));
@@ -28,32 +28,33 @@ int main(int argc, char *argv[]) {
 
   state->get_symbol("okay");
   Value vec2 = state->make_vector(vec);
+  */
 
-  //state->globals.push_back(state->get_symbol("okay"));
+  Value exc = state->load_file("scheme/syntax.scm");
 
-  //state->globals.push_back(Value::make_fixnum(5));
+  if(exc.is_active_exception()) {
+    state->print_exception(std::cerr, exc);
+    return EXIT_FAILURE;
+  }
 
-  state->enter_repl();
+
 
   state->save_image("heap.boot");
 
-
-  //state->globals.clear();
-  //state->gc.block_cursor = 0;
   delete state;
 
   state = new arete::State();
 
-  const char* result = state->load_image("heap.boot");
+  const char* result = state->boot_from_image("heap.boot");
 
-  state->boot();
+  //state->boot();
 
   state->enter_repl();
-  //std::cout << "globals: " << state->globals.at(0) << std::endl;
 
   if(result) std::cerr << result << std::endl;
 
   delete state;
 
   return 0;
+  //return do_main(argc, argv);
 }

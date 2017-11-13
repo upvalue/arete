@@ -218,13 +218,14 @@ Value State::make_record(size_t tag) {
   return make_record(globals.at(tag).as<RecordType>());
 }
 
- Value State::make_c_function(Value name, c_function_t addr, size_t min_arity, size_t max_arity,
-    bool variable_arity) {
+ Value State::make_c_function(Value name, Value closure, c_function_t addr, size_t min_arity,
+    size_t max_arity, bool variable_arity) {
   if(max_arity == 0)
     max_arity = min_arity;
-  AR_FRAME(this, name);
+  AR_FRAME(this, name, closure);
   CFunction *cfn = static_cast<CFunction*>(gc.allocate(CFUNCTION, sizeof(CFunction)));
   cfn->name = name;
+  cfn->closure = closure;
   cfn->addr = addr;
   cfn->min_arity = min_arity;
   cfn->max_arity = max_arity;

@@ -82,23 +82,28 @@ void State::boot() {
   load_builtin_functions();
   load_file_functions();
   load_numeric_functions();
-#if 0
 
+#if 0
 #if AR_LIB_SDL
   load_sdl(*this);
   register_feature("sdl");
 #endif
-
 #endif
+
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_FEATURES, C_NIL);
-  set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
-  set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
 
   register_feature("arete");
 
+  boot_common();
+
   // Uncomment to see allocations after boot
   // gc.allocations = 0;
+}
+
+void State::boot_common() {
+  set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
+  set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
 }
 
 std::string State::source_info(const SourceLocation loc, Value fn_name,

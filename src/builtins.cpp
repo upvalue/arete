@@ -11,10 +11,6 @@
 
 namespace arete {
 
-static void aslr_address() {
-
-}
-
 Value State::load_file(const std::string& path) {
   Value x, tmp;
   AR_FRAME(*this, x, tmp);
@@ -1331,18 +1327,36 @@ Value fn_exit(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
+void State::defun_core_closure(const std::string& cname, Value closure, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
+  Value cfn, sym, name;
+
+  // Adjust arguments for closure
+  if(max_arity == 0) {
+    max_arity = min_arity + 1;
+  }
+  min_arity++;
+
+  AR_FRAME(this, cfn, sym, name, closure);
+  name = make_string(cname);
+  cfn = make_c_function(name, closure, addr, min_arity, max_arity, variable_arity);
+
+
+  sym = get_symbol(name);
+  sym.set_symbol_value(cfn);
+}
+  
+
 void State::defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
   Value cfn, sym, name;
 
   AR_FRAME(this, cfn, sym, name);
   name = make_string(cname);
-  cfn = make_c_function(name, addr, min_arity, max_arity, variable_arity);
+  cfn = make_c_function(name, C_FALSE, addr, min_arity, max_arity, variable_arity);
 
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);
-
-  // sym.heap->set_header_bit(Value::SYMBOL_IMMUTABLE_BIT);
 }
+
 
 Value fn_char_to_integer(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "char->integer";
@@ -1364,6 +1378,12 @@ Value fn_char_numeric(State& state, size_t argc, Value* argv) {
 
 Value fn_repl(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(state.enter_repl());
+}
+
+Value fn_closure_test(State& state, size_t argc, Value* argv) {
+  AR_ASSERT(argc == 1);
+  std::cout << argv[0] << std::endl;
+  return C_UNSPECIFIED;
 }
 
 void State::load_builtin_functions() {
@@ -1508,6 +1528,8 @@ void State::load_builtin_functions() {
   defun_core("exit", fn_exit, 1);
   defun_core("current-millisecond", fn_current_millisecond, 0);
 
+  Value something = make_string("hello closure world");
+  defun_core_closure("closure-test", something, fn_closure_test, 0);
 }
 
 } // namespace arete
