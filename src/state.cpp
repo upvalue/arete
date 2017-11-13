@@ -27,13 +27,18 @@ State::~State() {
   delete symbol_table;
   current_state = 0;
 }
-  
-void State::boot() {
+
+void State::boot_common() {
   source_names.push_back("unknown");
   source_names.push_back("anonymous");
   source_contents.push_back("");
   source_contents.push_back("");
 
+  set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
+  set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
+}
+  
+void State::boot() {
   static const char* _symbols[] = {
     // C_SYNTAX values
     "quote", "begin", "define", "lambda", "if", "cond",  "and", "or", "set!",
@@ -99,11 +104,6 @@ void State::boot() {
 
   // Uncomment to see allocations after boot
   // gc.allocations = 0;
-}
-
-void State::boot_common() {
-  set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
-  set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
 }
 
 std::string State::source_info(const SourceLocation loc, Value fn_name,

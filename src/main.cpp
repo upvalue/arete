@@ -12,10 +12,10 @@ int do_main(int argc, char* argv[]) {
 }
 
 int main(int argc, char *argv[]) {
+  /*
   arete::State* state = new arete::State();
 
   state->boot();
-  /*
 
   Value v1 = state->make_pair(C_FALSE, C_FALSE);
   Value v2 = state->make_pair(v1, Value::make_fixnum(2));
@@ -28,7 +28,6 @@ int main(int argc, char *argv[]) {
 
   state->get_symbol("okay");
   Value vec2 = state->make_vector(vec);
-  */
 
   Value exc = state->load_file("scheme/syntax.scm");
 
@@ -36,8 +35,6 @@ int main(int argc, char *argv[]) {
     state->print_exception(std::cerr, exc);
     return EXIT_FAILURE;
   }
-
-
 
   state->save_image("heap.boot");
 
@@ -55,6 +52,9 @@ int main(int argc, char *argv[]) {
 
   delete state;
 
+  state->enter_repl();
+
   return 0;
-  //return do_main(argc, argv);
+  */
+  return do_main(argc, argv);
 }

@@ -1,5 +1,14 @@
 // image.cpp - saving and loading of heap images
 
+// TODO: Save sources
+
+// TODO: Cross-platformity
+
+// Is it possible to make 32-bit and 64-bit images from the same 64-bit compile,
+// assuming we don't do things like store numbers over the 32-bit INTPTR_MAX &etc?
+
+// Probably more trouble than it's worth
+
 #include <assert.h>
 
 #include "arete.hpp"
@@ -16,6 +25,8 @@
 
 namespace arete {
 
+// We use this to serialize function addresses.
+// This might not be cross-platform.
 static void aslr_address() {}
 
 static const char MAGIC_STRING[] = "ARETE-IMAGE\n";
@@ -53,6 +64,15 @@ struct PointerUpdater {
     //AR_IMG_LOG("updated pointer from " << (size_t)v.heap << " to " << (size_t) nv.heap);
     return nv;
   }
+
+  template <class T>
+  T update_function_pointer(T addr) {
+    if(reading) {
+      return (T)(((char*) aslr_address) + ((size_t) addr));
+    } else {
+      return (T)(((char*) addr) - ((size_t) aslr_address));
+    }
+  }
   
   void update_pointers(HeapValue* heap) {
     switch(heap->get_type()) {
@@ -79,6 +99,18 @@ struct PointerUpdater {
         break;
       }
 
+      case RECORD_TYPE: {
+        static_cast<RecordType*>(heap)->apply = update_value(static_cast<RecordType*>(heap)->apply);
+        static_cast<RecordType*>(heap)->print = update_value(static_cast<RecordType*>(heap)->print);
+        static_cast<RecordType*>(heap)->name = update_value(static_cast<RecordType*>(heap)->name);
+        static_cast<RecordType*>(heap)->parent = update_value(static_cast<RecordType*>(heap)->parent);
+        static_cast<RecordType*>(heap)->field_names = update_value(static_cast<RecordType*>(heap)->field_names);
+        static_cast<RecordType*>(heap)->finalizer = update_function_pointer(static_cast<RecordType*>(heap)->finalizer);
+
+        break;
+
+      }
+
       case FUNCTION:
         static_cast<Function*>(heap)->name = update_value(static_cast<Function*>(heap)->name);
         static_cast<Function*>(heap)->parent_env = update_value(static_cast<Function*>(heap)->parent_env);
@@ -94,11 +126,7 @@ struct PointerUpdater {
         break;
 
       case CFUNCTION: 
-        if(reading) {
-          static_cast<CFunction*>(heap)->addr = (c_function_t)(((char*) aslr_address) + ((size_t) static_cast<CFunction*>(heap)->addr));
-        } else {
-          static_cast<CFunction*>(heap)->addr = (c_function_t)(((char*) static_cast<CFunction*>(heap)->addr) - ((size_t) aslr_address));
-        }
+        static_cast<CFunction*>(heap)->addr = update_function_pointer(static_cast<CFunction*>(heap)->addr);
         static_cast<CFunction*>(heap)->name = update_value(static_cast<CFunction*>(heap)->name);
         static_cast<CFunction*>(heap)->closure = update_value(static_cast<CFunction*>(heap)->closure);
         break;
@@ -235,6 +263,8 @@ struct ImageReader {
 };
 
 void State::save_image(const std::string& path) {
+  gc.collect();
+
   FILE *f = fopen(path.c_str(), "wb");
   assert(f);
 

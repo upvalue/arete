@@ -218,6 +218,8 @@ Value State::make_record(size_t tag) {
   return make_record(globals.at(tag).as<RecordType>());
 }
 
+///// FUNCTIONS
+
  Value State::make_c_function(Value name, Value closure, c_function_t addr, size_t min_arity,
     size_t max_arity, bool variable_arity) {
   if(max_arity == 0)
@@ -232,6 +234,15 @@ Value State::make_record(size_t tag) {
   if(variable_arity)
     cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
   return cfn;
+}
+
+Value Value::c_function_apply(State& state, size_t argc, Value* argv) {
+  AR_TYPE_ASSERT(type() == CFUNCTION);
+  if(c_function_is_closure()) {
+    return c_function_closure_addr()(state, argc, c_function_closure_data(), argv);
+  } else {
+    return c_function_addr()(state, argc, argv);
+  }
 }
 
 ///// PAIRS

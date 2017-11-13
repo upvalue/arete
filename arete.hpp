@@ -167,6 +167,7 @@ extern size_t gc_collect_timer;
 extern State* current_state;
 
 typedef Value (*c_function_t)(State&, size_t, Value*);
+typedef Value (*c_closure_t)(State&, size_t, Value, Value*);
 
 typedef void (*c_finalizer_t)(State&, Value);
 
@@ -624,11 +625,20 @@ struct Value {
 
   // C FUNCTIONS
   static const unsigned CFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
+  static const unsigned CFUNCTION_CLOSURE_BIT = 1 << 10;
 
   c_function_t c_function_addr() const;
-  Value c_function_closure() const;
+
+  bool c_function_is_closure() const { 
+    AR_TYPE_ASSERT(heap_type_equals(CFUNCTION));
+    return heap->get_header_bit(CFUNCTION_CLOSURE_BIT);
+  }
+
+  c_closure_t c_function_closure_addr() const;
+  Value c_function_closure_data() const;
   Value c_function_name() const;
   bool c_function_variable_arity() const;
+  Value c_function_apply(State&, size_t, Value*);
 
   // VM FUNCTIONS
   unsigned vm_function_constant_count() const;
@@ -972,7 +982,11 @@ inline bool Value::function_is_macro() const {
  */
 struct CFunction : HeapValue {
   Value name, closure;
-  c_function_t addr;
+  union {
+    c_function_t addr;
+    c_closure_t closure_addr;
+  };
+
   size_t min_arity, max_arity;
 
   static const unsigned CLASS_TYPE = CFUNCTION;
@@ -983,14 +997,19 @@ inline Value Value::c_function_name() const {
   return as<CFunction>()->name;
 }
 
-inline Value Value::c_function_closure() const {
+inline Value Value::c_function_closure_data() const {
   AR_TYPE_ASSERT(type() == CFUNCTION);
   return as<CFunction>()->closure;
 }
 
 inline c_function_t Value::c_function_addr() const {
-  AR_TYPE_ASSERT(type() == CFUNCTION);
+  AR_TYPE_ASSERT(type() == CFUNCTION && !c_function_is_closure());
   return as<CFunction>()->addr;
+}
+
+inline c_closure_t Value::c_function_closure_addr() const {
+  AR_TYPE_ASSERT(type() == CFUNCTION && c_function_is_closure());
+  return as<CFunction>()->closure_addr;
 }
 
 inline bool Value::c_function_variable_arity() const {
@@ -1917,7 +1936,7 @@ struct State {
 
   /** Defines a built-in function */
   void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
-  void defun_core_closure(const std::string& cname, Value closure, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
+  void defun_core_closure(const std::string& cname, Value closure, c_closure_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
 
 
  

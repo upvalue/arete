@@ -706,7 +706,7 @@ Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value 
     args = args.cdr();
   }
   
-  tmp = fn.c_function_addr()(*this, argc, fn_args.vector_storage_data());
+  tmp = fn.c_function_apply(*this, argc, fn_args.vector_storage_data());
   EVAL_CHECK(tmp, src_exp, fn_name);
   return tmp;
 }
@@ -722,7 +722,7 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
     case VMFUNCTION: case CLOSURE:
       return apply_vm(fn, argc, argv);
     case CFUNCTION:
-      return fn.c_function_addr()(*this, argc, argv);
+      return fn.c_function_apply(*this, argc, argv);
     case FUNCTION: {
       Value lst = C_NIL;
       size_t i;
@@ -740,7 +740,6 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
 
       return eval_apply_function(fn, lst);
     }
-      break;
     default:
       return eval_error("cannot apply type", fn);
   }

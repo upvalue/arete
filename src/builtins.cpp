@@ -1327,19 +1327,21 @@ Value fn_exit(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED;
 }
 
-void State::defun_core_closure(const std::string& cname, Value closure, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
+void State::defun_core_closure(const std::string& cname, Value closure, c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
   Value cfn, sym, name;
 
   // Adjust arguments for closure
+#if 0 
   if(max_arity == 0) {
     max_arity = min_arity + 1;
   }
   min_arity++;
+#endif
 
   AR_FRAME(this, cfn, sym, name, closure);
   name = make_string(cname);
-  cfn = make_c_function(name, closure, addr, min_arity, max_arity, variable_arity);
-
+  cfn = make_c_function(name, closure, (c_function_t)addr, min_arity, max_arity, variable_arity);
+  cfn.heap->set_header_bit(Value::CFUNCTION_CLOSURE_BIT);
 
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);
@@ -1380,10 +1382,8 @@ Value fn_repl(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(state.enter_repl());
 }
 
-Value fn_closure_test(State& state, size_t argc, Value* argv) {
-  AR_ASSERT(argc == 1);
-  std::cout << argv[0] << std::endl;
-  return C_UNSPECIFIED;
+Value fn_closure_test(State& state, size_t argc, Value closure, Value* argv) {
+  return closure;
 }
 
 void State::load_builtin_functions() {

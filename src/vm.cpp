@@ -505,7 +505,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
             // Replace function on stack with its result
             f.stack[f.stack_i - fargc - 1] =
-              f.stack[f.stack_i - fargc - 1].c_function_addr()(*this, fargc, &f.stack[f.stack_i - fargc]);
+              f.stack[f.stack_i - fargc - 1].c_function_apply(*this, fargc, &f.stack[f.stack_i - fargc]);
 
             f.stack_i -= (fargc);
             
