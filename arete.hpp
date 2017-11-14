@@ -25,10 +25,6 @@
 
 ///// PRE! Preprocessor macros and compile-time configuration macros
 
-// 0 = Do not evaluate assertions, internal assertions
-// 1 = Print warnings, disable some internal assertions
-// 2 = Use ARETE_ASSERTION_FAIL macro on failure (by default, exits program)
-
 #ifdef ARETE_DEV
 # define ARETE_GC_DEBUG 1
 # ifndef ARETE_ASSERTION_LEVEL
@@ -43,6 +39,9 @@
 # define ARETE_64_BIT 1
 #endif
 
+// 0 = Do not evaluate assertions, internal assertions
+// 1 = Print warnings when assertions fail, disable some internal assertions
+// 2 = Exit program when assertions fail, enable all assertions
 #ifndef ARETE_ASSERTION_LEVEL
 # define ARETE_ASSERTION_LEVEL 0
 #endif
@@ -93,8 +92,6 @@
 # define ARETE_GC_DEBUG 0
 #endif
 
-// TODO: It's possible, though expensive and more complex, to do this with the incremental
-// collector. However, it shouldn't be necessary.
 #if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE && ARETE_GC_DEBUG == 1
 # define ARETE_ASSERT_LIVE(obj) \
    AR_ASSERT("attempt to invoke method on non-live object" && (arete::current_state->gc.live((obj)) == true));
@@ -108,10 +105,13 @@
 # define ARETE_LOG_TAGS 0
 #endif 
 
+// Various internal log tags for debugging
+
 #define ARETE_LOG_TAG_GC (1 << 0)
 #define ARETE_LOG_TAG_READER (1 << 1)
 #define ARETE_LOG_TAG_VM (1 << 2)
 #define ARETE_LOG_TAG_IMAGE (1 << 3)
+#define ARETE_LOG_TAG_DEFUN (1 << 4)
 
 #ifdef _MSC_VER
 # define ARETE_COLOR 0
@@ -120,7 +120,6 @@
 #ifdef __EMSCRIPTEN__
 # define ARETE_COLOR 0
 #endif
-
 
 #if ARETE_COLOR
 # define ARETE_COLOR_BLUE "\033[1;34m"
@@ -2257,6 +2256,42 @@ inline Handle::~Handle() {
   state.gc.handles.erase(it);
 }
 
+// Auto-registration of functions. Necessary for the saving and loading of images.
+
+struct DefunGroup;
+struct Defun;
+
+extern DefunGroup* defun_group;
+
+struct DefunGroup {
+  DefunGroup(const char* name_): name(name_) {
+    defun_group = this;
+  }
+
+  ~DefunGroup() {}
+
+  const char* name;
+  std::vector<Defun*> data;
+
+  void install(State& state);
+  void install_closure(State& state, Value closure);
+};
+
+struct Defun {
+  Defun(const char*, c_function_t, size_t, size_t = 0, bool = false);
+  ~Defun() {}
+
+  const char* fn_name;
+  c_function_t fn;
+  size_t min_arity, max_arity;
+  bool var_arity;
+};
+
+#define _AR_DEFUN_CONCAT(sym) defun_##sym
+#define _AR_DEFUN(sym) _AR_DEFUN_CONCAT(sym)
+#define AR_DEFUN(name, addr, ...) \
+  static Defun _AR_DEFUN(__COUNTER__) ((name), (c_function_t) addr, __VA_ARGS__);
+
 } // namespace arete
 
 // Handy macros for writing CFunctions
@@ -2293,6 +2328,14 @@ inline Handle::~Handle() {
 
 #define AR_FN_EXPECT_TYPE(state, argv, i, expect) \
   if((argv)[(i)].type() != (expect)) { \
+    std::ostringstream __os; \
+    __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (Type)(argv[i].type()); \
+    AR_FN_STACK_TRACE(state); \
+    return (state).type_error(__os.str()); \
+  } 
+
+#define AR_FN_EXPECT_HEAP_TYPE(state, argv, i, expect) \
+  if(!((argv)[(i)].heap_type_equals(expect))) { \
     std::ostringstream __os; \
     __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (Type)(argv[i].type()); \
     AR_FN_STACK_TRACE(state); \

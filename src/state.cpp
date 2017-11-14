@@ -130,4 +130,18 @@ void State::register_feature(const std::string& name) {
   set_global_value(G_FEATURES, make_pair(sym, pare));
 }
 
+Value State::load_file(const std::string& path) {
+  Value x, tmp;
+  AR_FRAME(*this, x, tmp);
+
+  x = slurp_file(path);
+
+  AR_FN_STATE_CHECK(x);
+
+  x = eval_toplevel_list(x);
+
+  return x;
+}
+
+
 }

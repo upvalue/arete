@@ -6,6 +6,8 @@
 
 namespace arete {
 
+DefunGroup numbers("numbers");
+
 Value State::make_flonum(double number) {
   Flonum* heap = (Flonum*) gc.allocate(FLONUM, sizeof(Flonum));
   heap->number = number;
@@ -14,21 +16,6 @@ Value State::make_flonum(double number) {
 }
 
 ///// FUNCTIONS  
-
-Value fn_flonump(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == FLONUM);
-}
-
-Value fn_fixnump(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == FIXNUM);
-}
-
-Value fn_numberp(State& state, size_t argc, Value* argv) {
-  switch(argv[0].type()) {
-    case FLONUM: case FIXNUM: return C_TRUE;
-    default: return C_FALSE;
-  }
-}
 
 // Casting arithmetic
 
@@ -73,6 +60,11 @@ OPV(fn_sub, "-", -, true, false)
 OPV(fn_mul, "*", *, false, false)
 OPV(fn_div, "/", /, false, true)
 
+AR_DEFUN("+", fn_add, 1, 1, true);
+AR_DEFUN("-", fn_sub, 1, 1, true);
+AR_DEFUN("*", fn_mul, 1, 1, true);
+AR_DEFUN("/", fn_div, 2, 2, true);
+
 #undef OPV
 
 #define OPV_BOOL(name, cname, operator) \
@@ -105,7 +97,8 @@ OPV(fn_div, "/", /, false, true)
     else if(lhs.type() == FLONUM && rhs.type() == FIXNUM) \
       return Value::make_boolean(lhs.flonum_value() operator rhs.fixnum_value()); \
     return C_TRUE; \
-  }
+  } \
+  AR_DEFUN(cname, name, 2, 2, true);
 
 // After writing all this out I see why the Lua/JS guys gave up and used floating point math only.
 // What fun.
@@ -137,6 +130,7 @@ Value fn_fx_sub(State& state, size_t argc, Value* argv) {
 
   return Value::make_fixnum(result);
 }
+AR_DEFUN("fx-", fn_fx_sub, 1, 1, true);
 
 Value fn_fx_add(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx+";
@@ -150,12 +144,16 @@ Value fn_fx_add(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(result);
 }
 
+AR_DEFUN("fx+", fn_fx_add, 2, 2, true);
+
 Value fn_fx_equals(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx=";
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   return Value::make_boolean(argv[0].bits == argv[1].bits);
 }
+AR_DEFUN("fx=", fn_fx_equals, 2, 2);
+
 
 Value fn_fx_lt(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx<";
@@ -163,6 +161,7 @@ Value fn_fx_lt(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   return Value::make_boolean(argv[0].fixnum_value() < argv[1].fixnum_value());
 }
+AR_DEFUN("fx<", fn_fx_lt, 2, 2);
 
 Value fn_fx_gt(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx>";
@@ -170,6 +169,7 @@ Value fn_fx_gt(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   return Value::make_boolean(argv[0].fixnum_value() > argv[1].fixnum_value());
 }
+AR_DEFUN("fx>", fn_fx_gt, 2, 2);
 
 Value fn_fx_div(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx/";
@@ -181,41 +181,22 @@ Value fn_fx_div(State& state, size_t argc, Value* argv) {
   
   return Value::make_fixnum(argv[0].fixnum_value() / argv[1].fixnum_value());
 }
+AR_DEFUN("fx/", fn_fx_div, 2, 2);
 
 Value fn_floor(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "floor";
 
-  AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
-
   if(argv[0].fixnump()) return argv[0];
+
+  AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].heap_type_equals(FLONUM));
 
   return state.make_flonum(floor(argv[0].flonum_value()));
 }
+AR_DEFUN("floor", fn_floor, 1);
 
 void State::load_numeric_functions() {
-  // defun_core("fixnum?", fn_fixnump, 1);
-  // defun_core("flonum?", fn_flonump, 1);
-  // defun_core("number?", fn_numberp, 1);
-
   // Numbers
-  defun_core("fx+", fn_fx_add, 1, 1, true);
-  defun_core("fx=", fn_fx_equals, 2, 2, true);
-  defun_core("fx-", fn_fx_sub, 1, 1, true);
-  defun_core("fx<", fn_fx_lt, 2);
-  defun_core("fx>", fn_fx_gt, 2);
-  defun_core("fx/", fn_fx_div, 2, 2);
-
-  defun_core("+", fn_add, 1, 1, true);
-  defun_core("-", fn_sub, 1, 1, true);
-  defun_core("/", fn_div, 2, 2, true);
-  defun_core("*", fn_mul, 1, 1, true);
-  defun_core("=", fn_num_equal, 2, 2, true);
-  defun_core("<", fn_lt, 2, 2, true);
-  defun_core(">", fn_gt, 2, 2, true);
-  defun_core("<=", fn_lte, 2, 2, true);
-  defun_core(">=", fn_gte, 2, 2, true);
-
-  defun_core("floor", fn_floor, 1);
+  numbers.install(*this);
 }
 
 }

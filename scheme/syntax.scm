@@ -800,6 +800,18 @@
       (cons (car lst) (filter fn (cdr lst)))
       (filter fn (cdr lst)))))
 
+;; VECTORS
+
+(define (list->vector lst)
+  (if (null? lst)
+    (make-vector)
+    (let ((vec (make-vector (length lst))))
+      (let loop ((elt (car lst))
+                 (rest (cdr lst))
+                 (i 0))
+        (vector-set! vec i elt)
+        (if (null? rest) vec (loop (car rest) (cdr rest) (+ i 1)))))))
+
 ;; SRFI-0
 
 (define (cond-expand-check-feature x form)

@@ -11,18 +11,9 @@
 
 namespace arete {
 
-Value State::load_file(const std::string& path) {
-  Value x, tmp;
-  AR_FRAME(*this, x, tmp);
+// TODO: Thread safety.
 
-  x = slurp_file(path);
-
-  AR_FN_STATE_CHECK(x);
-
-  x = eval_toplevel_list(x);
-
-  return x;
-}
+DefunGroup builtins("builtins");
 
 // Conversions
 Value fn_string_to_symbol(State& state, size_t argc, Value* argv) {
@@ -30,6 +21,7 @@ Value fn_string_to_symbol(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   return state.get_symbol(argv[0]);
 }
+AR_DEFUN("string->symbol", fn_string_to_symbol, 1);
 
 Value fn_symbol_to_string(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "symbol->string";
@@ -37,6 +29,7 @@ Value fn_symbol_to_string(State& state, size_t argc, Value* argv) {
   std::string str(argv[0].symbol_name_data());
   return state.make_string(str);
 }
+AR_DEFUN("symbol->string", fn_symbol_to_string, 1);
 
 // Equality
 
@@ -44,6 +37,7 @@ Value fn_eq(State& state, size_t argc, Value* argv) {
   // static const char* fn_name = "eq?";
   return Value::make_boolean(argv[0].bits == argv[1].bits);
 }
+AR_DEFUN("eq?", fn_eq, 2);
 
 Value fn_eqv(State& state, size_t argc, Value* argv) {
   if(argv[0].type() == FLONUM && argv[1].type() == FLONUM) {
@@ -56,71 +50,38 @@ Value fn_eqv(State& state, size_t argc, Value* argv) {
 
   return fn_eq(state, argc, argv);
 }
+AR_DEFUN("eqv?", fn_eqv, 2);
 
 Value fn_equal(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(state.equals(argv[0], argv[1]));
 }
-
-Value fn_string_append(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "string-append";
-  std::ostringstream os;
-  for(size_t i = 0; i != argc; i++) {
-    AR_FN_EXPECT_TYPE(state, argv, i, STRING);
-    os << argv[i].string_data();
-  }
-
-  return state.make_string(os.str());
-}
+AR_DEFUN("equal?", fn_equal, 2);
 
 ///// PREDICATES
-
-Value fn_nullp(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0] == C_NIL);
-}
-
-Value fn_renamep(State& state, size_t argc, Value* argv) {
-  return Value::make_boolean(argv[0].type() == RENAME);
-}
 
 Value fn_procedurep(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].procedurep());
 }
+AR_DEFUN("procedure?", fn_procedurep, 1);
 
 Value fn_value_type(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(argv[0].type());
 }
+AR_DEFUN("value-type", fn_value_type, 1);
 
 Value fn_macrop(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == FUNCTION && argv[0].function_is_macro());
 }
+AR_DEFUN("macro?", fn_macrop, 1);
 
-Value fn_self_evaluatingp(State& state, size_t argc, Value* argv) {
-  if(argv[0].immediatep()) return C_TRUE;
-
-  switch(argv[0].type()) {
-    case STRING:
-    case VECTOR: 
-    case FLONUM:
-      return C_TRUE;
-    default:
-      return C_FALSE;
-  }
-}
-
-Value fn_identifierp(State& state, size_t argc, Value* argv) {
-  Type tipe = argv[0].type();
-  return Value::make_boolean(tipe == RENAME || tipe == SYMBOL);
-}
-
+//
 ///// LISTS
+//
 
 Value fn_cons(State& state, size_t argc, Value* argv) {
-  Value kar, kdr;
-  AR_FRAME(state, kar, kdr);
-  kar = argv[0];
-  kdr = argv[1];
-  return state.make_pair(kar, kdr);
+  return state.make_pair(argv[0], argv[1]);
 }
+AR_DEFUN("cons", fn_cons, 2);
 
 /** cons that copies source information from a given expression */
 Value fn_cons_source(State& state, size_t argc, Value* argv) {
@@ -145,6 +106,7 @@ Value fn_cons_source(State& state, size_t argc, Value* argv) {
   pare = state.make_src_pair(kar, kdr, loc);
   return pare;
 }
+AR_DEFUN("cons-source", fn_cons_source, 3);
 
 /** Create a list from arguments. Somewhat complex due to the need to GC track
  * variables, and handle the transfer of source code information for the macroexpander. */
@@ -187,10 +149,12 @@ static Value fn_list_impl(State& state, size_t argc, Value* argv, bool copy_sour
 Value fn_list(State& state, size_t argc, Value* argv) {
   return fn_list_impl(state, argc, argv, false);
 }
+AR_DEFUN("list", fn_list, 0, 0, true);
 
 Value fn_list_source(State& state, size_t argc, Value* argv) {
   return fn_list_impl(state, argc, argv, true);
 }
+AR_DEFUN("list-source", fn_list_source, 1, 1, true);
 
 // (cons* 1) => 1
 // (cons* 1 2 3) => (1 2 . 3)
@@ -212,6 +176,7 @@ Value fn_cons_star(State& state, size_t argc, Value* argv) {
   }
   return lst;
 }
+AR_DEFUN("cons*", fn_cons_star, 1, 1, true);
 
 /** Returns the length of a list */
 Value fn_length(State& state, size_t argc, Value* argv) {
@@ -235,6 +200,7 @@ Value fn_length(State& state, size_t argc, Value* argv) {
 
   return Value::make_fixnum(length);
 }
+AR_DEFUN("length", fn_length, 1);
 
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
@@ -245,6 +211,7 @@ Value fn_listp(State& state, size_t argc, Value* argv) {
   }
   return C_FALSE;
 }
+AR_DEFUN("list?", fn_listp, 1);
 
 Value fn_list_ref(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "list-ref";
@@ -264,6 +231,7 @@ Value fn_list_ref(State& state, size_t argc, Value* argv) {
 
   return h.car();
 }
+AR_DEFUN("list-ref", fn_list_ref, 2);
 
 Value fn_list_join(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "list-join";
@@ -285,6 +253,7 @@ Value fn_list_join(State& state, size_t argc, Value* argv) {
 
   return state.make_string(ss.str());
 }
+AR_DEFUN("list-join", fn_list_join, 2);
 
 /** 
  * Underlying implementation of for-each and map. If improper is true, it will handle dotted lists,
@@ -365,30 +334,37 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
 Value fn_map_proper(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "map", false, true, false);
 }
+AR_DEFUN("map", fn_map_proper, 2);
 
 Value fn_map_improper(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "map-improper", true, true, false);
 }
+AR_DEFUN("map-improper", fn_map_improper, 2);
 
 Value fn_foreach_proper(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "for-each", true, false, false);
 }
+AR_DEFUN("for-each", fn_foreach_proper, 2);
 
 Value fn_foreach_improper(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "for-each-improper", true, false, false);
 }
+AR_DEFUN("for-each-improper", fn_foreach_improper, 2);
 
 Value fn_foreach_improper_i(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "for-each-improper", true, false, true);
 }
+AR_DEFUN("for-each-improper-i", fn_foreach_improper_i, 2);
 
 Value fn_map_proper_i(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "map-i", false, true, true);
 }
+AR_DEFUN("map-i", fn_map_proper_i, 2);
 
 Value fn_for_each_proper_i(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "for-each-i", false, false, true);
 }
+AR_DEFUN("for-each-i", fn_for_each_proper_i, 2);
 
 enum Mem { MEMQ, MEMV, MEMBER };
 
@@ -421,6 +397,7 @@ Value fn_mem_impl(const char* fn_name, Mem method, State& state, size_t argc, Va
 Value fn_memq(State& state, size_t argc, Value* argv) {
   return fn_mem_impl("memq", MEMQ, state, argc, argv);
 }
+AR_DEFUN("memq", fn_memq, 2);
 
 Value fn_memv(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "memv";
@@ -434,10 +411,12 @@ Value fn_memv(State& state, size_t argc, Value* argv) {
 
   return C_FALSE;
 }
+AR_DEFUN("memv", fn_memv, 2);
 
 Value fn_member(State& state, size_t argc, Value* argv) {
   return fn_mem_impl("member", MEMBER, state, argc, argv);
 }
+AR_DEFUN("member", fn_member, 2);
 
 Value fn_apply(State& state, size_t argc, Value* argv) {
   const char* fn_name = "apply";
@@ -463,6 +442,7 @@ Value fn_apply(State& state, size_t argc, Value* argv) {
 
   return tmp;
 }
+AR_DEFUN("apply", fn_apply, 2);
 
 ///// PAIRS
 
@@ -471,12 +451,14 @@ Value fn_car(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   return argv[0].car();
 }
+AR_DEFUN("car", fn_car, 1);
 
 Value fn_cdr(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "cdr";
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   return argv[0].cdr();
 }
+AR_DEFUN("cdr", fn_cdr, 1);
 
 Value fn_set_car(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "set-car!";
@@ -484,6 +466,7 @@ Value fn_set_car(State& state, size_t argc, Value* argv) {
   argv[0].set_car(argv[1]);
   return C_UNSPECIFIED;
 }
+AR_DEFUN("set-car!", fn_set_car, 1);
 
 Value fn_set_cdr(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "set-cdr!";
@@ -491,6 +474,7 @@ Value fn_set_cdr(State& state, size_t argc, Value* argv) {
   argv[0].set_cdr(argv[1]);
   return C_UNSPECIFIED;
 }
+AR_DEFUN("set-cdr!", fn_set_cdr, 1);
 
 ///// VECTORS
 
@@ -516,6 +500,7 @@ Value fn_make_vector(State& state, size_t argc, Value* argv) {
   }
   return vec;
 }
+AR_DEFUN("make-vector", fn_make_vector, 0, 2);
 
 Value fn_vector_set(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "vector-set!";
@@ -534,6 +519,7 @@ Value fn_vector_set(State& state, size_t argc, Value* argv) {
   argv[0].vector_set(position, argv[2]);
   return C_UNSPECIFIED;
 }
+AR_DEFUN("vector-set!", fn_vector_set, 3);
 
 Value fn_vector_append(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "vector-append!";
@@ -542,6 +528,7 @@ Value fn_vector_append(State& state, size_t argc, Value* argv) {
   state.vector_append(argv[0], argv[1]);
   return C_UNSPECIFIED;
 }
+AR_DEFUN("vector-append!", fn_vector_append, 2)
 
 Value fn_vector_ref(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "vector-ref";
@@ -559,6 +546,7 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
 
   return argv[0].vector_ref(argv[1].fixnum_value());
 }
+AR_DEFUN("vector-ref", fn_vector_ref, 2);
 
 Value fn_vector_length(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "vector-length";
@@ -566,11 +554,12 @@ Value fn_vector_length(State& state, size_t argc, Value* argv) {
 
   return Value::make_fixnum(argv[0].vector_length());
 }
+AR_DEFUN("vector-length", fn_vector_length, 1);
 
 Value fn_make_table(State& state, size_t argc, Value* argv) {
-  //static const char* fn_name = "make-table";
   return state.make_table();
 }
+AR_DEFUN("make-table", fn_make_table, 0);
 
 Value fn_table_ref(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "table-ref";
@@ -583,6 +572,7 @@ Value fn_table_ref(State& state, size_t argc, Value* argv) {
   if(!found) return C_FALSE;
   return result;
 }
+AR_DEFUN("table-ref", fn_table_ref, 2);
 
 Value fn_table_set(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "table-set!";
@@ -592,12 +582,14 @@ Value fn_table_set(State& state, size_t argc, Value* argv) {
 
   return state.table_set(argv[0], argv[1], argv[2]);
 }
+AR_DEFUN("table-set!", fn_table_set, 3);
 
 Value fn_table_entries(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "table-entries";
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
   return Value::make_fixnum(argv[0].as<Table>()->entries);
 }
+AR_DEFUN("table-entries", fn_table_entries, 1);
 
 Value fn_table_for_each(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "table-for-each";
@@ -608,6 +600,8 @@ Value fn_table_for_each(State& state, size_t argc, Value* argv) {
 
   Value table = argv[1], fn = argv[0], chain, arg, tmp;
   AR_FRAME(state, table, fn, chain, arg);
+
+  // TODO Check insertion by saving and comparing entries
 
   for(size_t i = 0; i != table.as<Table>()->chains->length; i++) {
     chain = table.as<Table>()->chains->data[i];
@@ -626,8 +620,21 @@ Value fn_table_for_each(State& state, size_t argc, Value* argv) {
 
   return C_UNSPECIFIED;
 }
+AR_DEFUN("table-for-each", fn_table_for_each, 2);
 
 ///// STRINGS
+
+Value fn_string_append(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "string-append";
+  std::ostringstream os;
+  for(size_t i = 0; i != argc; i++) {
+    AR_FN_EXPECT_HEAP_TYPE(state, argv, i, STRING);
+    os << argv[i].string_data();
+  }
+
+  return state.make_string(os.str());
+}
+AR_DEFUN("string-append", fn_string_append, 0, 0, true);
 
 Value fn_string_copy(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string-copy";
@@ -635,6 +642,7 @@ Value fn_string_copy(State& state, size_t argc, Value* argv) {
 
   return state.string_copy(argv[0]);
 }
+AR_DEFUN("string-copy", fn_string_copy, 1);
 
 ///// MACROEXPANSION SUPPORT
 
@@ -651,6 +659,7 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
 
   return state.gensym(state.get_symbol(prefix));
 }
+AR_DEFUN("gensym", fn_gensym, 0, 1);
 
 Value fn_gensymp(State& state, size_t argc, Value* argv) {
   // static const char* fn_name = "gensym?";
@@ -658,6 +667,7 @@ Value fn_gensymp(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].type() == SYMBOL &&
     argv[0].heap->get_header_bit(Value::SYMBOL_GENSYM_BIT));
 }
+AR_DEFUN("gensym?", fn_gensymp, 1);
 
 /** Macro that asserts an argument is a valid environment */
 #define AR_FN_EXPECT_ENV(state, n) \
@@ -671,6 +681,7 @@ Value fn_env_make(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_ENV(state, 0);
   return state.make_env(argv[0]);
 }
+AR_DEFUN("env-make", fn_env_make, 1);
 
 Value fn_env_define(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-define";
@@ -691,6 +702,7 @@ Value fn_env_define(State& state, size_t argc, Value* argv) {
 
   return C_UNSPECIFIED;
 }
+AR_DEFUN("env-define", fn_env_define, 3, 4);
 
 /** env-resolve takes an environment and identifier and returns an appropriate symbol for runtime
  * For example, references to arete.core functions like car become ##arete.core#car,
@@ -737,6 +749,7 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
 
   return argv[1];
 }
+AR_DEFUN("env-resolve", fn_env_resolve, 2);
 
 Value fn_env_compare(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-compare";
@@ -777,6 +790,7 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
   // If these both refer to a toplevel variable (i.e. not defined), this is true
   return Value::make_boolean((rename_env == env || (found1 && found1 == found2)) && id1.rename_expr() == id2);
 }
+AR_DEFUN("env-compare", fn_env_compare, 3);
 
 // env-lookup
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
@@ -798,6 +812,7 @@ Value fn_env_lookup(State& state, size_t argc, Value* argv) {
 
   return state.env_lookup(arg0, arg1);
 }
+AR_DEFUN("env-lookup", fn_env_lookup, 2);
 
 /** Check if a name is syntax (a builtin such as define, or a macro) in a particular environment.
   * Necessary because C_SYNTAX values cannot be handled by Scheme code directly. */
@@ -816,6 +831,7 @@ Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
     default: return C_FALSE;
   }
 }
+AR_DEFUN("env-syntax?", fn_env_syntaxp, 2);
 
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-function-name!";
@@ -828,6 +844,7 @@ Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   }
   return C_UNSPECIFIED;
 }
+AR_DEFUN("set-function-name!", fn_set_function_name, 2);
 
 Value fn_set_vmfunction_name(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-vmfunction-name!";
@@ -838,6 +855,7 @@ Value fn_set_vmfunction_name(State& state, size_t argc, Value* argv) {
 
   return C_UNSPECIFIED;
 }
+AR_DEFUN("set-vmfunction-name!", fn_set_vmfunction_name, 2);
 
 Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-vmfunction-log!";
@@ -859,6 +877,7 @@ Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
 
   return C_UNSPECIFIED;
 }
+AR_DEFUN("set-vmfunction-log!", fn_set_vmfunction_log, 2);
 
 Value fn_function_env(State& state, size_t argc, Value* argv) {
   // static const char* fn_name = "function-env";
@@ -869,6 +888,7 @@ Value fn_function_env(State& state, size_t argc, Value* argv) {
     default: return state.type_error("function-env expected valid macro");
   }
 }
+AR_DEFUN("function-env", fn_function_env, 1);
 
 Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   switch(argv[0].type()) {
@@ -886,6 +906,7 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   }
   return argv[0];
 }
+AR_DEFUN("set-function-macro-bit!", fn_set_function_macro_bit, 1);
 
 Value fn_function_min_arity(State& state, size_t argc, Value* argv) {
   switch(argv[0].type()) {
@@ -902,13 +923,15 @@ Value fn_function_min_arity(State& state, size_t argc, Value* argv) {
       return Value::make_fixnum(1);
   }
 }
+AR_DEFUN("function-min-arity", fn_function_min_arity, 1);
 
 Value fn_function_body(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "function-body";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
+  AR_FN_EXPECT_HEAP_TYPE(state, argv, 0, FUNCTION);
 
   return argv[0].as<Function>()->body;
 }
+AR_DEFUN("function-body", fn_function_body, 1);
 
 Value fn_function_name(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "function-name";
@@ -916,6 +939,7 @@ Value fn_function_name(State& state, size_t argc, Value* argv) {
 
   return argv[0].as<Function>()->name;
 }
+AR_DEFUN("function-name", fn_function_name, 1);
 
 Value fn_function_arguments(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "function-arguments";
@@ -923,6 +947,7 @@ Value fn_function_arguments(State& state, size_t argc, Value* argv) {
 
   return argv[0].as<Function>()->arguments;
 }
+AR_DEFUN("function-arguments", fn_function_arguments, 1);
 
 Value fn_function_rest_arguments(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "function-rest-arguments";
@@ -930,6 +955,7 @@ Value fn_function_rest_arguments(State& state, size_t argc, Value* argv) {
   
   return argv[0].as<Function>()->rest_arguments;
 }
+AR_DEFUN("function-rest-arguments", fn_function_rest_arguments, 1);
 
 Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-value";
@@ -939,6 +965,7 @@ Value fn_top_level_value(State& state, size_t argc, Value* argv) {
   if(r == C_UNDEFINED) return C_UNSPECIFIED;
   return r;
 }
+AR_DEFUN("top-level-value", fn_top_level_value, 1);
 
 Value fn_top_level_bound(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "top-level-bound?";
@@ -946,6 +973,7 @@ Value fn_top_level_bound(State& state, size_t argc, Value* argv) {
 
   return Value::make_boolean(argv[0].symbol_value() != C_UNDEFINED);
 }
+AR_DEFUN("top-level-bound?", fn_top_level_bound, 1);
 
 /** Iterate over everything that might be a toplevel function. */
 Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
@@ -981,6 +1009,7 @@ Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
   if(count > 0) return Value::make_fixnum(count);
   return Value::make_fixnum(0);
 }
+AR_DEFUN("top-level-for-each", fn_top_level_for_each, 1);
 
 Value fn_set_top_level_value(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-top-level-value!";
@@ -988,6 +1017,7 @@ Value fn_set_top_level_value(State& state, size_t argc, Value* argv) {
   argv[0].set_symbol_value(argv[1]);
   return C_UNSPECIFIED;
 }
+AR_DEFUN("set-top-level-value!", fn_set_top_level_value, 2);
 
 Value fn_make_rename(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "make-rename";
@@ -996,6 +1026,7 @@ Value fn_make_rename(State& state, size_t argc, Value* argv) {
 
   return state.make_rename(argv[1], argv[0]);
 }
+AR_DEFUN("make-rename", fn_make_rename, 2);
 
 Value fn_rename_set_gensym(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "rename-gensym!";
@@ -1009,24 +1040,28 @@ Value fn_rename_set_gensym(State& state, size_t argc, Value* argv) {
   renam.as<Rename>()->gensym = sym;
   return C_UNSPECIFIED;
 }
+AR_DEFUN("rename-gensym!", fn_rename_set_gensym, 1);
 
 Value fn_rename_env(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "rename-env";
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
   return argv[0].rename_env();
 }
+AR_DEFUN("rename-env", fn_rename_env, 1);
 
 Value fn_rename_expr(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "rename-env";
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
   return argv[0].rename_expr();
 }
+AR_DEFUN("rename-expr", fn_rename_expr, 1);
 
 Value fn_rename_gensym(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "rename-gensym";
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
   return argv[0].rename_gensym();
 }
+AR_DEFUN("rename-gensym", fn_rename_gensym, 1);
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
   Value env = argv[1], exp = argv[0];
@@ -1035,6 +1070,7 @@ Value fn_eval(State& state, size_t argc, Value* argv) {
   return state.eval_toplevel_list(exp);
   //return state.eval(C_FALSE, argv[0]);
 }
+AR_DEFUN("eval", fn_eval, 2);
 
 ///// MISC
 
@@ -1048,6 +1084,7 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   AR_ASSERT(exc.is_active_exception());
   return exc;
 }
+AR_DEFUN("raise", fn_raise, 3);
 
 Value fn_raise_source(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "raise-source";
@@ -1069,6 +1106,7 @@ Value fn_raise_source(State& state, size_t argc, Value* argv) {
 
   return exc;
 }
+AR_DEFUN("raise-source", fn_raise_source, 4);
 
 ///// RECORDS
 Value fn_register_record_type(State& state, size_t argc, Value* argv) {
@@ -1093,6 +1131,7 @@ Value fn_register_record_type(State& state, size_t argc, Value* argv) {
 
   return state.globals[tag];
 }
+AR_DEFUN("register-record-type", fn_register_record_type, 5);
 
 
 Value fn_set_record_type_printer(State& state, size_t argc, Value* argv) {
@@ -1103,6 +1142,7 @@ Value fn_set_record_type_printer(State& state, size_t argc, Value* argv) {
   rt->print = argv[1]; 
   return C_UNSPECIFIED;
 }
+AR_DEFUN("set-record-type-printer!", fn_set_record_type_printer, 2);
 
 Value fn_set_record_type_apply(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-record-type-apply!";
@@ -1112,6 +1152,7 @@ Value fn_set_record_type_apply(State& state, size_t argc, Value* argv) {
   rt->apply = argv[1]; 
   return C_UNSPECIFIED;
 }
+AR_DEFUN("set-record-type-apply", fn_set_record_type_apply, 2);
 
 // Macro for comparing records in the unusual case we already have the RecordType
 // (essentially in cases where record accessors have been generated by define-record)
@@ -1138,6 +1179,7 @@ Value fn_record_set(State& state, size_t argc, Value* argv) {
 
   return C_UNSPECIFIED;
 }
+AR_DEFUN("record-set!", fn_record_set, 4);
 
 Value fn_record_ref(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "record-ref";
@@ -1149,6 +1191,7 @@ Value fn_record_ref(State& state, size_t argc, Value* argv) {
 
   return argv[1].record_ref(argv[2].fixnum_value());
 }
+AR_DEFUN("record-ref", fn_record_ref, 3);
 
 Value fn_make_record(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "make-record";
@@ -1156,12 +1199,14 @@ Value fn_make_record(State& state, size_t argc, Value* argv) {
 
   return state.make_record(argv[0].as<RecordType>());
 }
+AR_DEFUN("make-record", fn_make_record, 1);
 
 Value fn_record_type_descriptor(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "record-type-descriptor";
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
   return argv[0].as<Record>()->type;
 }
+AR_DEFUN("record-type-descriptor", fn_record_type_descriptor, 1);
 
 Value fn_record_isa(State& state, size_t argc, Value* argv) {
   // static const char* fn_name = "record-isa?";
@@ -1171,6 +1216,7 @@ Value fn_record_isa(State& state, size_t argc, Value* argv) {
 
   return Value::make_boolean(rec.record_isa(rtd));
 }
+AR_DEFUN("record-isa?", fn_record_isa, 2);
 
 // Compiler
 Value fn_list_get_source(State& state, size_t argc, Value* argv) {
@@ -1191,6 +1237,7 @@ Value fn_list_get_source(State& state, size_t argc, Value* argv) {
   }
   return C_FALSE;
 }
+AR_DEFUN("list-get-source", fn_list_get_source, 1);
 
 Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "OpenFn->procedure";
@@ -1276,10 +1323,12 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
 
   return fn;
 }
+AR_DEFUN("OpenFn->procedure", fn_openfn_to_procedure, 1);
 
 Value fn_value_bits(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(argv[0].bits);
 }
+AR_DEFUN("value-bits", fn_value_bits, 1);
 
 Value fn_value_copy(State& state, size_t argc, Value* argv) {
   Value v1 = argv[0], v2;
@@ -1289,15 +1338,17 @@ Value fn_value_copy(State& state, size_t argc, Value* argv) {
   memcpy(v2.heap, v1.heap, v1.heap->size);
   return v2;
 }
+AR_DEFUN("value-copy", fn_value_copy, 1);
 
 Value fn_value_header_bit(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "value-header-bit";
+  static const char* fn_name = "value-header-bit?";
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   if(argv[0].immediatep()) {
     return state.eval_error("value-header bit got immediate object");
   }
   return Value::make_boolean(argv[0].heap->get_header_bit(argv[1].fixnum_value() > 0));
 }
+AR_DEFUN("value-header-bit?", fn_value_header_bit, 2)
 
 // Garbage collector
 
@@ -1305,6 +1356,11 @@ Value fn_gc_collect(State& state, size_t argc, Value* argv) {
   state.gc.collect();
   return C_UNSPECIFIED;
 }
+AR_DEFUN("gc:collect", fn_gc_collect, 0);
+
+//
+///// OS SPECIFIC 
+//
 
 Value fn_current_millisecond(State& state, size_t argc, Value* argv) {
 #ifdef _MSC_VER
@@ -1317,6 +1373,7 @@ Value fn_current_millisecond(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(milliseconds);
 #endif
 }
+AR_DEFUN("current-millisecond", fn_current_millisecond, 0);
 
 Value fn_exit(State& state, size_t argc, Value* argv) {
   if(argv[1] == C_TRUE) {
@@ -1326,203 +1383,41 @@ Value fn_exit(State& state, size_t argc, Value* argv) {
   }
   return C_UNSPECIFIED;
 }
+AR_DEFUN("exit", fn_exit, 1);
 
-void State::defun_core_closure(const std::string& cname, Value closure, c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
-  Value cfn, sym, name;
-
-  // Adjust arguments for closure
-#if 0 
-  if(max_arity == 0) {
-    max_arity = min_arity + 1;
-  }
-  min_arity++;
-#endif
-
-  AR_FRAME(this, cfn, sym, name, closure);
-  name = make_string(cname);
-  cfn = make_c_function(name, closure, (c_function_t)addr, min_arity, max_arity, variable_arity);
-  cfn.heap->set_header_bit(Value::CFUNCTION_CLOSURE_BIT);
-
-  sym = get_symbol(name);
-  sym.set_symbol_value(cfn);
-}
-  
-
-void State::defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
-  Value cfn, sym, name;
-
-  AR_FRAME(this, cfn, sym, name);
-  name = make_string(cname);
-  cfn = make_c_function(name, C_FALSE, addr, min_arity, max_arity, variable_arity);
-
-  sym = get_symbol(name);
-  sym.set_symbol_value(cfn);
-}
-
+//
+///// CONVERSION
+//
 
 Value fn_char_to_integer(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "char->integer";
   AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
   return Value::make_fixnum(argv[0].character());
 }
+AR_DEFUN("char->integer", fn_char_to_integer, 1);
 
 Value fn_integer_to_char(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "integer->char";
   AR_FN_EXPECT_TYPE(state, 0, argv, FIXNUM);
   return state.make_char(argv[0].fixnum_value());
 }
+AR_DEFUN("integer->char", fn_integer_to_char, 1);
 
 Value fn_char_numeric(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "char-numeric?";
   AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
-  return argv[0].character() >= '0' && argv[0].character() <= '9';
+  return Value::make_boolean(argv[0].character() >= '0' && argv[0].character() <= '9');
 }
+AR_DEFUN("char-numeric?", fn_char_numeric, 1);
 
 Value fn_repl(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(state.enter_repl());
 }
+AR_DEFUN("repl", fn_repl, 0);
 
 void State::load_builtin_functions() {
-  //std::cout << (size_t)((char*)aslr_address - (size_t)fn_string_to_symbol);
   // Conversion
-  defun_core("string->symbol", fn_string_to_symbol, 1);
-  defun_core("symbol->string", fn_symbol_to_string, 1);
-  defun_core("char->integer", fn_char_to_integer, 1);
-  defun_core("char-numeric?", fn_char_numeric, 1);
-  defun_core("integer->char", fn_integer_to_char, 1);
-
-  // Predicates
-  defun_core("procedure?", fn_procedurep, 1);
-  defun_core("macro?", fn_macrop, 1);
-
-  // Operations on raw objects
-  defun_core("value-type", fn_value_type, 1);
-  defun_core("value-bits", fn_value_bits, 1);
-  defun_core("value-copy", fn_value_copy, 1);
-  defun_core("value-header-bit?", fn_value_header_bit, 2);
-
-  // Strings
-  defun_core("string-copy", fn_string_copy, 1);
-
-  // Lists
-  defun_core("cons", fn_cons, 2);
-  defun_core("list", fn_list, 0, 0, true);
-  defun_core("cons*", fn_cons_star, 1, 1, true);
-  defun_core("list?", fn_listp, 1);
-  defun_core("list-ref", fn_list_ref, 2);
-  defun_core("list-join", fn_list_join, 2);
-  defun_core("length", fn_length, 1);
-
-  defun_core("map-i", fn_map_proper_i, 2);
-  defun_core("for-each-i", fn_for_each_proper_i, 2);
-  defun_core("map", fn_map_improper, 2);
-  defun_core("map-improper", fn_map_improper, 2);
-  defun_core("for-each", fn_foreach_proper, 2);
-  defun_core("for-each-improper", fn_foreach_improper, 2);
-  defun_core("for-each-improper-i", fn_foreach_improper_i, 2);
-
-  defun_core("memq", fn_memq, 2);
-  defun_core("memv", fn_memv, 2);
-  defun_core("member", fn_member, 2);
-  
-  defun_core("apply", fn_apply, 2);
-  defun_core("eval", fn_eval, 2);
-
-  // Vectors
-  defun_core("make-vector", fn_make_vector, 0, 2);
-  defun_core("vector-ref", fn_vector_ref, 2);
-  defun_core("vector-length", fn_vector_length, 1);
-  defun_core("vector-set!", fn_vector_set, 3);
-  defun_core("vector-append!", fn_vector_append, 2);
-
-  // Tables
-  defun_core("make-table", fn_make_table, 0);
-  defun_core("table-ref", fn_table_ref, 2);
-  defun_core("table-set!", fn_table_set, 3);
-  defun_core("table-for-each", fn_table_for_each, 2);
-  defun_core("table-entries", fn_table_entries, 1);
-
-  // Equality
-  defun_core("eq?", fn_eq, 2);
-  defun_core("eqv?", fn_eqv, 2);
-  defun_core("equal?", fn_equal, 2);
-
-  // I/O
-  defun_core("string-append", fn_string_append, 0, 0, true);
-  //defun_core("load", fn_load_file, 1);
-
-  // Pairs
-  defun_core("car", fn_car, 1, 1);
-  defun_core("cdr", fn_cdr, 1, 1);
-  defun_core("set-car!", fn_set_car, 2, 2);
-  defun_core("set-cdr!", fn_set_car, 2, 2);
-
-  // Exceptions
-  defun_core("raise", fn_raise, 3);
-  defun_core("raise-source", fn_raise_source, 4);
-
-  ///// Expansion support functionality
-  defun_core("cons-source", fn_cons_source, 3);
-  defun_core("list-source", fn_list_source, 0, 0, true);
-
-  // Environments
-  defun_core("env-make", fn_env_make, 1);
-  defun_core("env-resolve", fn_env_resolve, 2);
-  defun_core("env-define", fn_env_define, 3, 4);
-  defun_core("env-compare", fn_env_compare, 3);
-  defun_core("env-lookup", fn_env_lookup, 2);
-  defun_core("env-syntax?", fn_env_syntaxp, 2);
-  
-  // Renames
-  defun_core("make-rename", fn_make_rename, 2);
-  defun_core("rename-gensym!", fn_rename_set_gensym, 1);
-  defun_core("rename-env", fn_rename_env, 1);
-  defun_core("rename-expr", fn_rename_expr, 1);
-  defun_core("rename-gensym", fn_rename_gensym, 1);
-  defun_core("gensym", fn_gensym, 0, 1);
-  defun_core("gensym?", fn_gensymp, 1);
-
-  // Function modification
-  defun_core("set-function-name!", fn_set_function_name, 2);
-  defun_core("set-function-macro-bit!", fn_set_function_macro_bit, 1);
-  defun_core("function-min-arity", fn_function_min_arity, 1);
-  defun_core("function-env", fn_function_env, 1);
-  defun_core("function-body", fn_function_body, 1);
-  defun_core("function-name", fn_function_name, 1);
-  defun_core("function-arguments", fn_function_arguments, 1);
-  defun_core("function-rest-arguments", fn_function_rest_arguments, 1);
-  defun_core("set-vmfunction-name!", fn_set_vmfunction_name, 2);
-  defun_core("set-vmfunction-log!", fn_set_vmfunction_log, 2);
-
-  defun_core("top-level-value", fn_top_level_value, 1);
-  defun_core("top-level-bound?", fn_top_level_bound, 1);
-  defun_core("set-top-level-value!", fn_set_top_level_value, 2);
-
-  defun_core("top-level-for-each", fn_top_level_for_each, 1);
-
-  // Records
-  defun_core("register-record-type", fn_register_record_type, 5);
-  defun_core("set-record-type-printer!", fn_set_record_type_printer, 2);
-  defun_core("set-record-type-apply!", fn_set_record_type_apply, 2);
-
-  defun_core("make-record", fn_make_record, 1);
-  defun_core("record-ref", fn_record_ref, 3);
-  defun_core("record-set!", fn_record_set, 4);
-  defun_core("record-type-descriptor", fn_record_type_descriptor, 1);
-  defun_core("record-isa?", fn_record_isa, 2);
-
-  // Compiler
-  defun_core("list-get-source", fn_list_get_source, 1);
-  defun_core("OpenFn->procedure", fn_openfn_to_procedure, 1);
-
-  // Garbage collector
-  defun_core("gc:collect", fn_gc_collect, 0);
-
-  defun_core("repl", fn_repl, 0);
-
-  // Misc
-  defun_core("exit", fn_exit, 1);
-  defun_core("current-millisecond", fn_current_millisecond, 0);
+  builtins.install(*this);
 }
 
 } // namespace arete

@@ -7,6 +7,8 @@
 
 namespace arete {
 
+DefunGroup files("files");
+
 Value State::make_input_file_port(const char* cpath, std::istream* fs) {
   Value path = make_string(cpath);
   AR_FRAME(this, path);
@@ -73,12 +75,14 @@ Value State::make_output_file_port(Value path) {
   return res;
 }
 
+
 Value fn_open_output_file(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "open-output-file";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
 
   return state.make_output_file_port(argv[0]);
 }
+AR_DEFUN("open-output-file", fn_open_output_file, 1);
 
 Value fn_open_input_file(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "open-input-file";
@@ -86,6 +90,7 @@ Value fn_open_input_file(State& state, size_t argc, Value* argv) {
 
   return state.make_input_file_port(argv[0]);
 }
+AR_DEFUN("open-input-file", fn_open_input_file, 1);
 
 Value fn_close_port(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "close-port";
@@ -95,6 +100,8 @@ Value fn_close_port(State& state, size_t argc, Value* argv) {
 
   return C_UNSPECIFIED;
 }
+AR_DEFUN("close-output-port", fn_close_port, 1);
+AR_DEFUN("close-input-port", fn_close_port, 1);
 
 // Extract a file port from an argument, or return *current-input-port*
 #define  AR_MAYBE_INPUT_PORT(state, argv, argc, argi, name) \
@@ -109,7 +116,6 @@ Value fn_close_port(State& state, size_t argc, Value* argv) {
     name = state.get_global_value(State::G_CURRENT_INPUT_PORT); \
   }
 
-
 Value fn_read_char(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "read-char";
 
@@ -122,6 +128,7 @@ Value fn_read_char(State& state, size_t argc, Value* argv) {
   if(is->eof()) return C_EOF;
   return state.make_char(c);
 }
+AR_DEFUN("read-char", fn_read_char, 0, 1);
 
 Value fn_peek_char(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "peek-char";
@@ -134,6 +141,7 @@ Value fn_peek_char(State& state, size_t argc, Value* argv) {
   if(is->eof()) return C_EOF;
   return state.make_char(c);
 }
+AR_DEFUN("peek-char", fn_peek_char, 0, 1);
 
 Value fn_read(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "read";
@@ -151,6 +159,7 @@ Value fn_read(State& state, size_t argc, Value* argv) {
 
   return fp->reader->read();
 }
+AR_DEFUN("read", fn_read, 0, 1);
 
 // Extract a file port from an argument, or return *current-input-port*
 #define  AR_MAYBE_OUTPUT_PORT(state, argv, argc, argi, name) \
@@ -188,6 +197,7 @@ Value fn_write_char(State& state, size_t argc, Value* argv) {
   
   return C_UNSPECIFIED;
 }
+AR_DEFUN("write-char", fn_write_char, 1, 2);
 
 Value fn_write(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "write";
@@ -198,6 +208,7 @@ Value fn_write(State& state, size_t argc, Value* argv) {
   if(&os == &std::cout) os.flush();
   return C_UNSPECIFIED;
 }
+AR_DEFUN("write", fn_write, 1, 2);
 
 Value fn_display(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "display";
@@ -210,6 +221,7 @@ Value fn_display(State& state, size_t argc, Value* argv) {
     os << argv[0];
   return C_UNSPECIFIED;
 }
+AR_DEFUN("display", fn_display, 1, 2);
 
 Value fn_newline(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "newline";
@@ -222,6 +234,7 @@ Value fn_newline(State& state, size_t argc, Value* argv) {
 
   return C_UNSPECIFIED;
 }
+AR_DEFUN("newline", fn_newline, 0, 1);
 
 Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bool whitespace, bool pretty) {
   for(size_t i = 0; i != argc; i++) {
@@ -252,12 +265,14 @@ Value fn_print_source(State& state, size_t argc, Value* argv) {
   }
   return C_UNSPECIFIED;
 }
+AR_DEFUN("print-source", fn_print_source, 1);
 
 Value fn_print(State& state, size_t argc, Value* argv) {
   Value chk = fn_print_impl(state, argc, argv, std::cout, true, false);
   std::cout << std::endl;
   return chk;
 }
+AR_DEFUN("print", fn_print, 0, 0, true);
 
 Value fn_print_string(State& state, size_t argc, Value* argv) {
   std::ostringstream os;
@@ -265,12 +280,14 @@ Value fn_print_string(State& state, size_t argc, Value* argv) {
   if(chk.is_active_exception()) return chk;
   return state.make_string(os.str());
 }
+AR_DEFUN("print-string", fn_print_string, 0, 0, true);
 
 static Value fn_pretty_print(State& state, size_t argc, Value* argv) {
   Value chk = fn_print_impl(state, argc, argv, std::cout, true, true);
   std::cout << std::endl;
   return chk;
 }
+AR_DEFUN("pretty-print", fn_pretty_print, 0, 0, true);
 
 Value State::slurp_file(const std::string& path) {
   std::ifstream fs(path);
@@ -308,7 +325,6 @@ Value State::slurp_file(const std::string& path) {
   return lst;
 }
 
-
 Value fn_slurp_file(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "slurp-file";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
@@ -317,6 +333,7 @@ Value fn_slurp_file(State& state, size_t argc, Value* argv) {
 
   return state.slurp_file(path);
 }
+AR_DEFUN("slurp-file", fn_slurp_file, 1);
 
 Value fn_print_table_verbose(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "print-table-verbose";
@@ -326,6 +343,7 @@ Value fn_print_table_verbose(State& state, size_t argc, Value* argv) {
   
   return C_UNSPECIFIED;
 }
+AR_DEFUN("print-table-verbose", fn_print_table_verbose, 1);
 
 Value fn_load_file(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "load";
@@ -335,6 +353,7 @@ Value fn_load_file(State& state, size_t argc, Value* argv) {
   
   return state.load_file(path);
 }
+AR_DEFUN("load", fn_load_file, 1);
 
 void State::load_file_functions() {
   defun_core("slurp-file", fn_slurp_file, 1);
@@ -355,6 +374,8 @@ void State::load_file_functions() {
   defun_core("pretty-print", fn_pretty_print, 0, 0, true);
   defun_core("print-table-verbose", fn_print_table_verbose, 1);
   defun_core("load", fn_load_file, 1);
+
+  files.install(*this);
 }
 
 }

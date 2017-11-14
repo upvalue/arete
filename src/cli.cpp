@@ -19,8 +19,8 @@ static const char* help[] = {
   "Note: Arguments are evaluated left to right, e.g. arete <file1> --repl <file2>",
   "will cause <file1> to be loaded, a REPL to be opened, and <file2> to be loaded after it is closed.\n",
   "  --help: Print this message",
+  "  --image-load <path>: Load a heap image. Must be the first argument.",
   "  --image-save <path>: Save a heap image. Program exits after this.",
-  "  --image-load <path>: Load a heap image. MUST be the first argument."
   "  -- <arguments...>: Arguments after -- will be pass to Scheme as a list of strings named *command-line*",
   "  --set <variable> <expr>: Set a top-level variable to an expression (only read, not evaluated)",
   "  Helpful top-level variables:",

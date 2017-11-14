@@ -22,31 +22,46 @@ void State::set_global_value(Global sym, Value v) {
 bool State::equals(Value a, Value b) {
   if(a.bits == b.bits) return true;
 
-  if(a.type() == VECTOR && b.type() == VECTOR) {
-    if(a.vector_length() != b.vector_length()) return false;
-    for(size_t i = 0; i < a.vector_length(); i++) {
-      if(!equals(a.vector_ref(i), b.vector_ref(i))) {
-        return false;
-      }
-    }
-    return true;
-  } else if(a.type() == PAIR && b.type() == PAIR) {
-    while(a.type() == PAIR && b.type() == PAIR) {
-      if(!equals(a.car(), b.car())) {
-        return false;
-      }
-      a = a.cdr();
-      b = b.cdr();
-    }
+  Type tipe = a.type();
+  if(tipe != b.type()) return false;
 
-    if(a != C_NIL || b != C_NIL) {
-      return equals(a, b);
+  switch(tipe) {
+    case VECTOR: {
+      if(a.vector_length() != b.vector_length()) return false;
+      for(size_t i = 0; i < a.vector_length(); i++) {
+        if(!equals(a.vector_ref(i), b.vector_ref(i))) {
+          return false;
+        }
+      }
+      return true;
     }
+    case PAIR: {
+      while(a.heap_type_equals(PAIR) && b.heap_type_equals(PAIR)) {
+        if(!equals(a.car(), b.car())) {
+          return false;
+        }
+        a = a.cdr();
+        b = b.cdr();
+      }
 
-    return true;
-  } else if(a.type() == STRING && b.type() == STRING) {
-    if(a.string_bytes() != b.string_bytes()) return false;
-    return strncmp(a.string_data(), b.string_data(), a.string_bytes()) == 0;
+      if(a != C_NIL && b != C_NIL) {
+        return equals(a, b);
+      }
+
+      if(a != C_NIL || b != C_NIL) return false;
+
+      return true;
+    }
+    case STRING: {
+      if(a.string_bytes() != b.string_bytes()) return false;
+      return strncmp(a.string_data(), b.string_data(), a.string_bytes()) == 0;
+    }
+    case CHARACTER:
+      return a.character() == b.character();
+    default:  {
+      std::cerr << "arete: equal? can't compare values of type " << tipe << std::endl;
+      return false;
+    }
   }
 
   return a.bits == b.bits;
@@ -220,6 +235,37 @@ Value State::make_record(size_t tag) {
 
 ///// FUNCTIONS
 
+#define AR_DEFUN_LOG(expr) ARETE_LOG(ARETE_LOG_TAG_DEFUN, "defun", expr)
+
+static std::vector<c_function_t> id_to_function;
+static std::unordered_map<ptrdiff_t, size_t> function_to_id;
+DefunGroup* defun_group = 0;
+
+Defun::Defun(const char* fn_name_, c_function_t fn_, size_t min_arity_, size_t max_arity_, bool var_arity_):
+    fn_name(fn_name_), fn(fn_), min_arity(min_arity_), max_arity(max_arity_), var_arity(var_arity_) {
+
+  size_t id = id_to_function.size();
+  function_to_id.insert(std::make_pair((ptrdiff_t)fn, id));
+  id_to_function.push_back(fn);
+  AR_DEFUN_LOG(defun_group->name << ' ' << fn_name << " " << id << " <=> " << (ptrdiff_t) fn);
+  defun_group->data.push_back(this);
+}
+
+void DefunGroup::install(State& state) {
+  for(size_t i = 0; i != data.size(); i++) {
+    state.defun_core(data[i]->fn_name, data[i]->fn, data[i]->min_arity, data[i]->max_arity,
+      data[i]->var_arity);
+  }
+}
+
+void DefunGroup::install_closure(State& state, Value closure) {
+  AR_FRAME(state, closure);
+  for(size_t i = 0; i != data.size(); i++) {
+    state.defun_core_closure(data[i]->fn_name, closure, (c_closure_t)data[i]->fn,
+      data[i]->min_arity, data[i]->max_arity, data[i]->var_arity);
+  }
+}
+
  Value State::make_c_function(Value name, Value closure, c_function_t addr, size_t min_arity,
     size_t max_arity, bool variable_arity) {
   if(max_arity == 0)
@@ -234,6 +280,29 @@ Value State::make_record(size_t tag) {
   if(variable_arity)
     cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
   return cfn;
+}
+
+void State::defun_core_closure(const std::string& cname, Value closure, c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
+  Value cfn, sym, name;
+
+  AR_FRAME(this, cfn, sym, name, closure);
+  name = make_string(cname);
+  cfn = make_c_function(name, closure, (c_function_t)addr, min_arity, max_arity, variable_arity);
+  cfn.heap->set_header_bit(Value::CFUNCTION_CLOSURE_BIT);
+
+  sym = get_symbol(name);
+  sym.set_symbol_value(cfn);
+}
+
+void State::defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
+  Value cfn, sym, name;
+
+  AR_FRAME(this, cfn, sym, name);
+  name = make_string(cname);
+  cfn = make_c_function(name, C_FALSE, addr, min_arity, max_arity, variable_arity);
+
+  sym = get_symbol(name);
+  sym.set_symbol_value(cfn);
 }
 
 Value Value::c_function_apply(State& state, size_t argc, Value* argv) {

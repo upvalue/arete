@@ -63,10 +63,9 @@ heap.boot: arete $(CXXOBJS) $(wildcard scheme/*.scm)
 	$(call colorecho, "IMG $@")
 	./arete bootstrap.scm --save-image heap.boot
 
-
-arete.html: $(ECXXOBJS) src/main.em.o
+web/arete.js: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")
-	$(ECXX) -O3 $(ELDFLAGS) -o $@ $^ $(addprefix --preload-file ,$(wildcard bootstrap.scm scheme/*.scm examples/*.scm))
+	$(ECXX) -O3 $(ELDFLAGS) -o $@ $^ $(addprefix --preload-file ,$(wildcard *.boot bootstrap.scm scheme/*.scm examples/*.scm))
 
 arete-distilled.cpp: $(wildcard src/*.cpp)
 	$(call colorecho "arete.cpp")
