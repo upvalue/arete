@@ -73,9 +73,24 @@ struct PointerUpdater {
   T update_function_pointer(T addr) {
     if(addr == 0) return (T) 0;
     if(reading) {
-      return (T)(((char*) aslr_address) + ((size_t) addr));
+      // if(id_to_function.size() )
+      //AR_ASSERT("function id out of bounds; did you forget to recompile?" &&
+      //  id_to_function.size() > (size_t) addr);
+      return (T) function_id_to_ptr((size_t) addr);
+      //return (T)(((char*) aslr_address) + ((size_t) addr));
     } else {
-      return (T)(((char*) addr) - ((size_t) aslr_address));
+      /*
+      khiter_t k = kh_get(ar_fn_table, function_to_id3, ((ptrdiff_t) addr));
+      if(k == kh_end(function_to_id3)) {
+        AR_IMG_LOG("failed to find function id " << (ptrdiff_t) addr);
+        AR_ASSERT("failed to find function id; did you forget a Defun?" && k != kh_end(function_to_id3));
+      }
+      */
+      //auto i = function_to_id2->find((ptrdiff_t) addr);
+      //AR_ASSERT("failed to find function id; did you forget a Defun?" && i != function_to_id2->end());
+      return (T) function_ptr_to_id((size_t) addr);
+      //return (T) i->second;
+      //return (T)(((char*) addr) - ((size_t) aslr_address));
     }
   }
   
@@ -105,6 +120,9 @@ struct PointerUpdater {
       }
 
       case RECORD_TYPE: {
+        if(!reading) {
+          AR_IMG_LOG(static_cast<RecordType*>(heap)->name);
+        }
         static_cast<RecordType*>(heap)->apply = update_value(static_cast<RecordType*>(heap)->apply);
         static_cast<RecordType*>(heap)->print = update_value(static_cast<RecordType*>(heap)->print);
         static_cast<RecordType*>(heap)->name = update_value(static_cast<RecordType*>(heap)->name);

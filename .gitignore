@@ -12,3 +12,4 @@ vgcore*
 /web/arete.html.mem
 /web/arete.js
 /web/arete.data
+/vendor/linenoise/*.d

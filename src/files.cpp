@@ -75,7 +75,6 @@ Value State::make_output_file_port(Value path) {
   return res;
 }
 
-
 Value fn_open_output_file(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "open-output-file";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
@@ -265,7 +264,7 @@ Value fn_print_source(State& state, size_t argc, Value* argv) {
   }
   return C_UNSPECIFIED;
 }
-AR_DEFUN("print-source", fn_print_source, 1);
+AR_DEFUN("print-source", fn_print_source, 1, 1, true);
 
 Value fn_print(State& state, size_t argc, Value* argv) {
   Value chk = fn_print_impl(state, argc, argv, std::cout, true, false);
@@ -356,25 +355,6 @@ Value fn_load_file(State& state, size_t argc, Value* argv) {
 AR_DEFUN("load", fn_load_file, 1);
 
 void State::load_file_functions() {
-  defun_core("slurp-file", fn_slurp_file, 1);
-  defun_core("open-input-file", fn_open_input_file, 1);
-  defun_core("open-output-file", fn_open_output_file, 1);
-  defun_core("close-output-port", fn_close_port, 1);
-  defun_core("close-input-port", fn_close_port, 1);
-  defun_core("read", fn_read, 0, 1);
-  defun_core("read-char", fn_read_char, 0, 1);
-  defun_core("peek-char", fn_peek_char, 0, 1);
-  defun_core("write-char", fn_write_char, 1, 2);
-  defun_core("display", fn_display, 1, 2);
-  defun_core("write", fn_write, 1, 2);
-  defun_core("newline", fn_newline, 0, 1);
-  defun_core("print", fn_print, 0, 0, true);
-  defun_core("print-source", fn_print_source, 0, 0, true);
-  defun_core("print-string", fn_print_string, 0, 0, true);
-  defun_core("pretty-print", fn_pretty_print, 0, 0, true);
-  defun_core("print-table-verbose", fn_print_table_verbose, 1);
-  defun_core("load", fn_load_file, 1);
-
   files.install(*this);
 }
 

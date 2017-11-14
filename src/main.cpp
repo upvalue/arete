@@ -7,6 +7,7 @@ int do_main(int argc, char* argv[]) {
   arete::State* state = new arete::State();
   int return_code = state->enter_cli(argc, argv);
   delete state;
+  arete_free_function_tables();
   return return_code;
 }
 
@@ -33,5 +34,5 @@ int main(int argc, char *argv[]) {
 
   return 0;
 #endif
-  return do_main(argc, argv);
+  int result = do_main(argc, argv);
 }

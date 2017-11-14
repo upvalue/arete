@@ -272,6 +272,8 @@ void ttf_font_finalizer(State& state, Value sfont) {
   }
 }
 
+Defun _font_finalizer((void*) ttf_font_finalizer);
+
 Value sdl_open_font(State& state, SDLModule* module, size_t argc, Value* argv) {
   static const char* fn_name = "sdl:open-font";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
@@ -423,6 +425,8 @@ void timer_finalizer(State& state, Value timer) {
     }
   }
 }
+
+Defun _timer_finalizer((void*) timer_finalizer);
 
 Value load_sdl(State& state) {
   // Register record types

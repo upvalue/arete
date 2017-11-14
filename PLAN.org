@@ -17,15 +17,23 @@
   - [ ] Symbol collection
   - [ ] Generational garbage collection
 
+* Runtime
+  - [ ] Image saving: Images rely on C++ static initialization order to restore pointers to C++ functions. This may
+    not be very portable at all.
+
 * Compiler
   - [ ] Analysis pass.
     Replace symbol usage with unique eq? based "bindings." Display closures and most basic inlining,
     e.g. car in the application position.
+  - [ ] Native code compilation
 
 * I/O
   - [ ] Tables and structs should have read/write support
     Structs and other high-level objects may not be READ by any Arete instance, depending on code being loaded, but
     it'd still be good to have.
+
+* Emscripten compile
+  - [ ] Better demo. REPL, SDL, etc. Probably will need to write a callable C interface.
 
 * Various optimizations that probably won't make a difference
   - [x] heap_type_equals() primitive, for when we want to check whether the type of a heap object matches a type.

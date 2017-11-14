@@ -234,20 +234,73 @@ Value State::make_record(size_t tag) {
 
 ///// FUNCTIONS
 
+// Automatic function registration. This is a little nicer to write than adding functions away
+// from where they're defined, but the main point is assigning each function a unique ID for the
+// purpose of image serialization.
+
 #define AR_DEFUN_LOG(expr) ARETE_LOG(ARETE_LOG_TAG_DEFUN, "defun", expr)
 
-static std::vector<c_function_t> id_to_function;
-static std::unordered_map<ptrdiff_t, size_t> function_to_id;
+std::vector<c_function_t>* id_to_function = 0;
+std::unordered_map<ptrdiff_t, size_t> *function_to_id = 0;
 DefunGroup* defun_group = 0;
+
+c_function_t function_id_to_ptr(size_t id) {
+  return id_to_function->at(id);
+}
+
+c_function_t function_ptr_to_id(ptrdiff_t addr) {
+  auto i = function_to_id->find(addr);
+  if(i == function_to_id->end()) {
+    std::cerr << "arete: function_ptr_to_id failed to find ID for function " << (ptrdiff_t) addr <<
+      std::endl;
+
+    return nullptr;
+  }
+  return (c_function_t) i->second;
+}
+
+static void register_defun(const char* fn_name, c_function_t fn, Defun* push_back) {
+  if(!function_to_id) {
+    id_to_function = new std::vector<c_function_t>();
+    function_to_id = new std::unordered_map<ptrdiff_t, size_t>;
+  }
+
+  size_t id = id_to_function->size();
+  AR_DEFUN_LOG(defun_group->name << ' ' << fn_name << " " << id << " <=> " << (ptrdiff_t) fn);
+
+
+  // Add to defun group
+  if(push_back != nullptr) {
+    defun_group->data.push_back(push_back);
+  }
+
+  // Insert to hashtable. We have to check if it's there first because some defuns can point to the
+  // same function (close-input-port and close-output-port for example)
+  if(function_to_id->find((ptrdiff_t)fn) != function_to_id->end()) {
+    return;
+  }
+
+  function_to_id->insert(std::make_pair((ptrdiff_t)fn, id));
+
+  id_to_function->push_back(fn);
+}
 
 Defun::Defun(const char* fn_name_, c_function_t fn_, size_t min_arity_, size_t max_arity_, bool var_arity_):
     fn_name(fn_name_), fn(fn_), min_arity(min_arity_), max_arity(max_arity_), var_arity(var_arity_) {
 
-  size_t id = id_to_function.size();
-  function_to_id.insert(std::make_pair((ptrdiff_t)fn, id));
-  id_to_function.push_back(fn);
-  AR_DEFUN_LOG(defun_group->name << ' ' << fn_name << " " << id << " <=> " << (ptrdiff_t) fn);
-  defun_group->data.push_back(this);
+  register_defun(fn_name, fn_, this);
+  
+}
+
+Defun::Defun(void* fn_): fn((c_function_t)fn_) {
+  register_defun("finalizer", (c_function_t) fn_, nullptr);
+}
+
+void arete_free_function_tables() {
+  if(function_to_id) {
+    delete id_to_function;
+    function_to_id = 0;
+  }
 }
 
 void DefunGroup::install(State& state) {

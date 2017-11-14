@@ -467,7 +467,9 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
       os2 << '{';
       TableIterator ti(v);
       ps.indent += ps.indent_level;
+      size_t entries = 0;
       while(++ti) {
+        entries++;
         os2 << '\0';
         //for(size_t i = 0; i != start_indent1; i++) os2 << ' ';
         pretty_print_sub(state, os2, ti.key(), ps);
@@ -475,8 +477,10 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
         pretty_print_sub(state, os2, ti.value(), ps);
         os2 << " , ";
       }
-      os2 << '\0';
-      os2 << '\b';
+      if(entries != 0) {
+        os2 << '\0';
+        os2 << '\b';
+      }
       //for(size_t i = 0; i != start_indent1; i++) os2 << ' ';
       os2 << '}';
     } else if(v.type() == RECORD) {

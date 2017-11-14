@@ -2256,12 +2256,20 @@ inline Handle::~Handle() {
   state.gc.handles.erase(it);
 }
 
-// Auto-registration of functions. Necessary for the saving and loading of images.
+// Auto-registration of functions, and assigning of unique IDs to function pointers
+// Necessary for the saving and loading of images.
 
 struct DefunGroup;
 struct Defun;
 
 extern DefunGroup* defun_group;
+c_function_t function_id_to_ptr(size_t id);
+c_function_t function_ptr_to_id(ptrdiff_t addr);
+
+/** Free some dynamic memory allocations that may be done on program startup. States
+ * cannot be created after this is called.
+ */
+void arete_free_function_tables();
 
 struct DefunGroup {
   DefunGroup(const char* name_): name(name_) {
@@ -2279,12 +2287,14 @@ struct DefunGroup {
 
 struct Defun {
   Defun(const char*, c_function_t, size_t, size_t = 0, bool = false);
+  Defun(void*);
   ~Defun() {}
 
   const char* fn_name;
   c_function_t fn;
   size_t min_arity, max_arity;
   bool var_arity;
+  bool install;
 };
 
 #define _AR_DEFUN_CONCAT(sym) defun_##sym

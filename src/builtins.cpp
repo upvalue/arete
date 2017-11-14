@@ -1385,6 +1385,17 @@ Value fn_exit(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("exit", fn_exit, 1);
 
+Value fn_save_image(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "save-image";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+
+  state.save_image(argv[0].string_data());
+
+  exit(EXIT_SUCCESS);
+  return C_UNSPECIFIED; // make the compiler happy :)
+}
+AR_DEFUN("save-image", fn_save_image, 1);
+
 //
 ///// CONVERSION
 //

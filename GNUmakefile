@@ -1,13 +1,13 @@
 # Variables
-CXX := clang++
+CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
 CFLAGS := $(CFLAGS) -g3 -O3
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
-LDFLAGS := -lm
+LDFLAGS := -lm 
 
 ECXX := em++
-ECPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
-ECXXFLAGS := $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions 
+ECPPFLAGS := $(CPPFLAGS) 
+ECXXFLAGS := $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -DAR_LINENOISE=0 -DARETE_LOG_TAGS="(ARETE_LOG_TAG_IMAGE|ARETE_LOG_TAG_DEFUN)"
 ELDFLAGS :=
 
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
