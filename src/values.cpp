@@ -59,8 +59,7 @@ bool State::equals(Value a, Value b) {
     case CHARACTER:
       return a.character() == b.character();
     default:  {
-      std::cerr << "arete: equal? can't compare values of type " << tipe << std::endl;
-      return false;
+      return a.bits == b.bits;
     }
   }
 

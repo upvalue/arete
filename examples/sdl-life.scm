@@ -278,7 +278,7 @@
 
 (print "Quit normally.")
 
-(sdl:free-timer timer)
+;(sdl:remove-timer timer)
 (sdl:close-font font)
 
 (sdl:quit)

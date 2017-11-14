@@ -357,6 +357,10 @@ uint32_t sdl_timer_callback(uint32_t interval, void* parameter) {
   return interval;
 }
 
+struct TimerData {
+  Handle* symbol;
+  SDL_TimerID id;
+};
 
 Value sdl_add_timer(State& state, SDLModule* module, size_t argc, Value* argv) {
   static const char* fn_name = "sdl:add-timer";
@@ -365,43 +369,58 @@ Value sdl_add_timer(State& state, SDLModule* module, size_t argc, Value* argv) {
 
   size_t timer_tag = module->data.timer_tag;
   ptrdiff_t milliseconds = argv[1].fixnum_value();
+
   Handle *symbol_handle = new Handle(state, argv[0]);
-  SDL_AddTimer((uint32_t) milliseconds, sdl_timer_callback, symbol_handle);
+  SDL_TimerID id = SDL_AddTimer((uint32_t) milliseconds, sdl_timer_callback, symbol_handle);
+
+  CHECK_SDL(id);
 
   Value rec = state.make_record(timer_tag);
 
-  Handle** ptr = state.record_data<Handle*>(timer_tag, rec);
-  (*ptr) = symbol_handle;
+  TimerData* data = state.record_data<TimerData>(timer_tag, rec);
+  data->symbol = symbol_handle;
+  data->id = id;
+
+  //Handle** ptr = state.record_data<Handle*>(timer_tag, rec);
+  //(*ptr) = symbol_handle;
 
   return rec;
 }
 AR_DEFUN("sdl:add-timer", sdl_add_timer, 2);
 
-Value sdl_free_timer(State& state, SDLModule* module, size_t argc, Value* argv) {
-  static const char* fn_name = "sdl:free-timer";
+Value sdl_remove_timer(State& state, SDLModule* module, size_t argc, Value* argv) {
+  static const char* fn_name = "sdl:remove-timer";
 
   size_t timer_tag = module->data.timer_tag;
 
   AR_FN_EXPECT_RECORD_ISA(state, argv, 0, timer_tag);
 
-  Handle** ptr = state.record_data<Handle*>(timer_tag, argv[0]);
+  TimerData* data = state.record_data<TimerData>(timer_tag, argv[0]);
 
-  if(*ptr != 0) {
-    delete *ptr;
-    (*ptr) = 0;
+  bool result = false;
+
+  if(data->symbol != nullptr) {
+    delete data->symbol;
+    data->symbol = nullptr;
+    result = SDL_RemoveTimer(data->id) == SDL_TRUE;
   }
 
   argv[0].record_set_finalized();
+  return Value::make_boolean(result);
+
 
   return C_UNSPECIFIED;
 }
-AR_DEFUN("sdl:free-timer", sdl_free_timer, 1);
+AR_DEFUN("sdl:remove-timer", sdl_remove_timer, 1);
 
 void timer_finalizer(State& state, Value timer) {
-  Handle** handle = timer.record_data<Handle*>();
-  if(*handle) {
-    delete (*handle);
-    (*handle) = 0;
+  TimerData* timer_data = timer.record_data<TimerData>();
+  if(timer_data->symbol != nullptr) {
+    delete timer_data->symbol;
+    timer_data->symbol = nullptr;
+    if(SDL_WasInit(SDL_INIT_TIMER) & SDL_INIT_TIMER) {
+      SDL_RemoveTimer(timer_data->id);
+    }
   }
 }
 
