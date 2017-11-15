@@ -158,9 +158,9 @@ bool State::enter_repl(bool read_only, const char* history_file) {
         continue;
       }
 
-      tmp = make_pair(x, C_NIL);
+      //tmp = make_pair(x, C_NIL);
       //tmp = eval_toplevel_list(tmp);
-      tmp = eval2_body(tmp);
+      tmp = eval2_body(x);
 
       if(tmp.is_active_exception()) {
         print_exception(std::cerr, tmp);

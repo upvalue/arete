@@ -34,10 +34,14 @@ struct State::EvalFrame {
   }
 
 static State::Global get_form(State& state, Value sym) {
-  if(sym == state.globals[State::S_BEGIN]) return State::S_BEGIN;
-  else if(sym == state.globals[State::S_DEFINE]) return State::S_DEFINE;
-  else if(sym == state.globals[State::S_LAMBDA]) return State::S_LAMBDA;
-  else if(sym == state.globals[State::S_QUOTE]) return State::S_QUOTE;
+
+#define GET_FORM(n) else if(sym == state.globals[(n)]) return (n)
+  if(0) (void)0;
+  GET_FORM(State::S_DEFINE);
+  GET_FORM(State::S_LAMBDA);
+  GET_FORM(State::S_QUOTE);
+  GET_FORM(State::S_BEGIN);
+#undef GET_FORM
 
   return (State::Global)-1;
 }
@@ -64,13 +68,20 @@ Value State::temps_to_list() {
 Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
   size_t length = exp.list_length();
 
+  AR_FRAME(this, frame.env, frame.fn_name, exp);
+
   switch(type) {
+    case S_QUOTE: {
+      if(length != 2)
+        return eval_error("quote only takes one argument", exp);
+      return exp.cadr();
+    }
     case S_DEFINE: {
       if(length != 3)
         return eval_error("define expects exactly three arguments", exp);
 
       Value name = exp.cadr(), body = exp.caddr(), tmp;
-      AR_FRAME(this, exp, name, body, tmp);
+      AR_FRAME(this, name, body, tmp);
 
       if(!name.heap_type_equals(SYMBOL))
         return eval_error("first argument to define must be a symbol", exp.cdr());
@@ -100,7 +111,7 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
     }
     case S_LAMBDA: {
       Value fn_env, args, args_head, args_tail, saved_fn;
-      AR_FRAME(this, exp, frame.env, frame.fn_name, fn_env, args, args_head, args_tail, saved_fn);
+      AR_FRAME(this, fn_env, args, args_head, args_tail, saved_fn);
       Function* fn = static_cast<Function*>(gc.allocate(FUNCTION, sizeof(Function)));
       saved_fn = fn;
 
@@ -150,7 +161,6 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
         fn = saved_fn.as_unsafe<Function>();
       }
 
-
       /*std::cout << "fn body: " << fn->body << std::endl;
       std::cout << "fn args: " << fn->arguments << std::endl;
       std::cout << "fn rest: " << fn->rest_arguments << std::endl;*/
@@ -161,19 +171,25 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
   return C_UNSPECIFIED;
 }
 
-Value State::eval2_body(EvalFrame& frame, Value body) {
-  Value exp, cell;
+Value State::eval2_body(EvalFrame& frame, Value body, bool single) {
+  Value exp, cell, tmp;
 tail_call:
   bool tail = false;
 
-  AR_FRAME(this, exp, cell, body, frame.env, frame.fn_name);
+  AR_FRAME(this, exp, cell, body, frame.env, frame.fn_name, tmp);
 
-  while(body.heap_type_equals(PAIR)) {
+  while(single || body.heap_type_equals(PAIR)) {
     cell = exp;
-    exp = body.car();
-    body = body.cdr();
+    if(single) { 
+      exp = body;
+      single = false;
+      body = C_FALSE;
+    } else {
+      exp = body.car();
+      body = body.cdr();
+    }
 
-    tail = body == C_NIL;
+    tail = tco_enabled && body == C_NIL;
 
     switch(exp.type()) {
       case SYMBOL: {
@@ -211,24 +227,26 @@ tail_call:
         }
 
         Value kar = exp.car(), res, tmp;
+        Type kar_type = kar.type();
 
-        if(kar.heap_type_equals(RENAME))
+        if(kar_type == RENAME)
           res = env_lookup(kar.rename_env(), kar.rename_expr());
 
         // Check for syntactic values
-        if((kar.heap_type_equals(SYMBOL) && kar.symbol_value() == C_SYNTAX) ||
-          (kar.heap_type_equals(RENAME) && res == C_SYNTAX)) {
+        if((kar_type == SYMBOL && kar.symbol_value() == C_SYNTAX) ||
+          (kar_type == RENAME && res == C_SYNTAX)) {
 
           // The expander will rename special forms that it introduces into source code with an
           // env of #f; we unwrap those here
 
-          if(kar.heap_type_equals(RENAME) && res == C_SYNTAX) {
+          if(kar_type == RENAME && res == C_SYNTAX) {
             kar = kar.rename_expr();
           }
 
-          switch(get_form(*this, kar)) {
+          unsigned form = get_form(*this, kar);
+          switch(form) {
             case S_BEGIN:
-              if(tail && tco_enabled) {
+              if(tail) {
                 body = exp.cdr();
                 goto tail_call;
               } else {
@@ -236,11 +254,62 @@ tail_call:
               }
               break;
             default:
-              exp = eval2_form(frame, exp, get_form(*this, kar));
+              exp = eval2_form(frame, exp, form);
               break;
           }
-        } 
+        }  else {
+          // This is a normal function application 
+          tmp = eval2_body(frame, exp.car(), true);
+          kar_type = tmp.type();
 
+          // Ok. With CFUNCTION and VMFUNCTION, we have no hope of 
+          // tail calls so we can do them elsewhere
+          // With FUNCTION, we'll have to evaluate the arguments in the given env.
+          // If this is a tail call, we'll then modify the EvalFrame and goto. If not, we create
+          // a new one. easy peasy.
+          switch(kar_type) {
+          case CFUNCTION: {
+            Value fn = tmp, fn_args, tmp, args = exp.cdr();
+            AR_FRAME(this, fn, fn_args, tmp, args);
+
+            std::cout << fn << std::endl;
+            std::cout << args << std::endl;
+
+            size_t argc = args.list_length();
+            size_t min_arity = fn.c_function_min_arity(), max_arity = fn.c_function_max_arity();
+
+            if(argc < min_arity) {
+              std::ostringstream os;
+              os << "function " << fn << " expected at least " << min_arity << " arguments but got "
+                << argc;
+              return eval_error(os.str(), exp);
+            } else if(!fn.c_function_variable_arity() && argc > max_arity) {
+              std::ostringstream os;
+              os << "function " << fn << " expected at most " << max_arity << " arguments but got "
+                << argc;
+              return eval_error(os.str(), exp);
+            }
+
+            fn_args = make_vector_storage(argc);
+
+            while(args.heap_type_equals(PAIR)) {
+              tmp = eval2_body(frame, args.car(), true);
+              EVAL2_CHECK(tmp, exp);
+              vector_storage_append(fn_args, tmp);
+              args = args.cdr();
+            }
+
+            exp = fn.c_function_apply(*this, argc, fn_args.vector_storage_data());
+            EVAL2_CHECK(tmp, exp);
+
+            continue;
+          }
+          case FUNCTION:
+          case VMFUNCTION:
+            break;
+          default: AR_ASSERT(!"don't know how to apply this");
+          }
+        }
         break;
       }
 
@@ -259,7 +328,7 @@ Value State::eval2_body(Value exp) {
   EvalFrame frame;
   frame.env = C_FALSE;
   frame.fn_name = C_FALSE;
-  return eval2_body(frame, exp);
+  return eval2_body(frame, exp, true);
 }
 
 

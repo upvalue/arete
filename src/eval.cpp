@@ -724,19 +724,12 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
     case CFUNCTION:
       return fn.c_function_apply(*this, argc, argv);
     case FUNCTION: {
-      Value lst = C_NIL;
-      size_t i;
+      Value lst;
 
       temps.clear();
-
-      for(i = 0; i != argc; i++) {
-        temps.push_back(argv[i]);
-      }
-
-      AR_FRAME(*this, fn, lst);
-      while(i--) {
-        lst = make_pair(temps[i], lst);
-      }
+      temps.insert(temps.end(), &argv[0], &argv[argc]);
+      AR_FRAME(this, fn, lst);
+      lst = temps_to_list();
 
       return eval_apply_function(fn, lst);
     }

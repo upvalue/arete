@@ -67,9 +67,12 @@
 # endif
 #endif
 
-#define AR_FRAME(state, ...)  \
-  arete::FrameHack __arete_frame_ptrs[] = { __VA_ARGS__ };  \
-  arete::Frame __arete_frame((state), sizeof(__arete_frame_ptrs) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs); 
+#define _AR_FRAME2_(state, counter, ...)  \
+  arete::FrameHack __arete_frame_ptrs##counter[] = { __VA_ARGS__ };  \
+  arete::Frame __arete_frame##counter((state), sizeof(__arete_frame_ptrs##counter) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs##counter); 
+#define _AR_FRAME(state, counter, ...) _AR_FRAME2_(state, counter, __VA_ARGS__)
+
+#define AR_FRAME(state, ...) _AR_FRAME(state, __COUNTER__, __VA_ARGS__)
 
 #ifndef ARETE_BLOCK_SIZE
 # define ARETE_BLOCK_SIZE 4096
@@ -148,6 +151,11 @@
 #ifndef AR_LIB_SDL
 # define AR_LIB_SDL 1
 #endif
+
+// Macros for generating unique names for variables
+#define _AR_UNIQUE2_(name, count) name##count
+#define _AR_UNIQUE2(name, count) _AR_UNIQUE2_(name, count)
+#define _AR_UNIQUE(name) _AR_UNIQUE2(name, __COUNTER__)
 
 namespace arete {
 
@@ -637,6 +645,8 @@ struct Value {
   c_closure_t c_function_closure_addr() const;
   Value c_function_closure_data() const;
   Value c_function_name() const;
+  size_t c_function_min_arity() const;
+  size_t c_function_max_arity() const;
   bool c_function_variable_arity() const;
   Value c_function_apply(State&, size_t, Value*);
 
@@ -1012,6 +1022,16 @@ inline c_function_t Value::c_function_addr() const {
 inline c_closure_t Value::c_function_closure_addr() const {
   AR_TYPE_ASSERT(type() == CFUNCTION && c_function_is_closure());
   return as<CFunction>()->closure_addr;
+}
+
+inline size_t Value::c_function_min_arity() const {
+  AR_TYPE_ASSERT(type() == CFUNCTION);
+  return as<CFunction>()->min_arity;
+}
+
+inline size_t Value::c_function_max_arity() const {
+  AR_TYPE_ASSERT(type() == CFUNCTION);
+  return as<CFunction>()->max_arity;
 }
 
 inline bool Value::c_function_variable_arity() const {
@@ -1980,7 +2000,7 @@ struct State {
 
   std::vector<Value> eval_stack;
   Value eval2_form(EvalFrame& frame, Value exp, unsigned);
-  Value eval2_body(EvalFrame& frame, Value exp);
+  Value eval2_body(EvalFrame& frame, Value exp, bool single = false);
   Value eval2_body(Value exp);
 
   // Build a list of out of temps
@@ -2271,10 +2291,8 @@ struct Defun {
   bool install;
 };
 
-#define _AR_DEFUN_CONCAT(sym) defun_##sym
-#define _AR_DEFUN(sym) _AR_DEFUN_CONCAT(sym)
 #define AR_DEFUN(name, addr, ...) \
-  static Defun _AR_DEFUN(__COUNTER__) ((name), (c_function_t) addr, __VA_ARGS__);
+  static Defun _AR_UNIQUE(defun) ((name), (c_function_t) addr, __VA_ARGS__);
 
 } // namespace arete
 
