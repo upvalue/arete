@@ -1921,10 +1921,8 @@ struct State {
   void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
   void defun_core_closure(const std::string& cname, Value closure, c_closure_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
 
-
+  std::ostream& warn(Value src = C_FALSE);
  
-  std::ostream& warn() { return std::cerr << "arete: Warning: " ; }
-
   // Environments are just vectors containing the parent environment in the first position
   // and variable names/values in the even/odd positions afterwards e.g.
 
@@ -1981,8 +1979,12 @@ struct State {
   struct EvalFrame;
 
   std::vector<Value> eval_stack;
+  Value eval2_form(EvalFrame& frame, Value exp, unsigned);
   Value eval2_body(EvalFrame& frame, Value exp);
   Value eval2_body(Value exp);
+
+  // Build a list of out of temps
+  Value temps_to_list();
 
   // The internal application machinery is unfortunately somewhat complex due to the need for
   // interpreted, c++ and virtual machine functions to all be able to call eachother.
