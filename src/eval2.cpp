@@ -39,10 +39,13 @@ static State::Global get_form(State& state, Value sym) {
 #define GET_FORM(n) else if(sym == state.globals[(n)]) return (n)
   if(0) (void)0;
   GET_FORM(State::S_DEFINE);
+  GET_FORM(State::S_SET);
   GET_FORM(State::S_LAMBDA);
   GET_FORM(State::S_QUOTE);
   GET_FORM(State::S_BEGIN);
   GET_FORM(State::S_IF);
+  GET_FORM(State::S_AND);
+  GET_FORM(State::S_OR);
 #undef GET_FORM
 
   return (State::Global)-1;
@@ -70,7 +73,9 @@ Value State::temps_to_list() {
 Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
   size_t length = exp.list_length();
 
-  AR_FRAME(this, frame.env, frame.fn_name, exp);
+  Value tmp;
+
+  AR_FRAME(this, frame.env, frame.fn_name, exp, tmp);
 
   switch(type) {
     case S_QUOTE: {
@@ -110,6 +115,58 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
       }
 
       break;
+    }
+    case S_SET: {
+      if(length != 3) 
+        return eval_error("set! expects exactly three arguments", exp);
+
+      Value name = exp.cadr(), body = exp.caddr(), env_search = frame.env, rename_key;
+      AR_FRAME(this, name, body, env_search, rename_key);
+
+      if(!name.heap_type_equals(SYMBOL)) {
+        return eval_error("first argument to set! must be a symbol", exp.cdr());
+      }
+
+      bool found;
+
+      tmp = env_lookup_impl(env_search, name, rename_key, found);
+
+      // TODO check immutable
+      if(tmp == C_UNDEFINED) {
+        std::ostringstream os;
+        os << "attempt to set! undefined variable " << name;
+        return eval_error(os.str(), exp.cdr());
+      }
+
+      tmp = eval2_body(frame, body, true);
+      EVAL2_CHECK(tmp, exp.cddr());
+      env_set(frame.env, name, tmp);
+
+
+      return C_UNSPECIFIED;
+    }
+    case S_AND: {
+    case S_OR: 
+      bool is_or = type == S_OR;
+      exp = exp.cdr();
+
+      // Short case: (and) => #t, (or) => #f
+      if(exp == C_NIL) return Value::make_boolean(!is_or);
+
+      while(exp.heap_type_equals(PAIR)) {
+        tmp = eval2_body(frame, exp.car(), true);
+        EVAL2_CHECK(tmp, exp);
+
+        if((is_or && tmp != C_FALSE) || (!is_or && tmp == C_FALSE)) {
+          return tmp;
+        }
+        
+        exp = exp.cdr();
+      }
+
+      return tmp;
+      break;
+
     }
     case S_LAMBDA: {
       Value fn_env, args, saved_fn;
@@ -200,6 +257,8 @@ Value State::eval2_body(EvalFrame frame, Value body, bool single) {
   Value exp, cell, tmp;
 tail_call:
   bool tail = false;
+
+  AR_ASSERT(single || body.heap_type_equals(PAIR));
 
   AR_FRAME(this, frame.env, frame.fn_name, body, exp, cell, tmp);
 
@@ -357,15 +416,6 @@ tail_call:
 
             tmp = eval_check_arity(*this, fn, exp, argc, arity, arity, rest_args_name != C_FALSE);
             EVAL2_CHECK(tmp, exp);
-
-/*
-            std::cout << "fn:  " << fn << std::endl;
-            std::cout << "fn_args: " << fn_args << std::endl;
-            std::cout << "rest_args_name: " << rest_args_name << std::endl;
-            std::cout << "args: " << args << std::endl;
-            std::cout << "Exp:" << exp << std::endl;
-            std::cout << "tmp: " << tmp << std::endl;
-            */
 
             frame2.env = make_env(fn.function_parent_env(), argc + 1);
 
