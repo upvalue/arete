@@ -46,6 +46,7 @@ static State::Global get_form(State& state, Value sym) {
   GET_FORM(State::S_IF);
   GET_FORM(State::S_AND);
   GET_FORM(State::S_OR);
+  GET_FORM(State::S_COND);
 #undef GET_FORM
 
   return (State::Global)-1;
@@ -141,7 +142,6 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
       tmp = eval2_body(frame, body, true);
       EVAL2_CHECK(tmp, exp.cddr());
       env_set(frame.env, name, tmp);
-
 
       return C_UNSPECIFIED;
     }
@@ -272,6 +272,7 @@ tail_call:
       exp = body.car();
       body = body.cdr();
     }
+    restart_exp:
 
     tail = tco_enabled && body == C_NIL;
 
@@ -299,8 +300,27 @@ tail_call:
         return res;
       }
 
-      case RENAME:
-        break;
+      case RENAME: {
+        // First we look it up in the env 
+        // In case a renamed variable has been introduced as a binding
+        // e.g (lambda ((rename 'var )) (rename 'var))
+        Value chk = env_lookup(frame.env, exp);
+
+        if(exp.rename_env() != C_FALSE) {
+          std::cerr << "interpreter encountered a non-toplevel rename, but this should be gensymed " << exp << std::endl;
+          std::cerr << exp.rename_env() << std::endl;
+        }
+
+        if(chk != C_UNDEFINED) {
+          exp = chk;
+          continue;
+        }
+
+        // Then we look it up in the rename env
+        // e.g. ((r 'lambda) () #t)
+        exp = env_lookup(exp.rename_env(), exp.rename_expr());
+        continue;
+      }
 
       case PAIR: {
         size_t length = exp.list_length();
@@ -347,6 +367,48 @@ tail_call:
                 exp = exp.list_ref(3);
               }
 
+              if(tail) {
+                single = true;
+                body = exp;
+                continue;
+              } else {
+                
+                goto restart_exp;
+              }
+
+              continue;
+            }
+            case S_COND: {
+              Value pred, then, lst = exp.cdr();
+              AR_FRAME(this, pred, then, lst);
+              exp = C_UNSPECIFIED;
+              while(lst.heap_type_equals(PAIR)) {
+                if(lst.car().list_length() < 2) {
+                  return eval_error("cond clause must have at least two elements (condition and body)", lst);
+                }
+                pred = lst.caar();
+                then = lst.cdar();
+
+                if(pred == globals[State::S_ELSE]) {
+                  // Check for else clause
+                  tmp = C_TRUE;
+                } else {
+                  tmp = eval2_body(frame, pred, true);
+                  EVAL2_CHECK(tmp, lst);
+                }
+
+                if(tmp != C_FALSE) {
+                  if(tail) {
+                    body = then;
+                    goto tail_call;
+                  } else {
+                    exp = eval2_body(frame, then);
+                    break;
+                  }
+                }
+
+                lst = lst.cdr();
+              }
               continue;
             }
             case S_BEGIN:
@@ -376,9 +438,6 @@ tail_call:
           case CFUNCTION: {
             Value fn = tmp, fn_args, tmp, args = exp.cdr();
             AR_FRAME(this, fn, fn_args, tmp, args);
-
-            std::cout << fn << std::endl;
-            std::cout << args << std::endl;
 
             size_t argc = args.list_length();
 
