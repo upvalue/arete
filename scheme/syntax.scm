@@ -1,4 +1,4 @@
-;; syntax - expander, basic syntax (eg let, let*, structs)
+;; syntax.scm - expander, basic syntax (eg let, let*, structs)
 
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
@@ -9,6 +9,7 @@
 ;; Something like this
 ;; (let loop ()
 ;;   (error))
+
 
 ;; Does not result in super-descriptive error messages because the name is gensym'd by the compiler
 ;; How can we propagate information about where a lambda was introduced through the expander to the compiler?
@@ -187,7 +188,6 @@
         ((eq? kar 'set!) (expand-set x env))
         ((eq? kar 'cond) (expand-cond x env))
         ((eq? kar 'quote) x)
-        #;((eq? kar 'cond-expand) (expand-cond-expand x env))
         (else (begin 
                 (expand-macro x env))))
       ;; Normal function application

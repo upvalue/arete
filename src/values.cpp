@@ -268,7 +268,6 @@ static void register_defun(const char* fn_name, c_function_t fn, Defun* push_bac
   size_t id = id_to_function->size();
   AR_DEFUN_LOG(defun_group->name << ' ' << fn_name << " " << id << " <=> " << (ptrdiff_t) fn);
 
-
   // Add to defun group
   if(push_back != nullptr) {
     defun_group->data.push_back(push_back);
@@ -277,6 +276,7 @@ static void register_defun(const char* fn_name, c_function_t fn, Defun* push_bac
   // Insert to hashtable. We have to check if it's there first because some defuns can point to the
   // same function (close-input-port and close-output-port for example)
   if(function_to_id->find((ptrdiff_t)fn) != function_to_id->end()) {
+    AR_DEFUN_LOG("not inserting already-saved function to table");
     return;
   }
 

@@ -35,8 +35,10 @@
 
 #if UINTPTR_MAX == 0xffffffff
 # define ARETE_64_BIT 0
+# define AR_ALIGN // __attribute__((aligned(8)))
 #elif UINTPTR_MAX == 0xffffffffffffffff
 # define ARETE_64_BIT 1
+# define AR_ALIGN 
 #endif
 
 // 0 = Do not evaluate assertions, internal assertions
@@ -249,11 +251,11 @@ struct HeapValue {
   // f = object-specific flags
   // m = mark bit for incremental GC
   // t = type
-  size_t header;
+  size_t header AR_ALIGN;
 
   /** Size of the object. In the moving collector, this field is also used to store a pointer to
    * copied objects */
-  size_t size;
+  size_t size AR_ALIGN;
 
   void initialize(unsigned type, unsigned mark_bit, size_t size_) {
     header = (type) + (mark_bit << 8);
@@ -295,14 +297,14 @@ struct HeapValue {
  * A floating point number
  */
 struct Flonum : HeapValue {
-  double number;  
+  double number AR_ALIGN; 
 };
 
 /**
  * A string
  */
 struct String : HeapValue {
-  size_t bytes;
+  size_t bytes AR_ALIGN;
   char data[1];
 
   static const Type CLASS_TYPE = STRING;
@@ -752,7 +754,7 @@ struct Value {
     AR_TYPE_ASSERT(type() == T::CLASS_TYPE);
     return static_cast<T*>(heap);
   }
-};
+} AR_ALIGN;
 
 // Below here: inline definitions of things that need Value to be declared
 struct Symbol : HeapValue {
@@ -797,7 +799,7 @@ struct SourceLocation {
   /** An integer that corresponds to an entry in State::source_names */
   unsigned source;
   unsigned line, begin, length;
-};
+} AR_ALIGN;
 
 
 inline std::ostream& operator<<(std::ostream& os, const SourceLocation& src) {
@@ -811,8 +813,8 @@ inline std::ostream& operator<<(std::ostream& os, const SourceLocation& src) {
 }
 
 struct Pair : HeapValue {
-  Value data_car, data_cdr;
-  SourceLocation src;
+  Value data_car AR_ALIGN, data_cdr AR_ALIGN;
+  SourceLocation src AR_ALIGN;
 
   static const unsigned char CLASS_TYPE = PAIR;
 };
@@ -985,9 +987,9 @@ struct CFunction : HeapValue {
   union {
     c_function_t addr;
     c_closure_t closure_addr;
-  };
+  } AR_ALIGN;
 
-  size_t min_arity, max_arity;
+  size_t min_arity AR_ALIGN, max_arity AR_ALIGN;
 
   static const unsigned CLASS_TYPE = CFUNCTION;
 };

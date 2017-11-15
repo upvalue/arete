@@ -409,9 +409,6 @@ Value sdl_remove_timer(State& state, SDLModule* module, size_t argc, Value* argv
 
   argv[0].record_set_finalized();
   return Value::make_boolean(result);
-
-
-  return C_UNSPECIFIED;
 }
 AR_DEFUN("sdl:remove-timer", sdl_remove_timer, 1);
 

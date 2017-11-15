@@ -12,27 +12,6 @@ int do_main(int argc, char* argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-#if 0
-  arete::State* state = new arete::State();
-
-  state->boot();
-  state->load_file("bootstrap.scm");
-  //state->enter_repl();
-
-  state->save_image("heap.boot");
-
-  delete state;
-  state = new arete::State();
-
-  const char* result = state->boot_from_image("heap.boot");
-
-  state->enter_repl();
-
-  if(result) std::cerr << result << std::endl;
-
-  delete state;
-
-  return 0;
-#endif
   int result = do_main(argc, argv);
+  return result;
 }

@@ -23,22 +23,18 @@
 // Heap image -- we iterate over the entire heap, replacing pointers with
 //   offsets into the file
 
-// Symbol table is constructed after reading
+// Symbol table is reconstructed when the reader iterates over the heap
 
 namespace arete {
-
-// We use this to serialize function addresses.
-// This might not be cross-platform.
-static void aslr_address() {}
 
 static const char MAGIC_STRING[] = "ARETE-IMAGE\n";
 
 struct ImageHeader {
-  char magic[sizeof(MAGIC_STRING)];
-  size_t heap_size;
-  bool is_64_bit;
-  size_t global_count;
-  size_t gensym_counter;
+  char magic[sizeof(MAGIC_STRING)] AR_ALIGN;
+  size_t heap_size AR_ALIGN;
+  bool is_64_bit AR_ALIGN;
+  size_t global_count AR_ALIGN;
+  size_t gensym_counter AR_ALIGN;
 };
 
 struct CString {
@@ -333,11 +329,10 @@ void State::save_image(const std::string& path) {
   memset(&hdr, 0, sizeof(ImageHeader));
   strncpy((char*) &hdr.magic, (char*)MAGIC_STRING, sizeof(MAGIC_STRING));
   hdr.heap_size = gc.block_cursor;
-  hdr.is_64_bit = ARETE_64_BIT;
+  hdr.is_64_bit = 0;
   hdr.global_count = globals.size();
   hdr.gensym_counter = gensym_counter;
 
-  size_t heap_begin = sizeof(ImageHeader);
   fwrite(&hdr, sizeof(ImageHeader), 1, f);
 
   ImageWriter writer(*this, f);

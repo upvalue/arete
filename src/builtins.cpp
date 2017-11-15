@@ -466,7 +466,7 @@ Value fn_set_car(State& state, size_t argc, Value* argv) {
   argv[0].set_car(argv[1]);
   return C_UNSPECIFIED;
 }
-AR_DEFUN("set-car!", fn_set_car, 1);
+AR_DEFUN("set-car!", fn_set_car, 2);
 
 Value fn_set_cdr(State& state, size_t argc, Value* argv) {
   static const char *fn_name = "set-cdr!";
@@ -474,7 +474,7 @@ Value fn_set_cdr(State& state, size_t argc, Value* argv) {
   argv[0].set_cdr(argv[1]);
   return C_UNSPECIFIED;
 }
-AR_DEFUN("set-cdr!", fn_set_cdr, 1);
+AR_DEFUN("set-cdr!", fn_set_cdr, 2);
 
 ///// VECTORS
 

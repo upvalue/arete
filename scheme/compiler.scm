@@ -37,7 +37,7 @@
 
 ;; Then fn-lookup will have to use this new Binding struct.
 
-;;  lookup X and replace with NAME
+;; lookup X and replace with NAME
 
 ;; We could do a simple analysis pass like over code, replacing introduced bindings (in define, and in lambda args)
 ;; with a binding structure like this. Without building a full AST or intermediate language

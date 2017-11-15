@@ -1,7 +1,7 @@
 # Variables
 CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
-CFLAGS := $(CFLAGS) -g3 -O3
+CFLAGS := $(CFLAGS) -g3 -O3 
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
 LDFLAGS := -lm 
 
@@ -13,7 +13,8 @@ ELDFLAGS :=
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
 CXXOBJS := $(CXXOBJS) $(patsubst %.cpp,%.o,$(wildcard vendor/linenoise/*.cpp))
-DEPS := $(CXXOBJS:.o=.d) src/main.d
+CXXOBJS32 := $(patsubst %.o,%.32.o,$(CXXOBJS))
+DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) src/main.d
 
 ARETE_LIBS := sdl test
 
@@ -43,8 +44,12 @@ endef
 
 %.em.o: CPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
 %.em.o: %.cpp 
-	$(call colorecho, "CC $< ")
+	$(call colorecho, "CCJS $< ")
 	$(ECXX) $(ECXXFLAGS) -MMD -MF $(patsubst %.o,%.d,$@) -c -o $@ $<
+
+%.32.o: %.cpp
+	$(call colorecho "CC32 $< ")
+	$(CXX) $(CXXFLAGS) -m32 -MMD -MF $(patsubst %.o,%.d,$@) -c -o $@ $<
 
 %.o: %.c
 	$(call colorecho, "CC $< ")
@@ -59,13 +64,17 @@ arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^ 
 
+arete32: $(CXXOBJS32) src/main.32.o
+	$(call colorecho, "LD32 $@ ")
+	$(CXX) $(LDFLAGS) -m32 -o $@ $^
+
 heap.boot: arete $(CXXOBJS) $(wildcard scheme/*.scm)
 	$(call colorecho, "IMG $@")
 	./arete bootstrap.scm --save-image heap.boot
 
 web/arete.js: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")
-	$(ECXX) -O3 $(ELDFLAGS) -o $@ $^ $(addprefix --preload-file ,$(wildcard *.boot bootstrap.scm scheme/*.scm examples/*.scm))
+	$(ECXX) -O3 $(ELDFLAGS) -o $@ $^ $(addprefix --preload-file ,$(wildcard *.boot *.scm scheme/*.scm examples/*.scm examples/*.ttf))
 
 arete-distilled.cpp: $(wildcard src/*.cpp)
 	$(call colorecho "arete.cpp")
