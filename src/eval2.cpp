@@ -85,11 +85,33 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
       return exp.cadr();
     }
     case S_DEFINE: {
-      if(length != 3)
-        return eval_error("define expects exactly three arguments", exp);
+      if(length < 3)
+        return eval_error("define expects at least two arguments", exp);
 
       Value name = exp.cadr(), body = exp.caddr(), tmp;
       AR_FRAME(this, name, body, tmp);
+    define_lambda:
+
+      // Special case: define lambda, build lambda in place
+      if(name.heap_type_equals(PAIR)) {
+        Value args = name.cdr(), tmp = name.car();
+
+        if(!tmp.heap_type_equals(SYMBOL)) {
+          return eval_error("define lambda name must be a symbol", name);
+        }
+
+        name = tmp;
+
+        tmp = make_pair(args, exp.cddr());
+        tmp = make_pair(globals[S_LAMBDA], tmp);
+
+        body = tmp;
+
+        goto define_lambda;
+      }
+
+      std::cout << name << std::endl;
+      std::cout << body << std::endl;
 
       if(!name.heap_type_equals(SYMBOL))
         return eval_error("first argument to define must be a symbol", exp.cdr());
@@ -97,8 +119,8 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
       if(env_defined(frame.env, name)) {
         warn() << name << " shadows existing definition";
       }
-      
-      tmp = eval2_body(frame, exp.cddr());
+
+      tmp = eval2_body(frame, body, true);
 
       EVAL2_CHECK(tmp, exp);
 
@@ -327,7 +349,7 @@ tail_call:
 
         if(length == 0) {
           EVAL2_TRACE(cell);
-          return eval_error("non-list in source code", exp);
+          return eval_error("dotted list in source code", exp);
         }
 
         Value kar = exp.car(), res;
