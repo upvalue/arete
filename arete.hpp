@@ -1187,52 +1187,13 @@ inline Value* Value::vector_storage_data() const {
 // HASH TABLES
 
 struct Table : HeapValue  {
-  static const size_t LOAD_FACTOR = 90;
-
   VectorStorage* chains;
   unsigned char size_log2;
   size_t entries, max_entries;
 
+  static const size_t LOAD_FACTOR = 90;
   static const Type CLASS_TYPE = TABLE;
 };
-
-inline ptrdiff_t wang_integer_hash(ptrdiff_t key) {
-  key = (~key) + (key << 21);
-  key = key ^ (key >> 24);
-  key = (key + (key << 3)) + (key << 8); 
-  key = key ^ (key >> 14);
-  key = (key + (key << 2)) + (key << 4); 
-  key = key ^ (key >> 28);
-  key = key + (key << 31);
-  return key;
-}
-
-inline ptrdiff_t x31_string_hash(const char* s) {
-  ptrdiff_t h = *s;
-  if(h) for(++s; *s; ++s) h = (h << 5) - h + *s;
-  return h;
-}
-
-inline ptrdiff_t hash_value(Value x, bool& unhashable) {
-  unhashable = false;
-  switch(x.type()) {
-    case STRING:
-      return x31_string_hash(x.string_data());
-    case SYMBOL:
-#if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE
-      // If symbols can be moved (semispace), we need to hash the string, otherwise we can just
-      // hash the pointer, so this will fall-through to the below integer hash in the incremental
-      // collector
-      return x31_string_hash(x.symbol_name_data());
-#endif
-    case FIXNUM:
-    case CONSTANT:
-      return wang_integer_hash(x.bits);
-    default:
-      unhashable = true;
-      return 0;
-  }
-}
 
 struct RecordType : HeapValue {
   /** Allow record to handle application */
@@ -2015,6 +1976,13 @@ struct State {
   Value eval_set(Value env, Value exp, Value fn_name);
   Value eval_if(Value env, Value exp, bool has_else, Value fn_name);
   Value eval(Value env, Value exp, Value fn_name = C_FALSE);
+
+
+  struct EvalFrame;
+
+  std::vector<Value> eval_stack;
+  Value eval2_body(EvalFrame& frame, Value exp);
+  Value eval2_body(Value exp);
 
   // The internal application machinery is unfortunately somewhat complex due to the need for
   // interpreted, c++ and virtual machine functions to all be able to call eachother.

@@ -4,6 +4,44 @@
 
 namespace arete {
 
+static ptrdiff_t wang_integer_hash(ptrdiff_t key) {
+  key = (~key) + (key << 21);
+  key = key ^ (key >> 24);
+  key = (key + (key << 3)) + (key << 8); 
+  key = key ^ (key >> 14);
+  key = (key + (key << 2)) + (key << 4); 
+  key = key ^ (key >> 28);
+  key = key + (key << 31);
+  return key;
+}
+
+static ptrdiff_t x31_string_hash(const char* s) {
+  ptrdiff_t h = *s;
+  if(h) for(++s; *s; ++s) h = (h << 5) - h + *s;
+  return h;
+}
+
+static ptrdiff_t hash_value(Value x, bool& unhashable) {
+  unhashable = false;
+  switch(x.type()) {
+    case STRING:
+      return x31_string_hash(x.string_data());
+    case SYMBOL:
+#if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE
+      // If symbols can be moved (semispace), we need to hash the string, otherwise we can just
+      // hash the pointer, so this will fall-through to the below integer hash in the incremental
+      // collector
+      return x31_string_hash(x.symbol_name_data());
+#endif
+    case FIXNUM:
+    case CONSTANT:
+      return wang_integer_hash(x.bits);
+    default:
+      unhashable = true;
+      return 0;
+  }
+}
+
 void State::table_setup(Value table, size_t size_log2) {
   VectorStorage* chains = 0;
 

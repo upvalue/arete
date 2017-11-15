@@ -127,23 +127,21 @@ void State::print_gc_stats(std::ostream& os) {
 // This applies a GC-specific function to all the root variables of a program
 template <class T>
 void GCCommon::visit_roots(T& walker) {
-  for(Frame* f = frames; f != 0; f = f->previous) {
-    for(size_t j = 0; j != f->size; j++) {
+  for(Frame* f = frames; f != 0; f = f->previous) 
+    for(size_t j = 0; j != f->size; j++) 
       walker.touch(f->values[j]);
-    }
-  }
 
-  for(size_t i = 0; i != state.globals.size(); i++) {
+  for(size_t i = 0; i != state.globals.size(); i++) 
     walker.touch(state.globals[i].heap);
-  }
 
-  for(size_t i = 0; i != state.temps.size(); i++) {
+  for(size_t i = 0; i != state.temps.size(); i++)
     walker.touch(state.temps[i].heap);
-  }
 
-  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
+  for(size_t i = 0; i != state.eval_stack.size(); i++)
+    walker.touch(state.eval_stack[i].heap);
+
+  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++)
     walker.touch(((*i)->ref.heap));
-  }
 
   for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
     Symbol* v = x->second;
@@ -163,25 +161,19 @@ void GCCommon::visit_roots(T& walker) {
 
     walker.touch((HeapValue**) &link->exception);
 
-    for(size_t i = 0; i != free_vars; i++) {
+    for(size_t i = 0; i != free_vars; i++)
       walker.touch((HeapValue**) &link->upvalues[i].heap);
-    }
 
-    if(link->closure != 0) {
+    if(link->closure != 0)
       walker.touch((HeapValue**) &link->closure);
-    }
 
-    if(link->stack != 0) {
-      for(size_t i = 0; i != stack_i; i++) {
+    if(link->stack != 0)
+      for(size_t i = 0; i != stack_i; i++)
         walker.touch((HeapValue**) &link->stack[i]);
-      }
-    }
 
-    if(link->locals != 0) {
-      for(unsigned i = 0; i != local_count; i++) {
+    if(link->locals != 0)
+      for(unsigned i = 0; i != local_count; i++)
         walker.touch((HeapValue**) &link->locals[i]);
-      }
-    }
 
     // Update code pointer.
     link->code = link->fn->code_pointer();
