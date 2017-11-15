@@ -48,6 +48,10 @@
 ;; Really, we'd just like to inline lambda in the CAR position. That should provide a good speedup by optimizing let
 ;; and let* expressions.
 
+;; (let loop () #t)
+;; Can this be optimized as well? Right now it expands to (lambda () (define loop (...)) (lambda () body)....
+;; We could transform it to something with OP_LOCAL_SET 0 to a function's own adress.
+
 (set-top-level-value! 'COMPILER-VM-PRIMITIVES #t)
 
 ;; OpenFn is a record representing a function in the process of being compiled.

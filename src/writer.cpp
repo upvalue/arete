@@ -401,7 +401,7 @@ static bool pretty_print_shared_obj(State& state, std::ostream& os, Value v, Pri
     return true;
   }
 
-  unsigned cyc = v.heap->get_shared_count();
+  unsigned cyc = v.heap->get_header_int();
 
   //std::cout << "CHECKING fOR SHARED OBJECT " << cyc << std::endl;
 
@@ -578,11 +578,11 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
 static Value pretty_print_clear_mark(State& state, Value v, PrintState& ps) {
   if(!v.print_recursive()) return C_UNSPECIFIED;
 
-  if(v.heap->get_shared_count() == 0) {
+  if(v.heap->get_header_int() == 0) {
     return C_UNSPECIFIED;    
   }
 
-  v.heap->set_shared_count(0);
+  v.heap->set_header_int(0);
 
   if(v.type() == PAIR) {
     (void) pretty_print_clear_mark(state, v.car(), ps);
@@ -611,8 +611,8 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
     return C_UNSPECIFIED;
   }
 
-  unsigned cyc = v.heap->get_shared_count();
-  // std::cout << v << ' ' << v.heap->get_shared_count() << std::endl;
+  unsigned cyc = v.heap->get_header_int();
+  // std::cout << v << ' ' << v.heap->get_header_int() << std::endl;
 
   // TODO Check for initial shared object
   if(cyc >= ps.shared_objects_begin) {
@@ -642,8 +642,8 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
     */
     return C_UNSPECIFIED;
   } else {
-    v.heap->set_shared_count(ps.shared_objects_i++);
-    AR_ASSERT(v.heap->get_shared_count() == ps.shared_objects_i - 1);
+    v.heap->set_header_int(ps.shared_objects_i++);
+    AR_ASSERT(v.heap->get_header_int() == ps.shared_objects_i - 1);
   }
 
   if(v.type() == PAIR) {
@@ -689,7 +689,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
 
   // Print a toplevel repeated object object.
   if(!(v.atomic() || v.type() == SYMBOL || v.type() == TABLE)) {
-    unsigned cyc = v.heap->get_shared_count();
+    unsigned cyc = v.heap->get_header_int();
 
     std::unordered_map<unsigned, std::pair<unsigned, bool> >::iterator it = printed->find(cyc);
 

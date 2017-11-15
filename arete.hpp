@@ -282,11 +282,11 @@ struct HeapValue {
     header -= bit;
   }
 
-  unsigned get_shared_count() const {
+  unsigned get_header_int() const {
     return header >> HEADER_INT_SHIFT;
   }
 
-  void set_shared_count(unsigned count) {
+  void set_header_int(unsigned count) {
     // Extract header only
     header = header & ((size_t)((size_t)1 << HEADER_INT_SHIFT) - 1);
     header += ((size_t)count << HEADER_INT_SHIFT);

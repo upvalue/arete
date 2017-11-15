@@ -1,11 +1,8 @@
 // eval2.cpp - interpreter with tail-call optimization and let
 
-// Design of the interpreter
-
-// We use a stack allocated on the heap
-
-// In order to implement TCO, we do everything in one function; when evaluating the tail-expression
-// of a "body" (a function body or begin expression) we pop the stack and use a goto
+// In order to implement TCO, we do most evaluation in one function; 
+// when evaluating the tail-expression
+// of a "body" (a function body or begin expression) we pop the stack and use a goto.
 
 #include "arete.hpp"
 
@@ -260,6 +257,7 @@ tail_call:
         }  else {
           // This is a normal function application 
           tmp = eval2_body(frame, exp.car(), true);
+          EVAL2_CHECK(tmp, exp);
           kar_type = tmp.type();
 
           // Ok. With CFUNCTION and VMFUNCTION, we have no hope of 
@@ -278,6 +276,8 @@ tail_call:
             size_t argc = args.list_length();
             size_t min_arity = fn.c_function_min_arity(), max_arity = fn.c_function_max_arity();
 
+            // TODO: This can be moved into a separate function which checks this for VM 
+            // functions as well.
             if(argc < min_arity) {
               std::ostringstream os;
               os << "function " << fn << " expected at least " << min_arity << " arguments but got "
@@ -304,7 +304,74 @@ tail_call:
 
             continue;
           }
-          case FUNCTION:
+          case FUNCTION: {
+            EvalFrame frame2;
+            Value fn = tmp, args = exp.cdr(), fn_args, rest_args_head = C_NIL, rest_args_tail,
+              body, rest_args_name;
+            frame2.fn_name = tmp.function_name();
+            AR_FRAME(this, fn, args, fn_args, rest_args_head, rest_args_tail, body, frame2.fn_name,
+              frame2.env, rest_args_name);
+            
+            fn_args = fn.function_arguments();
+            size_t argc = args.list_length();
+            size_t arity = fn_args.list_length();
+
+            if(argc < arity) {
+              std::ostringstream os;
+              os << "function " << fn << " expected at least " << arity << " arguments but got " <<
+                argc;
+              return eval_error(os.str(), exp);
+            }
+
+            rest_args_name = fn.function_rest_arguments();
+
+            if(rest_args_name == C_FALSE && argc > arity) {
+              std::ostringstream os;
+              os << "function " << fn << " expected at most " << arity << " arguments but got " <<
+                argc;
+              return eval_error(os.str(), exp);
+            }
+
+            frame2.env = make_env(fn.function_parent_env(), argc + 1);
+
+            // Evaluate arguemnts, left to right
+            while(args.heap_type_equals(PAIR) && fn_args.heap_type_equals(PAIR)) {
+              tmp = eval2_body(frame, args.car(), true);
+              EVAL2_CHECK(tmp, args);
+              vector_append(frame2.env, fn_args.car());
+              vector_append(frame2.env, tmp);
+              args = args.cdr();
+              fn_args = fn_args.cdr();
+            }
+
+            if(rest_args_name != C_FALSE) {
+              temps.clear();
+              while(args.heap_type_equals(PAIR)) {
+                tmp = eval2_body(frame, args.car(), true);
+                EVAL2_CHECK(tmp, args);
+                temps.push_back(tmp);
+                args = args.cdr();
+              }
+              vector_append(frame2.env, rest_args_name);
+              vector_append(frame2.env, temps_to_list());
+            }
+
+            body = fn.function_body();
+
+            if(false) {
+              // tail call
+
+            } else {
+              tmp = eval2_body(frame2, body);
+              EVAL2_CHECK(tmp, body);
+              exp = tmp;
+              continue;
+            }
+
+            std::cout << "new fn env " << frame2.env << std::endl;
+
+            return C_FALSE;
+          }
           case VMFUNCTION:
             break;
           default: AR_ASSERT(!"don't know how to apply this");

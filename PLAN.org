@@ -12,10 +12,15 @@
     This may not be a big deal, but I've had to bump the stack size manually on Emscripten/Windows builds because it's
     so stack hungry. (AR_FRAME may also be a part of this as much as the lack of TCO). It might be simpler to just
     include a precompiled bytecode image for most use cases.
+  - [ ] Lookup cache
+    Might help.
 
 * Memory management
   - [ ] Symbol collection
   - [ ] Generational garbage collection
+
+* Reader/syntax
+  - [ ] Table/struct literals
 
 * Runtime
   - [ ] Image saving: Images rely on C++ static initialization order to restore pointers to C++ functions. This may
