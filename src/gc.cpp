@@ -124,13 +124,85 @@ void State::print_gc_stats(std::ostream& os) {
 #endif
 }
 
+// This applies a GC-specific function to all the root variables of a program
+template <class T>
+void GCCommon::visit_roots(T& walker) {
+  for(Frame* f = frames; f != 0; f = f->previous) {
+    for(size_t j = 0; j != f->size; j++) {
+      walker.touch(f->values[j]);
+    }
+  }
+
+  for(size_t i = 0; i != state.globals.size(); i++) {
+    walker.touch(state.globals[i].heap);
+  }
+
+  for(size_t i = 0; i != state.temps.size(); i++) {
+    walker.touch(state.temps[i].heap);
+  }
+
+  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
+    walker.touch(((*i)->ref.heap));
+  }
+
+  for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
+    Symbol* v = x->second;
+    walker.touch((HeapValue**) &v);
+    state.symbol_table->at(x->first) = v;
+  }
+
+  VMFrame* link = vm_frames;
+  while(link != 0) {
+    VMFunction* fn = link->fn;
+
+    size_t stack_i = link->stack_i;
+    unsigned local_count = fn->local_count;
+    size_t free_vars = fn->free_variables ? fn->free_variables->length : 0;
+
+    walker.touch((HeapValue**) &link->fn);
+
+    walker.touch((HeapValue**) &link->exception);
+
+    for(size_t i = 0; i != free_vars; i++) {
+      walker.touch((HeapValue**) &link->upvalues[i].heap);
+    }
+
+    if(link->closure != 0) {
+      walker.touch((HeapValue**) &link->closure);
+    }
+
+    if(link->stack != 0) {
+      for(size_t i = 0; i != stack_i; i++) {
+        walker.touch((HeapValue**) &link->stack[i]);
+      }
+    }
+
+    if(link->locals != 0) {
+      for(unsigned i = 0; i != local_count; i++) {
+        walker.touch((HeapValue**) &link->locals[i]);
+      }
+    }
+
+    // Update code pointer.
+    link->code = link->fn->code_pointer();
+
+    // I lost like two hours to a missing paren here
+    // Like this: link->code = (size_t*)(char*) (link->fn) + sizeof(VMFunction);
+    // Fun stuff.
+    link = link->previous;
+  }
+}
+
+//
+///// SEMISPACE COLLECTOR
+//
+
 GCSemispace::GCSemispace(State& state_): GCCommon(state_),  active(0), other(0),
     block_cursor(0),
     collect_before_every_allocation(false) {
 
   active = new Block(heap_size, 0);
 }
-
 
 GCSemispace::~GCSemispace() {
   delete active;
@@ -358,79 +430,31 @@ void GCSemispace::collect(size_t request, bool force) {
   }
 }
 
+struct SemispaceRootVisitor {
+  GCSemispace& gc;
+
+  SemispaceRootVisitor(GCSemispace& gc_): gc(gc_) {}
+
+  void touch(HeapValue*& value) {
+    gc.copy(&value);
+  }
+
+  void touch(HeapValue** value) {
+    gc.copy(value);
+  }
+};
+
 void GCSemispace::copy_roots() {
-  for(Frame* f = frames; f != 0; f = f->previous) {
-    for(size_t j = 0; j != f->size; j++) {
-      copy(f->values[j]);
-    }
-  }
-
-  VMFrame* link = vm_frames;
-  while(link != 0) {
-    VMFunction* fn = link->fn;
-
-    size_t stack_i = link->stack_i;
-    unsigned local_count = fn->local_count;
-    size_t free_vars = fn->free_variables ? fn->free_variables->length : 0;
-
-    copy((HeapValue**) &link->fn);
-
-    copy((HeapValue**) &link->exception);
-
-    for(size_t i = 0; i != free_vars; i++) {
-      copy((HeapValue**) &link->upvalues[i].heap);
-    }
-
-    if(link->closure != 0) {
-      copy((HeapValue**) &link->closure);
-    }
-
-    if(link->stack != 0) {
-      for(size_t i = 0; i != stack_i; i++) {
-        copy((HeapValue**) &link->stack[i]);
-      }
-    }
-
-    if(link->locals != 0) {
-      for(unsigned i = 0; i != local_count; i++) {
-        copy((HeapValue**) &link->locals[i]);
-      }
-
-    }
-
-    // Update code pointer.
-    link->code = link->fn->code_pointer();
-
-    // I lost like two hours to a missing paren here
-    // Like this: link->code = (size_t*)(char*) (link->fn) + sizeof(VMFunction);
-    // Fun stuff.
-
-    link = link->previous;
-  }
-
-  for(size_t i = 0; i != state.globals.size(); i++) {
-    copy(&state.globals[i].heap);
-  }
-
-  for(size_t i = 0; i != state.temps.size(); i++) {
-    copy(&state.temps[i].heap);
-  }
-
-  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
-    copy(&((*i)->ref.heap));
-  }
-
   ARETE_LOG_GC(state.symbol_table->size() << " live symbols");
+  SemispaceRootVisitor visitor(*this);
 
-  for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
-    Symbol* v = x->second;
-    copy((HeapValue**) &v);
-    state.symbol_table->at(x->first) = v;
-    //copy((HeapValue**) &x->second);
-  }
+  visit_roots(visitor);
 }
 
-///// INCREMENTAL
+//
+///// INCREMENTAL COLLECTOR
+//
+
 void GCIncremental::mark(HeapValue* v) {
   // We use a GOTO here to avoid creating unnecessary stack frames
   again: 
@@ -517,6 +541,20 @@ void GCIncremental::mark(HeapValue* v) {
   }
 }
 
+struct IncrementalRootVisitor {
+  GCIncremental& gc;
+
+  IncrementalRootVisitor(GCIncremental& gc_): gc(gc_) {}
+
+  void touch(HeapValue* value) {
+    gc.mark(value);
+  }
+
+  void touch(HeapValue** value) {
+    gc.mark(*value);
+  }
+};
+
 void GCIncremental::collect() {
   GCTimer timer(gc_collect_timer);
   // ARETE_LOG_GC("collecting");
@@ -530,68 +568,8 @@ void GCIncremental::collect() {
   mark_bit = !mark_bit;
 
   // Mark all live objects
-  for(Frame* f = frames; f != 0; f = f->previous) {
-    for(size_t j = 0; j != f->size; j++) {
-      mark(*f->values[j]);
-    }
-  }
-
-  VMFrame* link = vm_frames;
-  while(link != 0) {
-    VMFunction* fn = link->fn;
-
-    size_t stack_i = link->stack_i;
-    unsigned local_count = fn->local_count;
-    size_t free_vars = fn->free_variables ? fn->free_variables->length : 0;
-
-    mark(link->fn);
-
-    mark(link->exception.heap);
-
-    for(size_t i = 0; i != free_vars; i++) {
-      mark(link->upvalues[i].heap);
-    }
-
-    if(link->closure != 0) {
-      mark(link->closure);
-    }
-
-    for(size_t i = 0; i != stack_i; i++) {
-      mark(link->stack[i].heap);
-    }
-
-    for(unsigned i = 0; i != local_count; i++) {
-      mark(link->locals[i].heap);
-    }
-
-    // I lost like two hours to a missing paren here
-    // Like this: link->code = (size_t*)(char*) (link->fn) + sizeof(VMFunction);
-    // Fun stuff.
-
-    link = link->previous;
-  }
-
-  for(size_t i = 0; i != state.globals.size(); i++) {
-    mark(state.globals[i].heap);
-  }
-
-  for(size_t i = 0; i != state.temps.size(); i++) {
-    mark(state.temps[i].heap);
-  }
-
-  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
-    mark(((*i)->ref.heap));
-  }
-
-  ARETE_LOG_GC(state.symbol_table->size() << " live symbols");
-
-  for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
-    mark(x->second);
-  }
-
-  for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++) {
-    mark((*i)->ref.heap);
-  }
+  IncrementalRootVisitor visitor(*this);
+  visit_roots(visitor);
 
   ARETE_LOG_GC("found " << live_objects_after_collection << " live objects taking up " <<
     live_memory_after_collection << "b")

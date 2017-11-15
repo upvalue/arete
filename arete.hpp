@@ -1509,6 +1509,8 @@ struct GCCommon {
 
   ~GCCommon() {}
 
+  template <class T> void visit_roots(T& visitor);
+
   // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) == 16,
   // and align(8, 247) == 248 
   static size_t align(size_t boundary, size_t value) {

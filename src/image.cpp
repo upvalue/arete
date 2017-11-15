@@ -27,6 +27,8 @@
 
 namespace arete {
 
+#if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE
+
 static const char MAGIC_STRING[] = "ARETE-IMAGE\n";
 
 struct ImageHeader {
@@ -388,5 +390,18 @@ const char* State::boot_from_image(const std::string& path) {
 
   return 0;
 }
+
+#else 
+
+void State::save_image(const std::string& path) {
+  std::cerr << "image loading disabled on incremental GC";
+  exit(EXIT_FAILURE);
+}
+
+const char* State::boot_from_image(const std::string& path) {
+  return "image loading disabled on incremental GC";
+}
+
+#endif
 
 }
