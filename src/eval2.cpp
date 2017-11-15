@@ -42,6 +42,7 @@ static State::Global get_form(State& state, Value sym) {
   GET_FORM(State::S_LAMBDA);
   GET_FORM(State::S_QUOTE);
   GET_FORM(State::S_BEGIN);
+  GET_FORM(State::S_IF);
 #undef GET_FORM
 
   return (State::Global)-1;
@@ -270,10 +271,24 @@ tail_call:
           unsigned form = get_form(*this, kar);
           switch(form) {
             case S_IF: {
-              Value condition, then_branch, else_branch;
-              AR_FRAME(this, condition, then_branch, else_branch);
-              break;
+              if(length < 2) {
+                return eval_error("if must have at least two arguments (condition and then branch)",
+                  exp);
+              }
+              
+              tmp = eval2_body(frame, exp.cadr(), true);
+              EVAL2_CHECK(tmp, exp);
 
+              if(tmp != C_FALSE) {
+                exp = exp.list_ref(2);
+              } else if(length == 3) {
+                // 1-arm if
+                exp = C_UNSPECIFIED;
+              } else {
+                exp = exp.list_ref(3);
+              }
+
+              continue;
             }
             case S_BEGIN:
               if(tail) {
