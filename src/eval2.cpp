@@ -11,15 +11,19 @@ namespace arete {
 static bool tco_enabled = true;
 
 struct State::EvalFrame {
+  EvalFrame(): tco_lost(0) {}
+
   Value env;
   Value fn_name;
+  size_t tco_lost;
 };
 
 // Push function and source information onto the stack trace
-#define EVAL2_TRACE(exp) \
-  if((exp).type() == PAIR && (exp).pair_has_source()) { \
+#define EVAL2_TRACE(src) \
+  if((src).heap_type_equals(PAIR) && (src).pair_has_source()) { \
     std::ostringstream os; \
-    os << source_info((exp).pair_src(), (frame.fn_name), true); \
+    os << source_info((src).pair_src(), (frame.fn_name), true) << std::endl; \
+    if(frame.tco_lost) os << "- " << frame.tco_lost << " frames lost due to tail call optimization" << std::endl; \
     stack_trace.push_back(os.str()); \
   }
   
@@ -107,8 +111,8 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
       break;
     }
     case S_LAMBDA: {
-      Value fn_env, args, args_head, args_tail, saved_fn;
-      AR_FRAME(this, fn_env, args, args_head, args_tail, saved_fn);
+      Value fn_env, args, saved_fn;
+      AR_FRAME(this, fn_env, args, saved_fn);
       Function* fn = static_cast<Function*>(gc.allocate(FUNCTION, sizeof(Function)));
       saved_fn = fn;
 
@@ -153,14 +157,15 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
           fn->rest_arguments = argi;
         }
         
-        fn->arguments = temps_to_list();
+        args = temps_to_list();
 
         fn = saved_fn.as_unsafe<Function>();
+        fn->arguments = args;
       }
 
-      /*std::cout << "fn body: " << fn->body << std::endl;
-      std::cout << "fn args: " << fn->arguments << std::endl;
-      std::cout << "fn rest: " << fn->rest_arguments << std::endl;*/
+      //std::cout << "fn body: " << fn->body << std::endl;
+      //std::cout << "fn args: " << fn->arguments << std::endl;
+      //std::cout << "fn rest: " << fn->rest_arguments << std::endl;
 
       return saved_fn;
     }
@@ -168,20 +173,42 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
   return C_UNSPECIFIED;
 }
 
-Value State::eval2_body(EvalFrame& frame, Value body, bool single) {
+/** Generic arity check */
+static Value eval_check_arity(State& state, Value fn, Value exp,
+  size_t argc, size_t min_arity, size_t max_arity, bool var_arity) {
+
+  AR_ASSERT(state.gc.live(fn));
+  AR_ASSERT(state.gc.live(exp));
+
+  if(argc < min_arity) {
+    std::ostringstream os; 
+    os << "function " << fn << " expected at least " << min_arity << " arguments but got only " 
+      << argc;
+    return state.eval_error(os.str(), exp);
+  } else if(argc > max_arity && !var_arity) {
+    std::ostringstream os;
+    os << "function " << fn << " expected at most " << max_arity << " arguments but got only "
+      << argc;
+    return state.eval_error(os.str(), exp);
+  }
+
+  return C_FALSE;
+}
+
+Value State::eval2_body(EvalFrame frame, Value body, bool single) {
   Value exp, cell, tmp;
 tail_call:
   bool tail = false;
 
-  AR_FRAME(this, exp, cell, body, frame.env, frame.fn_name, tmp);
+  AR_FRAME(this, frame.env, frame.fn_name, body, exp, cell, tmp);
 
   while(single || body.heap_type_equals(PAIR)) {
-    cell = exp;
     if(single) { 
-      exp = body;
+      exp = cell = body;
       single = false;
       body = C_FALSE;
     } else {
+      cell = body;
       exp = body.car();
       body = body.cdr();
     }
@@ -196,7 +223,7 @@ tail_call:
           std::ostringstream os;
           os << "reference to undefined variable " << exp;
           // EVAL_TRACE(car, fn_name);
-          Value ret = eval_error(os.str(), exp);
+          Value ret = eval_error(os.str(), cell);
           return ret;
         } else if(res == C_SYNTAX) {
           std::stringstream os;
@@ -223,7 +250,7 @@ tail_call:
           return eval_error("non-list in source code", exp);
         }
 
-        Value kar = exp.car(), res, tmp;
+        Value kar = exp.car(), res;
         Type kar_type = kar.type();
 
         if(kar_type == RENAME)
@@ -242,6 +269,12 @@ tail_call:
 
           unsigned form = get_form(*this, kar);
           switch(form) {
+            case S_IF: {
+              Value condition, then_branch, else_branch;
+              AR_FRAME(this, condition, then_branch, else_branch);
+              break;
+
+            }
             case S_BEGIN:
               if(tail) {
                 body = exp.cdr();
@@ -254,7 +287,7 @@ tail_call:
               exp = eval2_form(frame, exp, form);
               break;
           }
-        }  else {
+        } else {
           // This is a normal function application 
           tmp = eval2_body(frame, exp.car(), true);
           EVAL2_CHECK(tmp, exp);
@@ -274,21 +307,11 @@ tail_call:
             std::cout << args << std::endl;
 
             size_t argc = args.list_length();
-            size_t min_arity = fn.c_function_min_arity(), max_arity = fn.c_function_max_arity();
 
-            // TODO: This can be moved into a separate function which checks this for VM 
-            // functions as well.
-            if(argc < min_arity) {
-              std::ostringstream os;
-              os << "function " << fn << " expected at least " << min_arity << " arguments but got "
-                << argc;
-              return eval_error(os.str(), exp);
-            } else if(!fn.c_function_variable_arity() && argc > max_arity) {
-              std::ostringstream os;
-              os << "function " << fn << " expected at most " << max_arity << " arguments but got "
-                << argc;
-              return eval_error(os.str(), exp);
-            }
+            tmp = eval_check_arity(*this, fn, exp, argc,
+              fn.c_function_min_arity(), fn.c_function_max_arity(), fn.c_function_variable_arity());
+
+            EVAL2_CHECK(tmp, exp);
 
             fn_args = make_vector_storage(argc);
 
@@ -306,31 +329,28 @@ tail_call:
           }
           case FUNCTION: {
             EvalFrame frame2;
-            Value fn = tmp, args = exp.cdr(), fn_args, rest_args_head = C_NIL, rest_args_tail,
-              body, rest_args_name;
+            Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body;
             frame2.fn_name = tmp.function_name();
-            AR_FRAME(this, fn, args, fn_args, rest_args_head, rest_args_tail, body, frame2.fn_name,
-              frame2.env, rest_args_name);
+            AR_FRAME(this, frame2.fn_name, frame2.env, fn, args, fn_args, rest_args_name, new_body);
             
             fn_args = fn.function_arguments();
             size_t argc = args.list_length();
             size_t arity = fn_args.list_length();
-
-            if(argc < arity) {
-              std::ostringstream os;
-              os << "function " << fn << " expected at least " << arity << " arguments but got " <<
-                argc;
-              return eval_error(os.str(), exp);
-            }
-
             rest_args_name = fn.function_rest_arguments();
 
-            if(rest_args_name == C_FALSE && argc > arity) {
-              std::ostringstream os;
-              os << "function " << fn << " expected at most " << arity << " arguments but got " <<
-                argc;
-              return eval_error(os.str(), exp);
-            }
+            //std::cout << "tmp: " << tmp << std::endl;
+
+            tmp = eval_check_arity(*this, fn, exp, argc, arity, arity, rest_args_name != C_FALSE);
+            EVAL2_CHECK(tmp, exp);
+
+/*
+            std::cout << "fn:  " << fn << std::endl;
+            std::cout << "fn_args: " << fn_args << std::endl;
+            std::cout << "rest_args_name: " << rest_args_name << std::endl;
+            std::cout << "args: " << args << std::endl;
+            std::cout << "Exp:" << exp << std::endl;
+            std::cout << "tmp: " << tmp << std::endl;
+            */
 
             frame2.env = make_env(fn.function_parent_env(), argc + 1);
 
@@ -356,36 +376,40 @@ tail_call:
               vector_append(frame2.env, temps_to_list());
             }
 
-            body = fn.function_body();
+            new_body = fn.function_body();
 
-            if(false) {
+            if(tail) {
               // tail call
-
+              frame2.tco_lost = frame.tco_lost + 1;
+              frame = frame2;
+              body = new_body;
+              goto tail_call;
             } else {
-              tmp = eval2_body(frame2, body);
-              EVAL2_CHECK(tmp, body);
+
+              tmp = eval2_body(frame2, new_body);
+              EVAL2_CHECK(tmp, new_body);
               exp = tmp;
               continue;
             }
 
-            std::cout << "new fn env " << frame2.env << std::endl;
-
+            AR_ASSERT(!"should never reach this point");
             return C_FALSE;
           }
           case VMFUNCTION:
             break;
-          default: AR_ASSERT(!"don't know how to apply this");
+          default: {
+            std::ostringstream os;
+            os << "attempt to apply non-applicable value of type " << (Type) kar_type << ": " <<
+              kar;
+            return eval_error(os.str(), exp);
           }
         }
         break;
       }
+    } // case PAIR
 
-      default: break;
+    default: break;
     }
-
-    // Check for special forms
-
-    // Evaluate function applications
   }
 
   return exp;

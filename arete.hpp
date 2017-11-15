@@ -2000,7 +2000,7 @@ struct State {
 
   std::vector<Value> eval_stack;
   Value eval2_form(EvalFrame& frame, Value exp, unsigned);
-  Value eval2_body(EvalFrame& frame, Value exp, bool single = false);
+  Value eval2_body(EvalFrame frame, Value exp, bool single = false);
   Value eval2_body(Value exp);
 
   // Build a list of out of temps

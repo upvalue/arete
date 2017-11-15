@@ -154,7 +154,6 @@ Value State::make_string(const std::string& body) {
   heap->bytes = body.size();
   strncpy(heap->data, body.c_str(), body.size());
   AR_ASSERT(heap->data[heap->bytes] == '\0');
-  // heap->data[heap->bytes] = '\0';
 
   return heap;
 }
@@ -185,6 +184,8 @@ Value State::make_exception(Value tag, Value message, Value irritants) {
 Value State::make_exception(Value tag, const std::string& cmessage, Value irritants) {
   Value message;
   AR_FRAME(this, tag, message, irritants);
+  AR_ASSERT(gc.live(tag));
+  AR_ASSERT(gc.live(irritants));
   message = make_string(cmessage);
   return make_exception(tag, message, irritants);
 }
