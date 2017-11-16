@@ -9,6 +9,7 @@ struct State::EvalFrame {
 
   Value env;
   Value fn_name;
+  /** count of frames lost due to tail call optimization, for stack traces */
   size_t tco_lost;
 };
 
@@ -31,12 +32,6 @@ struct State::EvalFrame {
   }
 
 #define EVAL2_CHECK(exp, src) EVAL2_CHECK_FRAME(frame, exp, src)
-
-#define EVAL2_BODY_CHECK(exp, src) \
-  if((exp).is_active_exception()) { \
-    EVAL2_TRACE_FRAME(frame, (src)); \
-    continue; \
-  }
 
 static State::Global get_form(State& state, Value sym) {
 
@@ -625,8 +620,62 @@ tail_call:
             AR_ASSERT(!"should never reach this point");
             return C_FALSE;
           }
-          case VMFUNCTION:
-            break;
+          case VMFUNCTION: {
+            Value fn = tmp, args = exp.cdr(), argv, varargs_begin, varargs_cur = C_NIL, closure;
+            AR_FRAME(this, fn, args, argv, varargs_begin, varargs_cur, closure);
+
+            if(fn.heap_type_equals(CLOSURE)) {
+              closure = fn;
+              fn = fn.closure_function();
+            }
+
+            size_t argc = args.list_length();
+
+            size_t min_arity = fn.vm_function_min_arity(), max_arity = fn.vm_function_max_arity();
+            bool var_arity = fn.vm_function_variable_arity();
+
+            tmp = eval_check_arity(*this, fn, exp, argc, min_arity, max_arity, var_arity);
+            EVAL2_CHECK(tmp, exp);
+
+            argv = make_vector_storage(argc+(var_arity ? 1:0));
+            argc = 0;
+
+            while(args.heap_type_equals(PAIR)) {
+              if(argc == max_arity) {
+                break;
+              }
+              tmp = eval2_body(frame, args.car(), true);
+              EVAL2_CHECK(tmp, args);
+
+              vector_storage_append(argv, tmp);
+              argc++;
+              args = args.cdr();
+            }
+
+            if(args.heap_type_equals(PAIR) && var_arity) {
+              while(args.heap_type_equals(PAIR)) {
+                tmp = eval2_body(frame, args.car(), true);
+                EVAL2_CHECK(tmp, args);
+                if(varargs_cur == C_NIL) {
+                  varargs_begin = varargs_cur = make_pair(tmp, C_NIL);
+                } else {
+                  tmp = make_pair(tmp, C_NIL);
+                  varargs_cur.set_cdr(tmp);
+                  varargs_cur = tmp;
+                }
+                args = args.cdr();
+              }
+              vector_storage_append(argv, varargs_begin);
+              argc++;
+            }
+
+            tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &argv.vector_storage_data()[0]);
+
+            EVAL2_CHECK(tmp, exp);
+            
+            exp = tmp;
+            continue;
+          }
           default: {
             std::ostringstream os;
             os << "attempt to apply non-applicable value of type " << (Type) kar_type << ": " <<
@@ -676,7 +725,10 @@ Value State::eval2_list(Value lst) {
   lst = lst_top;
 
   if(compiler != C_UNSPECIFIED && compiler != C_UNDEFINED) {
-
+    Value argv[1] = {lst};
+    tmp = apply(compiler, 1, argv);
+    if(tmp.is_active_exception()) return tmp;
+    return apply(tmp, 0, 0);
   }
 
   return C_UNSPECIFIED;

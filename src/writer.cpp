@@ -507,7 +507,7 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
       if(type.as_unsafe<RecordType>()->data_size > 0) {
         os2 << " " << type.as_unsafe<RecordType>()->data_size << "b udata";
       }
-      os2 << "\b>";
+      os2 << "\b" << '>';
     } else if(v.type() == VECTOR) {
       // VECTORS
 
@@ -556,7 +556,7 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
   } else {
     // Give up and just write it out as a big blob!
     for(size_t i = 0; i != str.size(); i++) {
-      if(str[i] == '\0') {
+      if(str[i] == '\0' || str[i] == '\b') {
         continue;
       } else {
         os << str[i];
@@ -579,7 +579,6 @@ static Value pretty_print_clear_mark(State& state, Value v, PrintState& ps) {
   if(!v.print_recursive()) return C_UNSPECIFIED;
 
   if(v.heap->get_header_int() == 0) {
-    return C_UNSPECIFIED;    
   }
 
   v.heap->set_header_int(0);

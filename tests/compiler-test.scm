@@ -14,4 +14,5 @@
 
 (define proc (OpenFn->procedure fn))
 
-(pretty-print (proc))
+(print (proc))
+;(pretty-print (proc))

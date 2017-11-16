@@ -82,7 +82,7 @@ suites = (
     ('reader', ['--read', '{}']),
     ('preboot',  ['{}']),
     ('expander', ['scheme/syntax.scm', '{}']),
-    #('compiler',  ['--set', 'compiler-test-file', '"{}"', 'tests/compiler-test.scm'])
+    ('compiler',  ['--set', 'compiler-test-file', '"{}"', 'tests/compiler-test.scm'])
 )
 
 if __name__ == '__main__':

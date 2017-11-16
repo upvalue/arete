@@ -724,7 +724,6 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
     case CFUNCTION:
       return fn.c_function_apply(*this, argc, argv);
     case FUNCTION: {
-      /*
       Value lst;
 
       temps.clear();
@@ -733,8 +732,6 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
       lst = temps_to_list();
 
       return eval_apply_function(fn, lst);
-      */
-      return eval2_apply_function(fn, argc, argv);
     }
     default:
       return eval_error("cannot apply type", fn);
