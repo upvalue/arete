@@ -2001,14 +2001,14 @@ struct State {
 
   struct EvalFrame;
 
-  std::vector<Value> eval_stack;
   Value eval2_form(EvalFrame& frame, Value exp, unsigned);
   Value eval2_body(EvalFrame frame, Value exp, bool single = false);
   Value eval2_exp(Value exp);
   Value eval2_list(Value lst);
+  Value eval2_apply_function(Value fn, size_t argc, Value* argv);
 
   // Build a list of out of temps
-  Value temps_to_list();
+  Value temps_to_list(size_t limit = 0);
 
   // The internal application machinery is unfortunately somewhat complex due to the need for
   // interpreted, c++ and virtual machine functions to all be able to call eachother.

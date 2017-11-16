@@ -102,6 +102,7 @@ void State::boot() {
 
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_FEATURES, C_NIL);
+  set_global_value(G_TCO_ENABLED, C_TRUE);
 
   register_feature("arete");
 

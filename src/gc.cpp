@@ -144,9 +144,6 @@ void GCCommon::visit_roots(T& walker) {
   for(size_t i = 0; i != state.temps.size(); i++)
     walker.touch(state.temps[i].heap);
 
-  for(size_t i = 0; i != state.eval_stack.size(); i++)
-    walker.touch(state.eval_stack[i].heap);
-
   for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++)
     walker.touch(((*i)->ref.heap));
 

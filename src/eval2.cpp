@@ -65,11 +65,11 @@ static State::Global get_form(State& state, Value sym) {
    return std::cerr;
  }
 
-Value State::temps_to_list() {
+Value State::temps_to_list(size_t limit) {
   if(temps.size() == 0) return C_NIL;
   Value ret = C_NIL;
   AR_FRAME(this, ret);
-  for(size_t i = temps.size(); i != 0; i--) {
+  for(size_t i = temps.size(); i != limit; i--) {
     ret = make_pair(temps[i-1], ret);
   }
   return ret;
@@ -284,6 +284,60 @@ static Value eval_check_arity(State& state, Value fn, Value exp,
   return C_FALSE;
 }
 
+// Apply a function. Not used by the interpreter itself but used for generic apply and calls from
+// C/VM functions
+Value State::eval2_apply_function(Value fn, size_t argc, Value* argv) {
+  AR_TYPE_ASSERT(fn.heap_type_equals(FUNCTION));
+  EvalFrame frame;
+  Value fn_args, fn_rest_args, tmp, new_env;
+
+  frame.fn_name = fn.function_name();
+  fn_args = fn.function_arguments();
+  fn_rest_args = fn.function_rest_arguments();
+
+  AR_FRAME(this, frame.fn_name, frame.env, fn, fn_args, fn_rest_args, tmp, new_env);
+  // Check argc against args length
+  size_t arity = fn_args.list_length();
+
+  tmp = eval_check_arity(*this, fn, C_FALSE, argc, arity, arity, fn_rest_args != C_FALSE);
+  if(tmp.is_active_exception()) return tmp;
+
+  temps.clear();
+
+  for(size_t i = 0; i != argc; i++) {
+    temps.push_back(argv[i]);
+  }
+
+  size_t actual_args = arity;
+
+  if(argc > arity) {
+    tmp = temps_to_list(arity);
+    temps[arity] = tmp;
+    actual_args++;
+  }
+
+  new_env = make_env(fn.function_parent_env(), actual_args);
+
+  size_t i = 0;
+  while(fn_args.heap_type_equals(PAIR)) {
+    vector_append(new_env, fn_args.car());
+    vector_append(new_env, temps[i++]);
+    fn_args = fn_args.cdr();
+  }
+
+  if(fn_rest_args != C_FALSE) {
+    vector_append(new_env, fn_rest_args);
+    vector_append(new_env, temps[i]);
+  }
+
+  frame.env = new_env;
+
+  tmp = eval2_body(frame, fn.function_body());
+
+  return tmp;
+
+}
+
 Value State::eval2_body(EvalFrame frame, Value body, bool single) {
   Value exp, cell, tmp;
 
@@ -306,7 +360,7 @@ tail_call:
     }
     restart_exp:
 
-    tail = tco_enabled && body == C_NIL;
+    tail = tco_enabled && (body == C_NIL || body == C_FALSE);
 
     switch(exp.type()) {
       case SYMBOL: {
@@ -474,15 +528,17 @@ tail_call:
           // a new one. easy peasy.
           switch(kar_type) {
           case CFUNCTION: {
-            Value fn = tmp, fn_args, tmp, args = exp.cdr();
-            AR_FRAME(this, fn, fn_args, tmp, args);
+            Value fn = tmp, fn_args, args = exp.cdr();
+            AR_FRAME(this, fn, fn_args,  args);
 
             size_t argc = args.list_length();
 
             tmp = eval_check_arity(*this, fn, exp, argc,
               fn.c_function_min_arity(), fn.c_function_max_arity(), fn.c_function_variable_arity());
-
+            
             EVAL2_CHECK(tmp, exp);
+
+            //std::cout << "frame.env" << frame.env << std::endl;
 
             fn_args = make_vector_storage(argc);
 
