@@ -387,9 +387,9 @@ void GCSemispace::collect(size_t request, bool force) {
       }
       // Should never be encountered on heap
       case BLOCK: case CONSTANT: case FIXNUM: default:
-        std::cerr << obj << std::endl; 
         std::cerr << "mystery object type " << obj->get_type() << std::endl;
         std::cerr << "mystery object size: " << obj->size << std::endl; 
+        std::cerr << obj << std::endl; 
         AR_ASSERT(!"arete:gc: encountered bad value on heap; probably a GC bug");
         break;
 #undef AR_COPY

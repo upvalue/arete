@@ -146,10 +146,13 @@ static Value fn_list_impl(State& state, size_t argc, Value* argv, bool copy_sour
   return lst;
 }
 
+#if 0
+// TODO REMOVE
 Value fn_list(State& state, size_t argc, Value* argv) {
   return fn_list_impl(state, argc, argv, false);
 }
 AR_DEFUN("list", fn_list, 0, 0, true);
+#endif
 
 Value fn_list_source(State& state, size_t argc, Value* argv) {
   return fn_list_impl(state, argc, argv, true);

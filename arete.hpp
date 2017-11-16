@@ -1748,6 +1748,7 @@ struct State {
   Value make_pair(Value car = C_FALSE, Value cdr = C_FALSE,
     size_t size = sizeof(Pair) - sizeof(SourceLocation));
   Value make_src_pair(Value car, Value cdr, SourceLocation& loc);
+  Value make_src_pair(Value car, Value cdr, Value src);
   Value make_char(char c);
 
   /** Create vector backing storage */
@@ -2001,7 +2002,8 @@ struct State {
   std::vector<Value> eval_stack;
   Value eval2_form(EvalFrame& frame, Value exp, unsigned);
   Value eval2_body(EvalFrame frame, Value exp, bool single = false);
-  Value eval2_body(Value exp);
+  Value eval2_exp(Value exp);
+  Value eval2_list(Value lst);
 
   // Build a list of out of temps
   Value temps_to_list();
@@ -2024,9 +2026,6 @@ struct State {
   Value eval_apply_function(Value fn, Value args);
 
   Value expand_expr(Value exp);
-  /** Evaluate a toplevel expression, expanding and compiling it if the expander 
-   * have been set up */
-  Value eval_toplevel(Value exp);
 
   /** Same, but with a list of expressions in-place */
   Value eval_toplevel_list(Value exp);

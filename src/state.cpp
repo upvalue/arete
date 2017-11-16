@@ -132,13 +132,14 @@ void State::register_feature(const std::string& name) {
 
 Value State::load_file(const std::string& path) {
   Value x, tmp;
-  AR_FRAME(*this, x, tmp);
+  AR_FRAME(this, x, tmp);
 
   x = slurp_file(path);
 
   AR_FN_STATE_CHECK(x);
 
-  x = eval_toplevel_list(x);
+  x = eval2_list(x);
+  //x = eval_toplevel_list(x);
 
   return x;
 }

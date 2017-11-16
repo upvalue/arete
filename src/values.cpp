@@ -300,6 +300,7 @@ Defun::Defun(void* fn_): fn((c_function_t)fn_) {
 void arete_free_function_tables() {
   if(function_to_id) {
     delete id_to_function;
+    delete function_to_id;
     function_to_id = 0;
   }
 }
@@ -378,7 +379,6 @@ Value State::make_pair(Value car, Value cdr, size_t size) {
   return heap;
 }
 
-/** Generate a pair with source code information */
 Value State::make_src_pair(Value car, Value cdr, SourceLocation& loc) {
   Value pare = C_FALSE;
   AR_FRAME(this, pare, car, cdr);
@@ -390,6 +390,15 @@ Value State::make_src_pair(Value car, Value cdr, SourceLocation& loc) {
 
   return pare;
 }
+
+Value State::make_src_pair(Value car, Value cdr, Value src) {
+  if(src.pair_has_source()) {
+    SourceLocation loc(src.pair_src());
+    return make_src_pair(car, cdr, loc);
+  }
+  return make_pair(car, cdr);
+}
+
 
 Value State::make_char(char c) {
   Char* heap = static_cast<Char*>(gc.allocate(CHARACTER, sizeof(Char)));

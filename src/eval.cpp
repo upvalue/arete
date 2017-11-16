@@ -782,17 +782,6 @@ Value State::expand_expr(Value exp) {
   return exp;
 }
 
-Value State::eval_toplevel(Value exp) {
-  // So, this should:
-  // expand an expression or list of expressions
-  // then compile into a list of expression.
-  exp = expand_expr(exp);
-
-  if(exp.is_active_exception()) return exp;
-
-  return eval(C_FALSE, exp);
-}
-
 Value State::eval_toplevel_list(Value lst) {
   Value elt, lst_top, tmp, compiler, vfn;
   AR_FRAME(*this, lst, elt, lst_top, tmp, compiler, vfn);

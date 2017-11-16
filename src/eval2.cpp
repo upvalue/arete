@@ -1,14 +1,10 @@
-// eval2.cpp - interpreter with tail-call optimization and let
-
-// In order to implement TCO, we do most evaluation in one function; 
-// when evaluating the tail-expression
-// of a "body" (a function body or begin expression) we pop the stack and use a goto.
+// eval2.cpp - interpreter with tail-call optimization 
 
 #include "arete.hpp"
 
 namespace arete {
 
-static bool tco_enabled = true;
+static bool tco_enabled = false;
 
 struct State::EvalFrame {
   EvalFrame(): tco_lost(0) {}
@@ -19,20 +15,24 @@ struct State::EvalFrame {
 };
 
 // Push function and source information onto the stack trace
-#define EVAL2_TRACE(src) \
+#define EVAL2_TRACE_FRAME(frame, src) \
   if((src).heap_type_equals(PAIR) && (src).pair_has_source()) { \
     std::ostringstream os; \
-    os << source_info((src).pair_src(), (frame.fn_name), true) << std::endl; \
-    if(frame.tco_lost) os << "- " << frame.tco_lost << " frames lost due to tail call optimization" << std::endl; \
+    os << source_info((src).pair_src(), (frame.fn_name), true); \
+    if(frame.tco_lost) os << std::endl <<  "- " << frame.tco_lost << " frames lost due to tail call optimization"; \
     stack_trace.push_back(os.str()); \
   }
+
+#define EVAL2_TRACE(src) EVAL2_TRACE_FRAME(frame, src)
   
 // Check if an error has occurred; if it has, trace it and return it
-#define EVAL2_CHECK(exp, src) \
+#define EVAL2_CHECK_FRAME(frame, exp, src) \
   if((exp).is_active_exception()) { \
-    EVAL2_TRACE((src)); \
+    EVAL2_TRACE_FRAME(frame, (src)); \
     return (exp); \
   }
+
+#define EVAL2_CHECK(exp, src) EVAL2_CHECK_FRAME(frame, exp, src)
 
 static State::Global get_form(State& state, Value sym) {
 
@@ -47,6 +47,7 @@ static State::Global get_form(State& state, Value sym) {
   GET_FORM(State::S_AND);
   GET_FORM(State::S_OR);
   GET_FORM(State::S_COND);
+
 #undef GET_FORM
 
   return (State::Global)-1;
@@ -91,27 +92,30 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
       Value name = exp.cadr(), body = exp.caddr(), tmp;
       AR_FRAME(this, name, body, tmp);
     define_lambda:
-
       // Special case: define lambda, build lambda in place
       if(name.heap_type_equals(PAIR)) {
         Value args = name.cdr(), tmp = name.car();
+
+        name = tmp;
 
         if(!tmp.heap_type_equals(SYMBOL)) {
           return eval_error("define lambda name must be a symbol", name);
         }
 
-        name = tmp;
+        SourceLocation loc;
 
-        tmp = make_pair(args, exp.cddr());
-        tmp = make_pair(globals[S_LAMBDA], tmp);
+        body = make_src_pair(exp.cddr().car(), exp.cddr().cdr(), exp);
+
+        tmp = make_src_pair(args, body, exp);
+        tmp = make_src_pair(globals[S_LAMBDA], tmp, exp);
 
         body = tmp;
 
         goto define_lambda;
       }
 
-      std::cout << name << std::endl;
-      std::cout << body << std::endl;
+      // std::cout << name << std::endl;
+      // std::cout << body << std::endl;
 
       if(!name.heap_type_equals(SYMBOL))
         return eval_error("first argument to define must be a symbol", exp.cdr());
@@ -277,10 +281,11 @@ static Value eval_check_arity(State& state, Value fn, Value exp,
 
 Value State::eval2_body(EvalFrame frame, Value body, bool single) {
   Value exp, cell, tmp;
+
 tail_call:
   bool tail = false;
 
-  AR_ASSERT(single || body.heap_type_equals(PAIR));
+  AR_ASSERT(single || body.heap_type_equals(PAIR) || body == C_NIL);
 
   AR_FRAME(this, frame.env, frame.fn_name, body, exp, cell, tmp);
 
@@ -533,7 +538,7 @@ tail_call:
             } else {
 
               tmp = eval2_body(frame2, new_body);
-              EVAL2_CHECK(tmp, new_body);
+              EVAL2_CHECK_FRAME(frame2, tmp, new_body);
               exp = tmp;
               continue;
             }
@@ -561,12 +566,14 @@ tail_call:
   return exp;
 }
 
-Value State::eval2_body(Value exp) {
+Value State::eval2_exp(Value exp) {
   EvalFrame frame;
-  frame.env = C_FALSE;
-  frame.fn_name = C_FALSE;
   return eval2_body(frame, exp, true);
 }
 
+Value State::eval2_list(Value lst) {
+  EvalFrame frame;
+  return eval2_body(frame, lst);
+}
 
 } // namespace arete
