@@ -362,7 +362,7 @@ void State::defun_core(const std::string& cname, c_function_t addr, size_t min_a
 Value Value::c_function_apply(State& state, size_t argc, Value* argv) {
   AR_TYPE_ASSERT(type() == CFUNCTION);
   if(c_function_is_closure()) {
-    return c_function_closure_addr()(state, c_function_closure_data(), argc, argv);
+    return c_function_closure_addr()(state, (void*) c_function_closure_data().bits, argc, argv);
   } else {
     return c_function_addr()(state, argc, argv);
   }

@@ -88,7 +88,7 @@
       var spinnerElement = document.getElementById('spinner');
 
       var Module = {
-        arguments: ['terp-sdl.scm'],
+        arguments: ['--load-image', 'heap.boot', '--repl'],
         preRun: [],
         postRun: [],
         print: (function() {
@@ -108,8 +108,8 @@
             }
           };
         })(),
-        TOTAL_STACK: 16777216,
-        TOTAL_MEMORY: 16777216 * 4,
+        //TOTAL_STACK: 16777216,
+        //TOTAL_MEMORY: 16777216 * 2,
         printErr: function(text) {
           console.log(Module.TOTAL_STACK);
           if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');

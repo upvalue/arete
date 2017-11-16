@@ -3,18 +3,21 @@ CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
 CFLAGS := $(CFLAGS) -g3 -O3 
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
-LDFLAGS := -lm 
+LDFLAGS := -lm -fno-rtti -fno-exceptions
 
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) 
-ECXXFLAGS := $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -DAR_LINENOISE=0 -DARETE_LOG_TAGS="(ARETE_LOG_TAG_IMAGE|ARETE_LOG_TAG_DEFUN)"
-ELDFLAGS :=
+ECXXFLAGS := -s ASSERTIONS=1 -s EMULATE_FUNCTION_POINTER_CASTS=1 -Os $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -DAR_LINENOISE=0 -DARETE_LOG_TAGS="(ARETE_LOG_TAG_IMAGE|ARETE_LOG_TAG_DEFUN)"
+ELDFLAGS := -Os -s ASSERTIONS=1 -s EMULATE_FUNCTION_POINTER_CASTS=1
 
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
 CXXOBJS := $(CXXOBJS) $(patsubst %.cpp,%.o,$(wildcard vendor/linenoise/*.cpp))
 CXXOBJS32 := $(patsubst %.o,%.32.o,$(CXXOBJS))
 DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) src/main.d
+
+# Files to include with Emscripten builds
+EFILES := $(addprefix --preload-file ,$(wildcard *.boot *.scm scheme/*.scm examples/*.scm examples/*.ttf))
 
 ARETE_LIBS := sdl test
 
@@ -25,7 +28,7 @@ ifeq ($(findstring sdl,$(ARETE_LIBS)),sdl)
 	CXXFLAGS := $(CXXFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) -DAR_LIB_SDL=1
 	ECXXFLAGS := $(CXXFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) -DAR_LIB_SDL=1 -s USE_SDL=2 -s USE_SDL_TTF=2
 	LDFLAGS := $(LDFLAGS) $(shell pkg-config --libs sdl2 SDL2_ttf)
-	ELDFLAGS := -s USE_SDL=2 -s USE_SDL_TTF=2
+	ELDFLAGS := $(ELDFLAGS) -s USE_SDL=2 -s USE_SDL_TTF=2
 else
 	CXXFLAGS := $(CXXFLAGS) -DAR_LIB_SDL=0
 endif
@@ -74,7 +77,7 @@ heap.boot: arete $(CXXOBJS) $(wildcard scheme/*.scm)
 
 web/arete.js: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")
-	$(ECXX) -O3 $(ELDFLAGS) -o $@ $^ $(addprefix --preload-file ,$(wildcard *.boot *.scm scheme/*.scm examples/*.scm examples/*.ttf))
+	$(ECXX) $(ELDFLAGS) -o $@ $^ $(EFILES)
 
 arete-distilled.cpp: $(wildcard src/*.cpp)
 	$(call colorecho "arete.cpp")

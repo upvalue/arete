@@ -176,7 +176,7 @@ extern size_t gc_collect_timer;
 extern State* current_state;
 
 typedef Value (*c_function_t)(State&, size_t, Value*);
-typedef Value (*c_closure_t)(State&, Value, size_t, Value*);
+typedef Value (*c_closure_t)(State&, void*, size_t, Value*);
 typedef void (*c_finalizer_t)(State&, Value);
 
 std::ostream& operator<<(std::ostream& os,  Value);

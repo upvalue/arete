@@ -88,6 +88,8 @@ Value sdl_clear(State& state, SDLModule* module, size_t argc, Value* argv) {
 AR_DEFUN("sdl:clear", sdl_clear, 0);
 
 Value sdl_make_event(State& state, SDLModule* module, size_t argc, Value* argv) {
+  std::cerr << "sdl:make-event" << std::endl;
+  std::cerr << module->data.event_tag << std::endl;
   Value v = state.make_record(module->data.event_tag);
   return v;
 }
