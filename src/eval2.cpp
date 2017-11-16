@@ -4,7 +4,7 @@
 
 namespace arete {
 
-static bool tco_enabled = false;
+static bool tco_enabled = true;
 
 struct State::EvalFrame {
   EvalFrame(): tco_lost(0) {}
@@ -33,6 +33,12 @@ struct State::EvalFrame {
   }
 
 #define EVAL2_CHECK(exp, src) EVAL2_CHECK_FRAME(frame, exp, src)
+
+#define EVAL2_BODY_CHECK(exp, src) \
+  if((exp).is_active_exception()) { \
+    EVAL2_TRACE_FRAME(frame, (src)); \
+    continue; \
+  }
 
 static State::Global get_form(State& state, Value sym) {
 
@@ -536,8 +542,14 @@ tail_call:
               body = new_body;
               goto tail_call;
             } else {
+              // Have to loop here to get accurate source code information out of this
+              while(new_body.heap_type_equals(PAIR)) {
+                tmp = eval2_body(frame2, new_body.car(), true);
+                EVAL2_CHECK_FRAME(frame2, tmp, new_body.car().heap_type_equals(PAIR) ? new_body.car() : new_body);
+                new_body = new_body.cdr();
+              }
 
-              tmp = eval2_body(frame2, new_body);
+              //tmp = eval2_body(frame2, new_body);
               EVAL2_CHECK_FRAME(frame2, tmp, new_body);
               exp = tmp;
               continue;
