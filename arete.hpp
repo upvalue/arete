@@ -1211,7 +1211,6 @@ struct Table : HeapValue  {
   unsigned char size_log2;
   size_t entries, max_entries;
 
-  static const size_t LOAD_FACTOR = 90;
   static const Type CLASS_TYPE = TABLE;
 };
 
@@ -1599,14 +1598,14 @@ struct GCIncremental : GCCommon {
 
 /** A re-entrant instance of the Arete runtime */
 struct State {
+  struct EvalFrame;
+  typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
 
 #if ARETE_GC_STRATEGY == ARETE_GC_INCREMENTAL
   GCIncremental gc;
 #elif ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE
   GCSemispace gc;
 #endif 
-
-  typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
 
   /** Counts how many times gensym has been called; appended to the end of gensyms to ensure
    * their uniqueness */ 
@@ -1952,7 +1951,7 @@ struct State {
   // #(#f hello 12345)
   // for a environment one level below toplevel after a (define hello 12345)
 
-  static const size_t VECTOR_ENV_FIELDS = 2;
+  static const size_t VECTOR_ENV_FIELDS = 1;
 
   Value make_env(Value parent = C_FALSE, size_t size = 0);
 
@@ -1988,49 +1987,20 @@ struct State {
   }
 
   Value eval_error(const std::string& msg, Value exp = C_FALSE);
-  Value eval_body(Value env, Value fn_name, Value calling_fn_name, Value src_exp, Value body);
-  Value eval_cond(Value env, Value exp, Value fn_name);
-  Value eval_boolean_op(Value env, Value exp, Value fn_name, bool is_or);
-  Value eval_begin(Value env, Value exp, Value fn_name);
-  Value eval_lambda(Value env, Value exp);
-  Value eval_define(Value env, Value exp, Value fn_name);
-  Value eval_set(Value env, Value exp, Value fn_name);
-  Value eval_if(Value env, Value exp, bool has_else, Value fn_name);
-  Value eval(Value env, Value exp, Value fn_name = C_FALSE);
-
-
-  struct EvalFrame;
-
-  Value eval2_form(EvalFrame frame, Value exp, unsigned);
-  Value eval2_body(EvalFrame frame, Value exp, bool single = false);
-  Value eval2_exp(Value exp);
-  Value eval2_list(Value lst);
-  Value eval2_apply_function(Value fn, size_t argc, Value* argv);
+  Value eval_form(EvalFrame frame, Value exp, unsigned);
+  Value eval_body(EvalFrame frame, Value exp, bool single = false);
+  Value eval_exp(Value exp);
+  Value eval_apply_function(Value fn, size_t argc, Value* argv);
+  /** The primary application function */
+  Value eval_list(Value lst);
 
   // Build a list of out of temps
   Value temps_to_list(size_t limit = 0);
 
-  // The internal application machinery is unfortunately somewhat complex due to the need for
-  // interpreted, c++ and virtual machine functions to all be able to call eachother.
-
-  // Moreover, C++ and virtual machine functions use a different calling convention: argc/argv
-  // style whereas the interpreter takes a list and converts it into an environment for evaluation.
-
-  // The functions below should only be called by the interpreter and can optionally evaluate
-  // their arguments 
-
-  /** Apply a scheme function */
-  Value eval_apply_scheme(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
-  Value eval_apply_vm(Value env,  Value fn, Value args, Value src_exp, Value calling_fn_name, bool eval_args = true);
-  Value eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args = true);
-  
   /** Apply a Scheme function against a list of already-evaluated arguments */
   Value eval_apply_function(Value fn, Value args);
 
   Value expand_expr(Value exp);
-
-  /** Same, but with a list of expressions in-place */
-  Value eval_toplevel_list(Value exp);
 
   /**
    * This is the primary application function, and the only one that should be called by C++

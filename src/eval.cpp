@@ -1,24 +1,31 @@
 // eval.cpp - Interpreter & related functionality
 
-// TODO: Because of no TCO, this thing is super stack-hungry and I've had to increase
-// it with configuration on emscripten and MSVC
+// Braindead interpreter
 
-// TCO would not be unmanageable here, but it would require a bit of a rewrite.
+// It implements TCO by putting most of the interpreter in a giant while loop (eval_body) and 
+// using goto's and continues when tail calls occur. 
 
 #include "arete.hpp"
 
-#define EVAL_TRACE(exp, fn_name) \
-  if((exp).type() == PAIR && (exp).pair_has_source()) { \
+// Push function and source information onto the stack trace
+#define EVAL_TRACE_FRAME(frame, src) \
+  if((src).heap_type_equals(PAIR) && (src).pair_has_source()) { \
     std::ostringstream os; \
-    os << source_info((exp).pair_src(), (fn_name), true); \
+    os << source_info((src).pair_src(), (frame.fn_name), true); \
+    if(frame.tco_lost) os << std::endl <<  "- " << frame.tco_lost << " frames lost due to tail call optimization"; \
     stack_trace.push_back(os.str()); \
   }
+
+#define EVAL_TRACE(src) EVAL_TRACE_FRAME(frame, src)
   
-#define EVAL_CHECK(exp, src, fn_name) \
+// Check if an error has occurred; if it has, trace it and return it
+#define EVAL_CHECK_FRAME(frame, exp, src) \
   if((exp).is_active_exception()) { \
-    EVAL_TRACE((src), (fn_name)); \
+    EVAL_TRACE_FRAME(frame, (src)); \
     return (exp); \
   }
+
+#define EVAL_CHECK(exp, src) EVAL_CHECK_FRAME(frame, exp, src)
 
 namespace arete {
 
@@ -37,7 +44,7 @@ void State::env_set(Value env, Value name, Value val) {
   // AR_TYPE_ASSERT(name.type() == SYMBOL);
   // Toplevel set
   while(env != C_FALSE) {
-    for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
+    for(size_t i = env.vector_length() - 1; i > VECTOR_ENV_FIELDS; i -= 2) {
       if(identifier_equal(env.vector_ref(i-1), name)) {
         env.vector_set(i, val);
         return;
@@ -55,7 +62,7 @@ bool State::env_defined(Value env, Value name) {
   if(name.type() != SYMBOL) return false;
 
   if(env.type() == VECTOR) {
-    for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
+    for(size_t i = env.vector_length() - 1; i > VECTOR_ENV_FIELDS; i -= 2) {
       if(identifier_equal(env.vector_ref(i-1), name)) {
         return true;
       }
@@ -73,12 +80,13 @@ Value State::env_lookup_impl(Value& env, Value name, Value& rename_key, bool& re
   // First we search through vectors with identifier_equal, which only
   // returns true if symbols are the same or if renames have the same env and expr
   while(env.type() == VECTOR) {
-    for(size_t i = env.vector_length() - 1; i >= VECTOR_ENV_FIELDS; i -= 2) {
+    for(size_t i = env.vector_length() - 1; i > VECTOR_ENV_FIELDS; i -= 2) {
       // Here we check for function-level renames in the environment.
       // This is necessary because the expansion pass will replace them
       // with gensyms before returning the full expression
       if(identifier_equal(env.vector_ref(i-1), name)) {
         rename_key = env.vector_ref(i-1);
+
         return env.vector_ref(i);
       }
     }
@@ -100,7 +108,6 @@ Value State::env_lookup_impl(Value& env, Value name, Value& rename_key, bool& re
     std::cout << name << std::endl;
   }
   AR_ASSERT("reached toplevel on rename" && name.type() == SYMBOL);
-
   return name.as<Symbol>()->value;
 }
 
@@ -122,600 +129,721 @@ Value State::eval_error(const std::string& msg, Value exp) {
   return make_exception(globals[State::S_EVAL_ERROR], os.str(), exp);
 }
 
-Value State::eval_body(Value env,  Value fn_name, Value calling_fn_name, Value src_exp, Value body) {
-  Value tmp;
-  AR_FRAME(this, env, fn_name, calling_fn_name, src_exp, body, tmp);
+struct State::EvalFrame {
+  EvalFrame(): tco_lost(0) {}
 
-  while(body.type() == PAIR) {
-    tmp = eval(env, body.car(), fn_name);
-    if(tmp.is_active_exception()) return tmp;
-    if(body.cdr() == C_NIL) {
+  Value env;
+  Value fn_name;
+  /** count of frames lost due to tail call optimization, for stack traces */
+  size_t tco_lost;
+};
+
+static State::Global get_form(State& state, Value sym) {
+
+#define GET_FORM(n) else if(sym == state.globals[(n)]) return (n)
+  if(0) (void)0;
+  GET_FORM(State::S_DEFINE);
+  GET_FORM(State::S_SET);
+  GET_FORM(State::S_LAMBDA);
+  GET_FORM(State::S_QUOTE);
+  GET_FORM(State::S_BEGIN);
+  GET_FORM(State::S_IF);
+  GET_FORM(State::S_AND);
+  GET_FORM(State::S_OR);
+  GET_FORM(State::S_COND);
+
+#undef GET_FORM
+
+  return (State::Global)-1;
+}
+
+ std::ostream& State::warn(Value src) {
+   std::cerr << "arete: Warning: ";
+   if(src.heap_type_equals(PAIR) && src.pair_has_source()) {
+     std::cerr << source_info(src.pair_src());
+   }
+   return std::cerr;
+ }
+
+Value State::temps_to_list(size_t limit) {
+  if(temps.size() == 0) return C_NIL;
+  Value ret = C_NIL;
+  AR_FRAME(this, ret);
+  for(size_t i = temps.size(); i != limit; i--) {
+    ret = make_pair(temps[i-1], ret);
+  }
+  return ret;
+}
+
+// Handler for special forms which do not involve tail call optimization
+Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
+  size_t length = exp.list_length();
+
+  Value tmp;
+
+  AR_FRAME(this, frame.env, frame.fn_name, exp, tmp);
+
+  switch(type) {
+    case S_QUOTE: {
+      //if(length != 2)
+      //  return eval_error("quote only takes one argument", exp);
+      return exp.cadr();
+    }
+    case S_DEFINE: {
+      if(length < 3)
+        return eval_error("define expects at least two arguments", exp);
+
+      Value name = exp.cadr(), body = exp.caddr(), args;
+      AR_FRAME(this, name, body, args);
+    define_lambda:
+      // Special case: define lambda, build lambda in place
+      if(name.heap_type_equals(PAIR)) {
+        args = name.cdr();
+        tmp = name.car();
+
+        name = tmp;
+
+        if(!tmp.heap_type_equals(SYMBOL)) {
+          return eval_error("define lambda name must be a symbol", name);
+        }
+
+        SourceLocation loc;
+
+        body = make_src_pair(exp.cddr().car(), exp.cddr().cdr(), exp);
+
+        tmp = make_src_pair(args, body, exp);
+        tmp = make_src_pair(globals[S_LAMBDA], tmp, exp);
+
+        body = tmp;
+
+        goto define_lambda;
+      }
+
+      // std::cout << name << std::endl;
+      // std::cout << body << std::endl;
+
+      if(!name.heap_type_equals(SYMBOL))
+        return eval_error("first argument to define must be a symbol", exp.cdr());
+
+      if(env_defined(frame.env, name)) {
+        warn() << name << " shadows existing definition";
+      }
+
+      tmp = eval_body(frame, body, true);
+
+      EVAL_CHECK(tmp, exp);
+
+      // Add to the environment
+      if(frame.env == C_FALSE) {
+        name.set_symbol_value(tmp);
+      } else {
+        vector_append(frame.env, name);
+        vector_append(frame.env, tmp);
+      }
+
+      // Handle a named function
+      if(tmp.heap_type_equals(FUNCTION) && tmp.function_name() == C_FALSE) {
+        tmp.as_unsafe<Function>()->name = name;
+      }
+
+      break;
+    }
+    case S_SET: {
+      if(length != 3) 
+        return eval_error("set! expects exactly three arguments", exp);
+
+      Value name = exp.cadr(), body = exp.caddr(), env_search = frame.env, rename_key;
+      AR_FRAME(this, name, body, env_search, rename_key);
+
+      if(!name.heap_type_equals(SYMBOL)) {
+        return eval_error("first argument to set! must be a symbol", exp.cdr());
+      }
+
+      bool found;
+
+      tmp = env_lookup_impl(env_search, name, rename_key, found);
+
+      // TODO check immutable
+      if(tmp == C_UNDEFINED) {
+        std::ostringstream os;
+        os << "attempt to set! undefined variable " << name;
+        return eval_error(os.str(), exp.cdr());
+      }
+
+      tmp = eval_body(frame, body, true);
+      EVAL_CHECK(tmp, exp.cddr());
+      env_set(frame.env, name, tmp);
+
+      return C_UNSPECIFIED;
+    }
+    case S_AND: {
+    case S_OR: 
+      bool is_or = type == S_OR;
+      exp = exp.cdr();
+
+      // Short case: (and) => #t, (or) => #f
+      if(exp == C_NIL) return Value::make_boolean(!is_or);
+
+      while(exp.heap_type_equals(PAIR)) {
+        tmp = eval_body(frame, exp.car(), true);
+        EVAL_CHECK(tmp, exp);
+
+        if((is_or && tmp != C_FALSE) || (!is_or && tmp == C_FALSE)) {
+          return tmp;
+        }
+        
+        exp = exp.cdr();
+      }
+
       return tmp;
     }
-    body = body.cdr();
-  }
+    case S_LAMBDA: {
+      Value fn_env, args, saved_fn;
+      AR_FRAME(this, fn_env, args, saved_fn);
+      Function* fn = static_cast<Function*>(gc.allocate(FUNCTION, sizeof(Function)));
+      saved_fn = fn;
 
+      fn->parent_env = frame.env;
+
+      if(length < 3)
+        return eval_error("lambda must be a list with at least three arguments");
+
+      args = exp.cadr();
+      fn->body = exp.cddr();
+
+      // (lambda () ...)
+      if(args == C_NIL) {
+        fn->arguments = C_NIL;
+      } else if(args.identifierp()) {
+        // Second case: (lambda rest ...)
+        fn->arguments = C_NIL;
+        fn->rest_arguments = args;
+      } else {
+        // Third case: normal arguments list
+        // Build a copy of the list and extract the REST arguments
+        Value argi = args;
+
+        temps.clear();
+        while(argi.heap_type_equals(PAIR)) {
+          Value arg = argi.car();
+
+          if(!arg.identifierp()) {
+            EVAL_TRACE(argi);
+            return eval_error("lambda arguments must all be symbols", argi);
+          }
+
+          temps.push_back(argi.car());          
+          argi = argi.cdr();
+        }
+
+        if(argi != C_NIL) {
+          if(!argi.identifierp()) {
+            EVAL_TRACE(argi);
+            return eval_error("lambda arguments must all be symbols", argi);
+          }
+          fn->rest_arguments = argi;
+        }
+        
+        args = temps_to_list();
+
+        fn = saved_fn.as_unsafe<Function>();
+        fn->arguments = args;
+      }
+
+      //std::cout << "fn body: " << fn->body << std::endl;
+      //std::cout << "fn args: " << fn->arguments << std::endl;
+      //std::cout << "fn rest: " << fn->rest_arguments << std::endl;
+
+      return saved_fn;
+    }
+  }
   return C_UNSPECIFIED;
 }
 
-Value State::eval_cond(Value env,  Value exp, Value fn_name) {
-  Value pred, body, lst = exp.cdr(), tmp;
-  AR_FRAME(this, env, exp,  fn_name, pred, body, lst, tmp);
+/** Generic arity check */
+static Value eval_check_arity(State& state, Value fn, Value exp,
+  size_t argc, size_t min_arity, size_t max_arity, bool var_arity) {
 
-  while(lst.cdr() != C_NIL) {
-    pred = lst.caar();
-    body = lst.cdar();
+  AR_ASSERT(state.gc.live(fn));
+  AR_ASSERT(state.gc.live(exp));
 
-    tmp = eval(env,  pred, fn_name);
-    EVAL_CHECK(tmp, exp, fn_name);
+  if(argc < min_arity) {
+    std::ostringstream os; 
+    os << "function " << fn << " expected at least " << min_arity << " arguments but got only " 
+      << argc;
+    return state.eval_error(os.str(), exp);
+  } else if(argc > max_arity && !var_arity) {
+    std::ostringstream os;
+    os << "function " << fn << " expected at most " << max_arity << " arguments but got only "
+      << argc;
+    return state.eval_error(os.str(), exp);
+  }
 
-    if(tmp != C_FALSE) {
-      tmp = eval_body(env,  fn_name, fn_name, body, body);
-      return tmp;
+  return C_FALSE;
+}
+
+// Apply a function. Not used by the interpreter itself but used for generic apply and calls from
+// C/VM functions
+Value State::eval_apply_function(Value fn, size_t argc, Value* argv) {
+  AR_TYPE_ASSERT(fn.heap_type_equals(FUNCTION));
+  EvalFrame frame;
+  Value fn_args, fn_rest_args, tmp, new_env;
+
+  frame.fn_name = fn.function_name();
+  fn_args = fn.function_arguments();
+  fn_rest_args = fn.function_rest_arguments();
+
+  AR_FRAME(this, frame.fn_name, frame.env, fn, fn_args, fn_rest_args, tmp, new_env);
+  // Check argc against args length
+  size_t arity = fn_args.list_length();
+
+  tmp = eval_check_arity(*this, fn, C_FALSE, argc, arity, arity, fn_rest_args != C_FALSE);
+  if(tmp.is_active_exception()) return tmp;
+
+  temps.clear();
+
+  for(size_t i = 0; i != argc; i++) {
+    temps.push_back(argv[i]);
+  }
+
+  size_t actual_args = arity;
+
+  if(argc > arity) {
+    tmp = temps_to_list(arity);
+    temps[arity] = tmp;
+    actual_args++;
+  }
+
+  new_env = make_env(fn.function_parent_env(), actual_args);
+
+  size_t i = 0;
+  while(fn_args.heap_type_equals(PAIR)) {
+    vector_append(new_env, fn_args.car());
+    vector_append(new_env, temps[i++]);
+    fn_args = fn_args.cdr();
+  }
+
+  if(fn_rest_args != C_FALSE) {
+    vector_append(new_env, fn_rest_args);
+    vector_append(new_env, temps[i]);
+  }
+
+  frame.env = new_env;
+
+  tmp = eval_body(frame, fn.function_body());
+
+  return tmp;
+
+}
+
+Value State::eval_body(EvalFrame frame, Value body, bool single) {
+  Value exp, cell, tmp;
+
+tail_call:
+  bool tail = false, tco_enabled = get_global_value(G_TCO_ENABLED) != C_FALSE;
+
+  AR_ASSERT(single || body.heap_type_equals(PAIR) || body == C_NIL);
+
+  AR_FRAME(this, frame.env, frame.fn_name, body, exp, cell, tmp);
+
+  while(single || body.heap_type_equals(PAIR)) {
+    if(single) { 
+      exp = cell = body;
+      single = false;
+      body = C_FALSE;
+    } else {
+      cell = body;
+      exp = body.car();
+      body = body.cdr();
+    }
+    restart_exp:
+
+    tail = tco_enabled && (body == C_NIL || body == C_FALSE);
+
+    switch(exp.type()) {
+      case SYMBOL: {
+        Value res = env_lookup(frame.env, exp);
+
+        if(res == C_UNDEFINED) {
+          std::ostringstream os;
+          os << "reference to undefined variable " << exp;
+          // EVAL_TRACE(car, fn_name);
+          Value ret = eval_error(os.str(), cell);
+          return ret;
+        } else if(res == C_SYNTAX) {
+          std::stringstream os;
+          os << "attempt to use syntax " << exp << " as value";
+          if(exp == globals[S_DEFINE_SYNTAX]) {
+            // if this happened, it's probably because the macroexpander has not been loaded
+            os << " (did you load the expander?)";
+          }
+          EVAL_TRACE(cell);
+          return eval_error(os.str(), exp);
+        }
+
+        return res;
+      }
+
+      case RENAME: {
+        // First we look it up in the env 
+        // In case a renamed variable has been introduced as a binding
+        // e.g (lambda ((rename 'var )) (rename 'var))
+        Value chk = env_lookup(frame.env, exp);
+
+        if(exp.rename_env() != C_FALSE) {
+          std::cerr << "interpreter encountered a non-toplevel rename, but this should be gensymed " << exp << std::endl;
+          std::cerr << exp.rename_env() << std::endl;
+        }
+
+        if(chk != C_UNDEFINED) {
+          exp = chk;
+          continue;
+        }
+
+        // Then we look it up in the rename env
+        // e.g. ((r 'lambda) () #t)
+        exp = env_lookup(exp.rename_env(), exp.rename_expr());
+        continue;
+      }
+
+      case PAIR: {
+        size_t length = exp.list_length();
+
+        if(length == 0) {
+          EVAL_TRACE(cell);
+          return eval_error("dotted list in source code", exp);
+        }
+
+        Value kar = exp.car(), res;
+        Type kar_type = kar.type();
+
+        if(kar_type == RENAME)
+          res = env_lookup(kar.rename_env(), kar.rename_expr());
+
+        // Check for syntactic values
+        if((kar_type == SYMBOL && kar.symbol_value() == C_SYNTAX) ||
+          (kar_type == RENAME && res == C_SYNTAX)) {
+
+          // The expander will rename special forms that it introduces into source code with an
+          // env of #f; we unwrap those here
+
+          if(kar_type == RENAME && res == C_SYNTAX) {
+            kar = kar.rename_expr();
+          }
+
+          unsigned form = get_form(*this, kar);
+          switch(form) {
+            case S_IF: {
+              if(length < 2) {
+                return eval_error("if must have at least two arguments (condition and then branch)",
+                  exp);
+              }
+              
+              tmp = eval_body(frame, exp.cadr(), true);
+              EVAL_CHECK(tmp, exp);
+
+              if(tmp != C_FALSE) {
+                exp = exp.list_ref(2);
+              } else if(length == 3) {
+                // 1-arm if
+                exp = C_UNSPECIFIED;
+              } else {
+                exp = exp.list_ref(3);
+              }
+
+              if(tail) {
+                single = true;
+                body = exp;
+                continue;
+              } else {
+                
+                goto restart_exp;
+              }
+
+              continue;
+            }
+            case S_COND: {
+              Value pred, then, lst = exp.cdr();
+              AR_FRAME(this, pred, then, lst);
+              exp = C_UNSPECIFIED;
+              while(lst.heap_type_equals(PAIR)) {
+                if(lst.car().list_length() < 2) {
+                  return eval_error("cond clause must have at least two elements (condition and body)", lst);
+                }
+                pred = lst.caar();
+                then = lst.cdar();
+
+                if(pred == globals[State::S_ELSE]) {
+                  // Check for else clause
+                  tmp = C_TRUE;
+                } else {
+                  tmp = eval_body(frame, pred, true);
+                  EVAL_CHECK(tmp, lst);
+                }
+
+                if(tmp != C_FALSE) {
+                  if(tail) {
+                    body = then;
+                    goto tail_call;
+                  } else {
+                    exp = eval_body(frame, then);
+                    break;
+                  }
+                }
+
+                lst = lst.cdr();
+              }
+              continue;
+            }
+            case S_BEGIN:
+              if(tail) {
+                body = exp.cdr();
+                goto tail_call;
+              } else {
+                exp = eval_body(frame, exp.cdr());
+              }
+              break;
+            // LET EXPRESSION. 
+            // (let loop ((asdf #t)) a)
+            // Create a function with the body and arguments list.
+
+            // Simpler case
+            // (let ((asdf #t)) asdf)
+            default:
+              exp = eval_form(frame, exp, form);
+              break;
+          }
+        } else {
+          // This is a normal function application 
+          tmp = eval_body(frame, exp.car(), true);
+          EVAL_CHECK(tmp, exp);
+          kar_type = tmp.type();
+
+          // Ok. With CFUNCTION and VMFUNCTION, we have no hope of 
+          // tail calls so we can do them elsewhere
+          // With FUNCTION, we'll have to evaluate the arguments in the given env.
+          // If this is a tail call, we'll then modify the EvalFrame and goto. If not, we create
+          // a new one. easy peasy.
+          switch(kar_type) {
+          case CFUNCTION: {
+            Value fn = tmp, fn_args, args = exp.cdr();
+            AR_FRAME(this, fn, fn_args,  args);
+
+            size_t argc = args.list_length();
+
+            tmp = eval_check_arity(*this, fn, exp, argc,
+              fn.c_function_min_arity(), fn.c_function_max_arity(), fn.c_function_variable_arity());
+            
+            EVAL_CHECK(tmp, exp);
+
+            //std::cout << "frame.env" << frame.env << std::endl;
+
+            fn_args = make_vector_storage(argc);
+
+            while(args.heap_type_equals(PAIR)) {
+              tmp = eval_body(frame, args.car(), true);
+              EVAL_CHECK(tmp, exp);
+              vector_storage_append(fn_args, tmp);
+              args = args.cdr();
+            }
+
+            exp = fn.c_function_apply(*this, argc, fn_args.vector_storage_data());
+            EVAL_CHECK(tmp, exp);
+
+            continue;
+          }
+          case FUNCTION: {
+            EvalFrame frame2;
+            Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body,
+              rest_args_head = C_NIL, rest_args_tail;
+            frame2.fn_name = tmp.function_name();
+            AR_FRAME(this, frame2.fn_name, frame2.env, fn, args, fn_args, rest_args_name, new_body,
+              rest_args_head, rest_args_tail);
+            
+            fn_args = fn.function_arguments();
+            size_t argc = args.list_length();
+            size_t arity = fn_args.list_length();
+            rest_args_name = fn.function_rest_arguments();
+
+            //std::cout << "tmp: " << tmp << std::endl;
+
+            tmp = eval_check_arity(*this, fn, exp, argc, arity, arity, rest_args_name != C_FALSE);
+            EVAL_CHECK(tmp, exp);
+
+            frame2.env = make_env(fn.function_parent_env(), argc + 1);
+
+            // Evaluate arguemnts, left to right
+            while(args.heap_type_equals(PAIR) && fn_args.heap_type_equals(PAIR)) {
+              tmp = eval_body(frame, args.car(), true);
+              EVAL_CHECK(tmp, args);
+              vector_append(frame2.env, fn_args.car());
+              vector_append(frame2.env, tmp);
+              args = args.cdr();
+              fn_args = fn_args.cdr();
+            }
+
+            if(rest_args_name != C_FALSE) {
+              while(args.heap_type_equals(PAIR)) {
+                tmp = eval_body(frame, args.car(), true);
+                EVAL_CHECK(tmp, args);
+
+                if(rest_args_head == C_NIL) {
+                  rest_args_head = rest_args_tail = make_pair(tmp, C_NIL);
+                } else {
+                  tmp = make_pair(tmp, C_NIL);
+                  rest_args_tail.set_cdr(tmp);
+                  rest_args_tail = tmp;
+                }
+                args = args.cdr();
+              }
+            }
+
+            vector_append(frame2.env, fn.function_rest_arguments());
+            vector_append(frame2.env, rest_args_head);
+
+            new_body = fn.function_body();
+
+            if(tail) {
+              // tail call
+              frame2.tco_lost = frame.tco_lost + 1;
+              frame = frame2;
+              body = new_body;
+              goto tail_call;
+            } else {
+              // Have to loop here to get accurate source code information out of this
+              while(new_body.heap_type_equals(PAIR)) {
+                tmp = eval_body(frame2, new_body.car(), true);
+                EVAL_CHECK_FRAME(frame2, tmp,
+                  new_body.car().heap_type_equals(PAIR) ? new_body.car() : new_body);
+                new_body = new_body.cdr();
+              }
+
+              exp = tmp;
+              continue;
+            }
+
+            AR_ASSERT(!"should never reach this point");
+            return C_FALSE;
+          }
+          case VMFUNCTION: {
+            Value fn = tmp, args = exp.cdr(), argv, varargs_begin, varargs_cur = C_NIL, closure;
+            AR_FRAME(this, fn, args, argv, varargs_begin, varargs_cur, closure);
+
+            if(fn.heap_type_equals(CLOSURE)) {
+              closure = fn;
+              fn = fn.closure_function();
+            }
+
+            size_t argc = args.list_length();
+
+            size_t min_arity = fn.vm_function_min_arity(), max_arity = fn.vm_function_max_arity();
+            bool var_arity = fn.vm_function_variable_arity();
+
+            tmp = eval_check_arity(*this, fn, exp, argc, min_arity, max_arity, var_arity);
+            EVAL_CHECK(tmp, exp);
+
+            argv = make_vector_storage(argc+(var_arity ? 1:0));
+            argc = 0;
+
+            while(args.heap_type_equals(PAIR)) {
+              if(argc == max_arity) {
+                break;
+              }
+              tmp = eval_body(frame, args.car(), true);
+              EVAL_CHECK(tmp, args);
+
+              vector_storage_append(argv, tmp);
+              argc++;
+              args = args.cdr();
+            }
+
+            if(args.heap_type_equals(PAIR) && var_arity) {
+              while(args.heap_type_equals(PAIR)) {
+                tmp = eval_body(frame, args.car(), true);
+                EVAL_CHECK(tmp, args);
+                if(varargs_cur == C_NIL) {
+                  varargs_begin = varargs_cur = make_pair(tmp, C_NIL);
+                } else {
+                  tmp = make_pair(tmp, C_NIL);
+                  varargs_cur.set_cdr(tmp);
+                  varargs_cur = tmp;
+                }
+                args = args.cdr();
+              }
+              vector_storage_append(argv, varargs_begin);
+              argc++;
+            }
+
+            tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &argv.vector_storage_data()[0]);
+
+            EVAL_CHECK(tmp, exp);
+            
+            exp = tmp;
+            continue;
+          }
+          default: {
+            std::ostringstream os;
+            os << "attempt to apply non-applicable value of type " << (Type) kar_type << ": " <<
+              kar;
+            return eval_error(os.str(), exp);
+          }
+        }
+        break;
+      }
+    } // case PAIR
+
+    default: break;
+    }
+  }
+
+  return exp;
+}
+
+Value State::eval_exp(Value exp) {
+  EvalFrame frame;
+  return eval_body(frame, exp, true);
+}
+
+Value State::eval_list(Value lst) {
+  Value elt, lst_top, tmp, compiler, vfn;
+  EvalFrame frame;
+  lst_top = lst;
+  compiler = get_global_value(G_COMPILER);
+
+  AR_FRAME(this, lst, elt, lst_top, tmp, compiler, vfn);
+  while(lst.heap_type_equals(PAIR)) {
+    tmp = expand_expr(lst.car());
+    if(tmp.is_active_exception()) return tmp;
+
+    // We evaluate expressions as we go down the list, so that the expander can be installed
+    // on the fly and used in the file in which that is done
+    if(compiler == C_UNDEFINED) {
+      tmp = eval_body(frame, tmp, true);
+      if(tmp.is_active_exception() || lst.cdr() == C_NIL) return tmp;
     }
 
+    if(tmp.is_active_exception()) return tmp;
+    lst.set_car(tmp);
     lst = lst.cdr();
   }
 
-  // Check for else clause
-  pred = lst.caar();
-  body = lst.cdar();
-  if(pred == globals[S_ELSE]) {
-    return eval_body(env,  fn_name, fn_name, body, body);
-  } else {
-    tmp = eval(env,  pred, fn_name);
-    EVAL_CHECK(tmp, exp, fn_name);
+  lst = lst_top;
 
-    if(tmp != C_FALSE) {
-      tmp = eval_body(env,  fn_name, fn_name, body, body);
-      return tmp;
-    }
+  if(compiler != C_UNSPECIFIED && compiler != C_UNDEFINED) {
+    Value argv[1] = {lst};
+    tmp = apply(compiler, 1, argv);
+    if(tmp.is_active_exception()) return tmp;
+    return apply(tmp, 0, 0);
   }
 
   return C_UNSPECIFIED;
 }
 
-Value State::eval_boolean_op(Value env, Value exp, Value fn_name, bool is_or) {
-  Value tmp;
-  AR_FRAME(this, env, exp, fn_name, tmp);
 
-  exp = exp.cdr();
 
-  // (and) => #t, (or) => #f
-  if(exp == C_NIL) return Value::make_boolean(!is_or);
-
-  while(exp.type() == PAIR) {
-    tmp = eval(env, exp.car(), fn_name);
-    if(tmp.is_active_exception()) {
-      return tmp;
-    }
-    if((is_or && tmp != C_FALSE) || (!is_or && tmp == C_FALSE)) {
-      return tmp;
-    }
-    exp = exp.cdr();
-  }
-  
-  return tmp;
-}
-
-Value State::eval_begin(Value env,  Value exp, Value fn_name) {
-  AR_FRAME(this, env,  exp, fn_name);
-  return eval_body(env,  fn_name, fn_name, exp, exp.cdr());
-}
-
-Value State::eval_lambda(Value env,  Value exp) {
-  Value fn_env, args, args_head, args_tail, fn_name;
-
-  AR_FRAME(this, env,  exp, fn_env, args, args_head, args_tail, fn_name);
-  Function* fn = (Function*) gc.allocate(FUNCTION, sizeof(Function));
-  fn->name = C_FALSE;
-  fn->parent_env = env;
-
-  // Some verification is needed here because eval_lambda may be called by the macroexpander
-  if(exp.list_length() < 3) 
-    return eval_error("lambda must be a list with at least three elements",  exp);
-
-  args = exp.cadr();
-  if(args.identifierp()) {
-    fn->arguments = C_NIL;
-    fn->rest_arguments = args;
-  } else {
-    // First case: (lambda rest ...)
-    if(args == C_NIL) {
-      fn->arguments = C_NIL;
-      fn->rest_arguments = C_FALSE;
-    } else {
-      // Second case
-      fn->rest_arguments = C_FALSE;
-      Value argi = args;
-      while(argi.type() == PAIR) {
-        if(!argi.car().identifierp()) {
-          return eval_error("lambda argument list all be identifiers", argi);
-        }
-        argi.set_car(argi.car());
-        if(argi.cdr() == C_NIL) {
-          break;
-        } else if(argi.cdr().type() != PAIR) {
-          if(!argi.cdr().identifierp()) {
-            return eval_error("lambda argument list must all be identifiers", args);
-          }
-
-          fn->rest_arguments = argi.cdr();
-          argi.set_cdr(C_NIL);
-        }
-        argi = argi.cdr();
-      }
-      // TODO this should not modify the source list.
-      fn->arguments = args;
-
-    }
-  }
-  fn->body = exp.cddr();
-  return fn;
-}
-
-Value State::eval_define(Value env,  Value exp, Value fn_name) {
-  Value name, body, tmp;
-  AR_FRAME(this, env,  exp, name, body, tmp, fn_name);
-
-  if(exp.list_length() != 3) {
-    return eval_error("define expects exactly three arguments", exp);
-  }
-
-  name = exp.cadr();
-
-  body = exp.caddr();
-
-  if(name.type() != SYMBOL) {
-    return eval_error("first argument to define must be a symbol", exp.cdr());
-  }
-
-  if(env_defined(env, name)) {
-    if(exp.pair_has_source()) {
-      warn() << source_info(exp.pair_src()) << ' ' <<  name << " shadows existing definition of " << name << std::endl;;
-    } else {
-      warn() << name << " shadows existing definition" << std::endl;
-    }
-  }
-
-  tmp = eval(env,  body, fn_name);
-
-  EVAL_CHECK(tmp, exp, fn_name);
-
-  if(env == C_FALSE) {
-    name.as<Symbol>()->value = tmp;
-  } else {
-    vector_append(env, name);
-    vector_append(env, tmp);
-  }
-
-  // TODO how to handle qualified names here? Should we just check the string? Probably.
-  if(tmp.type() == FUNCTION && tmp.function_name() == C_FALSE) {
-    tmp.as<Function>()->name = name;
-  }
-
-  return C_UNSPECIFIED;
-}
-
-Value State::eval_set(Value env, Value exp, Value fn_name) {
-  Value tmp, name, body, env_search = env;
-  AR_FRAME(this, name, tmp, body, exp, env, fn_name, env_search);
-
-  if(exp.list_length() != 3) {
-    return eval_error("set! must be a list with exactly three elements");
-  }
-
-  name = exp.cadr();
-
-  if(name.type() != SYMBOL) {
-    return eval_error("first argument to set! must be a symbol", exp.cdr());
-  }
-
-  body = exp.caddr();
-
-  Value rename_key;
-  bool found;
-  tmp = env_lookup_impl(env_search, name, rename_key, found);
-
-  if(env_search == C_FALSE && name.symbol_immutable()) {
-    std::ostringstream os;
-    os << "attempt to set! immutable builtin " << name << std::endl;
-    return eval_error(os.str(), exp.cdr());
-  }
-
-  if(tmp == C_UNDEFINED) {
-    std::ostringstream os;
-    os << "attempt to set! undefined variable " << name;
-    return eval_error(os.str(), exp.cdr());
-  }
-
-  tmp = eval(env, body, fn_name);
-  EVAL_CHECK(tmp, exp, fn_name);
-  env_set(env, name, tmp);
-
-  return C_UNSPECIFIED;
-}
-
-Value State::eval_if(Value env, Value exp, bool has_else, Value fn_name) {
-  Value cond = exp.list_ref(1);
-  Value then_branch = exp.list_ref(2);
-  Value else_branch = C_UNSPECIFIED;
-  Value res = C_FALSE;
-
-  AR_FRAME(this, env,  exp, fn_name, cond, then_branch, else_branch, res);
-  // TODO: protect
-
-  if(has_else) {
-    else_branch = exp.list_ref(3);
-  }
-
-  cond = eval(env,  cond, fn_name);
-
-  if(cond.is_active_exception()) {
-    return cond;
-  } else if(cond != C_FALSE) {
-    res = eval(env,  then_branch, fn_name);
-  } else {
-    res = eval(env,  else_branch, fn_name);
-  }
-
-  return res;
-}
-
-Value State::eval(Value env, Value exp, Value fn_name) {
-  AR_ASSERT(env.type() != TABLE);
-  // Interpreter should never encounter tables
-  Value res, car, tmp;
-
-  AR_FRAME(this, env, exp, res, car, tmp, fn_name);
-
-  if(exp.immediatep())
-    return exp;
-
-  switch(exp.type()) {
-    case VECTOR: case VECTOR_STORAGE: case FLONUM: case STRING: case CHARACTER:
-    case RECORD: case RECORD_TYPE: case FUNCTION: case CFUNCTION: case TABLE:
-      return exp;
-    case PAIR: {
-      size_t length = exp.list_length();
-      if(length == 0) {
-        return eval_error("non-list in source code", exp);
-      }
-      car = exp.car();
-
-      // Check for rename in application
-      if(car.type() == RENAME) {
-        tmp = car.rename_expr();
-        res = car.rename_env();
-
-        tmp = env_lookup(car.rename_env(), car.rename_expr());
-      }
-
-      if((car.type() == SYMBOL && car.symbol_value() == C_SYNTAX) ||
-        (car.type() == RENAME && tmp == C_SYNTAX)) {
-        // Renamed syntax is special-cased
-        if(car.type() == RENAME && tmp == C_SYNTAX) {
-          car = car.rename_expr();
-        }
-        if(car == globals[S_DEFINE]) {
-          return eval_define(env, exp, fn_name);
-        } else if(car == globals[S_LAMBDA]) {
-          return eval_lambda(env, exp);
-        } else if(car == globals[S_SET]) {
-          return eval_set(env, exp, fn_name);
-        } else if(car == globals[S_BEGIN]) {
-          return eval_begin(env, exp, fn_name);
-        } else if(car == globals[S_COND]) {
-          return eval_cond(env,  exp, fn_name);
-          // add fn name
-        } else if(car == globals[S_AND]) {
-          return eval_boolean_op(env, exp, fn_name, false);
-        } else if(car == globals[S_OR]) {
-          return eval_boolean_op(env, exp, fn_name, true);
-        } else if(car == globals[S_IF]) {
-          if(length != 3 && length != 4) {
-            return eval_error("if requires 2-3 arguments", exp);
-          }
-
-          return eval_if(env,  exp, length == 4, fn_name);
-        } else if(car == globals[S_QUOTE]) {
-          if(length == 1) return eval_error("quote needs at least one argument", exp);
-          else if(length > 2) return eval_error("quote takes exactly 1 argument", exp.cddr());
-          return exp.cadr();
-        }
-        // form, let, set!, if, quote
-      } 
-
-      // Normal function application
-      car = eval(env, exp.car(), fn_name);
-
-      if(car.is_active_exception()) {
-        if(exp.car().type() == SYMBOL) {
-          std::ostringstream os;
-          os << "attempt to apply undefined function " << exp.car();
-          return eval_error(os.str(), exp);
-        }
-        return car;
-      }
-
-      if(!car.applicable()) {
-        std::ostringstream os;
-        if(car == C_UNDEFINED) {
-          os << "attempt to apply undefined function " << exp.car() << std::endl;
-        } else {
-          os << "attempt to apply non-applicable value " << car << std::endl;
-        }
-        return eval_error(os.str(), exp);
-      } else {
-        if(car.type() == FUNCTION) {
-          return eval_apply_scheme(env, car, exp.cdr(), exp, fn_name);
-        } else if(car.type() == CFUNCTION) {
-          return eval_apply_c(env, car, exp.cdr(), exp, fn_name);
-        } else if(car.type() == VMFUNCTION || car.type() == CLOSURE) {
-          return eval_apply_vm(env, car, exp.cdr(), exp, fn_name);
-        }
-      }
-
-      return exp;
-    }
-    case RENAME: {
-      // First we look it up in the env 
-      // In case a renamed variable has been introduced as a binding
-      // e.g (lambda ((rename 'var )) (rename 'var))
-      Value chk = env_lookup(env, exp);
-
-      if(exp.rename_env() != C_FALSE) {
-        std::cerr << "interpreter encountered a non-toplevel rename, but this should be gensymed " << exp << std::endl;
-        std::cerr << exp.rename_env() << std::endl;
-      }
-
-      if(chk != C_UNDEFINED) {
-        return chk;
-      }
-
-      // Then we look it up in the rename env
-      // e.g. ((r 'lambda) () #t)
-      return env_lookup(exp.rename_env(), exp.rename_expr());
-    }
-    case SYMBOL: {
-      res = env_lookup(env, exp);
-
-      if(res.bits == 0) {
-        return C_FALSE;
-      } 
-
-      if(res == C_UNDEFINED) {
-        std::ostringstream os;
-        os << "reference to undefined variable " << exp;
-        EVAL_TRACE(car, fn_name);
-        Value ret= eval_error(os.str(), exp);
-        return ret;
-      }
-
-      if(res == C_SYNTAX) {
-        std::stringstream os;
-        os << "attempt to use syntax " << exp << " as value";
-        if(exp == globals[S_DEFINE_SYNTAX]) {
-          // if this happened, it's probably because the macroexpander has not been loaded
-          os << " (did you load syntax.scm?)";
-        }
-        EVAL_TRACE(car, fn_name);
-        return eval_error(os.str(), exp);
-      }
-
-      return res;
-    }
-    default: {
-      if(exp.is_active_exception()) return exp;
-      AR_ASSERT(!":(");
-    }
-  }
-
-  return C_UNSPECIFIED;
-}
-
-Value State::eval_apply_scheme(Value env, Value fn, Value args, Value src_exp,
-    Value calling_fn_name, bool eval_args) {
-
-  Value new_env, tmp, rest_args_name, fn_args, rest_args_head = C_NIL, rest_args_tail, body;
-  Value fn_name;
-
-  AR_FRAME(this, env, fn, args, src_exp, calling_fn_name, new_env, tmp, rest_args_name, fn_args,
-    rest_args_head, rest_args_tail, body, fn_name);
-
-  fn_name = fn.function_name();
-
-  size_t given_args = args.list_length();
-  // Allocating some space in advance here provides a modest speedup by avoiding some collections
-  new_env = make_env(fn.function_parent_env(), given_args + 1);
-  // bool eval_args = fn.function_eval_args();
-
-  fn_args = fn.function_arguments();
-  size_t arity = fn_args.list_length();
-
-  if(given_args < arity) {
-    std::ostringstream os;
-    os << "function " << fn << " expected at least " << arity << " arguments but got " << given_args;
-    return eval_error(os.str(), src_exp);
-  }
-
-  rest_args_name = fn.function_rest_arguments();
-
-  if(rest_args_name == C_FALSE && given_args > arity) {
-    std::ostringstream os;
-    os << "function " << fn << " expected at most " << arity << " arguments but got " << given_args;
-    return eval_error(os.str(), src_exp);
-  }
-
-  // Evaluate arguments left to right
-  // std::cout << "CALLING FN " << fn_name << " with eval_args " << eval_args << std::endl;
-  while(args.type() == PAIR && fn_args.type() == PAIR) {
-    if(eval_args) {
-      tmp = eval(env,  args.car(), calling_fn_name);
-    } else {
-      tmp = args.car();
-    }
-
-    EVAL_CHECK(tmp, src_exp, calling_fn_name);
-    vector_append(new_env, fn_args.car());
-    fn_args = fn_args.cdr();
-    vector_append(new_env, tmp);
-    args = args.cdr();
-  }
-
-  // std::cout << "Args " << args << " " << args.type() << std::endl;
-  if(fn.function_rest_arguments() != C_FALSE) {
-    while(args.type() == PAIR) {
-      if(eval_args) {
-        tmp = eval(env, args.car(), calling_fn_name);
-        EVAL_CHECK(tmp, src_exp, calling_fn_name);
-      } else {
-        tmp = args.car();
-      }
-      if(rest_args_head == C_NIL) {
-        rest_args_head = rest_args_tail = make_pair(tmp, C_NIL);
-      } else {
-        tmp = make_pair(tmp, C_NIL);
-        rest_args_tail.set_cdr(tmp);
-        rest_args_tail = tmp;
-      }
-      args = args.cdr();
-    }
-
-    vector_append(new_env, fn.function_rest_arguments());
-    vector_append(new_env, rest_args_head);
-  }
-
-  // Now eval body left to right
-  body = fn.function_body();
-
-  // std::cout << "evaluating function " << fn_name << " in body " << new_env << std::endl;
-  tmp =  eval_body(new_env,  fn_name, calling_fn_name, src_exp, body);
-  EVAL_CHECK(tmp, src_exp, calling_fn_name);
-  return tmp;
-}
-
-Value State::eval_apply_vm(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
-  Value tmp, closure(C_FALSE), vec, varargs_begin, varargs_cur;
-  AR_FRAME(this, env, fn, args, src_exp, fn_name, tmp, closure, vec, varargs_begin, varargs_cur);
-
-  if(fn.type() == CLOSURE) {
-    closure = fn;
-    fn = fn.closure_function();
-  }
-
-  size_t given_args = args.list_length();
-  size_t min_arity = fn.as<VMFunction>()->min_arity;
-  size_t max_arity = fn.as<VMFunction>()->max_arity;
-  bool varargs = fn.vm_function_variable_arity();
-
-  if(given_args < min_arity) {
-    std::ostringstream os;
-    os << "function " << fn << " expected at least " << min_arity << " arguments but got " << given_args;
-    return eval_error(os.str(), src_exp);
-  }
-
-  if(!fn.vm_function_variable_arity() && given_args > max_arity) {
-    std::ostringstream os;
-    os << " function " << fn << " expected at most " << max_arity << " arguments but got " << given_args;
-    return eval_error(os.str(), src_exp);
-  }
-
-  size_t argc = 0;
-  vec = make_vector_storage(given_args+(varargs?1:0));
-  while(args.type() == PAIR) {
-    if(argc == max_arity) {
-      break;
-    }
-    tmp = args.car();
-    if(eval_args) {
-      tmp = eval(env, args.car());
-      EVAL_CHECK(tmp, src_exp, fn_name);
-    } 
-    vector_storage_append(vec, tmp);
-    argc++;
-    args = args.cdr();
-  }
-
-  if(args.type() == PAIR && fn.vm_function_variable_arity()) {
-    varargs_begin = varargs_cur = C_NIL;
-    while(args.type() == PAIR) {
-      tmp = args.car();
-      if(eval_args) {
-        tmp = eval(env, tmp);
-        EVAL_CHECK(tmp, src_exp, fn_name);
-      } 
-      if(varargs_cur == C_NIL) {
-        varargs_begin = varargs_cur = make_pair(tmp, C_NIL);
-      } else {
-        tmp = make_pair(tmp, C_NIL);
-        varargs_cur.set_cdr(tmp);
-        varargs_cur = tmp;
-      }
-      args = args.cdr();
-    }
-    vector_storage_append(vec, varargs_begin);
-    argc++;
-  }
-
-  if(closure != C_FALSE) {
-    AR_ASSERT(gc.live(closure));
-    AR_ASSERT(closure.type() == CLOSURE);
-  }
-  AR_ASSERT(gc.live(fn));
-  AR_ASSERT(fn.type() == VMFUNCTION);
-  tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &vec.vector_storage_data()[0]);
-
-  EVAL_CHECK(tmp, src_exp, fn_name);
-  return tmp;
-}
-
-
-Value State::eval_apply_c(Value env, Value fn, Value args, Value src_exp, Value fn_name, bool eval_args) {
-  Value fn_args, tmp;
-  AR_FRAME(this, env, fn, args, src_exp, fn_name, fn_args, tmp);
-
-  size_t given_args = args.list_length();
-  size_t min_arity = fn.as<CFunction>()->min_arity;
-  size_t max_arity = fn.as<CFunction>()->max_arity;
-
-  if(given_args < min_arity) {
-    std::ostringstream os;
-    os << "function " << fn << " expected at least " << min_arity << " arguments but got " << given_args;
-    return eval_error(os.str(), src_exp);
-  }
-
-  if(!fn.c_function_variable_arity() && given_args > max_arity) {
-    std::ostringstream os;
-    os << " function " << fn << " expected at most " << max_arity << " arguments but got " << given_args;
-    return eval_error(os.str(), src_exp);
-  }
-
-  fn_args = make_vector_storage(given_args);
-  size_t argc = 0;
-  while(args.type() == PAIR) {
-    if(eval_args) {
-      tmp = eval(env,  args.car());
-      EVAL_CHECK(tmp, src_exp, fn_name);
-    } else {
-      tmp = args.car();
-      EVAL_CHECK(tmp, src_exp, fn_name);
-    }
-    vector_storage_append(fn_args, tmp);
-    argc++;
-    args = args.cdr();
-  }
-  
-  tmp = fn.c_function_apply(*this, argc, fn_args.vector_storage_data());
-  EVAL_CHECK(tmp, src_exp, fn_name);
-  return tmp;
-}
-
-Value State::eval_apply_function(Value fn, Value args) {
-  AR_TYPE_ASSERT(fn.type() == FUNCTION);
-
-  return eval_apply_scheme(fn.function_parent_env(), fn, args, C_FALSE, C_FALSE, false);
-}
+//
+///// Generic operations
+//
 
 Value State::apply(Value fn, size_t argc, Value* argv) {
   switch(fn.type()) {
@@ -724,14 +852,7 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
     case CFUNCTION:
       return fn.c_function_apply(*this, argc, argv);
     case FUNCTION: {
-      Value lst;
-
-      temps.clear();
-      temps.insert(temps.end(), &argv[0], &argv[argc]);
-      AR_FRAME(this, fn, lst);
-      lst = temps_to_list();
-
-      return eval_apply_function(fn, lst);
+      return eval_apply_function(fn, argc, argv);
     }
     default:
       return eval_error("cannot apply type", fn);
@@ -782,40 +903,5 @@ Value State::expand_expr(Value exp) {
   return exp;
 }
 
-Value State::eval_toplevel_list(Value lst) {
-  Value elt, lst_top, tmp, compiler, vfn;
-  AR_FRAME(*this, lst, elt, lst_top, tmp, compiler, vfn);
-  lst_top = lst;
-  compiler = get_global_value(G_COMPILER);
-  while(lst.type() == PAIR) {
-    tmp = expand_expr(lst.car());
-
-    if(tmp.is_active_exception()) return tmp;
-
-    // We have to eval expressions as we encounter them, if the
-    // compiler hasn't been fully installed yet, in order to allow LOADing the expander, compiler
-    // and then using them from the file which did that
-    if(compiler == C_UNDEFINED) {
-      tmp = eval(C_FALSE, tmp);
-      if(tmp.is_active_exception() || lst.cdr() == C_NIL) return tmp;
-    }
-
-    if(tmp.is_active_exception()) return tmp;
-    lst.set_car(tmp);
-    lst = lst.cdr();
-  }
-
-  lst = lst_top;
-
-  if(compiler != C_UNSPECIFIED && compiler != C_UNDEFINED) {
-    Value argv[1] = {lst};
-    tmp = apply(compiler, 1, argv);
-    if(tmp.is_active_exception()) return tmp;
-    tmp = apply(tmp, 0, 0);
-    return tmp;
-  }
-
-  return C_UNSPECIFIED;
-}
 
 } // namespace arete

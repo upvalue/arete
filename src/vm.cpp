@@ -620,7 +620,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             */
 
             f.stack[f.stack_i - fargc - 1] =
-              eval2_apply_function(f.stack[f.stack_i - fargc - 1], fargc, &f.stack[f.stack_i - fargc]);
+              eval_apply_function(f.stack[f.stack_i - fargc - 1], fargc, &f.stack[f.stack_i - fargc]);
 
             f.stack_i -= (fargc);
 

@@ -159,8 +159,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
       }
 
       tmp = make_pair(x, C_NIL);
-      tmp = eval2_list(tmp);
-      //tmp = eval2_exp(x);
+      tmp = eval_list(tmp);
 
       if(tmp.is_active_exception()) {
         print_exception(std::cerr, tmp);
@@ -300,7 +299,7 @@ int State::enter_cli(int argc_, char* argv[]) {
         if(x == C_EOF) break;
 
         x = make_pair(x, C_NIL);
-        x = eval_toplevel_list(x);
+        x = eval_list(x);
 
         if(x.is_active_exception()) 
           return cli_exception(this, x, "--eval argument resulted in an evaluation error");

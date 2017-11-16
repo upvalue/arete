@@ -4,7 +4,9 @@
 
 namespace arete {
 
-static ptrdiff_t wang_integer_hash(ptrdiff_t key) {
+static const unsigned LOAD_FACTOR = 85;
+
+ptrdiff_t wang_integer_hash(ptrdiff_t key) {
   key = (~key) + (key << 21);
   key = key ^ (key >> 24);
   key = (key + (key << 3)) + (key << 8); 
@@ -60,12 +62,12 @@ void State::table_setup(Value table, size_t size_log2) {
   } 
   heap->chains = chains;
   // Pre-calculate max entries
-  heap->max_entries = (Table::LOAD_FACTOR * size) / 100;
+  heap->max_entries = (LOAD_FACTOR * size) / 100;
 }
 
 ptrdiff_t State::hash_index(Value table, Value key, bool& unhashable) {
   ptrdiff_t hash = hash_value(key, unhashable);
-  return hash & (table.as<Table>()->chains->length - 1);
+  return hash % (table.as<Table>()->chains->length - 1);
 }
   
 void State::table_grow(Value table) {

@@ -1070,8 +1070,7 @@ Value fn_eval(State& state, size_t argc, Value* argv) {
   Value env = argv[1], exp = argv[0];
   AR_FRAME(state, env, exp);
   exp = state.make_pair(exp, C_NIL);
-  return state.eval_toplevel_list(exp);
-  //return state.eval(C_FALSE, argv[0]);
+  return state.eval_list(exp);
 }
 AR_DEFUN("eval", fn_eval, 2);
 

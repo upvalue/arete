@@ -140,8 +140,7 @@ Value State::load_file(const std::string& path) {
 
   AR_FN_STATE_CHECK(x);
 
-  x = eval2_list(x);
-  //x = eval_toplevel_list(x);
+  x = eval_list(x);
 
   return x;
 }
