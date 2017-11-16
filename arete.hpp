@@ -1652,6 +1652,7 @@ struct State {
     S_AND,
     S_OR,
     S_SET,
+    S_LET,
     // Module forms
     S_DEFINE_LIBRARY,
     S_IMPORT,
@@ -1679,6 +1680,7 @@ struct State {
     S_EXPAND_ERROR,
     S_SYNTAX_ERROR,
     // Global variables
+    G_TCO_ENABLED,
     G_FEATURES,
     G_COMMAND_LINE,
     G_EXPANDER_PRINT,

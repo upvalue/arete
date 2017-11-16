@@ -9,6 +9,13 @@
 // They'll all be searched after every collection. Depending on how many persistent finalizable
 // objects are in a program, this could be a source of slowdowns.
 
+// TODO: It seems like duplicating AR_FRAME values in the same function call causes issues e.g.
+// AR_FRAME(this, something)
+//   AR_FRAME(this, something)
+
+// Leads to errors. Issues with the reference hack used?
+
+
 #include <chrono>
 
 #include "arete.hpp"

@@ -4,8 +4,6 @@
 
 namespace arete {
 
-static bool tco_enabled = true;
-
 struct State::EvalFrame {
   EvalFrame(): tco_lost(0) {}
 
@@ -95,12 +93,13 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
       if(length < 3)
         return eval_error("define expects at least two arguments", exp);
 
-      Value name = exp.cadr(), body = exp.caddr(), tmp;
-      AR_FRAME(this, name, body, tmp);
+      Value name = exp.cadr(), body = exp.caddr(), args;
+      AR_FRAME(this, name, body, args);
     define_lambda:
       // Special case: define lambda, build lambda in place
       if(name.heap_type_equals(PAIR)) {
-        Value args = name.cdr(), tmp = name.car();
+        args = name.cdr();
+        tmp = name.car();
 
         name = tmp;
 
@@ -289,7 +288,7 @@ Value State::eval2_body(EvalFrame frame, Value body, bool single) {
   Value exp, cell, tmp;
 
 tail_call:
-  bool tail = false;
+  bool tail = false, tco_enabled = get_global_value(G_TCO_ENABLED) != C_FALSE;
 
   AR_ASSERT(single || body.heap_type_equals(PAIR) || body == C_NIL);
 
@@ -452,6 +451,12 @@ tail_call:
                 exp = eval2_body(frame, exp.cdr());
               }
               break;
+            // LET EXPRESSION. 
+            // (let loop ((asdf #t)) a)
+            // Create a function with the body and arguments list.
+
+            // Simpler case
+            // (let ((asdf #t)) asdf)
             default:
               exp = eval2_form(frame, exp, form);
               break;
@@ -545,12 +550,11 @@ tail_call:
               // Have to loop here to get accurate source code information out of this
               while(new_body.heap_type_equals(PAIR)) {
                 tmp = eval2_body(frame2, new_body.car(), true);
-                EVAL2_CHECK_FRAME(frame2, tmp, new_body.car().heap_type_equals(PAIR) ? new_body.car() : new_body);
+                EVAL2_CHECK_FRAME(frame2, tmp,
+                  new_body.car().heap_type_equals(PAIR) ? new_body.car() : new_body);
                 new_body = new_body.cdr();
               }
 
-              //tmp = eval2_body(frame2, new_body);
-              EVAL2_CHECK_FRAME(frame2, tmp, new_body);
               exp = tmp;
               continue;
             }
@@ -584,8 +588,35 @@ Value State::eval2_exp(Value exp) {
 }
 
 Value State::eval2_list(Value lst) {
+  Value elt, lst_top, tmp, compiler, vfn;
   EvalFrame frame;
-  return eval2_body(frame, lst);
+  lst_top = lst;
+  compiler = get_global_value(G_COMPILER);
+
+  AR_FRAME(this, lst, elt, lst_top, tmp, compiler, vfn);
+  while(lst.heap_type_equals(PAIR)) {
+    tmp = expand_expr(lst.car());
+    if(tmp.is_active_exception()) return tmp;
+
+    // We evaluate expressions as we go down the list, so that the expander can be installed
+    // on the fly and used in the file in which that is done
+    if(compiler == C_UNDEFINED) {
+      tmp = eval2_exp(tmp);
+      if(tmp.is_active_exception() || lst.cdr() == C_NIL) return tmp;
+    }
+
+    if(tmp.is_active_exception()) return tmp;
+    lst.set_car(tmp);
+    lst = lst.cdr();
+  }
+
+  lst = lst_top;
+
+  if(compiler != C_UNSPECIFIED && compiler != C_UNDEFINED) {
+
+  }
+
+  return C_UNSPECIFIED;
 }
 
 } // namespace arete

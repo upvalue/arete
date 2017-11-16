@@ -49,7 +49,7 @@ void State::boot() {
 
   static const char* _symbols[] = {
     // C_SYNTAX values
-    "quote", "begin", "define", "lambda", "if", "cond",  "and", "or", "set!",
+    "quote", "begin", "define", "lambda", "if", "cond",  "and", "or", "set!", "let",
     "define-syntax", "let-syntax", "letrec-syntax", "define-library", "import",
     // Used by interpreter
     "else",
@@ -60,6 +60,7 @@ void State::boot() {
     // Tags for errors that may be thrown by the runtime
     "file", "read", "eval", "type", "expand", "syntax",
     // Various variables
+    "TCO-ENABLED",
     "*features*",
     "*command-line*",
     "EXPANDER-PRINT",
