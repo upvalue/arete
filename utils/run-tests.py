@@ -81,7 +81,7 @@ def run_tests(path, args = []):
 suites = (
     ('reader', ['--read', '{}']),
     ('preboot',  ['{}']),
-    #('expander', ['scheme/syntax.scm', '{}']),
+    ('expander', ['scheme/syntax.scm', '{}']),
     #('compiler',  ['--set', 'compiler-test-file', '"{}"', 'tests/compiler-test.scm'])
 )
 

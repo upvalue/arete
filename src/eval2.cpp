@@ -76,7 +76,7 @@ Value State::temps_to_list(size_t limit) {
 }
 
 // Handler for special forms which do not involve tail call optimization
-Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
+Value State::eval2_form(EvalFrame frame, Value exp, unsigned type) {
   size_t length = exp.list_length();
 
   Value tmp;
@@ -85,8 +85,8 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
 
   switch(type) {
     case S_QUOTE: {
-      if(length != 2)
-        return eval_error("quote only takes one argument", exp);
+      //if(length != 2)
+      //  return eval_error("quote only takes one argument", exp);
       return exp.cadr();
     }
     case S_DEFINE: {
@@ -196,8 +196,6 @@ Value State::eval2_form(EvalFrame& frame, Value exp, unsigned type) {
       }
 
       return tmp;
-      break;
-
     }
     case S_LAMBDA: {
       Value fn_env, args, saved_fn;
@@ -556,9 +554,11 @@ tail_call:
           }
           case FUNCTION: {
             EvalFrame frame2;
-            Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body;
+            Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body,
+              rest_args_head = C_NIL, rest_args_tail;
             frame2.fn_name = tmp.function_name();
-            AR_FRAME(this, frame2.fn_name, frame2.env, fn, args, fn_args, rest_args_name, new_body);
+            AR_FRAME(this, frame2.fn_name, frame2.env, fn, args, fn_args, rest_args_name, new_body,
+              rest_args_head, rest_args_tail);
             
             fn_args = fn.function_arguments();
             size_t argc = args.list_length();
@@ -583,16 +583,23 @@ tail_call:
             }
 
             if(rest_args_name != C_FALSE) {
-              temps.clear();
               while(args.heap_type_equals(PAIR)) {
                 tmp = eval2_body(frame, args.car(), true);
                 EVAL2_CHECK(tmp, args);
-                temps.push_back(tmp);
+
+                if(rest_args_head == C_NIL) {
+                  rest_args_head = rest_args_tail = make_pair(tmp, C_NIL);
+                } else {
+                  tmp = make_pair(tmp, C_NIL);
+                  rest_args_tail.set_cdr(tmp);
+                  rest_args_tail = tmp;
+                }
                 args = args.cdr();
               }
-              vector_append(frame2.env, rest_args_name);
-              vector_append(frame2.env, temps_to_list());
             }
+
+            vector_append(frame2.env, fn.function_rest_arguments());
+            vector_append(frame2.env, rest_args_head);
 
             new_body = fn.function_body();
 

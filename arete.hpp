@@ -79,7 +79,7 @@
 #endif
 
 #ifndef ARETE_HEAP_SIZE 
-# define ARETE_HEAP_SIZE (1024 * 1024)
+# define ARETE_HEAP_SIZE (1024 * 1024 * 2)
 #endif 
 
 #ifndef ARETE_GC_LOAD_FACTOR
@@ -2001,7 +2001,7 @@ struct State {
 
   struct EvalFrame;
 
-  Value eval2_form(EvalFrame& frame, Value exp, unsigned);
+  Value eval2_form(EvalFrame frame, Value exp, unsigned);
   Value eval2_body(EvalFrame frame, Value exp, bool single = false);
   Value eval2_exp(Value exp);
   Value eval2_list(Value lst);
