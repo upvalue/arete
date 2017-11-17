@@ -60,7 +60,6 @@
 
     ;; let return
     result))
-#|
 
 (define (append x y)
   (if (pair? x)
@@ -96,6 +95,7 @@
   (lambda (x c)
     (qq-object c (cadr x))
     ))
+#|
 
 (define-syntax when
   (lambda (x)

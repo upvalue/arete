@@ -757,9 +757,6 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("env-resolve", fn_env_resolve, 2);
 
-
-#endif
-
 Value fn_env_compare(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-compare";
 
@@ -800,7 +797,6 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("env-compare", fn_env_compare, 3);
 
-#if 0
 
 // env-lookup
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
@@ -1092,7 +1088,7 @@ Value fn_eval(State& state, size_t argc, Value* argv) {
   Value env = argv[1], exp = argv[0];
   AR_FRAME(state, env, exp);
   exp = state.make_pair(exp, C_NIL);
-  return state.eval_list(exp);
+  return state.eval_list(exp, false);
 }
 AR_DEFUN("eval", fn_eval, 2);
 

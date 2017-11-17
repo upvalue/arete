@@ -95,6 +95,8 @@
 
 ;; Environment machinery
 
+
+
 (define (env-make parent)
   (define vec (make-vector))
   (vector-append! vec parent)
@@ -139,7 +141,7 @@
 
 ;; Returns environment where key was resolved, the key in the environment considered equivalent to the given name
 ;; (necessary for rename gensyms) and the value itself.
-(define (env-lookup env name)
+(define (env-lookup env name . skip-undefined-table)
   (cond
     ;; toplevel
     ((eq? env #f)
@@ -159,11 +161,18 @@
          (if (procedure? (table-ref env strip))
            (list env strip (table-ref env strip))
            (list env (table-ref env strip) 'variable))
-         ;; this variable is not defined, check for syntax
-         #;(list env (table-ref env name) unspecified)
+         ;; problem
+
+         ;; if a variable is not defined, sometimes we want to treat it basically as a toplevel value.
+         ;; for example, (env-compare #f 'else (make-rename <some table> 'else)) => #t
+         ;; we also want to check for built-in syntax
+         ;; but for most code we want to return a qualified name so that something in a module can reference
+         ;; something defined later on in a module.
          (if (eq? (env-check-syntax strip) 'syntax)
            (list #f strip 'syntax)
-           (list env (module-qualify env strip) unspecified))
+           (if (not (null? skip-undefined-table))
+             (list #f strip unspecified)
+             (list env (module-qualify env strip) unspecified)))
          )))
     ;; local environment
     ((vector? env)
@@ -174,6 +183,23 @@
          res
          (env-lookup (vector-ref env 0) name))))))
 
+;; Compare two identifiers to see if they "mean" the same thing
+;; For example
+;; 'else and (make-rename #f 'else) => #t
+;; 'else and (make-rename <environment where else is defined by the user> 'else) => #f
+(define (env-compare env a b)
+  (cond
+    ((eq? a b) #t)
+    ((and (symbol? a) (rename? b)) (env-compare env b a))
+    ((and (rename? a) (symbol? b))
+     (and 
+       ;; if they are the same symbol
+       (eq? (rename-expr a) b)
+       ;; and their environments resolve to the same thing
+       (eq? (car (env-lookup (rename-env a) (rename-expr a) #t))
+            (car (env-lookup env b #t)))))
+
+    (else #f)))
 
 ;; Name resolution
 
@@ -403,7 +429,6 @@
       (if (table-ref env "module-export-all")
         (table-set! (table-ref env "module-exports") name #t)))
 
-    ;(set! body (caddr x))
     (set! expanded-body (expand body env))
     (set! fn (eval expanded-body #f))
 

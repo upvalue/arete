@@ -806,7 +806,7 @@ Value State::eval_exp(Value exp) {
   return eval_body(frame, exp, true);
 }
 
-Value State::eval_list(Value lst) {
+Value State::eval_list(Value lst, bool expand) {
   Value elt, lst_top, tmp, compiler, vfn;
   EvalFrame frame;
   lst_top = lst;
@@ -814,8 +814,11 @@ Value State::eval_list(Value lst) {
 
   AR_FRAME(this, lst, elt, lst_top, tmp, compiler, vfn);
   while(lst.heap_type_equals(PAIR)) {
-    tmp = expand_expr(lst.car());
-    if(tmp.is_active_exception()) return tmp;
+    tmp = lst.car();
+    if(expand) {
+      tmp = expand_expr(tmp);
+      if(tmp.is_active_exception()) return tmp;
+    }
 
     // We evaluate expressions as we go down the list, so that the expander can be installed
     // on the fly and used in the file in which that is done
