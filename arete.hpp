@@ -176,6 +176,7 @@ extern size_t gc_collect_timer;
 extern State* current_state;
 
 typedef Value (*c_function_t)(State&, size_t, Value*);
+// We have to use (void*) here to make Emscripten happy.
 typedef Value (*c_closure_t)(State&, void*, size_t, Value*);
 typedef void (*c_finalizer_t)(State&, Value);
 
@@ -1687,6 +1688,8 @@ struct State {
     G_COMPILER,
     G_CURRENT_INPUT_PORT,
     G_CURRENT_OUTPUT_PORT,
+    G_CURRENT_MODULE,
+    G_CORE_MODULE,
     G_END
   };
 

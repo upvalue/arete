@@ -69,6 +69,9 @@ void State::boot() {
     // I/O
     "*current-input-port*",
     "*current-output-port*",
+    // modules
+    "*current-module*",
+    "*core-module*"
   };
 
   AR_ASSERT((sizeof(_symbols) / sizeof(const char*)) == G_END &&

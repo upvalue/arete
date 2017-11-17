@@ -967,7 +967,7 @@
          (fn-exxxpr
            ;; Unexpanded boot functions which use COND
            ;; need to be expanded.
-           (if (memq name '(expand-apply expand))
+           (if (memq name '(expand-apply expand env-define %env-lookup %env-resolve))
              (expand fn-expr #f)
              fn-expr))
          )
@@ -997,7 +997,8 @@
       (print ";; compiled"
       (top-level-for-each
         (lambda (k v)
-          (if (and (eq? (value-type v) 13) (not (memq k '( define-record))))
+
+          (if (and (eq? (value-type v) 13) (not (memq k '(define-record))))
             (begin
               ;(print ";; compiling" k)
               (let ((is-macro (env-syntax? #f k)))

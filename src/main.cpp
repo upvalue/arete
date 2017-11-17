@@ -11,7 +11,29 @@ int do_main(int argc, char* argv[]) {
   return return_code;
 }
 
+#ifndef __EMSCRIPTEN__
 int main(int argc, char *argv[]) {
   int result = do_main(argc, argv);
   return result;
 }
+#else
+
+arete::State *main_state = 0;
+
+extern "C" {
+
+void ar_init() {
+  main_state = new arete::State();
+}
+
+void ar_eval_and_print(const char* str) {
+
+}
+
+void ar_free() {
+  delete main_state;
+}
+
+}
+
+#endif

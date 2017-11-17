@@ -374,7 +374,7 @@ static Value eval_check_arity(State& state, Value fn, Value exp,
     return state.eval_error(os.str(), exp);
   } else if(argc > max_arity && !var_arity) {
     std::ostringstream os;
-    os << "function " << fn << " expected at most " << max_arity << " arguments but got only "
+    os << "function " << fn << " expected at most " << max_arity << " arguments but got "
       << argc;
     return state.eval_error(os.str(), exp);
   }
@@ -610,7 +610,9 @@ tail_call:
             // Simpler case
             // (let ((asdf #t)) asdf)
             default:
-              exp = eval_form(frame, exp, form);
+              tmp = eval_form(frame, exp, form);
+              EVAL_CHECK(tmp, exp);
+              exp = tmp;
               break;
           }
         } else {
@@ -839,8 +841,6 @@ Value State::eval_list(Value lst) {
   return C_UNSPECIFIED;
 }
 
-
-
 //
 ///// Generic operations
 //
@@ -873,7 +873,7 @@ Value State::expand_expr(Value exp) {
   if(expand != C_UNDEFINED) {
     Value sym, mod, saved = C_FALSE;
     AR_FRAME(this, expand, exp, sym, saved);
-    Value argv[2] = {exp, C_FALSE};
+    Value argv[2] = {exp, get_global_value(G_CURRENT_MODULE)};
 
     // Save the original expression for source code information
     saved = exp;

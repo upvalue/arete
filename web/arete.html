@@ -18,11 +18,6 @@
       /* the canvas *must not* have any border or padding, or mouse coords will be wrong */
       canvas.emscripten { border: 0px none; background-color: black; }
 
-      #emscripten_logo {
-        display: inline-block;
-        margin: 0;
-      }
-
       #status {
         display: inline-block;
         vertical-align: top;
@@ -96,11 +91,7 @@
           if (element) element.value = ''; // clear browser cache
           return function(text) {
             if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-            // These replacements are necessary if you render to raw HTML
-            //text = text.replace(/&/g, "&amp;");
-            //text = text.replace(/</g, "&lt;");
-            //text = text.replace(/>/g, "&gt;");
-            //text = text.replace('\n', '<br>', 'g');
+
             console.log(text);
             if (element) {
               element.value += text + "\n";
@@ -130,6 +121,7 @@
           return canvas;
         })(),
         setStatus: function(text) {
+          console.log(text);
           if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
           if (text === Module.setStatus.text) return;
           var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
@@ -163,7 +155,13 @@
         };
       };
     </script>
-    <script>
+    <script type="module" src="arete-embed.js"></script>
+      <script type="module">
+        console.log("loading");
+        import thing from './arete-embed.js';
+        console.log("got it",thing);
+      </script>
+      <script type="text/javascript">
 
           (function() {
             var memoryInitializer = 'arete.html.mem';
@@ -181,6 +179,7 @@
           var script = document.createElement('script');
           script.src = "arete.js";
           document.body.appendChild(script);
+    </script>
 
 </script>
   </body>

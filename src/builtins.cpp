@@ -679,12 +679,15 @@ AR_DEFUN("gensym?", fn_gensymp, 1);
 #define AR_FN_EXPECT_IDENT(state, n) \
   AR_FN_ASSERT_ARG((state), (n), "to be a valid identifier (symbol or rename)", argv[(n)].identifierp())
 
+#if 0
 Value fn_env_make(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-make";
   AR_FN_EXPECT_ENV(state, 0);
   return state.make_env(argv[0]);
 }
 AR_DEFUN("env-make", fn_env_make, 1);
+
+// TODO Remove
 
 Value fn_env_define(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-define";
@@ -754,6 +757,9 @@ Value fn_env_resolve(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("env-resolve", fn_env_resolve, 2);
 
+
+#endif
+
 Value fn_env_compare(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "env-compare";
 
@@ -763,7 +769,6 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
     || (type1 == SYMBOL && type2 == SYMBOL)) {
     return Value::make_boolean(argv[1].bits == argv[2].bits);
   }
-
 
   //std::cout << argv[0] << std::endl;
   AR_FN_EXPECT_ENV(state, 0);
@@ -794,6 +799,8 @@ Value fn_env_compare(State& state, size_t argc, Value* argv) {
   return Value::make_boolean((rename_env == env || (found1 && found1 == found2)) && id1.rename_expr() == id2);
 }
 AR_DEFUN("env-compare", fn_env_compare, 3);
+
+#if 0
 
 // env-lookup
 Value fn_env_lookup(State& state, size_t argc, Value* argv) {
@@ -835,6 +842,7 @@ Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
   }
 }
 AR_DEFUN("env-syntax?", fn_env_syntaxp, 2);
+#endif
 
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-function-name!";
@@ -910,6 +918,20 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
   return argv[0];
 }
 AR_DEFUN("set-function-macro-bit!", fn_set_function_macro_bit, 1);
+
+Value fn_function_is_macro(State& state, size_t argc, Value* argv) {
+  switch(argv[0].type()) {
+    case FUNCTION:
+      return Value::make_boolean(argv[0].heap->get_header_bit(Value::FUNCTION_MACRO_BIT));
+    case VMFUNCTION: {
+      Value fn = argv[0].closure_unbox();
+      return Value::make_boolean(fn.heap->get_header_bit(Value::VMFUNCTION_MACRO_BIT));
+    }
+    default: break;
+  }
+  return C_FALSE;
+}
+AR_DEFUN("function-macro?", fn_function_is_macro, 1);
 
 Value fn_function_min_arity(State& state, size_t argc, Value* argv) {
   switch(argv[0].type()) {
@@ -1331,6 +1353,17 @@ Value fn_value_bits(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum(argv[0].bits);
 }
 AR_DEFUN("value-bits", fn_value_bits, 1);
+
+Value fn_value_make(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "value-make";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  Value v;
+  v.bits = argv[0].fixnum_value();
+  return v;
+}
+AR_DEFUN("value-make", fn_value_make, 1);
+
+// Creates a value from a fixnum. Will segfault if anything other than a constant or fixnum results.
 
 Value fn_value_copy(State& state, size_t argc, Value* argv) {
   Value v1 = argv[0], v2;
