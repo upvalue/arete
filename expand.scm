@@ -36,6 +36,7 @@
 (define vector? (lambda (v) (eq? (value-type v) 9)))
 (define rename? (lambda (v) (eq? (value-type v) 16)))
 (define identifier? (lambda (v) (or (rename? v) (symbol? v))))
+(define (function? v) (eq? (value-type v) 13))
 
 (define list (lambda lst lst))
 
@@ -76,6 +77,10 @@
 ;; NOTE: If any function here uses COND, it has to be added to a whitelist in compiler.scm to be re-expanded, as 
 ;; the compiler does not support COND directly but relies on the expander's if-based implementation of it.
 
+;; TODO: Somewhat confusingly, we store transformers directly in modules but check for syntax at the toplevel and 
+;; in all other cases, the "value" of a name in the module is a symbol that it's supposed to resolve to.
+;; This isn't super confusing at this point but it is a little odd.
+
 ;; Rename convenience function that uses the dynamically scoped *current-rename-env* variable to make renames
 (define (rename name)
   (define env (top-level-value '*current-rename-env*))
@@ -99,6 +104,9 @@
   (cond
     ((and (eq? env #f) (not (null? toplevel?))) (set-top-level-value! name value))
     ((eq? env #f) unspecified)
+    ((table? env)
+     (begin
+       (table-set! env name (if (eq? value 'variable) (module-qualify env name) value))))
     ((vector? env) (begin
                      (vector-append! env name)
                      (vector-append! env value)))
@@ -109,36 +117,63 @@
   (or (eq? a b)
       (and (rename? a) (rename? b) (eq? (rename-env a) (rename-env b)) (eq? (rename-expr a) (rename-expr b)))))
 
-(define (%env-vec-lookup env len i id)
+(define (env-vec-lookup env len i id)
   (if (fx= i len)
     #f
     (if (identifier=? (vector-ref env i) id)
       (list env (vector-ref env i) (vector-ref env (fx+ i 1)))
-      (%env-vec-lookup env len (+ i 2) id))))
+      (env-vec-lookup env len (+ i 2) id))))
 
 ;; Env lookup
 
 ;; This has to be done like this, because we cannot store #<syntax> or #<undefined> in named variables.
-(define (%env-check-syntax name)
+(define (env-check-syntax name)
   (if (fx= (value-bits (top-level-value name)) 34) 'syntax (top-level-value name)))
+
+;; Add a module's name to a symbol
+(define (module-qualify mod name)
+  (string->symbol (string-append "##" (table-ref mod "module-name") "#" (symbol->string name))))
+
+(define (rename-strip id)
+  (if (rename? id) (rename-expr id) id))
 
 ;; Returns environment where key was resolved, the key in the environment considered equivalent to the given name
 ;; (necessary for rename gensyms) and the value itself.
-(define (%env-lookup env name)
+(define (env-lookup env name)
   (cond
+    ;; toplevel
     ((eq? env #f)
      (begin
-       (if (rename? name)
+       (list #f (rename-strip name) (env-check-syntax (rename-strip name)))
+       #;(if (rename? name)
          ;; strip renames at toplevel
-         (list #f (rename-expr name) (%env-check-syntax (rename-expr name)))
-         (list #f name (%env-check-syntax name)))))
+         (list #f (rename-expr name) (env-check-syntax (rename-expr name)))
+         (list #f name (env-check-syntax name)))))
+    ((table? env)
+     (begin
+       (define strip (rename-strip name))
+       (if (table-ref env strip)
+         ;; this variable is defined, can either be a transformer which is 
+         ;; returned directly for the use of the expander,
+         ;; or is a reference to a variable
+         (if (procedure? (table-ref env strip))
+           (list env strip (table-ref env strip))
+           (list env (table-ref env strip) 'variable))
+         ;; this variable is not defined, check for syntax
+         #;(list env (table-ref env name) unspecified)
+         (if (eq? (env-check-syntax strip) 'syntax)
+           (list #f strip 'syntax)
+           (list env (module-qualify env strip) unspecified))
+         )))
+    ;; local environment
     ((vector? env)
      (begin
        (define len (vector-length env))
-       (define res (%env-vec-lookup env len 1 name))
+       (define res (env-vec-lookup env len 1 name))
        (if res 
          res
-         (%env-lookup (vector-ref env 0) name))))))
+         (env-lookup (vector-ref env 0) name))))))
+
 
 ;; Name resolution
 
@@ -150,19 +185,19 @@
 ;; Symbols in modules become qualified, e.g. (define x #t) in module (arete) becomes 
 ;; (define ##arete#x #t)
 
-(define (%env-resolve env name)
+(define (env-resolve env name)
   (apply
     (lambda (env name value)
       (cond
         ((and (rename? name) (rename-gensym name)) (rename-gensym name))
         (else name)))
-    (%env-lookup env name)))
+    (env-lookup env name)))
 
-(define (%env-syntax? env name)
+(define (env-syntax? env name)
   (apply 
     (lambda (env name value)
       (or (eq? value 'syntax) (function-macro? value)))
-    (%env-lookup env name)))
+    (env-lookup env name)))
 
 ;; Shorthand for mapping expand because it's so common
 (define expand-map
@@ -202,14 +237,18 @@
           (list-source x (make-rename #f 'lambda) (cdr kar)
             (cons-source x (make-rename #f 'begin) (cddr x))))))
 
-    (if (%env-syntax? env name)
+    (if (env-syntax? env name)
       (raise-source x 'expand (print-string "definition of" name "shadows syntax") (list x)))
 
     (if (rename? name)
       (rename-gensym! name))
 
     ;; Handle module stuff
+    (if (and (table? env) (table-ref env "module-export-all"))
+      (table-set! (table-ref env "module-exports" name #t)))
+
     (env-define env name 'variable)
+
     #|
     (if (table? env)
       (begin
@@ -226,9 +265,10 @@
       (env-define env name 'variable))
     |#
 
-    (set! result (list-source x (car x)
+    (set! result (list-source x (make-rename #f 'define)
                               ;; We'll replace name with the actual gensym here if there is one
-                              (if (and (rename? name) (rename-gensym name)) (rename-gensym name) name)
+                              (list-ref (env-lookup env name) 1)
+                              #;(if (and (rename? name) (rename-gensym name)) (rename-gensym name) name)
                               (expand value env)))
 
     result))
@@ -236,9 +276,9 @@
 ;; Expand an identifier
 (define expand-identifier
   (lambda (x env)
-    (if (%env-syntax? env x)
+    (if (env-syntax? env x)
       (raise-source x 'expand (print-string "used syntax" x "as value") (list x)))
-    (%env-resolve env x)))
+    (env-resolve env x)))
 
 ;; Expand and/or
 (define expand-and-or
@@ -250,7 +290,7 @@
   (lambda (x env)
     (define kar (car x))
     (define len (length x))
-    (define syntax? (and (identifier? kar) (%env-syntax? env kar)))
+    (define syntax? (and (identifier? kar) (env-syntax? env kar)))
 
     ;; Extract names from renames
     ;; TODO: (let ((begin (lambda () (print "hello")))) (begin)) ?
@@ -432,14 +472,13 @@
 ;; Expand a macro appplication
 (define expand-macro 
   (lambda (x env)
-    (define lookup (list-ref (%env-lookup env (car x)) 2))
+    (define lookup (list-ref (env-lookup env (car x)) 2))
     (define arity (function-min-arity lookup))
-    (define result #f)
     (define saved-rename-env (top-level-value '*current-rename-env*))
 
     (set-top-level-value! '*current-rename-env* (function-env lookup))
 
-    (set! result
+    (define result
       (if (eq? arity 1)
         ;; Only pass form
         (lookup x)
@@ -455,9 +494,7 @@
 
     (set-top-level-value! '*current-rename-env* saved-rename-env)
 
-    (set! result (expand result env))
-
-    result))
+    (expand result env)))
 
 ;; cond expander
 (define expand-cond-full-clause
@@ -511,7 +548,21 @@
 (set-top-level-value! '*current-module* #f)
 (set-top-level-value! 'expander expand-toplevel)
 
-;(set-top-level-value! '*core-module* (make-table))
-;(table-set! (top-level-value '*core-module*) "module-name" "arete#core")
+(set-top-level-value! '*core-module* (make-table))
+(table-set! (top-level-value '*core-module*) "module-name" "arete#core")
+(table-set! (top-level-value '*core-module*) "module-exports" (make-table))
 
+;; populate core module
+(top-level-for-each
+  (lambda (k v)
+    (if (procedure? v)
+      ((lambda (name)
+         (set-top-level-value! name v)
+         (table-set! (table-ref *core-module* "module-exports") k #t)
+         (table-set! *core-module* k k))
+       (module-qualify *core-module* k)))))
+
+(pretty-print *core-module*)
+
+(set-top-level-value! '*current-module* *core-module*)
 

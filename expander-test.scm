@@ -1,3 +1,4 @@
+
 (define-syntax let
   (lambda (x r c)
     (define let-fn-name #f)
@@ -59,6 +60,7 @@
 
     ;; let return
     result))
+#|
 
 (define (append x y)
   (if (pair? x)
@@ -210,7 +212,6 @@
     `(,#'let (,@(map (lambda (b) (list-source b (car b) #'unspecified)) bindings))
       ,@(map (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
       ,@body))))
-#|
 
 ;; TODO: letrec restrictions.
 (define-syntax letrec
