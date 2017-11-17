@@ -95,7 +95,6 @@
   (lambda (x c)
     (qq-object c (cadr x))
     ))
-#|
 
 (define-syntax when
   (lambda (x)
@@ -444,4 +443,3 @@
   (lambda (x)
     (cadr x)))
 
-|#

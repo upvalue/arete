@@ -123,7 +123,7 @@
   (if (fx= i len)
     #f
     (if (identifier=? (vector-ref env i) id)
-      (list env (vector-ref env i) (vector-ref env (fx+ i 1)))
+      (list env (vector-ref env i) (vector-ref env (fx+ i 1)) #t)
       (env-vec-lookup env len (+ i 2) id))))
 
 ;; Env lookup
@@ -140,17 +140,18 @@
   (if (rename? id) (rename-expr id) id))
 
 ;; Returns environment where key was resolved, the key in the environment considered equivalent to the given name
-;; (necessary for rename gensyms) and the value itself.
-(define (env-lookup env name . skip-undefined-table)
+;; (necessary for rename gensyms) the value of the key in the environment, and whether the variable was "found"
+;; (variables may be referenced before definition)
+(define (env-lookup env name)
   (cond
     ;; toplevel
     ((eq? env #f)
      (begin
-       (list #f (rename-strip name) (env-check-syntax (rename-strip name)))
+       (list #f (rename-strip name) (env-check-syntax (rename-strip name)) #t)))
        #;(if (rename? name)
          ;; strip renames at toplevel
          (list #f (rename-expr name) (env-check-syntax (rename-expr name)))
-         (list #f name (env-check-syntax name)))))
+         (list #f name (env-check-syntax name)));))
     ((table? env)
      (begin
        (define strip (rename-strip name))
@@ -159,8 +160,8 @@
          ;; returned directly for the use of the expander,
          ;; or is a reference to a variable
          (if (procedure? (table-ref env strip))
-           (list env strip (table-ref env strip))
-           (list env (table-ref env strip) 'variable))
+           (list env strip (table-ref env strip) #t)
+           (list env (table-ref env strip) 'variable #t))
          ;; problem
 
          ;; if a variable is not defined, sometimes we want to treat it basically as a toplevel value.
@@ -169,11 +170,8 @@
          ;; but for most code we want to return a qualified name so that something in a module can reference
          ;; something defined later on in a module.
          (if (eq? (env-check-syntax strip) 'syntax)
-           (list #f strip 'syntax)
-           (if (not (null? skip-undefined-table))
-             (list #f strip unspecified)
-             (list env (module-qualify env strip) unspecified)))
-         )))
+           (list #f strip 'syntax #t)
+           (list env (module-qualify env strip) unspecified #f)))))
     ;; local environment
     ((vector? env)
      (begin
@@ -192,12 +190,34 @@
     ((eq? a b) #t)
     ((and (symbol? a) (rename? b)) (env-compare env b a))
     ((and (rename? a) (symbol? b))
-     (and 
+
+     ;; here's the problem
+     ;; unquote resolves to ##arete#core#unquote
+     ;; #'unquote resolves to unquote.
+     (and (eq? (rename-expr a) b)
+      (apply 
+         (lambda (renv rkey rvalue rfound)
+           (apply
+             (lambda (env key value found)
+               ;; env-lookup will still return a table and qualified name
+               ;; in the case that something cannot be found
+               (define senv (if (and (not found) (table? env)) #f env))
+               (eq? renv senv))
+
+             (env-lookup env b)))
+         (env-lookup (rename-env a) (rename-expr a)))))
+     #;(print "Env-compare2" a b)
+     #;(if (eq? b 'unquote)
+       (begin
+         (print (car (env-lookup (rename-env a) (rename-expr a))))
+         (print "ENV@:" (car (env-lookup env b)))))
+
+     #|(and 
        ;; if they are the same symbol
        (eq? (rename-expr a) b)
        ;; and their environments resolve to the same thing
-       (eq? (car (env-lookup (rename-env a) (rename-expr a) #t))
-            (car (env-lookup env b #t)))))
+       (eq? (car (env-lookup (rename-env a) (rename-expr a)))
+            (car (env-lookup env b)))))|#;
 
     (else #f)))
 
@@ -213,15 +233,16 @@
 
 (define (env-resolve env name)
   (apply
-    (lambda (env name value)
+    (lambda (env key value found)
       (cond
-        ((and (rename? name) (rename-gensym name)) (rename-gensym name))
+        ((and (rename? key) (rename-gensym key)) (rename-gensym key))
+        ((table? env) key)
         (else name)))
     (env-lookup env name)))
 
 (define (env-syntax? env name)
   (apply 
-    (lambda (env name value)
+    (lambda (env name value found)
       (or (eq? value 'syntax) (function-macro? value)))
     (env-lookup env name)))
 
@@ -293,7 +314,7 @@
 
     (set! result (list-source x (make-rename #f 'define)
                               ;; We'll replace name with the actual gensym here if there is one
-                              (list-ref (env-lookup env name) 1)
+                              (env-resolve env name)#;(list-ref (env-lookup env name) 1)
                               #;(if (and (rename? name) (rename-gensym name)) (rename-gensym name) name)
                               (expand value env)))
 
@@ -429,7 +450,9 @@
       (if (table-ref env "module-export-all")
         (table-set! (table-ref env "module-exports") name #t)))
 
+    (pretty-print body)
     (set! expanded-body (expand body env))
+    (pretty-print expanded-body)
     (set! fn (eval expanded-body #f))
 
     (if (not (procedure? fn))
@@ -580,7 +603,7 @@
 ;; populate core module
 (top-level-for-each
   (lambda (k v)
-    (if (procedure? v)
+    (if (or (procedure? v) (memq k '(unspecified)))
       ((lambda (name)
          (set-top-level-value! name v)
          (table-set! (table-ref *core-module* "module-exports") k #t)
