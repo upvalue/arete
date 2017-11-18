@@ -649,8 +649,9 @@ tail_call:
               args = args.cdr();
             }
 
-            exp = fn.c_function_apply(*this, argc, fn_args.vector_storage_data());
+            tmp = fn.c_function_apply(*this, argc, fn_args.vector_storage_data());
             EVAL_CHECK(tmp, exp);
+            exp = tmp;
 
             continue;
           }

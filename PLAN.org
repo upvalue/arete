@@ -1,10 +1,12 @@
 * Refactoring
-  - [ ] Method calling conventions revamp.
+  - [ ] Method calling conventions revamp?
     Right now, we use argc/argv style, which is convenient for the VM design but probably problematic from a performance
     standpoint and is awkward to use from C++.
 
 * Language
   - [ ] Gradual typing
+
+* SRFIs
   - [ ] SRFI 89: Optional arguments
 
 * Interpreter
@@ -25,6 +27,7 @@
 * Runtime
   - [ ] Image saving: Images rely on C++ static initialization order to restore pointers to C++ functions. This may
     not be very portable at all.
+  - [ ] Better hash table implementation and benchmarks
 
 * Compiler
   - [ ] Analysis pass.

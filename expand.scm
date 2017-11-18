@@ -110,7 +110,12 @@
     ((eq? env #f) unspecified)
     ((table? env)
      (begin
-       (table-set! env name (if (eq? value 'variable) (module-qualify env name) value))))
+       (table-set! env name (if (eq? value 'variable) (module-qualify env name) value))
+       (if (eq? (table-ref env "module-export-all") #t)
+         (table-set! (table-ref env "module-exports") name name))
+
+
+    ))
     ((vector? env) (begin
                      (vector-append! env name)
                      (vector-append! env value)))
@@ -277,9 +282,6 @@
       (rename-gensym! name))
 
     ;; Handle module stuff
-    (if (and (table? env) (table-ref env "module-export-all"))
-      (table-set! (table-ref env "module-exports" name #t)))
-
     (env-define env name 'variable)
 
     (set! result (list-source x (make-rename #f 'define)
@@ -410,10 +412,10 @@
         (define mod (table-ref module-table module-name))
         (table-map
           (lambda (k v)
-            (if (and (symbol? k) (table-ref (table-ref mod "module-exports") k))
-              (cons k v)
-              #f))
-          mod)))))
+            (cons k (table-ref mod v)))
+          (table-ref mod "module-exports"))
+      
+      ))))
 
 (define (module-import! mod1 mod2-spec)
   (define mod2-name (module-spec->string mod2-spec mod2-spec))
@@ -445,7 +447,24 @@
        (cdr x)))
 
     ((eq? kar 'export)
-     (export-not-supported))
+     (for-each-i
+       (lambda (i cell)
+         (if (not (or (symbol? cell) (and (list? cell) (fx= (length cell) 3) (symbol? (car cell)) (symbol? (cadr cell)) (symbol? (caddr cell )))))
+           (raise-source (list-tail x (fx+ i 1)) 'expand "export arguments must be either a symbol or (rename from to)" (list x)))
+
+         (define name (if (symbol? cell) cell (caddr cell)))
+         (define value (if (symbol? cell) cell (cadr cell)))
+
+         ;; this is already defined and may be imported from somewhere else
+         (set! value
+           (if (table-ref mod name)
+             (table-ref mod name)
+             (module-qualify mod value)))
+
+         (print "export: " name value)
+
+         (table-set! (table-ref mod "module-exports") name value))
+     (cdr x)))
 
   ) ;cond
 )
@@ -457,22 +476,22 @@
 
   ;; module fart...
   (define name (module-spec->string (cdr x) (cadr x)))
-  (define module (make-table))
 
   (if (table-ref module-table name)
     (begin
       (print "raising exception")
       (raise-source x 'expand (print-string "module" (cadr x) "encountered twice") (list x))))
 
-  (table-set! module-table name module)
-  (table-set! module "module-name" name)
-  (table-set! module "module-stage" 1)
+  (define mod (module-make name))
+  (table-set! module-table name mod)
+  (table-set! mod "module-name" name)
+  (table-set! mod "module-stage" 1)
 
-  (set-top-level-value! '*current-module* module)
+  (set-top-level-value! '*current-module* mod)
 
   (for-each
     (lambda (x)
-      (expand-module-decl module x env))
+      (expand-module-decl mod x env))
     (cddr x))
 
   unspecified
@@ -737,12 +756,13 @@
       unspecified
       (expand-cond-clause x env (cadr x) (cddr x)))))
 
-;; Install expander
+;; Set up module system
 (define module-table (make-table))
 
 (define *core-module* (module-make "arete"))
 
 (table-set! module-table "arete" *core-module*)
+(table-set! *core-module* "module-export-all" #t)
 
 (define test (module-make "test"))
 
@@ -762,10 +782,11 @@
     (if (or (procedure? v) (memq k '(unspecified)))
       ((lambda (name)
          (set-top-level-value! name v)
-         (table-set! (table-ref *core-module* "module-exports") k #t)
+         (table-set! (table-ref *core-module* "module-exports") k k)
          (table-set! *core-module* k k))
        (module-qualify *core-module* k)))))
 
+;; Install expander
 (set-top-level-value! 'expander expand-toplevel)
 
 ;; Basic module support

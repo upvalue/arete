@@ -119,7 +119,8 @@ bool State::enter_repl(bool read_only, const char* history_file) {
       Value mname = 
         table_get(get_global_value(G_CURRENT_MODULE), get_global_value(G_STR_MODULE_NAME), found);
 
-      if(found) {
+      if(found && !mname.string_equals("user")) {
+
         promptss << mname.string_data() << ' ';
       }
     }

@@ -1000,7 +1000,7 @@
 
           (if (and (eq? (value-type v) 13) (not (memq k '(define-record))))
             (begin
-              (print ";; compiling" k)
+              ;(print ";; compiling" k)
               (let ((is-macro (env-syntax? #f k)))
                 (recompile-function k)
                 )
