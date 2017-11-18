@@ -346,7 +346,7 @@
           #f
           (loop (car rest) (cdr rest)))))))
 
-(define (assq obj alist) (assoc-impl eq? obj alist))
+;(define (assq obj alist) (assoc-impl eq? obj alist))
 (define (assv obj alist) (assoc-impl eqv? obj alist))
 (define (assoc obj alist) (assoc-impl equal? obj alist))
 
@@ -361,7 +361,7 @@
           (begin
             (loop (fx+ i 1) (fn result (list-ref lst (fx+ i 1))))))))))
 
-(define (filter fn lst)
+#;(define (filter fn lst)
   (if (null? lst)
     '()
     (if (fn (car lst))

@@ -274,8 +274,9 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
     AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
   }
 
-  Value nlst_head, nlst_current = C_NIL, tmp, lst = argv[1], fn = argv[0], arg;
-  AR_FRAME(state, nlst_head, nlst_current, lst, fn, arg, tmp);
+  Value tmp, lst = argv[1], fn = argv[0], arg;
+  ListAppender nlst;
+  AR_FRAME(state, nlst.head, nlst.tail,  lst, fn, arg, tmp);
   
   size_t i = 0;
 
@@ -298,12 +299,7 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
         tmp = state.make_pair(tmp, C_NIL);
       }
 
-      if(nlst_current == C_NIL) {
-        nlst_head = nlst_current = tmp; // state.make_pair(tmp, C_NIL);
-      } else {
-        nlst_current.set_cdr(tmp);
-        nlst_current = tmp;
-      }
+      nlst.append_cell(tmp);
     }
     i++;
     lst = lst.cdr();
@@ -321,8 +317,8 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
       }
 
       if(tmp.is_active_exception()) return tmp;
-      if(ret) {
-        nlst_current.set_cdr(tmp);
+      if(ret && nlst.head != C_NIL) {
+        nlst.tail.set_cdr(tmp);
       }
     } else {
       std::ostringstream os;
@@ -331,7 +327,7 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
     }
   }
 
-  return ret ? nlst_head : C_UNSPECIFIED;
+  return ret ? nlst.head : C_UNSPECIFIED;
 }
 
 Value fn_map_proper(State& state, size_t argc, Value* argv) {
@@ -368,23 +364,6 @@ Value fn_for_each_proper_i(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "for-each-i", false, false, true);
 }
 AR_DEFUN("for-each-i", fn_for_each_proper_i, 2);
-
-/** Builds lists efficiently by tracking tail */
-struct ListAppender {
-  ListAppender(): head(C_NIL) {}
-
-  Value head, tail;
-
-  void append(State& state, Value v) {
-    if(head == C_NIL) {
-      head = tail = state.make_pair(v, C_NIL);
-    } else {
-      Value tmp = state.make_pair(v, C_NIL);
-      tail.set_cdr(tmp);
-      tail = tmp;
-    }
-  }
-};
 
 Value fn_filter(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "filter";

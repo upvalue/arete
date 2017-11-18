@@ -1225,29 +1225,6 @@ inline size_t Value::table_entries() const {
   return as<Table>()->entries;
 }
 
-/** 
- * An object for easily iterating over the keys/values of a table. Assumes no insertion 
- * takes place
- */
-struct TableIterator {
-  TableIterator(Value table_): i(0), table(table_), chain(C_NIL), cell(C_FALSE) {}
-
-  ~TableIterator() {}
-
-  bool operator++();
-
-  Value operator*() const {
-    return cell;
-  }
-
-  Value key() const { AR_ASSERT(cell != C_FALSE); return cell.car(); }
-  Value value() const { AR_ASSERT(cell != C_FALSE); return cell.cdr(); }
-
-  size_t i;
-  Value table, chain, cell;
-};
-
-
 struct RecordType : HeapValue {
   /** Allow record to handle application */
   Value apply;
@@ -2014,7 +1991,7 @@ struct State {
    * interpreter and for the hygienic macro expander. See fn_env_compare and fn_env_resolve in
    * arete.cpp.
    */
-  Value env_lookup_impl(Value& env, Value name, Value& rename_key, bool& reached_toplevel);
+  Value env_lookup_impl(Value& env, Value name, bool& reached_toplevel);
 
   Value env_lookup(Value env, Value name);
 
@@ -2304,6 +2281,50 @@ struct Defun {
 
 #define AR_DEFUN(name, addr, ...) \
   static Defun _AR_UNIQUE(defun) ((name), (c_function_t) addr, __VA_ARGS__);
+
+// Various convenience objects. Note that their values must be registered in an AR_FRAME.
+
+/** Builds lists efficiently by tracking tail */
+struct ListAppender {
+  ListAppender(): head(C_NIL) {}
+
+  Value head, tail;
+
+  void append_cell(Value v) {
+    if(head == C_NIL) {
+      head = tail = v;
+    } else {
+      tail.set_cdr(v);
+      tail = v;
+    }
+  }
+
+  void append(State& state, Value v) {
+    append_cell(state.make_pair(v, C_NIL));
+  }
+};
+
+/** 
+ * An object for easily iterating over the keys/values of a table. Assumes no insertion 
+ * takes place
+ */
+struct TableIterator {
+  TableIterator(Value table_): i(0), table(table_), chain(C_NIL), cell(C_FALSE) {}
+
+  ~TableIterator() {}
+
+  bool operator++();
+
+  Value operator*() const {
+    return cell;
+  }
+
+  Value key() const { AR_ASSERT(cell != C_FALSE); return cell.car(); }
+  Value value() const { AR_ASSERT(cell != C_FALSE); return cell.cdr(); }
+
+  size_t i;
+  Value table, chain, cell;
+};
 
 } // namespace arete
 

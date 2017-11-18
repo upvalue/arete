@@ -73,11 +73,8 @@ bool State::env_defined(Value env, Value name) {
   return false;
 }
 
-Value State::env_lookup_impl(Value& env, Value name, Value& rename_key, bool& reached_toplevel) {
-  rename_key = C_FALSE;
+Value State::env_lookup_impl(Value& env, Value name, bool& reached_toplevel) {
   reached_toplevel = false;
-
-  // TODO: Remove rename_key
 
   // First we search through vectors with identifier_equal, which only
   // returns true if symbols are the same or if renames have the same env and expr
@@ -87,8 +84,6 @@ Value State::env_lookup_impl(Value& env, Value name, Value& rename_key, bool& re
       // This is necessary because the expansion pass will replace them
       // with gensyms before returning the full expression
       if(identifier_equal(env.vector_ref(i-1), name)) {
-        rename_key = env.vector_ref(i-1);
-
         return env.vector_ref(i);
       }
     }
@@ -114,9 +109,8 @@ Value State::env_lookup_impl(Value& env, Value name, Value& rename_key, bool& re
 }
 
 Value State::env_lookup(Value env, Value name) {
-  Value rename_key;
   bool found;
-  return env_lookup_impl(env, name, rename_key, found);
+  return env_lookup_impl(env, name, found);
 }
 
 /** Return an eval error with source code information */
@@ -254,8 +248,8 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
       if(length != 3) 
         return eval_error("set! expects exactly three arguments", exp);
 
-      Value name = exp.cadr(), body = exp.caddr(), env_search = frame.env, rename_key;
-      AR_FRAME(this, name, body, env_search, rename_key);
+      Value name = exp.cadr(), body = exp.caddr(), env_search = frame.env;
+      AR_FRAME(this, name, body, env_search);
 
       if(!name.heap_type_equals(SYMBOL)) {
         return eval_error("first argument to set! must be a symbol", exp.cdr());
@@ -263,7 +257,7 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
 
       bool found;
 
-      tmp = env_lookup_impl(env_search, name, rename_key, found);
+      tmp = env_lookup_impl(env_search, name,  found);
 
       // TODO check immutable
       if(tmp == C_UNDEFINED) {
@@ -517,6 +511,7 @@ tail_call:
 
         if(length == 0) {
           EVAL_TRACE(cell);
+          std::cout << exp << std::endl;
           return eval_error("dotted list in source code", exp);
         }
 
@@ -661,11 +656,11 @@ tail_call:
           }
           case FUNCTION: {
             EvalFrame frame2;
-            Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body,
-              rest_args_head = C_NIL, rest_args_tail;
+            Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body;
+            ListAppender rest;
             frame2.fn_name = tmp.function_name();
             AR_FRAME(this, frame2.fn_name, frame2.env, fn, args, fn_args, rest_args_name, new_body,
-              rest_args_head, rest_args_tail);
+              rest.head, rest.tail);
             
             fn_args = fn.function_arguments();
             size_t argc = args.list_length();
@@ -694,18 +689,12 @@ tail_call:
                 tmp = eval_body(frame, args.car(), true);
                 EVAL_CHECK(tmp, args);
 
-                if(rest_args_head == C_NIL) {
-                  rest_args_head = rest_args_tail = make_pair(tmp, C_NIL);
-                } else {
-                  tmp = make_pair(tmp, C_NIL);
-                  rest_args_tail.set_cdr(tmp);
-                  rest_args_tail = tmp;
-                }
+                rest.append(*this, tmp);
                 args = args.cdr();
               }
 
               vector_append(frame2.env, rest_args_name);
-              vector_append(frame2.env, rest_args_head);
+              vector_append(frame2.env, rest.head);
             }
 
             new_body = fn.function_body();

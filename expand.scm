@@ -1,4 +1,4 @@
-;; expand.scm - expander rewrite
+;; expand.scm - basic functionality, expander
 
 ;; syntax.scm - expander, basic syntax (eg let, let*, structs)
 
@@ -150,10 +150,6 @@
     ((eq? env #f)
      (begin
        (list #f (rename-strip name) (env-check-syntax (rename-strip name)) #t)))
-       #;(if (rename? name)
-         ;; strip renames at toplevel
-         (list #f (rename-expr name) (env-check-syntax (rename-expr name)))
-         (list #f name (env-check-syntax name)));))
     ((table? env)
      (begin
        (define strip (rename-strip name))
@@ -411,13 +407,13 @@
       ;; This is an actual module, load it if necessary and import it.
       (begin
         (define module-name (module-spec->string spec spec))
-        (define module (table-ref module-table module-name))
+        (define mod (table-ref module-table module-name))
         (table-map
           (lambda (k v)
-            (if (symbol? k)
+            (if (and (symbol? k) (table-ref (table-ref mod "module-exports") k))
               (cons k v)
               #f))
-          module)))))
+          mod)))))
 
 (define (module-import! mod1 mod2-spec)
   (define mod2-name (module-spec->string mod2-spec mod2-spec))
@@ -430,6 +426,11 @@
 (define (expand-import mod spec)
   (define imports (filter (lambda (v) v) (module-import-eval spec)))
 
+  (for-each
+    (lambda (k)
+      (table-set! mod (car k) (cdr k)))
+    imports)
+
   (print imports)
   #t)
 
@@ -438,11 +439,14 @@
 
   (cond
     ((eq? kar 'import)
-
      (for-each
        (lambda (x)
          (expand-import mod x))
        (cdr x)))
+
+    ((eq? kar 'export)
+     (export-not-supported))
+
   ) ;cond
 )
 
@@ -744,6 +748,9 @@
 
 (table-set! module-table "test" test)
 
+(table-set! (table-ref test "module-exports") 'car #t)
+(table-set! (table-ref test "module-exports") 'cdr #t)
+
 (table-set! test 'car 'car)
 (table-set! test 'cdr 'cdr)
 
@@ -766,7 +773,6 @@
 ;; (module (module1))
 ;; (define hello-world)
 
-#;(module (module1)
-        (import (test)))
+;(module (module1) (import (test)))
 
 
