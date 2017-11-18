@@ -15,22 +15,6 @@ namespace arete {
 
 DefunGroup builtins("builtins");
 
-// Conversions
-Value fn_string_to_symbol(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "string->symbol";
-  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
-  return state.get_symbol(argv[0]);
-}
-AR_DEFUN("string->symbol", fn_string_to_symbol, 1);
-
-Value fn_symbol_to_string(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "symbol->string";
-  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
-  std::string str(argv[0].symbol_name_data());
-  return state.make_string(str);
-}
-AR_DEFUN("symbol->string", fn_symbol_to_string, 1);
-
 // Equality
 
 Value fn_eq(State& state, size_t argc, Value* argv) {
@@ -647,28 +631,6 @@ Value fn_table_for_each(State& state, size_t argc, Value* argv) {
   return fn_table_map_impl("table-for-each", false, state, argc, argv);
 }
 AR_DEFUN("table-for-each", fn_table_for_each, 2);
-
-///// STRINGS
-
-Value fn_string_append(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "string-append";
-  std::ostringstream os;
-  for(size_t i = 0; i != argc; i++) {
-    AR_FN_EXPECT_HEAP_TYPE(state, argv, i, STRING);
-    os << argv[i].string_data();
-  }
-
-  return state.make_string(os.str());
-}
-AR_DEFUN("string-append", fn_string_append, 0, 0, true);
-
-Value fn_string_copy(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "string-copy";
-  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
-
-  return state.string_copy(argv[0]);
-}
-AR_DEFUN("string-copy", fn_string_copy, 1);
 
 ///// MACROEXPANSION SUPPORT
 
@@ -1449,31 +1411,6 @@ Value fn_save_image(State& state, size_t argc, Value* argv) {
   return C_UNSPECIFIED; // make the compiler happy :)
 }
 AR_DEFUN("save-image", fn_save_image, 1);
-
-//
-///// CONVERSION
-//
-
-Value fn_char_to_integer(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "char->integer";
-  AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
-  return Value::make_fixnum(argv[0].character());
-}
-AR_DEFUN("char->integer", fn_char_to_integer, 1);
-
-Value fn_integer_to_char(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "integer->char";
-  AR_FN_EXPECT_TYPE(state, 0, argv, FIXNUM);
-  return state.make_char(argv[0].fixnum_value());
-}
-AR_DEFUN("integer->char", fn_integer_to_char, 1);
-
-Value fn_char_numeric(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "char-numeric?";
-  AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
-  return Value::make_boolean(argv[0].character() >= '0' && argv[0].character() <= '9');
-}
-AR_DEFUN("char-numeric?", fn_char_numeric, 1);
 
 Value fn_repl(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(state.enter_repl());

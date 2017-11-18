@@ -388,9 +388,9 @@
 
   (case (car form)
     ((and)
-     (reduce (lambda (a b) (and a b)) (map (lambda (x) (if (memq x *features*) #t #f)) (cdr form))))
+     (reduce (lambda (a b) (and a b)) (map (lambda (x) (if (memq x (top-level-value '*features*)) #t #f)) (cdr form))))
     ((or)
-     (reduce (lambda (a b) (or a b)) (map (lambda (x) (if (memq x *features*) #t #f)) (cdr form))))
+     (reduce (lambda (a b) (or a b)) (map (lambda (x) (if (memq x (top-level-value '*features*)) #t #f)) (cdr form))))
     ((else) #t)
     ((library) (raise 'syntax "cond-expand does not support library yet" (list form))))
 )

@@ -7,6 +7,8 @@ namespace arete {
 
 State* current_state = 0;
 
+extern void load_string_functions(State&);
+
 State::State():
   gc(*this),
   gensym_counter(0),
@@ -101,6 +103,7 @@ void State::boot() {
   load_builtin_functions();
   load_file_functions();
   load_numeric_functions();
+  load_string_functions(*this);
 
   load_sdl(*this);
   register_feature("sdl");

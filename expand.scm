@@ -51,8 +51,8 @@
 (define input-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 9))))
 (define output-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 10))))
 
-(define current-input-port (lambda () *current-input-port*))
-(define current-output-port (lambda () *current-output-port*))
+(define current-input-port (lambda () (top-level-value'*current-input-port*)))
+(define current-output-port (lambda () (top-level-value '*current-output-port*)))
 
 (define self-evaluating?
   (lambda (v)
@@ -286,8 +286,7 @@
 
     (set! result (list-source x (make-rename #f 'define)
                               ;; We'll replace name with the actual gensym here if there is one
-                              (env-resolve env name)#;(list-ref (env-lookup env name) 1)
-                              #;(if (and (rename? name) (rename-gensym name)) (rename-gensym name) name)
+                              (env-resolve env name)
                               (expand value env)))
 
     result))

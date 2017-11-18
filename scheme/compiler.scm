@@ -1000,11 +1000,11 @@
 
           (if (and (eq? (value-type v) 13) (not (memq k '(define-record))))
             (begin
-              ;(print ";; compiling" k)
+              ;; TODO duplicate compile of qualified-name functionality
+
               (let ((is-macro (env-syntax? #f k)))
                 (recompile-function k)
                 )
-              #t
               
               ))))
       "functions")

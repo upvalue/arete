@@ -2282,7 +2282,8 @@ struct Defun {
 #define AR_DEFUN(name, addr, ...) \
   static Defun _AR_UNIQUE(defun) ((name), (c_function_t) addr, __VA_ARGS__);
 
-// Various convenience objects. Note that their values must be registered in an AR_FRAME.
+// Various convenience objects. Note that their fields must be registered in an AR_FRAME
+// manually.
 
 /** Builds lists efficiently by tracking tail */
 struct ListAppender {
