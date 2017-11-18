@@ -1,7 +1,8 @@
 // gc.cpp - Garbage collection
 
-// TODO: Reduction of code duplication between collectors. Specifically, walking the roots
-// at the very least seems like it should be shared between both;
+// TODO: Reduction of code duplication between collectors. It should be possible to share
+// the code that visits the pointers. The marking collector is recursive and uses a GOTO to save
+// stack space. The copying collector is not.
 
 // TODO: Finalizers should probably simply be disabled in production builds; this should be used
 // for warnings only.
@@ -14,6 +15,15 @@
 //   AR_FRAME(this, something)
 
 // Leads to errors. Issues with the reference hack used?
+
+// TODO: Lazy sweep improvements
+
+// One idea would be to do a little bit of work for each allocation - sweep over X bytes of memory,
+// and do things like find holes that are sized well for common objects like pairs. This would
+// reduce fragmentation as well as the worst case scenario of e.g. having to sweep over a bunch
+// of large objects to find a small one. The sweep would still eventually have to go over all
+// objects (to mark them), but this might improve things. It would, however, increase complexity
+// quite a bit.
 
 
 #include <chrono>

@@ -674,7 +674,7 @@ AR_DEFUN("gensym?", fn_gensymp, 1);
 
 /** Macro that asserts an argument is a valid environment */
 #define AR_FN_EXPECT_ENV(state, n) \
- AR_FN_ASSERT_ARG((state), (n), "to be a valid environment (vector or #f)", argv[(n)].type() == VECTOR || argv[(n)] == C_FALSE);
+ AR_FN_ASSERT_ARG((state), (n), "to be a valid environment (vector or #f)", argv[(n)].type() == VECTOR || argv[(n)].type() == TABLE || argv[(n)] == C_FALSE);
 
 #define AR_FN_EXPECT_IDENT(state, n) \
   AR_FN_ASSERT_ARG((state), (n), "to be a valid identifier (symbol or rename)", argv[(n)].identifierp())

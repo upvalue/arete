@@ -77,6 +77,8 @@ Value State::env_lookup_impl(Value& env, Value name, Value& rename_key, bool& re
   rename_key = C_FALSE;
   reached_toplevel = false;
 
+  // TODO: Remove rename_key
+
   // First we search through vectors with identifier_equal, which only
   // returns true if symbols are the same or if renames have the same env and expr
   while(env.type() == VECTOR) {
@@ -899,7 +901,9 @@ Value State::expand_expr(Value exp) {
         get_global_value(G_EXPANDER_PRINT) != C_FALSE) {
       print_src_pair(std::cout, saved, ARETE_COLOR_BLUE);
       std::cout << std::endl;
-      std::cout << "Expanded to: " << exp << std::endl;
+      std::cout << "Expanded to: " << std::endl;// << exp << std::endl;
+      pretty_print(std::cout, exp);
+      std::cout << std::endl;
     }
   } 
 

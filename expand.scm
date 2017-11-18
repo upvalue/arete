@@ -15,6 +15,10 @@
 ;; Does not result in super-descriptive error messages because the name is gensym'd by the compiler
 ;; How can we propagate information about where a lambda was introduced through the expander to the compiler?
 
+;; TODO:
+;;  fix else
+;;  module syntax and functionality.
+
 (define caar (lambda (x) (car (car x))))
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
@@ -202,7 +206,8 @@
                ;; env-lookup will still return a table and qualified name
                ;; in the case that something cannot be found
                (define senv (if (and (not found) (table? env)) #f env))
-               (eq? renv senv))
+               (define rsenv (if (and (not rfound) (table? renv)) #f renv))
+               (eq? rsenv senv))
 
              (env-lookup env b)))
          (env-lookup (rename-env a) (rename-expr a)))))
@@ -597,7 +602,7 @@
 (set-top-level-value! 'expander expand-toplevel)
 
 (set-top-level-value! '*core-module* (make-table))
-(table-set! (top-level-value '*core-module*) "module-name" "arete#core")
+(table-set! (top-level-value '*core-module*) "module-name" "arete")
 (table-set! (top-level-value '*core-module*) "module-exports" (make-table))
 
 ;; populate core module

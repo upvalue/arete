@@ -437,8 +437,13 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
 
       unsigned indent_after = 0, attempt_indent = 0;
 
-      if(v.car() == state.globals[State::S_DEFINE] || v.car() == state.globals[State::S_LAMBDA] ||
-        v.car() == state.globals[State::S_IF]) {
+      Value kar = v.car();
+      if(kar.heap_type_equals(RENAME)) {
+        kar = kar.rename_expr();
+      }
+
+      if(kar == state.globals[State::S_DEFINE] || kar == state.globals[State::S_LAMBDA] ||
+        kar == state.globals[State::S_IF]) {
         attempt_indent = 1;
         indent_after = 2;
       } else {
