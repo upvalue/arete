@@ -349,10 +349,28 @@ Value fn_load_file(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   
   std::string path(argv[0].string_data());
+
+  Value mod, res;
+  AR_FRAME(state, mod, res);
   
-  return state.load_file(path);
+  mod = state.get_global_value(State::G_CURRENT_MODULE);
+  res = state.load_file(path);
+  state.set_global_value(State::G_CURRENT_MODULE, mod);
+  return res;
 }
 AR_DEFUN("load", fn_load_file, 1);
+
+Value fn_load_module(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "load-module";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+
+  // auto => auto.sld, auto.scm
+  // 
+
+  //return state.load_file(path);
+
+}
+AR_DEFUN("load-module", fn_load_module, 1);
 
 void State::load_file_functions() {
   files.install(*this);

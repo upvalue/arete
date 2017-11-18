@@ -333,12 +333,7 @@
         (raise-source src 'expand (print-string "arguments to import specifier" name " must all be symbols") (list syms))))
     syms))
 
-;; How this works.
-;; Basically, when it encounters the actual module specifier like say (sdl)
-;; It will tell the runtime to load the module
-;; Then it converts its exported bindings into a list of pairs correlating names with values
 
-;; Then the modifiers only, prefix, rename and except are applied to this list with map & filter
 (define (assq obj alist)
   (if (null? alist)
     #f
@@ -346,6 +341,29 @@
       (car alist)
       (assq obj (cdr alist)))))
 
+(define (module-load src name)
+  (define mod (table-ref module-table name))
+  (if mod
+    ;; TODO check cyclic imports
+    (begin
+      (if (eq? (table-ref mod "module-stage") 1)
+        (raise-source src 'expand "cyclic import" (list name)))
+      mod)
+    (begin
+      (define file (string-append name ".scm"))
+      (load file)
+      (if (not (table-ref module-table name))
+        (raise-source src 'expand (print-string "expected loading file" file "to provide module but it did not") (list name)))
+      (table-ref module-table name))
+  ) ;if
+)
+
+;; Despite being long, this is fairly simple.
+
+;; Basically, when it encounters the actual module specifier like say (sdl)
+;; It will load the module and return all its bindings in the form of a list correlating names with values
+
+;; The modifiers only, prefix, rename and except then modify this list with map & filter
 (define (module-import-eval spec)
   (if (not (list? spec))
     (raise-source spec 'expand "module specifier must be a list" (list spec)))
@@ -408,7 +426,7 @@
       ;; This is an actual module, load it if necessary and import it.
       (begin
         (define module-name (module-spec->string spec spec))
-        (define mod (table-ref module-table module-name))
+        (define mod (module-load spec module-name))
         (table-map
           (lambda (k v)
             (cons k (table-ref mod v)))
@@ -434,6 +452,11 @@
 
   (print imports)
   #t)
+
+(define (expand-toplevel-import x env)
+  (if (not (and (list? x) (fx= (length x) 2)))
+    (raise-source x 'expand "bad import spec" (list x)))
+  (expand-import env (cadr x)))
 
 (define (expand-module-decl mod x env)
   (define kar (car x))
@@ -467,6 +490,7 @@
 
   ) ;cond
 )
+
 
 (define (expand-module x env)
   (define len (length x))
@@ -512,6 +536,10 @@
     (if syntax?
       (cond
         ((eq? kar 'module) (expand-module x env))
+        ((eq? kar 'import)
+         (if (not (table? env))
+           (raise-source x "import must be part of module statement or be at toplevel"))
+         (expand-toplevel-import x env))
         ((eq? kar 'define) (expand-define x env))
         ((eq? kar 'define-syntax) (expand-define-syntax x env))
         ((or (eq? kar 'letrec-syntax) (eq? kar 'let-syntax)) (expand-let-syntax x env))
@@ -762,6 +790,7 @@
 
 (table-set! module-table "arete" *core-module*)
 (table-set! *core-module* "module-export-all" #t)
+(table-set! *core-module* "module-stage" 2)
 
 (define test (module-make "test"))
 

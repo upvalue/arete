@@ -2196,8 +2196,6 @@ struct XReader {
 
 std::ostream& operator<<(std::ostream& os, Value v);
 
-Value load_sdl(State&);
-
 // MISC! Various inline functions 
 
 inline Type Value::type() const {

@@ -8,6 +8,8 @@ namespace arete {
 State* current_state = 0;
 
 extern void load_string_functions(State&);
+extern void load_platform_functions(State&);
+extern void load_sdl(State&);
 
 State::State():
   gc(*this),
@@ -104,6 +106,7 @@ void State::boot() {
   load_file_functions();
   load_numeric_functions();
   load_string_functions(*this);
+  load_platform_functions(*this);
 
   load_sdl(*this);
   register_feature("sdl");

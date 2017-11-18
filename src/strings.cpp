@@ -4,8 +4,6 @@
 
 namespace arete {
 
-///// STRINGS
-
 DefunGroup strings("strings");
 
 // Conversions

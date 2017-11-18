@@ -3,9 +3,6 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
-#ifndef _MSC_VER
-# include <sys/time.h>
-#endif
 
 #include "arete.hpp"
 
@@ -664,167 +661,6 @@ AR_DEFUN("gensym?", fn_gensymp, 1);
 #define AR_FN_EXPECT_IDENT(state, n) \
   AR_FN_ASSERT_ARG((state), (n), "to be a valid identifier (symbol or rename)", argv[(n)].identifierp())
 
-#if 0
-Value fn_env_make(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "env-make";
-  AR_FN_EXPECT_ENV(state, 0);
-  return state.make_env(argv[0]);
-}
-AR_DEFUN("env-make", fn_env_make, 1);
-
-// TODO Remove
-
-Value fn_env_define(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "env-define";
-  AR_FN_EXPECT_ENV(state, 0);
-  AR_FN_EXPECT_IDENT(state, 1);
-
-  Value env = argv[0], name = argv[1], value = argv[2];
-  AR_FRAME(state, env, name, value);
-
-  if(argv[0] == C_FALSE) {
-    if(argc == 4 && argv[3] == C_TRUE) {
-      name.as<Symbol>()->value = value;
-    }
-  } else {
-    state.vector_append(env, name);
-    state.vector_append(env, value);
-  }
-
-  return C_UNSPECIFIED;
-}
-AR_DEFUN("env-define", fn_env_define, 3, 4);
-
-/** env-resolve takes an environment and identifier and returns an appropriate symbol for runtime
- * For example, references to arete.core functions like car become ##arete.core#car,
- * renames in lambda lists become gensyms, and so on. If it can't resolve a symbol, it is eitehr
- * an undefined variable or a toplevel variable and is returned unmodified. */
-Value fn_env_resolve(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "env-resolve";
-  AR_FN_EXPECT_ENV(state, 0);
-  AR_FN_EXPECT_IDENT(state, 1);
-
-  Value env = argv[0], name, rename_key, result, renames, qname, imports, arg1 = argv[1], mname;
-  AR_FRAME(state, env, name, rename_key, result, renames, qname, imports, arg1, mname);
-
-  // Value env = argv[0];
-
-  // (env-resolve (<table> vars) name)
-
-  // If this is a vector, these bindings have been found in a lambda body.
-
-  // Symbols and renames may refer to table-level variables, e.g. (print "something")
-  // Must become ##arete.core#print
-  // As might (make-rename <core> 'print)
-
-  // Or they might reference variables introduced in the argument list of a lambda, which means that
-  // symbols should be returned unmodified, and renames should become gensyms
-
-  if(argv[0].type() == VECTOR) {
-    // Note that env_lookup_impl takes env and rename_key as references
-    bool found;
-    result = state.env_lookup_impl(env, argv[1], rename_key, found);
-    (void) result;
-
-    // If a rename was introduced in the bindings of a lambda, it needs to resolve to a gensym
-    if(env.type() != TABLE) {
-      if(argv[1].type() == RENAME) {
-        if(rename_key != C_FALSE) {
-          AR_ASSERT(rename_key.rename_gensym() != C_FALSE);
-          return rename_key.rename_gensym();
-        }
-      }
-      return argv[1];
-    } 
-  }
-
-  return argv[1];
-}
-AR_DEFUN("env-resolve", fn_env_resolve, 2);
-
-Value fn_env_compare(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "env-compare";
-
-  Type type1 = argv[1].type(), type2 = argv[2].type();
-
-  if((type1 != SYMBOL && type1 != RENAME) || (type2 != SYMBOL && type2 != RENAME)
-    || (type1 == SYMBOL && type2 == SYMBOL)) {
-    return Value::make_boolean(argv[1].bits == argv[2].bits);
-  }
-
-  //std::cout << argv[0] << std::endl;
-  AR_FN_EXPECT_ENV(state, 0);
-  AR_FN_EXPECT_IDENT(state, 1);
-  AR_FN_EXPECT_IDENT(state, 2);
-
-  Value env = argv[0];
-  Value id1 = argv[1];
-  Value id2 = argv[2];
-
-  if(state.identifier_equal(id1, id2)) {
-    return C_TRUE;
-  }
-
-  // Ensure that id1 holds the rename
-  if(id2.type() == RENAME) {
-    std::swap(id1, id2);
-  }
-
-  Value rename_env = id1.rename_env();
-  Value rename_key;
-
-  bool found1, found2;
-  state.env_lookup_impl(rename_env, id1.rename_expr(), rename_key, found1);
-  state.env_lookup_impl(env, id2, rename_key, found2);
-
-  // If these both refer to a toplevel variable (i.e. not defined), this is true
-  return Value::make_boolean((rename_env == env || (found1 && found1 == found2)) && id1.rename_expr() == id2);
-}
-AR_DEFUN("env-compare", fn_env_compare, 3);
-
-
-// env-lookup
-Value fn_env_lookup(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "env-lookup";
-  AR_FN_EXPECT_ENV(state, 0);
-  AR_FN_ASSERT_ARG(state, 1, "to be a valid identifier (symbol or rename)", argv[1].identifierp());
-
-  Value arg0 = argv[0], arg1 = argv[1];
-  Value env = argv[0], qname, result;
-  AR_FRAME(state, env, qname, result, arg0, arg1);
-
-  qname = fn_env_resolve(state, argc, argv);
-
-  result = state.env_lookup(env, qname);
-  
-  if(result != C_UNDEFINED) {
-    return result;
-  }
-
-  return state.env_lookup(arg0, arg1);
-}
-AR_DEFUN("env-lookup", fn_env_lookup, 2);
-
-/** Check if a name is syntax (a builtin such as define, or a macro) in a particular environment.
-  * Necessary because C_SYNTAX values cannot be handled by Scheme code directly. */
-Value fn_env_syntaxp(State& state, size_t argc, Value* argv) {
-  Value env, name, qname;
-  AR_FRAME(state, env, qname, name);
-
-  Value result = fn_env_lookup(state, argc, argv);
-
-  if(result == C_SYNTAX) return C_TRUE;
-  switch(result.type()) {
-    case FUNCTION:
-      return Value::make_boolean(result.function_is_macro());
-    case CLOSURE: case VMFUNCTION:
-      return Value::make_boolean(result.closure_unbox().vm_function_is_macro());
-    default: return C_FALSE;
-  }
-}
-AR_DEFUN("env-syntax?", fn_env_syntaxp, 2);
-#endif
-
 Value fn_set_function_name(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-function-name!";
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
@@ -1374,23 +1210,6 @@ Value fn_gc_collect(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("gc:collect", fn_gc_collect, 0);
 
-//
-///// OS SPECIFIC 
-//
-
-Value fn_current_millisecond(State& state, size_t argc, Value* argv) {
-#ifdef _MSC_VER
-	return Value::make_fixnum(0);
-#else
-  struct timeval te; 
-  gettimeofday(&te, NULL); // get current time
-  size_t milliseconds = te.tv_sec*1000LL + te.tv_usec/1000; // caculate milliseconds
-
-  return Value::make_fixnum(milliseconds);
-#endif
-}
-AR_DEFUN("current-millisecond", fn_current_millisecond, 0);
-
 Value fn_exit(State& state, size_t argc, Value* argv) {
   if(argv[1] == C_TRUE) {
     exit(EXIT_SUCCESS);
@@ -1418,7 +1237,6 @@ Value fn_repl(State& state, size_t argc, Value* argv) {
 AR_DEFUN("repl", fn_repl, 0);
 
 void State::load_builtin_functions() {
-  // Conversion
   builtins.install(*this);
 }
 
