@@ -573,10 +573,14 @@ struct Value {
   static const unsigned SYMBOL_GENSYM_BIT = 1 << 10;
   static const unsigned SYMBOL_READ_BIT = 1 << 11;
 
-  // Syntactic closures
+  // RENAMES
+
   Value rename_expr() const;
   Value rename_env() const;
   Value rename_gensym() const;
+
+  // TABLES
+  size_t table_entries() const;
 
   // PAIRS
   size_t list_length() const;
@@ -799,6 +803,7 @@ struct Rename : HeapValue {
 inline Value Value::rename_expr() const { return as<Rename>()->expr; }
 inline Value Value::rename_env() const { return as<Rename>()->env; }
 inline Value Value::rename_gensym() const { return as<Rename>()->gensym; }
+
 
 /** 
  * Identifies a location in source code.
@@ -1214,6 +1219,34 @@ struct Table : HeapValue  {
 
   static const Type CLASS_TYPE = TABLE;
 };
+
+inline size_t Value::table_entries() const {
+  AR_TYPE_ASSERT(heap_type_equals(TABLE));
+  return as<Table>()->entries;
+}
+
+/** 
+ * An object for easily iterating over the keys/values of a table. Assumes no insertion 
+ * takes place
+ */
+struct TableIterator {
+  TableIterator(Value table_): i(0), table(table_), chain(C_NIL), cell(C_FALSE) {}
+
+  ~TableIterator() {}
+
+  bool operator++();
+
+  Value operator*() const {
+    return cell;
+  }
+
+  Value key() const { AR_ASSERT(cell != C_FALSE); return cell.car(); }
+  Value value() const { AR_ASSERT(cell != C_FALSE); return cell.cdr(); }
+
+  size_t i;
+  Value table, chain, cell;
+};
+
 
 struct RecordType : HeapValue {
   /** Allow record to handle application */
@@ -1654,6 +1687,7 @@ struct State {
     S_SET,
     S_LET,
     // Module forms
+    S_MODULE,
     S_DEFINE_LIBRARY,
     S_IMPORT,
     S_DEFINE_SYNTAX,
@@ -1688,8 +1722,11 @@ struct State {
     G_COMPILER,
     G_CURRENT_INPUT_PORT,
     G_CURRENT_OUTPUT_PORT,
+    // Modules
     G_CURRENT_MODULE,
     G_CORE_MODULE,
+    // Strings
+    G_STR_MODULE_NAME,
     G_END
   };
 

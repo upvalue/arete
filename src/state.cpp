@@ -40,6 +40,7 @@ void State::boot_common() {
 
   set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
   set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
+  set_global_value(G_STR_MODULE_NAME, make_string("module-name"));
   
   booted = true;
 }
@@ -50,7 +51,7 @@ void State::boot() {
   static const char* _symbols[] = {
     // C_SYNTAX values
     "quote", "begin", "define", "lambda", "if", "cond",  "and", "or", "set!", "let",
-    "define-syntax", "let-syntax", "letrec-syntax", "define-library", "import",
+    "module", "define-library", "import", "define-syntax", "let-syntax", "letrec-syntax",
     // Used by interpreter
     "else",
     // Used by reader      
@@ -71,7 +72,8 @@ void State::boot() {
     "*current-output-port*",
     // modules
     "*current-module*",
-    "*core-module*"
+    "*core-module*",
+    "module-name",
   };
 
   AR_ASSERT((sizeof(_symbols) / sizeof(const char*)) == G_END &&

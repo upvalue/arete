@@ -110,9 +110,22 @@ bool State::enter_repl(bool read_only, const char* history_file) {
   }
 #endif
 
-  static const char* prompt = "> ";
-
   while(++i) {
+    static const char* prompt = "> ";
+    std::ostringstream promptss;
+
+    if(get_global_value(G_CURRENT_MODULE).heap_type_equals(TABLE)) {
+      bool found;
+      Value mname = 
+        table_get(get_global_value(G_CURRENT_MODULE), get_global_value(G_STR_MODULE_NAME), found);
+
+      if(found) {
+        promptss << mname.string_data() << ' ';
+      }
+    }
+    promptss << i << "> ";
+
+
     std::ostringstream line_name;
     line_name << "repl-line-" << i;
 
@@ -120,7 +133,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
     liness >> std::noskipws;
     bool history_add = true;
 #if AR_LINENOISE
-    char *line = linenoise(prompt);
+    char *line = linenoise(promptss.str().c_str());
 
     if(!line) {
       break;

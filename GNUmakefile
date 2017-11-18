@@ -58,16 +58,16 @@ endef
 	$(call colorecho, "CC $< ")
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-all: arete
+all: bin/arete
 
 -include $(DEPS)
 
 # Link 
-arete: $(CXXOBJS) src/main.o
+bin/arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^ 
 
-arete32: $(CXXOBJS32) src/main.32.o
+bin/arete32: $(CXXOBJS32) src/main.32.o
 	$(call colorecho, "LD32 $@ ")
 	$(CXX) $(LDFLAGS) -m32 -o $@ $^
 

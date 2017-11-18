@@ -1,7 +1,6 @@
 *.d
 *.o
 *.obj
-/arete
 *.exe
 /tests/test-incremental
 /tests/test-semispace
@@ -13,3 +12,5 @@ vgcore*
 /web/arete.js
 /web/arete.data
 /vendor/linenoise/*.d
+/bin/arete
+/bin/arete32

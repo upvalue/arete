@@ -369,6 +369,52 @@ Value fn_for_each_proper_i(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("for-each-i", fn_for_each_proper_i, 2);
 
+/** Builds lists efficiently by tracking tail */
+struct ListAppender {
+  ListAppender(): head(C_NIL) {}
+
+  Value head, tail;
+
+  void append(State& state, Value v) {
+    if(head == C_NIL) {
+      head = tail = state.make_pair(v, C_NIL);
+    } else {
+      Value tmp = state.make_pair(v, C_NIL);
+      tail.set_cdr(tmp);
+      tail = tmp;
+    }
+  }
+};
+
+Value fn_filter(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "filter";
+  AR_FN_ASSERT_ARG(state, 0, "to be applicable", (argv[0].applicable()));
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
+  
+  // TODO: This pattern, which is repeated quite often, could be 
+  Value fn = argv[0], lst = argv[1], result = C_NIL, tmp;
+  ListAppender a;
+  AR_FRAME(state, fn, lst, result, tmp, a.head, a.tail);
+
+  while(lst.heap_type_equals(PAIR)) {
+    Value argv[1] = {lst.car()};
+    tmp = state.apply(fn, 1, argv);
+
+    if(tmp.is_active_exception()) return tmp;
+
+    if(tmp == C_FALSE) {
+      lst = lst.cdr();
+      continue;
+    }
+
+    a.append(state, lst.car());
+    lst = lst.cdr();
+  }
+
+  return a.head;
+}
+AR_DEFUN("filter", fn_filter, 2);
+
 enum Mem { MEMQ, MEMV, MEMBER };
 
 Value fn_mem_impl(const char* fn_name, Mem method, State& state, size_t argc, Value* argv) {
@@ -590,38 +636,36 @@ AR_DEFUN("table-set!", fn_table_set, 3);
 Value fn_table_entries(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "table-entries";
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
-  return Value::make_fixnum(argv[0].as<Table>()->entries);
+  return Value::make_fixnum(argv[0].table_entries());
 }
 AR_DEFUN("table-entries", fn_table_entries, 1);
 
-Value fn_table_for_each(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "table-for-each";
-
+static Value fn_table_map_impl(const char* fn_name, bool map, State& state, size_t argc, Value* argv) {
   AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
   AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
 
+  Value fn = argv[0], lst = C_NIL, tmp;
+  TableIterator ti(argv[1]);
+  AR_FRAME(state, tmp, fn, lst, ti.table, ti.chain, ti.cell);
 
-  Value table = argv[1], fn = argv[0], chain, arg, tmp;
-  AR_FRAME(state, table, fn, chain, arg);
-
-  // TODO Check insertion by saving and comparing entries
-
-  for(size_t i = 0; i != table.as<Table>()->chains->length; i++) {
-    chain = table.as<Table>()->chains->data[i];
-    if(chain != C_FALSE) {
-      while(chain != C_NIL) {
-        arg = state.make_pair(chain.cdar(), C_NIL);
-        arg = state.make_pair(chain.caar(), arg);
-
-        Value argv[2] = {chain.caar(), chain.cdar()};
-        tmp = state.apply(fn, 2, argv);
-        if(tmp.is_active_exception()) return tmp;
-        chain = chain.cdr();
-      }
+  while(++ti) {
+    Value argv[2] = {ti.key(), ti.value()};
+    tmp = state.apply(fn, 2, argv);
+    if(tmp.is_active_exception()) return tmp;
+    if(map) {
+      lst = state.make_pair(tmp, lst);
     }
   }
+  return map ? lst : C_UNSPECIFIED;
+}
 
-  return C_UNSPECIFIED;
+Value fn_table_map(State& state, size_t argc, Value* argv) {
+  return fn_table_map_impl("table-map", true, state, argc, argv);
+}
+AR_DEFUN("table-map", fn_table_map, 2);
+
+Value fn_table_for_each(State& state, size_t argc, Value* argv) {
+  return fn_table_map_impl("table-for-each", false, state, argc, argv);
 }
 AR_DEFUN("table-for-each", fn_table_for_each, 2);
 

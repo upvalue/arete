@@ -246,6 +246,7 @@ std::unordered_map<ptrdiff_t, size_t> *function_to_id = 0;
 DefunGroup* defun_group = 0;
 
 c_function_t function_id_to_ptr(size_t id) {
+  AR_ASSERT(id < id_to_function->size());
   return id_to_function->at(id);
 }
 

@@ -967,7 +967,7 @@
          (fn-exxxpr
            ;; Unexpanded boot functions which use COND
            ;; need to be expanded.
-           (if (memq name '(expand-apply expand env-define env-compare env-lookup env-resolve))
+           (if (memq name '(expand-apply expand env-lookup env-define env-compare env-resolve expand-module-decl))
              (expand fn-expr #f)
              fn-expr))
          )

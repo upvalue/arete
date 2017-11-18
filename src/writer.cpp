@@ -47,45 +47,6 @@
 
 namespace arete {
 
-/** 
- * An object for easily iterating over the keys/values of a table. Assumes no insertion 
- * takes place
- */
-struct TableIterator {
-  TableIterator(Value table_): i(0), table(table_), chain(C_NIL), cell(C_FALSE) {}
-
-  ~TableIterator() {}
-
-  bool operator++() {
-  try_again:
-    // If we have a current chain
-    if(chain != C_FALSE && chain != C_NIL) {
-      cell = chain.car();
-      chain = chain.cdr();
-      return true;      
-    }
-
-    if(i == table.as<Table>()->chains->length) {
-      chain = C_FALSE;
-      return false;
-    }
-
-    // Go to the next chain
-    chain = table.as<Table>()->chains->data[i++];
-    goto try_again;
-  }
-
-  Value operator*() const {
-    return cell;
-  }
-
-  Value key() const { AR_ASSERT(cell != C_FALSE); return cell.car(); }
-  Value value() const { AR_ASSERT(cell != C_FALSE); return cell.cdr(); }
-
-  size_t i;
-  Value table, chain, cell;
-};
-
 typedef std::pair<unsigned, bool> print_info_t;
 typedef std::unordered_map<unsigned, print_info_t> print_table_t;
 
@@ -101,6 +62,10 @@ struct PrintState {
   unsigned printed_count;
   size_t row_width;
   size_t indent;
+
+  /** Truncate table entries. If zero, all entries will be printed */
+  size_t table_max;
+  /** Amount to indent by, default 2. */
   unsigned indent_level;
 };
 
@@ -468,19 +433,25 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
       }
       os2 << ')';
 
-    } else if(v.type() == TABLE) {
+    } else if(v.heap_type_equals(TABLE)) {
       os2 << '{';
       TableIterator ti(v);
       ps.indent += ps.indent_level;
       size_t entries = 0;
       while(++ti) {
         entries++;
-        os2 << '\0';
-        //for(size_t i = 0; i != start_indent1; i++) os2 << ' ';
-        pretty_print_sub(state, os2, ti.key(), ps);
-        os2 << ' ';
-        pretty_print_sub(state, os2, ti.value(), ps);
-        os2 << " , ";
+        if(entries == ps.table_max) {
+          os2 << '\0';
+          os2 << "#+" << v.table_entries() << "... ";
+          break;
+        } else {
+          os2 << '\0';
+          //for(size_t i = 0; i != start_indent1; i++) os2 << ' ';
+          pretty_print_sub(state, os2, ti.key(), ps);
+          os2 << ' ';
+          pretty_print_sub(state, os2, ti.value(), ps);
+          os2 << " , ";
+        }
       }
       if(entries != 0) {
         os2 << '\0';
@@ -684,6 +655,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
   ps.indent_level = 2;
   ps.row_width = 120;
   ps.indent = 0;
+  ps.table_max = 5;
 
   ps.printed = printed;
   // Right now printing can't return an exception, but it might if we allow users to extend this

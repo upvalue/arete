@@ -4,6 +4,25 @@
 
 namespace arete {
 
+bool TableIterator::operator++() {
+try_again:
+  // If we have a current chain
+  if(chain != C_FALSE && chain != C_NIL) {
+    cell = chain.car();
+    chain = chain.cdr();
+    return true;      
+  }
+
+  if(i == table.as<Table>()->chains->length) {
+    chain = C_FALSE;
+    return false;
+  }
+
+  // Go to the next chain
+  chain = table.as<Table>()->chains->data[i++];
+  goto try_again;
+}
+
 static const unsigned LOAD_FACTOR = 85;
 
 ptrdiff_t wang_integer_hash(ptrdiff_t key) {

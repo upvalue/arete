@@ -99,8 +99,6 @@
 
 ;; Environment machinery
 
-
-
 (define (env-make parent)
   (define vec (make-vector))
   (vector-append! vec parent)
@@ -211,18 +209,6 @@
 
              (env-lookup env b)))
          (env-lookup (rename-env a) (rename-expr a)))))
-     #;(print "Env-compare2" a b)
-     #;(if (eq? b 'unquote)
-       (begin
-         (print (car (env-lookup (rename-env a) (rename-expr a))))
-         (print "ENV@:" (car (env-lookup env b)))))
-
-     #|(and 
-       ;; if they are the same symbol
-       (eq? (rename-expr a) b)
-       ;; and their environments resolve to the same thing
-       (eq? (car (env-lookup (rename-env a) (rename-expr a)))
-            (car (env-lookup env b)))))|#;
 
     (else #f)))
 
@@ -266,7 +252,6 @@
 
     (if (fx< len 2)
       (raise-source x 'expand "define is missing first argument (name)" (list x)))
-;      (raise 'expand "define is missing first argument (name)" (list x)))
 
     (if (fx< len 3)
       (raise-source x 'expand "define is missing second argument (value)" (list x)))
@@ -301,22 +286,6 @@
 
     (env-define env name 'variable)
 
-    #|
-    (if (table? env)
-      (begin
-        ;; Table-level renames
-        (if (rename? name)
-          (begin (rename-gensym! name) (vector-append! (table-ref env "module-renames" name)))
-          ;; If this is not a rename, it may need to be exported
-          (begin
-            (if (table-ref env "module-export-all")
-              (table-set! (table-ref env "module-exports") name #t))))
-        ;; TODO. Could probably use string-append here instead of relying on env-resolve to fail.
-        (env-define env name (env-resolve env name) #f)
-        (set! name (env-resolve env name)))
-      (env-define env name 'variable))
-    |#
-
     (set! result (list-source x (make-rename #f 'define)
                               ;; We'll replace name with the actual gensym here if there is one
                               (env-resolve env name)#;(list-ref (env-lookup env name) 1)
@@ -337,6 +306,174 @@
   (lambda (x env)
     (cons-source x (car x) (expand-map (cdr x) env))))
 
+;;;;; Module machinery
+(define (module-spec->string src lst . str)
+  (if (null? lst)
+    (car str)
+    (if (or (not (pair? lst)) (not (symbol? (car lst))))
+      (raise-source src 'expand "module specification must be a proper list of symbols" (list lst))
+      (module-spec->string
+        src
+        (cdr lst)
+        (if (not (null? str)) (string-append (car str) "#" (symbol->string (car lst))) (symbol->string (car lst)))
+        ))))
+
+
+(define (module-make name)
+  (define mod (make-table))
+
+  (table-set! mod "module-stage" 1)
+  (table-set! mod "module-name" name)
+  (table-set! mod "module-exports" (make-table))
+
+  mod)
+
+;; Check a list of specifiers
+(define (module-check-spec src name syms)
+  (for-each
+    (lambda (x)
+      (if (not (symbol? x))
+        (raise-source src 'expand (print-string "arguments to import specifier" name " must all be symbols") (list syms))))
+    syms))
+
+;; How this works.
+;; Basically, when it encounters the actual module specifier like say (sdl)
+;; It will tell the runtime to load the module
+;; Then it converts its exported bindings into a list of pairs correlating names with values
+
+;; Then the modifiers only, prefix, rename and except are applied to this list with map & filter
+(define (assq obj alist)
+  (if (null? alist)
+    #f
+    (if (eq? (caar alist) obj)
+      (car alist)
+      (assq obj (cdr alist)))))
+
+(define (module-import-eval spec)
+  (if (not (list? spec))
+    (raise-source spec 'expand "module specifier must be a list" (list spec)))
+
+  (define kar (car spec))
+
+  (cond
+    ((eq? kar 'prefix)
+     (begin
+       (if (not (symbol? (caddr spec)))
+         (raise-source (cddr spec) 'expand "module prefix must be a symbol" (list spec)))
+       (if (not (fx= (length spec) 3))
+         (raise-source (cdddr spec) 'expand "prefix specifier must have exactly three elements" (list spec)))
+       (define pfx-str (symbol->string (caddr spec)))
+       (map
+         (lambda (cell)
+           (if (pair? cell)
+             (cons (string->symbol (string-append pfx-str (symbol->string (car cell)))) (cdr cell))
+             #f))
+         (module-import-eval (cadr spec))))
+    )
+    ((eq? kar 'only)
+     (begin
+       (define allowed (cddr spec))
+       (module-check-spec spec 'only allowed)
+       (filter
+         (lambda (cell)
+           (and cell (memq (car cell) allowed)))
+         (module-import-eval (cadr spec)))
+     )
+    )
+    ((eq? kar 'except)
+     (begin
+       (define forbidden (cddr spec))
+       (module-check-spec spec 'except forbidden)
+       (filter
+         (lambda (cell) (and cell (not (memq (car cell) forbidden))))
+         (module-import-eval (cadr spec)))))
+
+    ((eq? kar 'rename)
+     (begin
+       (define renames (cddr spec))
+       (for-each
+         (lambda (x)
+           (if (or (not (list? x)) (not (fx= (length x) 2)) (not (symbol? (car x))) (not (symbol? (cadr x))))
+             (raise-source spec 'expand (print-string "arguments to rename specifier must all be lists with two symbols") (list spec))))
+         renames)
+       (map
+         (lambda (cell)
+           (if cell
+             (begin
+               (define check (assq (car cell) renames))
+               (if check
+                 (cons (cadr check) (cdr cell))
+                 cell))
+             cell))
+         (module-import-eval (cadr spec)))))
+
+    (else
+      ;; This is an actual module, load it if necessary and import it.
+      (begin
+        (define module-name (module-spec->string spec spec))
+        (define module (table-ref module-table module-name))
+        (table-map
+          (lambda (k v)
+            (if (symbol? k)
+              (cons k v)
+              #f))
+          module)))))
+
+(define (module-import! mod1 mod2-spec)
+  (define mod2-name (module-spec->string mod2-spec mod2-spec))
+  (define mod (table-ref module-table mod2-name))
+
+  (print "importing" mod2-name "to" (table-ref mod1 "module-name"))
+
+  #t)
+
+(define (expand-import mod spec)
+  (define imports (filter (lambda (v) v) (module-import-eval spec)))
+
+  (print imports)
+  #t)
+
+(define (expand-module-decl mod x env)
+  (define kar (car x))
+
+  (cond
+    ((eq? kar 'import)
+
+     (for-each
+       (lambda (x)
+         (expand-import mod x))
+       (cdr x)))
+  ) ;cond
+)
+
+(define (expand-module x env)
+  (define len (length x))
+  (if (not (fx> len 1))
+    (raise-source x 'expand "module requires at least one argument (module name specifier)" (list x)))
+
+  ;; module fart...
+  (define name (module-spec->string (cdr x) (cadr x)))
+  (define module (make-table))
+
+  (if (table-ref module-table name)
+    (begin
+      (print "raising exception")
+      (raise-source x 'expand (print-string "module" (cadr x) "encountered twice") (list x))))
+
+  (table-set! module-table name module)
+  (table-set! module "module-name" name)
+  (table-set! module "module-stage" 1)
+
+  (set-top-level-value! '*current-module* module)
+
+  (for-each
+    (lambda (x)
+      (expand-module-decl module x env))
+    (cddr x))
+
+  unspecified
+)
+
 ;; Expand an application. Could be a special form, a macro, or a normal function application
 (define expand-apply
   (lambda (x env)
@@ -352,6 +489,7 @@
     ;; Check for special syntactic forms
     (if syntax?
       (cond
+        ((eq? kar 'module) (expand-module x env))
         ((eq? kar 'define) (expand-define x env))
         ((eq? kar 'define-syntax) (expand-define-syntax x env))
         ((or (eq? kar 'letrec-syntax) (eq? kar 'let-syntax)) (expand-let-syntax x env))
@@ -455,9 +593,7 @@
       (if (table-ref env "module-export-all")
         (table-set! (table-ref env "module-exports") name #t)))
 
-    (pretty-print body)
     (set! expanded-body (expand body env))
-    (pretty-print expanded-body)
     (set! fn (eval expanded-body #f))
 
     (if (not (procedure? fn))
@@ -598,12 +734,20 @@
       (expand-cond-clause x env (cadr x) (cddr x)))))
 
 ;; Install expander
-(set-top-level-value! '*current-module* #f)
-(set-top-level-value! 'expander expand-toplevel)
+(define module-table (make-table))
 
-(set-top-level-value! '*core-module* (make-table))
-(table-set! (top-level-value '*core-module*) "module-name" "arete")
-(table-set! (top-level-value '*core-module*) "module-exports" (make-table))
+(define *core-module* (module-make "arete"))
+
+(table-set! module-table "arete" *core-module*)
+
+(define test (module-make "test"))
+
+(table-set! module-table "test" test)
+
+(table-set! test 'car 'car)
+(table-set! test 'cdr 'cdr)
+
+(define *current-module* *core-module*)
 
 ;; populate core module
 (top-level-for-each
@@ -615,7 +759,14 @@
          (table-set! *core-module* k k))
        (module-qualify *core-module* k)))))
 
-(pretty-print *core-module*)
+(set-top-level-value! 'expander expand-toplevel)
 
-(set-top-level-value! '*current-module* *core-module*)
+;; Basic module support
+
+;; (module (module1))
+;; (define hello-world)
+
+#;(module (module1)
+        (import (test)))
+
 

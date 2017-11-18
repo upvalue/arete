@@ -410,10 +410,13 @@ Value State::eval_apply_function(Value fn, size_t argc, Value* argv) {
 
   size_t actual_args = arity;
 
+  // Handle rest arguments
   if(argc > arity) {
     tmp = temps_to_list(arity);
     temps[arity] = tmp;
     actual_args++;
+  } else {
+    temps.push_back(C_NIL);
   }
 
   new_env = make_env(fn.function_parent_env(), actual_args);
@@ -449,6 +452,7 @@ tail_call:
   AR_FRAME(this, frame.env, frame.fn_name, body, exp, cell, tmp);
 
   while(single || body.heap_type_equals(PAIR)) {
+    EVAL_CHECK(exp, exp);
     if(single) { 
       exp = cell = body;
       single = false;
@@ -558,7 +562,6 @@ tail_call:
                 body = exp;
                 continue;
               } else {
-                
                 goto restart_exp;
               }
 
@@ -700,10 +703,10 @@ tail_call:
                 }
                 args = args.cdr();
               }
-            }
 
-            vector_append(frame2.env, fn.function_rest_arguments());
-            vector_append(frame2.env, rest_args_head);
+              vector_append(frame2.env, rest_args_name);
+              vector_append(frame2.env, rest_args_head);
+            }
 
             new_body = fn.function_body();
 
@@ -721,6 +724,8 @@ tail_call:
                   new_body.car().heap_type_equals(PAIR) ? new_body.car() : new_body);
                 new_body = new_body.cdr();
               }
+
+              EVAL_CHECK(tmp, exp);
 
               exp = tmp;
               continue;

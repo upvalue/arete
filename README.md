@@ -22,5 +22,6 @@ Arete uses the C++ STL, and optionally the linenoise-ng library from ArangoDB.
 
 # R?RS/SRFI compliance.
 
-Arete currently aims at R5RS compliance minus continuations. It is probable that R7RS modules will be added in the near
-future. 
+Arete currently supports some features of R5RS and R7RS. Full compliance is not the primary goal at present, but I have
+tried to hew to the standards. If you miss something, open an issue :)
+
