@@ -5,7 +5,7 @@ OBJS=src/builtins.obj src/files.obj src/lib-sdl.obj src/platform.obj src/strings
 
 # Note: Stack size has to be massively increased for bootstrap to work.
 LDFLAGS = /nologo /Stack:8000000
-CFLAGS = /Ivendor\linenoise /nologo /W3 /D_CRT_SECURE_NO_WARNINGS /DARETE_DEV  /DARETE_GC_STRATEGY="(ARETE_GC_SEMISPACE)" /DARETE_LOG_TAGS="(ARETE_LOG_TAG_VM)" 
+CFLAGS = /Ivendor\linenoise /nologo /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /DARETE_DEV  /DARETE_GC_STRATEGY="(ARETE_GC_SEMISPACE)" /DARETE_LOG_TAGS="(ARETE_LOG_TAG_VM)"  /EHsc
 
 .cpp.obj:
 	cl $(CFLAGS) /I . /Fo$@ /c $<

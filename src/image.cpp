@@ -334,7 +334,7 @@ struct ImageReader {
 
           sweep += v.size;
           state.gc.block_cursor += v.size;
-          fseek(f, v.size, SEEK_CUR);
+          fseek(f, (long)v.size, SEEK_CUR);
           continue;
         }
       }

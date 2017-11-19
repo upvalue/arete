@@ -32,7 +32,7 @@ AR_DEFUN("char->integer", fn_char_to_integer, 1);
 Value fn_integer_to_char(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "integer->char";
   AR_FN_EXPECT_TYPE(state, 0, argv, FIXNUM);
-  return state.make_char(argv[0].fixnum_value());
+  return state.make_char((char)argv[0].fixnum_value());
 }
 AR_DEFUN("integer->char", fn_integer_to_char, 1);
 

@@ -240,12 +240,12 @@ int State::enter_cli(int argc_, char* argv[]) {
   }
 
   // Find Scheme *command-line* arguments after --
-  for(size_t i = 1; i != argc; i++) {
+  for(unsigned i = 1; i != argc; i++) {
     if(rest.compare(argv[i]) == 0) {
 
       Value lst = C_NIL, tmp;
       AR_FRAME(*this, lst, tmp);
-      for(size_t j = argc - 1; j != i; j--) {
+      for(unsigned j = argc - 1; j != i; j--) {
         tmp = make_string(argv[j]);
         lst = make_pair(tmp, lst);
       }

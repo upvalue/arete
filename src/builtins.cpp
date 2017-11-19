@@ -913,7 +913,7 @@ Value fn_register_record_type(State& state, size_t argc, Value* argv) {
   // Should string_data return char* ?
   std::string cname(name.string_data());
 
-  size_t tag = state.register_record_type(cname, field_count, data.fixnum_value(), fields, parent);
+  size_t tag = (size_t)state.register_record_type(cname, (unsigned)field_count, (unsigned)data.fixnum_value(), fields, parent);
 
   return state.globals[tag];
 }
@@ -961,7 +961,7 @@ Value fn_record_set(State& state, size_t argc, Value* argv) {
 
   _AR_FN_EXPECT_RECORD_ISA(state, argv[0], argv[1]);
 
-  argv[1].record_set(argv[2].fixnum_value(), argv[3]);
+  argv[1].record_set((unsigned)argv[2].fixnum_value(), argv[3]);
 
   return C_UNSPECIFIED;
 }
@@ -975,7 +975,7 @@ Value fn_record_ref(State& state, size_t argc, Value* argv) {
 
   _AR_FN_EXPECT_RECORD_ISA(state, argv[0], argv[1]);
 
-  return argv[1].record_ref(argv[2].fixnum_value());
+  return argv[1].record_ref((unsigned)argv[2].fixnum_value());
 }
 AR_DEFUN("record-ref", fn_record_ref, 3);
 
@@ -1077,11 +1077,11 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   VMFunction* vfn = static_cast<VMFunction*>(state.gc.allocate(VMFUNCTION, size));
 
   vfn->constant_count = constant_count;
-  vfn->min_arity = rec.record_ref(9).fixnum_value();
-  vfn->max_arity = rec.record_ref(10).fixnum_value();
-  vfn->bytecode_size = bytecode_size;
-  vfn->stack_max = rec.record_ref(6).fixnum_value();
-  vfn->local_count = rec.record_ref(5).fixnum_value();
+  vfn->min_arity = (unsigned)rec.record_ref(9).fixnum_value();
+  vfn->max_arity = (unsigned)rec.record_ref(10).fixnum_value();
+  vfn->bytecode_size = (unsigned)bytecode_size;
+  vfn->stack_max = (unsigned)rec.record_ref(6).fixnum_value();
+  vfn->local_count = (unsigned)rec.record_ref(5).fixnum_value();
   vfn->name = rec.record_ref(0);
   vfn->free_variables = static_cast<Blob*>(free_vars_blob.heap);
   vfn->sources = static_cast<Blob*>(sources_blob.heap);

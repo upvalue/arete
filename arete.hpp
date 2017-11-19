@@ -119,7 +119,7 @@
 #define ARETE_LOG_TAG_DEFUN (1 << 4)
 
 #define AR_POSIX 0
-#define AR_WINDOWs 1
+#define AR_WINDOWS 1
 
 #ifdef _MSC_VER
 # define AR_OS AR_WINDOWS
@@ -1515,7 +1515,7 @@ struct GCCommon {
 
   // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) == 16,
   // and align(8, 247) == 248 
-  static size_t align(size_t boundary, size_t value) {
+  static size_t align(int boundary, size_t value) {
     return (size_t)((value + (boundary - 1)) & -boundary);
   }
 };

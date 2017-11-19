@@ -46,7 +46,7 @@ unsigned State::register_source(const std::string& path, std::istream& is) {
   source_names.push_back(path);
   source_contents.push_back(contents.str());
 
-  return source_names.size() - 1;
+  return (unsigned)(source_names.size() - 1);
 }
 
 static bool is_symbol_initial(char c) {

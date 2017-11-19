@@ -77,7 +77,7 @@ namespace arete {
  * Like SourceLocation, but includes a code offset
  */
 struct VMSourceLocation {
-  size_t code, source, line, begin, length;
+  unsigned code, source, line, begin, length;
 };
 
 std::ostream& operator<<(std::ostream& os, const VMSourceLocation& loc) {
@@ -350,7 +350,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   // Initialize local variables
   memcpy(f.locals, argv, argc * sizeof(Value));
 
-  for(unsigned i = argc; i < f.fn->local_count; i++) { 
+  for(unsigned i = (unsigned)argc; i < f.fn->local_count; i++) { 
     f.locals[i] = C_UNSPECIFIED;
   }
 

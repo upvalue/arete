@@ -56,7 +56,7 @@ struct PrintState {
 
   bool try_pretty;
   bool print_shared;
-  size_t shared_objects_begin, shared_objects_i;
+  unsigned shared_objects_begin, shared_objects_i;
   print_table_t* printed;
   unsigned printed_count;
   size_t row_width;
@@ -302,17 +302,17 @@ void State::print_src_line(std::ostream& os, const SourceLocation& src, const ch
 
     while(!ss.eof()) {
       if(seek_line == src.line) {
-        unsigned line_position = ss.tellg();
+        unsigned line_position = (unsigned)ss.tellg();
         std::getline(ss, source_line);
         os << color << source_line << ARETE_COLOR_RESET << std::endl;
 
-        size_t i, j;
+        unsigned i, j;
         // Print whitespace for each char in source line until the beginning of this element
         for(i = line_position, j = 0; i < src.begin; i++, j++) {
           os << ' ';
         }
 
-        unsigned limit = j + src.length;
+        unsigned limit = (unsigned)(j + src.length);
         // If end_position is 0, we'll highlight the whole line this error occurred on.
         // Otherwise, try to highlight specific errors eg.
         // (hello #bad)
@@ -587,7 +587,7 @@ static Value pretty_print_clear_mark(State& state, Value v, PrintState& ps) {
     (void) pretty_print_clear_mark(state, v.car(), ps);
     (void) pretty_print_clear_mark(state, v.cdr(), ps);
   } else if(v.type() == RECORD) {
-    for(size_t i = 0; i != v.record_field_count(); i++) {
+    for(unsigned i = 0; i != v.record_field_count(); i++) {
       (void) pretty_print_clear_mark(state, v.record_ref(i), ps);
     }
   } else if(v.type() == VECTOR) {
@@ -649,7 +649,7 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
     (void) pretty_print_mark(state, v.car(), ps);
     (void) pretty_print_mark(state, v.cdr(), ps);
   } else if(v.type() == RECORD) {
-    for(size_t i = 0; i != v.record_field_count(); i++) {
+    for(unsigned i = 0; i != v.record_field_count(); i++) {
       (void) pretty_print_mark(state, v.record_ref(i), ps);
     }
   } else if(v.type() == VECTOR) {
