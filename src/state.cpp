@@ -45,6 +45,7 @@ void State::boot_common() {
   set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
   set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
   set_global_value(G_STR_MODULE_NAME, make_string("module-name"));
+  set_global_value(G_STR_MODULE_EXPORTS, make_string("module-exports"));
   
   booted = true;
 }
@@ -75,13 +76,17 @@ void State::boot() {
     "*current-input-port*",
     "*current-output-port*",
     // modules
+    "module-table",
     "*current-module*",
+    "*push-module*",
     "*core-module*",
+    // module fields
     "module-name",
+    "module-exports",
   };
 
   AR_ASSERT((sizeof(_symbols) / sizeof(const char*)) == G_END &&
-    "did you forget to change _symbols to match enum Global?");
+    "did you forget to change _symbols to match enum Global? (or miss a comma when you did? ;)");
 
     // TODO: This is suitably confusing and there should probably be multiple vectors:
     // for symbols used directly, for symbols used to store values, and for other values (strings)
@@ -101,6 +106,9 @@ void State::boot() {
     globals.push_back(s);
   }
 
+  boot_common();
+
+  set_global_value(G_MODULE_TABLE, make_table());
 
   load_builtin_functions();
   load_file_functions();
@@ -116,8 +124,6 @@ void State::boot() {
   set_global_value(G_TCO_ENABLED, C_TRUE);
 
   register_feature("arete");
-
-  boot_common();
 
   // Uncomment to see allocations after boot
   // gc.allocations = 0;

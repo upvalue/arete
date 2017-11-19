@@ -356,6 +356,12 @@ Value fn_load_file(State& state, size_t argc, Value* argv) {
   mod = state.get_global_value(State::G_CURRENT_MODULE);
   res = state.load_file(path);
   state.set_global_value(State::G_CURRENT_MODULE, mod);
+  // Allow *push-module* to override the current module. This is so the expander can set up
+  // and install the user module in which interaction happens by default
+  if(state.get_global_value(State::G_PUSH_MODULE) != C_UNDEFINED) {
+    state.set_global_value(State::G_CURRENT_MODULE, state.get_global_value(State::G_PUSH_MODULE));
+    state.set_global_value(State::G_PUSH_MODULE, C_UNDEFINED);
+  }
   return res;
 }
 AR_DEFUN("load", fn_load_file, 1);
@@ -369,6 +375,7 @@ Value fn_load_module(State& state, size_t argc, Value* argv) {
 
   //return state.load_file(path);
 
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("load-module", fn_load_module, 1);
 

@@ -1700,10 +1700,13 @@ struct State {
     G_CURRENT_INPUT_PORT,
     G_CURRENT_OUTPUT_PORT,
     // Modules
+    G_MODULE_TABLE,
     G_CURRENT_MODULE,
+    G_PUSH_MODULE,
     G_CORE_MODULE,
     // Strings
     G_STR_MODULE_NAME,
+    G_STR_MODULE_EXPORTS,
     G_END
   };
 
@@ -1822,6 +1825,10 @@ struct State {
    * @param size_log2 log2(size_log2) = memory usage of the hash table
    */
   Value make_table(size_t size_log2 = 4);
+
+  Value make_module(const std::string& name);
+  void module_define(Value module, const std::string& key, Value value);
+
   // Strings
   
   /**
@@ -2263,6 +2270,7 @@ struct DefunGroup {
 
   void install(State& state);
   void install_closure(State& state, Value closure);
+  void install_module(State& state, const std::string& name, Value closure);
 };
 
 struct Defun {

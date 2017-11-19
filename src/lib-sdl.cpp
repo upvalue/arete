@@ -453,7 +453,10 @@ Value load_sdl(State& state) {
   AR_FRAME(state, module);
 
   // Install functions
-  sdl_functions.install_closure(state, module);
+  // creates a table
+  // sdl_functions.install_closure(state, "sdl", module);
+  sdl_functions.install_module(state, "sdl", module);
+  //sdl_functions.install_closure(state, module);
 
   return C_UNSPECIFIED;
 }

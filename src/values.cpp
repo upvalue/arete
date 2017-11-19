@@ -321,6 +321,80 @@ void DefunGroup::install_closure(State& state, Value closure) {
   }
 }
 
+Value State::make_module(const std::string& name) {
+  Value key, val;
+  Value module = make_table();
+  
+  // Create "module-stage" field and mark module as fully expanded
+  key = make_string("module-stage");
+  table_set(module, key, Value::make_fixnum(2));
+
+  // Create "module-exports" field
+  val = make_table();
+  key = make_string("module-exports");
+  table_set(module, get_global_value(G_STR_MODULE_EXPORTS), val);
+
+  // Create "module-name" field and store module name
+  AR_FRAME(this, key, val, module);
+  key = make_string("module-name");
+  val = make_string(name);
+
+  // Register module in module table
+  table_set(get_global_value(G_MODULE_TABLE), val, module);
+
+  pretty_print(std::cout, module);
+  return module;
+}
+
+void State::module_define(Value module, const std::string& ckey, Value value) {
+  AR_TYPE_ASSERT(module.heap_type_equals(TABLE));
+
+  Value key, exports;
+  AR_FRAME(this, module, key, exports, value);
+
+  key = make_string("module-exports");
+  bool hashable;
+  exports = table_get(module, key, hashable);
+  
+  key = make_string(ckey);
+
+  table_set(exports, key, value);
+}
+
+void DefunGroup::install_module(State& state, const std::string& cname, Value closure) {
+  Value module, cfn, sym, name, exports;
+  bool found;
+  AR_FRAME(state, module, closure, exports, cfn, sym, name);
+  module = state.make_module(cname);
+
+  exports = state.table_get(module, state.get_global_value(State::G_STR_MODULE_EXPORTS), found);
+  AR_ASSERT(found);
+
+
+  for(size_t i = 0; i != data.size(); i++) {
+    const Defun* defun = data.at(i);
+
+    std::ostringstream qname;
+
+    name = state.make_string(defun->fn_name);
+    cfn = state.make_c_function(name, closure, (c_function_t) defun->fn, defun->min_arity,
+      defun->max_arity, defun->var_arity);
+
+    name = state.get_symbol(name);
+
+    qname << "##" << cname << "#" << name;
+
+    sym = state.get_symbol(qname.str());
+    sym.set_symbol_value(cfn);
+
+    bool hashable;
+
+    state.table_set(module, name, sym);
+    state.table_set(exports, name, name);
+  }
+  state.pretty_print(std::cout, module);
+}
+
  Value State::make_c_function(Value name, Value closure, c_function_t addr, size_t min_arity,
     size_t max_arity, bool variable_arity) {
   if(max_arity == 0)
@@ -328,7 +402,10 @@ void DefunGroup::install_closure(State& state, Value closure) {
   AR_FRAME(this, name, closure);
   CFunction *cfn = static_cast<CFunction*>(gc.allocate(CFUNCTION, sizeof(CFunction)));
   cfn->name = name;
-  cfn->closure = closure;
+  if(closure != C_FALSE) {
+    cfn->closure = closure;
+    cfn->set_header_bit(Value::CFUNCTION_CLOSURE_BIT);
+  }
   cfn->addr = addr;
   cfn->min_arity = min_arity;
   cfn->max_arity = max_arity;
@@ -343,7 +420,6 @@ void State::defun_core_closure(const std::string& cname, Value closure, c_closur
   AR_FRAME(this, cfn, sym, name, closure);
   name = make_string(cname);
   cfn = make_c_function(name, closure, (c_function_t)addr, min_arity, max_arity, variable_arity);
-  cfn.heap->set_header_bit(Value::CFUNCTION_CLOSURE_BIT);
 
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);

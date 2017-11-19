@@ -994,11 +994,13 @@
 (define (pull-up-bootstraps)
   (time-function "bootstrapped!"
     (lambda () 
-      (print ";; compiled"
       (top-level-for-each
         (lambda (k v)
+          ;; This is pretty shoddy, but since the module system currently just creates duplicates of every function
+          ;; defined before it is installed, we'll compile all functions in the module system (as well as the toplevel
+          ;; COMPILER and EXPANDER which do not have a module-level definition)
 
-          (if (and (eq? (value-type v) 13) (not (memq k '(define-record))))
+          (if (and (eq? (value-type v) 13) (or (eq? k 'compiler) (eq? k 'expander) (eqv? (string-ref (symbol->string k) 1) #\#)))
             (begin
               ;; TODO duplicate compile of qualified-name functionality
 
@@ -1007,7 +1009,12 @@
                 )
               
               ))))
-      "functions")
+      ;; After which point we'll just update the bindings.
+      (top-level-for-each
+        (lambda (k v)
+          (if (and (eq? (value-type v) 13))
+            (begin
+            (set-top-level-value! k (top-level-value (string->symbol (string-append "##arete#" (symbol->string k)))))))))
 )))
 
 (set-top-level-value! 'compiler compile-toplevel)

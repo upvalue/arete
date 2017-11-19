@@ -387,8 +387,6 @@ static bool pretty_print_shared_obj(State& state, std::ostream& os, Value v, Pri
 static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintState& ps) {
   std::ostringstream os2;
 
-  // std::cout << "indenty" << ps.indent << std::endl;
-
   size_t start_indent1 = ps.indent;
   size_t start_row_width = ps.row_width;
   ps.row_width -= ps.indent;
@@ -655,7 +653,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
   ps.indent_level = 2;
   ps.row_width = 120;
   ps.indent = 0;
-  ps.table_max = 5;
+  //ps.table_max = 5;
 
   ps.printed = printed;
   // Right now printing can't return an exception, but it might if we allow users to extend this

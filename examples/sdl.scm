@@ -1,5 +1,7 @@
 ;; sdl.scm - minimal sdl example that runs on the interpreter
 
+;; (import (prefix (sdl) sdl:))
+
 (sdl:init 640 480)
 
 (define event (sdl:make-event))

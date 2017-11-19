@@ -5,10 +5,9 @@
 
 (time-function "full expand & compile on VM"
   (lambda ()
-    (define (compile-file file)
-      (compile-toplevel (expand-toplevel (slurp-file file) (top-level-value '*core-module*))))
+    (define (compile-file file) (compile-toplevel (expand-toplevel (slurp-file file) (top-level-value '*core-module*))))
 
     (compile-file "expand.scm")
-    (compile-file "syntax.scm")
-    (compile-file "scheme/compiler.scm")
+    ;(compile-file "syntax.scm")
+    ;(compile-file "scheme/compiler.scm")
 ))

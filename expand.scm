@@ -1,6 +1,4 @@
-;; expand.scm - basic functionality, expander
-
-;; syntax.scm - expander, basic syntax (eg let, let*, structs)
+;; expand.scm - most basic boot functionality, macroexpansion & modules
 
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
@@ -16,8 +14,17 @@
 ;; How can we propagate information about where a lambda was introduced through the expander to the compiler?
 
 ;; TODO:
-;;  fix else
-;;  module syntax and functionality.
+
+;; TODO: USER module in which interaction-level stuff happens. Automatically imports (arete).
+;; TODO: Fix redundant compilation, VM primitive compilation.
+;; TODO: C++-side module creation and put SDL primitives into module
+
+;; TODO Dequalify names when they are used in errors. e.g. x => ##module#x becomes 
+;;   reference to undefined variable 'x' in module (module)
+
+;; TODO disallow inter-module set!
+
+
 
 (define caar (lambda (x) (car (car x))))
 (define cadr (lambda (x) (car (cdr x))))
@@ -344,12 +351,19 @@
 (define (module-load src name)
   (define mod (table-ref module-table name))
   (if mod
-    ;; TODO check cyclic imports
     (begin
       (if (eq? (table-ref mod "module-stage") 1)
         (raise-source src 'expand "cyclic import" (list name)))
       mod)
     (begin
+      ;; thing#asdf 
+      ;; becomes thing/asdf
+      ;; then we try load path + extension combos
+      ;; ./thing/asdf.sld
+      ;; ./thing/asdf.scm
+      ;; etc
+
+
       (define file (string-append name ".scm"))
       (load file)
       (if (not (table-ref module-table name))
@@ -363,7 +377,14 @@
 ;; Basically, when it encounters the actual module specifier like say (sdl)
 ;; It will load the module and return all its bindings in the form of a list correlating names with values
 
-;; The modifiers only, prefix, rename and except then modify this list with map & filter
+;; The modifiers only, prefix, rename and except then modify that list with map & filter
+
+;; Filter a list of imports. For only/except
+(define (module-import-filter spec name check)
+  (define syms (cddr spec))
+  (module-check-spec spec name syms)
+  (filter (lambda (cell) (check cell syms)) (module-import-eval (cadr spec))))
+
 (define (module-import-eval spec)
   (if (not (list? spec))
     (raise-source spec 'expand "module specifier must be a list" (list spec)))
@@ -386,23 +407,9 @@
          (module-import-eval (cadr spec))))
     )
     ((eq? kar 'only)
-     (begin
-       (define allowed (cddr spec))
-       (module-check-spec spec 'only allowed)
-       (filter
-         (lambda (cell)
-           (and cell (memq (car cell) allowed)))
-         (module-import-eval (cadr spec)))
-     )
-    )
+     (module-import-filter spec 'only (lambda (cell allowed) (and cell (memq (car cell) allowed)))))
     ((eq? kar 'except)
-     (begin
-       (define forbidden (cddr spec))
-       (module-check-spec spec 'except forbidden)
-       (filter
-         (lambda (cell) (and cell (not (memq (car cell) forbidden))))
-         (module-import-eval (cadr spec)))))
-
+     (module-import-filter spec 'except (lambda (cell forbidden) (and cell (not (memq (car cell) forbidden))))))
     ((eq? kar 'rename)
      (begin
        (define renames (cddr spec))
@@ -423,7 +430,7 @@
          (module-import-eval (cadr spec)))))
 
     (else
-      ;; This is an actual module, load it if necessary and import it.
+      ;; This is an actual module specifier (or should be), load it if necessary and import it.
       (begin
         (define module-name (module-spec->string spec spec))
         (define mod (module-load spec module-name))
@@ -431,7 +438,6 @@
           (lambda (k v)
             (cons k (table-ref mod v)))
           (table-ref mod "module-exports"))
-      
       ))))
 
 (define (module-import! mod1 mod2-spec)
@@ -450,8 +456,8 @@
       (table-set! mod (car k) (cdr k)))
     imports)
 
-  (print imports)
-  #t)
+  ;(print imports)
+  unspecified)
 
 (define (expand-toplevel-import x env)
   (if (not (and (list? x) (fx= (length x) 2)))
@@ -483,8 +489,6 @@
              (table-ref mod name)
              (module-qualify mod value)))
 
-         (print "export: " name value)
-
          (table-set! (table-ref mod "module-exports") name value))
      (cdr x)))
 
@@ -502,7 +506,6 @@
 
   (if (table-ref module-table name)
     (begin
-      (print "raising exception")
       (raise-source x 'expand (print-string "module" (cadr x) "encountered twice") (list x))))
 
   (define mod (module-make name))
@@ -784,7 +787,7 @@
       (expand-cond-clause x env (cadr x) (cddr x)))))
 
 ;; Set up module system
-(define module-table (make-table))
+;(define module-table (make-table))
 
 (define *core-module* (module-make "arete"))
 
@@ -804,7 +807,7 @@
 
 (define *current-module* *core-module*)
 
-;; populate core module
+;; populate core module with already-defined things
 (top-level-for-each
   (lambda (k v)
     (if (or (procedure? v) (memq k '(unspecified)))
@@ -814,6 +817,16 @@
          (table-set! *core-module* k k))
        (module-qualify *core-module* k)))))
 
+(define *user-module* (module-make "user"))
+
+(table-set! module-table "user" *user-module*)
+(table-set! *user-module* "module-export-all" #t)
+(table-set! *user-module* "module-stage" 2)
+
+(expand-import *user-module* '(arete))
+
+(set-top-level-value! '*push-module* *user-module*)
+(set-top-level-value! '*current-module* *core-module*)
 ;; Install expander
 (set-top-level-value! 'expander expand-toplevel)
 
