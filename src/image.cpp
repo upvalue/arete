@@ -14,6 +14,10 @@
 // TODO: It would be great to get rid of the function_id_to_ptr stuff. The problem is we don't know
 // where all c function pointers will be stored in a way such that we can restore them easily.
 
+// It should be possible to associate functions with names rather than pointers
+
+// TODO: Why don't we just insist that each C function has a unique name?
+
 #include <assert.h>
 
 #include "arete.hpp"

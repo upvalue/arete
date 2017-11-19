@@ -427,7 +427,7 @@ void timer_finalizer(State& state, Value timer) {
 
 Defun _timer_finalizer((void*) timer_finalizer);
 
-Value load_sdl(State& state) {
+void load_sdl(State& state) {
   // Register record types
   size_t sdl_module_tag = state.register_record_type("#<sdl:module>", 0, sizeof(SDLModuleData));
 
@@ -455,8 +455,6 @@ Value load_sdl(State& state) {
   // Install functions
   // creates a table
   sdl_functions.install_module(state, "sdl", module);
-
-  return C_UNSPECIFIED;
 }
 
 }

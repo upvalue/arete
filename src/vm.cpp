@@ -6,6 +6,8 @@
 // e.g. after a function application there should probably be a simple way to save a position
 // on the stack and refer to it later.
 
+// TODO: Memory usage could be reduced by actual bytecode, but this would increase complexity
+
 #include "arete.hpp"
 
 // TODO: Non C-stack improvement. There's no need to malloc every function call. Rather we should
@@ -406,7 +408,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         f.stack[f.stack_i++] = sym.symbol_value();
         if(f.stack[f.stack_i - 1] == C_UNDEFINED) {
           std::ostringstream os;
-          os << "reference to undefined global " << sym;
+          os << "reference to undefined variable " << symbol_dequalify(sym);
           f.exception = eval_error(os.str());
           goto exception;
         }
@@ -978,7 +980,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       VMSourceLocation vmloc = sources.blob_ref<VMSourceLocation>(0);
       for(i = 1; i < sources.blob_length() / 5; i++) {
         VMSourceLocation vmloc2 = sources.blob_ref<VMSourceLocation>(i);
-        if(vmloc2.code > code_offset) {
+        if(vmloc2.code >= code_offset) {
           break;
         }
         vmloc = vmloc2;

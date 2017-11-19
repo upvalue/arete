@@ -402,7 +402,7 @@
       (if (OpenFn/toplevel? search-fn)
         (begin
           (unless (or (top-level-bound? x) (table-ref (OpenFn/env search-fn) x))
-            (print-source src "Warning: reference to undefined global variable" x))
+            (print-source src "Warning: reference to undefined variable" (symbol-dequalify x)))
           (cons 'global x))
         (aif (table-ref (OpenFn/env search-fn) x)
           (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
@@ -498,9 +498,11 @@
   ;; And it's finally done
   (compile-finish sub-fn)
 
-  ;; Now emit an argument to push this function onto the stack
-  (when fn
-    (let ((procedure (OpenFn->procedure sub-fn)))
+  (let ((procedure (OpenFn->procedure sub-fn)))
+    ;; This can be called without a higher function in the case that we're bootstrapping and recompiling the whole
+    ;; heap. If so, we'll just return the compiled procedure, if not, we'll emit some code to push this function
+    ;; onto the stack and to create a closure, if necessary
+    (when fn
       (emit fn 'push-constant (register-constant fn procedure))
 
       ;; Finally, if this function encloses free variables, we emit an instruction
@@ -514,10 +516,8 @@
                 (if (Var/upvalue? var)
                   (emit fn 'words 1 (Var/idx var))
                   (emit fn 'words 0 (Var/free-variable-id var))))
-              (loop (fx+ i 1))))))
-      procedure))
-
-  sub-fn
+              (loop (fx+ i 1)))))))
+      procedure)
 )
 
 (define (compile-define fn x tail?)
@@ -531,7 +531,8 @@
 
   (let ((result (compile-expr fn (list-ref x 2) (list-tail x 2) tail?)))
     (when (procedure? result)
-      (set-vmfunction-name! result name)))
+      (begin
+        (set-vmfunction-name! result (symbol-dequalify name)))))
 
   (if (OpenFn/toplevel? fn)
     (begin
@@ -762,8 +763,8 @@
 
 ;; This is where most expressions will enter the compiler, it creates a function on-the-fly and returns it for
 ;; execution
-(define (compile-toplevel body)
-  (define fn (OpenFn/make 'vm-toplevel))
+(define (compile-toplevel body mod)
+  (define fn (OpenFn/make (aif (source-name body) (string->symbol (string-append "toplevel:" it)) 'vm-toplevel)))
 
   (OpenFn/toplevel?! fn #t)
 
@@ -972,12 +973,18 @@
          )
 
     (let ((fn (compile-lambda #f fn-exxxpr)))
+      (when is-macro?
+        (set-function-macro-bit! fn))
+      fn)
+
+    #;(let ((fn (compile-lambda #f fn-exxxpr)))
       (OpenFn/name! fn fn-name)
       ;(set-top-level-value! name (OpenFn->procedure fn))
       (let ((result (OpenFn->procedure fn)))
         (when is-macro?
           (set-function-macro-bit! result))
-        result))))
+        result))
+  ))
 
 (define (time-function str cb)
   (let ((time-start (current-millisecond)))

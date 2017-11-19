@@ -111,7 +111,6 @@ bool State::enter_repl(bool read_only, const char* history_file) {
 #endif
 
   while(++i) {
-    static const char* prompt = "> ";
     std::ostringstream promptss;
 
     if(get_global_value(G_CURRENT_MODULE).heap_type_equals(TABLE)) {
@@ -304,7 +303,9 @@ int State::enter_cli(int argc_, char* argv[]) {
 
       i += 1;
 
-      XReader reader(*this, ss, false, "eval argument");
+      std::ostringstream src_name;
+      src_name << "eval argument " << argc;
+      XReader reader(*this, ss, false, src_name.str());
 
       Value x;
 
@@ -317,7 +318,7 @@ int State::enter_cli(int argc_, char* argv[]) {
 
         if(x == C_EOF) break;
 
-        x = make_pair(x, C_NIL);
+        x = make_src_pair(x, C_NIL, x);
         x = eval_list(x);
 
         if(x.is_active_exception()) 

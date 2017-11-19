@@ -141,6 +141,18 @@ void State::print_gc_stats(std::ostream& os) {
 #endif
 }
 
+GCCommon::GCCommon(State& state_, size_t heap_size_):
+  state(state_), 
+  frames(0),
+  vm_frames(0),
+  collect_before_every_allocation(false),
+  allocations(0),
+  collections(0), live_objects_after_collection(0), live_memory_after_collection(0),
+  heap_size(heap_size_),
+  block_size(heap_size_) {
+
+}
+
 // This applies a GC-specific function to all the root variables of a program
 template <class T>
 void GCCommon::visit_roots(T& walker) {
@@ -203,7 +215,9 @@ void GCCommon::visit_roots(T& walker) {
 ///// SEMISPACE COLLECTOR
 //
 
-GCSemispace::GCSemispace(State& state_): GCCommon(state_),  active(0), other(0),
+GCSemispace::GCSemispace(State& state_, size_t heap_size):
+    GCCommon(state_, heap_size), 
+    active(0), other(0),
     block_cursor(0),
     collect_before_every_allocation(false) {
 
@@ -461,6 +475,22 @@ void GCSemispace::copy_roots() {
 //
 ///// INCREMENTAL COLLECTOR
 //
+
+GCIncremental::GCIncremental(State& state_, size_t heap_size):
+    GCCommon(state_, heap_size),
+    mark_bit(1), block_i(0), block_cursor(0) {
+  Block *b = new Block(heap_size, mark_bit);
+  blocks.push_back(b);
+
+  // Blocks should be allocated dead
+  AR_ASSERT(!marked((HeapValue*) b->data));
+}
+
+GCIncremental::~GCIncremental() {
+  for(size_t i = 0; i != blocks.size(); i++) {
+    delete blocks[i];
+  }
+}
 
 void GCIncremental::mark(HeapValue* v) {
   // We use a GOTO here to avoid creating unnecessary stack frames

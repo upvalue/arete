@@ -1,8 +1,21 @@
 // values.cpp - Value constructors, mutators, various methods
 
+#include <algorithm>
+
 #include "arete.hpp"
 
 namespace arete {
+
+std::string Value::type_desc() const {
+  Type tipe = type();
+  std::ostringstream os;
+  if(tipe == RECORD) {
+    os << "record " << record_type().record_type_name().string_data();
+  } else {
+    os << tipe;
+  }
+  return os.str();
+}
 
 Value State::get_symbol(Global sym) {
   Value sym2 = (globals.at((size_t) sym));
@@ -109,6 +122,26 @@ Value State::gensym(Value sym) {
   Value sym2 = get_symbol(os.str());
   sym2.heap->set_header_bit(Value::SYMBOL_GENSYM_BIT);
   return sym2;
+}
+
+Value State::symbol_dequalify(Value sym) {
+  AR_TYPE_ASSERT(sym.heap_type_equals(SYMBOL));
+
+  if(!sym.symbol_qualified()) return sym;
+
+  std::string name;
+  const char* data = sym.symbol_name_data();
+
+  size_t length = sym.symbol_name().string_bytes();
+
+  for(size_t i = length; i != 0; i--) {
+    if(data[i-1] == '#') break;
+    name += data[i-1];
+  }
+
+  std::reverse(name.begin(), name.end());
+
+  return get_symbol(name);
 }
 
 Value State::make_rename(Value expr, Value env) {

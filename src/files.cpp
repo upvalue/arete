@@ -266,6 +266,17 @@ Value fn_print_source(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("print-source", fn_print_source, 1, 1, true);
 
+Value fn_source_name(State& state, size_t argc, Value* argv) {
+  if(argv[0].heap_type_equals(PAIR) && argv[0].pair_has_source()) {
+    SourceLocation loc = argv[0].pair_src();
+    if(state.source_names.size() > loc.source) {
+      return state.make_string(state.source_names[loc.source]);
+    }
+  }
+  return C_FALSE;
+}
+AR_DEFUN("source-name", fn_source_name, 1);
+
 Value fn_print(State& state, size_t argc, Value* argv) {
   Value chk = fn_print_impl(state, argc, argv, std::cout, true, false);
   std::cout << std::endl;
@@ -318,7 +329,9 @@ Value State::slurp_file(const std::string& path) {
   std::reverse(temps.begin(), temps.end());
 
   for(size_t i = 0; i != temps.size(); i++) {
-    lst = make_pair(temps[i], lst);
+    SourceLocation loc;
+    loc.source = reader.source;
+    lst = make_src_pair(temps[i], lst, loc);
   }
 
   return lst;

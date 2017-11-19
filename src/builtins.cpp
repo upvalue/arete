@@ -590,6 +590,15 @@ Value fn_gensymp(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("gensym?", fn_gensymp, 1);
 
+// Strip qualifications from a symbol e.g. ##user#x becomes x, mainly for error messages
+Value fn_symbol_dequalify(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "symbol-dequalify";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+
+  return state.symbol_dequalify(argv[0]);
+}
+AR_DEFUN("symbol-dequalify", fn_symbol_dequalify, 1);
+
 /** Macro that asserts an argument is a valid environment */
 #define AR_FN_EXPECT_ENV(state, n) \
  AR_FN_ASSERT_ARG((state), (n), "to be a valid environment (vector or #f)", argv[(n)].type() == VECTOR || argv[(n)].type() == TABLE || argv[(n)] == C_FALSE);
@@ -1112,11 +1121,12 @@ Value fn_value_make(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   Value v;
   v.bits = argv[0].fixnum_value();
+  if(!v.immediatep()) {
+    return state.eval_error("value-make resulted in non-immediate value");
+  }
   return v;
 }
 AR_DEFUN("value-make", fn_value_make, 1);
-
-// Creates a value from a fixnum. Will segfault if anything other than a constant or fixnum results.
 
 Value fn_value_copy(State& state, size_t argc, Value* argv) {
   Value v1 = argv[0], v2;

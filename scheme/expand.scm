@@ -245,6 +245,11 @@
     (env-lookup env name)))
 
 (define (env-syntax? env name)
+  (if (eq? (top-level-value 'fart) #t)
+    (begin
+      (pretty-print env)
+      (pretty-print name)
+      (pretty-print (env-lookup env name))))
   (apply 
     (lambda (env name value found)
       (or (eq? value 'syntax) (function-macro? value)))
@@ -356,7 +361,7 @@
       (assq obj (cdr alist)))))
 
 (define (module-load src name)
-  (define mod (table-ref module-table name))
+  (define mod (table-ref (top-level-value 'module-table) name))
   (if mod
     (begin
       (if (eq? (table-ref mod "module-stage") 1)
@@ -373,9 +378,9 @@
 
       (define file (string-append name ".scm"))
       (load file)
-      (if (not (table-ref module-table name))
+      (if (not (table-ref (top-level-value 'module-table) name))
         (raise-source src 'expand (print-string "expected loading file" file "to provide module but it did not") (list name)))
-      (table-ref module-table name))
+      (table-ref (top-level-value 'module-table) name))
   ) ;if
 )
 
@@ -449,7 +454,7 @@
 
 (define (module-import! mod1 mod2-spec)
   (define mod2-name (module-spec->string mod2-spec mod2-spec))
-  (define mod (table-ref module-table mod2-name))
+  (define mod (table-ref (top-level-value 'module-table) mod2-name))
 
   (print "importing" mod2-name "to" (table-ref mod1 "module-name"))
 
@@ -511,12 +516,12 @@
   ;; module fart...
   (define name (module-spec->string (cdr x) (cadr x)))
 
-  (if (table-ref module-table name)
+  (if (table-ref (top-level-value 'module-table) name)
     (begin
       (raise-source x 'expand (print-string "module" (cadr x) "encountered twice") (list x))))
 
   (define mod (module-make name))
-  (table-set! module-table name mod)
+  (table-set! (top-level-value 'module-table) name mod)
   (table-set! mod "module-name" name)
   (table-set! mod "module-stage" 1)
 
@@ -798,13 +803,13 @@
 
 (define *core-module* (module-make "arete"))
 
-(table-set! module-table "arete" *core-module*)
+(table-set! (top-level-value 'module-table) "arete" *core-module*)
 (table-set! *core-module* "module-export-all" #t)
 (table-set! *core-module* "module-stage" 2)
 
 (define test (module-make "test"))
 
-(table-set! module-table "test" test)
+(table-set! (top-level-value 'module-table) "test" test)
 
 (table-set! (table-ref test "module-exports") 'car #t)
 (table-set! (table-ref test "module-exports") 'cdr #t)
@@ -826,7 +831,7 @@
 
 (define *user-module* (module-make "user"))
 
-(table-set! module-table "user" *user-module*)
+(table-set! (top-level-value 'module-table) "user" *user-module*)
 (table-set! *user-module* "module-export-all" #t)
 (table-set! *user-module* "module-stage" 2)
 
@@ -834,14 +839,6 @@
 
 (set-top-level-value! '*push-module* *user-module*)
 (set-top-level-value! '*current-module* *core-module*)
+
 ;; Install expander
 (set-top-level-value! 'expander expand-toplevel)
-
-;; Basic module support
-
-;; (module (module1))
-;; (define hello-world)
-
-;(module (module1) (import (test)))
-
-

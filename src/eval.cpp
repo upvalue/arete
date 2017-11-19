@@ -840,8 +840,8 @@ Value State::eval_list(Value lst, bool expand) {
   lst = lst_top;
 
   if(compiler != C_UNSPECIFIED && compiler != C_UNDEFINED) {
-    Value argv[1] = {lst};
-    tmp = apply(compiler, 1, argv);
+    Value argv[2] = {lst, get_global_value(G_CURRENT_MODULE)};
+    tmp = apply(compiler, 2, argv);
     if(tmp.is_active_exception()) return tmp;
     return apply(tmp, 0, 0);
   }

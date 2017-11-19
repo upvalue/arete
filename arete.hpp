@@ -441,7 +441,6 @@ struct Value {
 #ifdef __GNUC__
   __attribute__((always_inline))
 #endif
-  
   ;
   Type type_unsafe() const {
     if((bits & 3) == 0) {
@@ -458,6 +457,8 @@ struct Value {
     else return (Type) heap->get_type();
     */
   }
+
+  std::string type_desc() const;
 
   bool heap_type_equals(Type tipe) const {
     if((bits & 3) == 0 && (bits != 0)) return (heap->get_type() == tipe);
@@ -1077,7 +1078,6 @@ struct VMFunction : HeapValue {
   size_t* code_pointer() {
     return (size_t*)(((char*)((size_t) this)) + sizeof(VMFunction));
   }
-
 };
 
 inline Value Value::vm_function_macro_env() const {
@@ -1504,17 +1504,7 @@ struct GCCommon {
   size_t live_objects_after_collection, live_memory_after_collection, heap_size;
   size_t block_size;
 
-  GCCommon(State& state_, size_t heap_size_ = ARETE_HEAP_SIZE): state(state_), 
-    frames(0),
-    vm_frames(0),
-    collect_before_every_allocation(false),
-    allocations(0),
-    collections(0), live_objects_after_collection(0), live_memory_after_collection(0),
-    heap_size(heap_size_),
-    block_size(heap_size_) {
-
-  }
-
+  GCCommon(State& state_, size_t heap_size_);
   ~GCCommon() {}
 
   template <class T> void visit_roots(T& visitor);
@@ -1533,7 +1523,7 @@ struct GCSemispace : GCCommon {
   char* other_cursor;
   bool collect_before_every_allocation;
 
-  GCSemispace(State&);
+  GCSemispace(State&, size_t);
   ~GCSemispace();
 
   void copy(HeapValue** ref);
@@ -1592,19 +1582,8 @@ struct GCIncremental : GCCommon {
   std::vector<Block*> blocks;
   size_t block_i, block_cursor;
 
-  GCIncremental(State& state_): GCCommon(state_), mark_bit(1), block_i(0), block_cursor(0) {
-    Block *b = new Block(heap_size, mark_bit);
-    blocks.push_back(b);
-
-    // Blocks should be allocated dead
-    AR_ASSERT(!marked((HeapValue*) b->data));
-  }
-
-  ~GCIncremental() {
-    for(size_t i = 0; i != blocks.size(); i++) {
-      delete blocks[i];
-    }
-  }
+  GCIncremental(State& state_, size_t heap_size);
+  ~GCIncremental();
 
   /** This doesn't do anything, but is here so GCSemispace::live calls can be used in normal
    * source code */
@@ -1778,6 +1757,11 @@ struct State {
    * interned
    */
   Value get_symbol(const std::string& name);
+
+  /**
+   * Dequalify a symbol e.g. ##user#x becomes just x. For reporting error messages.
+   */
+  Value symbol_dequalify(Value sym);
 
   /** Generate a unique symbol. */
   Value gensym(Value sym);
@@ -2393,7 +2377,7 @@ struct TableIterator {
 #define AR_FN_EXPECT_TYPE(state, argv, i, expect) \
   if((argv)[(i)].type() != (expect)) { \
     std::ostringstream __os; \
-    __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (Type)(argv[i].type()); \
+    __os << "function " << (fn_name) << " expected argument " << (i) << " to be of type " << (Type)(expect) << " but got " << (argv[i].type_desc()); \
     AR_FN_STACK_TRACE(state); \
     return (state).type_error(__os.str()); \
   } 

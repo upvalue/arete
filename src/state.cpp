@@ -12,7 +12,7 @@ extern void load_platform_functions(State&);
 extern void load_sdl(State&);
 
 State::State():
-  gc(*this),
+  gc(*this, ARETE_HEAP_SIZE),
   gensym_counter(0),
   booted(false),
   symbol_table(),
