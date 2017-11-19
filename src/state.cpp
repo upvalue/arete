@@ -15,6 +15,7 @@ State::State():
   gc(*this, ARETE_HEAP_SIZE),
   gensym_counter(0),
   booted(false),
+  tco_enabled(true),
   symbol_table(),
   source_names(),
   source_contents(),

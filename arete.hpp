@@ -493,6 +493,10 @@ struct Value {
     return cmp == 0 ? C_FALSE : C_TRUE;
   }
 
+  bool boolean_value() const {
+    return bits != C_FALSE;
+  }
+
   // FLONUMS
   double flonum_value() const {
     AR_TYPE_ASSERT(type() == FLONUM);
@@ -1617,6 +1621,8 @@ struct State {
   /** Counts how many times gensym has been called; appended to the end of gensyms to ensure
    * their uniqueness */ 
   size_t gensym_counter;
+
+  bool tco_enabled;
 
   bool booted;
 

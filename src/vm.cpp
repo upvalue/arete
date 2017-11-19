@@ -102,6 +102,8 @@ VMFrame::VMFrame(State& state_): state(state_), closure(0),
   previous = state.gc.vm_frames;
   if(previous) {
     depth = previous->depth+1;
+  } else {
+    state.tco_enabled = state.get_global_value(State::G_TCO_ENABLED).boolean_value();
   }
   state.gc.vm_frames = this;
   AR_ASSERT(state.gc.vm_frames == this);
@@ -573,7 +575,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               fargc = min_arity + 1;
             }
 
-            if(insn == OP_APPLY_TAIL) {
+            if(tco_enabled && insn == OP_APPLY_TAIL) {
               frames_lost++;
 
               temps.clear();
