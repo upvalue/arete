@@ -1,5 +1,5 @@
 // writer.cpp - Output of Scheme objects and source code
-// Includes printing of pretty and cyclic objects
+// Includes pretty printing and printing of objects with circular references
 
 // TODO: More user control over printing process. Disable pretty or cyclic printing.
 
@@ -9,38 +9,37 @@
 
 // Each object has a 16 or 32 bit int in its header that can be used for this purpose. We
 // dive through the object tree recursively setting this int to a value that is unique to each
-// print. (Currently, we use State::shared_object_begin and State::shared_object_i for this purpose)
-// In the future, we should probably just reset all values before each pretty-print and use 
-// stack-allocated ints. This is more expensive but would avoid the issue of an overflow.
+// print. 
 
 // This is conceptually similar to a garbage collector mark, but we have to use the ints to keep
 // track of the order in which objects will actually be printed. 
 
 // When actual printing occurs, we use a hash table that relates these unique ints to whether or
 // not they've already been printed, as well as an integer that tells the user (or reader) which
-// object they are.
+// object they are visually.
 
-// A value which has not been printed is printed fully along with this int, i.e. #0= 
+// A value which has not been printed is printed fully along with this int, i.e. #0=<object text...>
 // A value which has already been printed is simply printed as #0#
 
 // Pretty printing
 
 // We try to indent things nicely so that source code and large tables/records are more readable
 // for the user. The printer does this by outputting \0 at places that are likely candidates for
-// a line break + indent
+// a line break + indent and \b where brackets should be de-dented.
 
 // e.x. (define (a)\0 something-really-long)
 // or 
-// #<Record\0field1: "value1"\0field2: "value2">
+// #<Record\0field1: "value1"\0field2: "value2"\b>
 
 // If an object's contents do not fit on a single line easily, we'll do a line break + indent
 // at these points. However, past a certain point (e.g. if we've used up a lot of horizontal space)
-// It will give up and print them as a giant blob like a naive printer.
+// It will give up and print them as a giant blob.
 
 // Both of these combine to mean that pretty-printing is fairly expensive and causes a fair amount
 // of heap allocation. They should probably only be used for debugging purposes and for
 // serialization of objects with shared structure.
 
+#include <fstream>
 #include <math.h>
 
 #include "arete.hpp"
@@ -144,9 +143,6 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os;
     }
-
-    
-      return os << v.flonum_value(); 
     case SYMBOL:
       return os << v.symbol_name_data();
     case STRING: {
@@ -261,13 +257,43 @@ std::ostream& operator<<(std::ostream& os, Value v) {
   }
   return os;
 }
+
+void State::lazy_load_source(size_t src) {
+  if(src <= source_names.size()) {
+    std::cerr << "arete: attempt to access source id " << src << " but only have " <<
+      source_names.size() << "sources" << std::endl;
+  }
+
+  while(src <= source_contents.size()) {
+    source_contents.push_back("");
+  }
+
+  const std::string& contents = source_contents[src];
+  if(contents.empty()) {
+    std::cout << "attempting to lazy load source code " << source_names[src] << std::endl;
+
+
+    std::ifstream ifs(source_names[src]);
+    if(!ifs) {
+      std::cerr << "arete: attempt to access source id " << src << " (" << source_names[src] << ")"
+        << " failed as file could not be opened" << std::endl;
+    }
+
+    std::ostringstream contents;
+    contents << ifs.rdbuf();
+    source_contents[src] = contents.str();
+  }
+}
  
 void State::print_src_line(std::ostream& os, const SourceLocation& src, const char* color) {
   unsigned seek_line = 1;
   std::string source_line;
   char c;
+
+  // Inefficient as all get-out, but as this only occurs on errors or during development
+  // (e.g. printing the source of expanded stuff) we won't worry about it.
   
-  if(src.source > 0 && source_contents[src.source].size() > 0) {
+  if(src.source > 0 && !source_contents[src.source].empty()) {
     std::stringstream ss;
 
     ss >> std::noskipws;

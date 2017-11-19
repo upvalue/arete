@@ -118,8 +118,14 @@
 #define ARETE_LOG_TAG_IMAGE (1 << 3)
 #define ARETE_LOG_TAG_DEFUN (1 << 4)
 
+#define AR_POSIX 0
+#define AR_WINDOWs 1
+
 #ifdef _MSC_VER
+# define AR_OS AR_WINDOWS
 # define ARETE_COLOR 0
+#else
+# define AR_OS AR_POSIX
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -504,6 +510,11 @@ struct Value {
 
   // STRINGS
   const char* string_data() const {
+    AR_TYPE_ASSERT(type() == STRING);
+    return static_cast<String*>(heap)->data;
+  }
+
+  char* string_data_mod() const {
     AR_TYPE_ASSERT(type() == STRING);
     return static_cast<String*>(heap)->data;
   }
@@ -1912,6 +1923,11 @@ struct State {
    * @return true if argument's source was successfully printed
    */
   bool print_src_pair(std::ostream& os, Value pair, const char* color = ARETE_COLOR_RED);
+
+  /**
+   * Attempt to lazily load source code information
+   */
+  void lazy_load_source(size_t source);
 
    /**
    * Print an line of source code with a specific source object highlighted

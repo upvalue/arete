@@ -9,12 +9,14 @@ design and implementation, but for the moment it's essentially a vanilla Scheme.
 
 Currently:
 
-    make arete
-    ./arete bootstrap.scm 
+    make heap.boot
+    bin/arete --load-image heap.boot
 
-Will load the macro-expander and base library (scheme/syntax.scm) and the compiler (scheme/compiler.scm), then compile
-all functions, at which point you can load other files (such as the ones in the examples directory) or play with the
-REPL.
+Will bootstrap the expander and compiler, then save them into a loadable image. Prepending --load-image heap.boot will
+make the files in examples/ and REPL work as expected.
+
+For development, scheme/expand.scm, scheme/syntax.scm and scheme/compiler.scm must be loaded in order. See the files
+for details on the various side-effecting things they do in order to bootstrap the system.
 
 # Dependencies
 

@@ -119,7 +119,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
       Value mname = 
         table_get(get_global_value(G_CURRENT_MODULE), get_global_value(G_STR_MODULE_NAME), found);
 
-      if(found && !mname.string_equals("user")) {
+      if(found) {// && !mname.string_equals("user")) {
 
         promptss << mname.string_data() << ' ';
       }
@@ -266,6 +266,11 @@ int State::enter_cli(int argc_, char* argv[]) {
   for(; i != argc; i++) {
     const char* arg = argv[i];
 
+    if(get_global_value(G_PUSH_MODULE) != C_UNDEFINED) {
+      //set_global_value(G_PUSH_MODULE, get_global_value(G_CURRENT_MODULE));
+      //set_global_value(G_PUSH_MODULE, C_UNDEFINED);
+    }
+    
     if(help.compare(arg) == 0) {
       print_help();
       return EXIT_SUCCESS;

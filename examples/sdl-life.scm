@@ -1,5 +1,7 @@
 ;; sdl.scm - basic SDL example
 
+(import (prefix (sdl) sdl:))
+
 ;; PART 1: Basic game of life functionality
 
 (define (make-grid x y)

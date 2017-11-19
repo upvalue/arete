@@ -71,9 +71,9 @@ bin/arete32: $(CXXOBJS32) src/main.32.o
 	$(call colorecho, "LD32 $@ ")
 	$(CXX) $(LDFLAGS) -m32 -o $@ $^
 
-heap.boot: arete $(CXXOBJS) $(wildcard scheme/*.scm)
-	$(call colorecho, "IMG $@")
-	./arete bootstrap.scm --save-image heap.boot
+heap.boot: bin/arete $(CXXOBJS) $(wildcard scheme/*.scm)
+	$(call colorecho, "IMG $@ ")
+	bin/arete scheme/expand.scm scheme/syntax.scm scheme/compiler.scm --eval "(pull-up-bootstraps)" --save-image $@
 
 web/arete.js: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")

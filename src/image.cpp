@@ -11,6 +11,9 @@
 // if we had a way to compact incremental and possibly inefficient allocations. However, we don't
 // always know what the correct size for an object should be.
 
+// TODO: It would be great to get rid of the function_id_to_ptr stuff. The problem is we don't know
+// where all c function pointers will be stored in a way such that we can restore them easily.
+
 #include <assert.h>
 
 #include "arete.hpp"
@@ -49,7 +52,8 @@ struct PointerUpdater {
   size_t begin, offset;
   bool reading;
 
-  PointerUpdater(size_t begin_, size_t offset_): begin(begin_), offset(offset_), reading(true) {}
+  PointerUpdater(size_t begin_, size_t offset_, bool reading_): begin(begin_), offset(offset_),
+    reading(reading_) {}
   PointerUpdater() {}
   ~PointerUpdater() {}
 
@@ -69,26 +73,13 @@ struct PointerUpdater {
 
   template <class T>
   T update_function_pointer(T addr) {
-    if(addr == 0) return (T) 0;
+    // if(addr == 0) return (T) 0;
     if(reading) {
-      // if(id_to_function.size() )
-      //AR_ASSERT("function id out of bounds; did you forget to recompile?" &&
-      //  id_to_function.size() > (size_t) addr);
-      return (T) function_id_to_ptr((size_t) addr);
-      //return (T)(((char*) aslr_address) + ((size_t) addr));
+      size_t fid = (size_t) addr;
+      AR_ASSERT((ptrdiff_t) function_id_to_ptr(fid) != 0);
+      return (T) function_id_to_ptr((size_t) fid);
     } else {
-      /*
-      khiter_t k = kh_get(ar_fn_table, function_to_id3, ((ptrdiff_t) addr));
-      if(k == kh_end(function_to_id3)) {
-        AR_IMG_LOG("failed to find function id " << (ptrdiff_t) addr);
-        AR_ASSERT("failed to find function id; did you forget a Defun?" && k != kh_end(function_to_id3));
-      }
-      */
-      //auto i = function_to_id2->find((ptrdiff_t) addr);
-      //AR_ASSERT("failed to find function id; did you forget a Defun?" && i != function_to_id2->end());
-      return (T) function_ptr_to_id((size_t) addr);
-      //return (T) i->second;
-      //return (T)(((char*) addr) - ((size_t) aslr_address));
+     return (T) function_ptr_to_id((size_t) addr);
     }
   }
   
@@ -119,14 +110,16 @@ struct PointerUpdater {
 
       case RECORD_TYPE: {
         if(!reading) {
-          AR_IMG_LOG(static_cast<RecordType*>(heap)->name);
+          //AR_IMG_LOG(static_cast<RecordType*>(heap)->name);
         }
         static_cast<RecordType*>(heap)->apply = update_value(static_cast<RecordType*>(heap)->apply);
         static_cast<RecordType*>(heap)->print = update_value(static_cast<RecordType*>(heap)->print);
         static_cast<RecordType*>(heap)->name = update_value(static_cast<RecordType*>(heap)->name);
         static_cast<RecordType*>(heap)->parent = update_value(static_cast<RecordType*>(heap)->parent);
         static_cast<RecordType*>(heap)->field_names = update_value(static_cast<RecordType*>(heap)->field_names);
-        static_cast<RecordType*>(heap)->finalizer = update_function_pointer(static_cast<RecordType*>(heap)->finalizer);
+        if(static_cast<RecordType*>(heap)->finalizer != 0) {
+          static_cast<RecordType*>(heap)->finalizer = update_function_pointer(static_cast<RecordType*>(heap)->finalizer);
+        }
         break;
       }
 
@@ -144,6 +137,12 @@ struct PointerUpdater {
         static_cast<VMFunction*>(heap)->macro_env = update_value(static_cast<VMFunction*>(heap)->macro_env);
         static_cast<VMFunction*>(heap)->sources = (Blob*)update_heapvalue(static_cast<VMFunction*>(heap)->sources);
         static_cast<VMFunction*>(heap)->free_variables = (Blob*)update_heapvalue(static_cast<VMFunction*>(heap)->free_variables);
+        break;
+      }
+
+      case CLOSURE: {
+        static_cast<Closure*>(heap)->function = update_value(static_cast<Closure*>(heap)->function);
+        static_cast<Closure*>(heap)->upvalues = (VectorStorage*)update_heapvalue(static_cast<Closure*>(heap)->upvalues);
         break;
       }
 
@@ -202,7 +201,19 @@ struct PointerUpdater {
 };
 
 struct ImageWriter {
-  ImageWriter(State& state_, FILE* f_): state(state_), f(f_) {}
+  /** Offset of heap data in the file */
+  size_t heap_offset;
+  State& state;
+  FILE* f;
+  PointerUpdater updater;
+
+  // Offset is past the header and globals
+  ImageWriter(State& state_, FILE* f_): state(state_), f(f_),
+    updater((size_t)state.gc.active->data, (ftell(f_) + (state.globals.size() * sizeof(size_t))),
+    false) {
+
+  }
+
   ~ImageWriter() {}
 
   void write_header() {
@@ -226,6 +237,19 @@ struct ImageWriter {
     AR_IMG_LOG("wrote " << state.globals.size() << " globals");
   }
 
+  void write_sources() {
+    size_t source_names_count = state.source_names.size();
+    fwrite(&source_names_count, sizeof(size_t), 1, f);
+    for(size_t i = 0; i != state.source_names.size(); i++) {
+      const std::string& source_name = state.source_names.at(i);
+      size_t size = source_name.size();
+
+      fwrite(&size, sizeof(size_t), 1, f);
+      fwrite(source_name.c_str(), size, 1, f);
+    }
+    AR_IMG_LOG("wrote " << state.source_names.size() << " source names");
+  }
+
   void walk_heap() {
     char* sweep = state.gc.active->data;
     while(sweep != (state.gc.active->data + state.gc.block_cursor)) {
@@ -235,15 +259,19 @@ struct ImageWriter {
     }
   }
 
-  /** Offset of heap data in the file */
-  PointerUpdater updater;
-  size_t heap_offset;
-  State& state;
-  FILE* f;
 };
 
 struct ImageReader {
-  ImageReader(State& state_, FILE* f_): state(state_), f(f_) {}
+  State& state;
+  FILE* f;
+  const ImageHeader& hdr;
+  PointerUpdater updater;
+
+  ImageReader(State& state_, FILE* f_, ImageHeader& hdr_): state(state_), f(f_), hdr(hdr_),
+    updater((ftell(f) + (hdr.global_count * sizeof(size_t))), (size_t)state.gc.active->data, true) {
+
+    }
+
   ~ImageReader() {}
 
 
@@ -253,6 +281,26 @@ struct ImageReader {
       fread(&ptr.heap, sizeof(HeapValue*), 1, f);
       ptr = updater.update_value(ptr);
       state.globals.push_back(ptr);
+    }
+  }
+
+  void read_sources() {
+    size_t sources;
+    fread(&sources, sizeof(size_t), 1, f);
+    AR_IMG_LOG("reading " << sources << " sources");
+    for(size_t i = 0; i != sources; i++) {
+      size_t string_size;
+      fread(&string_size, sizeof(size_t), 1, f);
+      char* cstr = (char*)calloc(1,string_size+1);
+
+      fread(cstr, string_size, 1, f);
+      std::string cxxstring(cstr);
+      free(cstr);
+
+      AR_IMG_LOG("source: " << cxxstring);
+      state.source_names.push_back(cxxstring);
+      state.source_contents.push_back("");
+
     }
   }
 
@@ -315,10 +363,6 @@ struct ImageReader {
     AR_IMG_LOG(symbols_loaded << " symbols loaded");
   }
 
-  ImageHeader hdr;
-  PointerUpdater updater;
-  State& state;
-  FILE* f;
 };
 
 void State::save_image(const std::string& path) {
@@ -331,19 +375,17 @@ void State::save_image(const std::string& path) {
   memset(&hdr, 0, sizeof(ImageHeader));
   strncpy((char*) &hdr.magic, (char*)MAGIC_STRING, sizeof(MAGIC_STRING));
   hdr.heap_size = gc.block_cursor;
-  hdr.is_64_bit = 0;
+  hdr.is_64_bit = ARETE_64_BIT;
   hdr.global_count = globals.size();
   hdr.gensym_counter = gensym_counter;
 
   fwrite(&hdr, sizeof(ImageHeader), 1, f);
 
   ImageWriter writer(*this, f);
-  writer.updater.reading = false;
-  writer.updater.begin = (size_t)gc.active->data;
-  writer.updater.offset = ftell(f)  + (globals.size() * sizeof(size_t));
   writer.write_globals();
   AR_IMG_LOG("writing heap beginning at " << writer.updater.offset);
   writer.walk_heap();
+  writer.write_sources();
 
   fclose(f);
 }
@@ -363,26 +405,27 @@ const char* State::boot_from_image(const std::string& path) {
   ImageHeader hdr;
   fread(&hdr, sizeof(ImageHeader), 1, f);
 
+  if(strncmp(hdr.magic, MAGIC_STRING, 13) != 0) {
+    return "failed to read image header";
+  }
+
+  if(hdr.is_64_bit != ARETE_64_BIT) {
+    return "attempted to load image with wrong word size (64-bit on 32-bit or vice versa)";
+  }
+
   AR_IMG_LOG((hdr.is_64_bit ? "64-bit" : "32-bit") << " image with " << hdr.global_count
     << " globals");
 
   gensym_counter = hdr.gensym_counter;
 
-  if(strncmp(hdr.magic, MAGIC_STRING, 13) != 0) {
-    return "failed to read image header";
-  }
-
   AR_IMG_LOG("heap size " << hdr.heap_size);
 
-  ImageReader reader(*this, f);
+  ImageReader reader(*this, f, hdr);
 
-  reader.hdr = hdr;
-  reader.updater.reading = true;
-  reader.updater.offset = (size_t)gc.active->data;
-  reader.updater.begin = ftell(f) + (hdr.global_count * sizeof(size_t));
   AR_IMG_LOG("reading heap beginning at " << reader.updater.begin << " into " << (size_t)gc.active->data);
   reader.read_globals();
   reader.walk_heap();
+  reader.read_sources();
 
   fclose(f);
 

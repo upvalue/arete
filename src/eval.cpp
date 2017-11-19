@@ -724,6 +724,7 @@ tail_call:
             AR_ASSERT(!"should never reach this point");
             return C_FALSE;
           }
+          case CLOSURE:
           case VMFUNCTION: {
             Value fn = tmp, args = exp.cdr(), argv, varargs_begin, varargs_cur = C_NIL, closure;
             AR_FRAME(this, fn, args, argv, varargs_begin, varargs_cur, closure);

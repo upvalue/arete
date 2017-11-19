@@ -64,17 +64,31 @@ Value fn_string_copy(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("string-copy", fn_string_copy, 1);
 
+#define AR_FN_CHECK_BOUNDS(state, tipe, len, idx) \
+  if(len <= (size_t) idx) { \
+    std::ostringstream os; \
+    os << "attempted to get index " << (idx) << " in a " << tipe << " of length " << (len); \
+    return state.type_error(os.str()); \
+  }
+
+Value fn_string_set(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "string-set!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 2, CHARACTER);
+  AR_FN_CHECK_BOUNDS(state, "string", argv[0].string_bytes(), argv[1].fixnum_value());
+
+  argv[0].string_data_mod()[(size_t) argv[1].fixnum_value()] = argv[2].character();
+
+  return C_UNSPECIFIED;
+}
+AR_DEFUN("string-set!", fn_string_set, 3);
+
 Value fn_string_ref(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string-ref";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-
-  // (string-ref "asd" 3)
-  if(argv[0].string_bytes() <= (size_t)argv[1].fixnum_value()) {
-    std::ostringstream os;
-    os << "attempted to get index " << argv[1].fixnum_value() << " in a string of length " << argv[0].string_bytes();
-    return state.type_error(os.str());
-  }
+  AR_FN_CHECK_BOUNDS(state, "string", argv[0].string_bytes(), argv[1].fixnum_value());
 
   return state.make_char(argv[0].string_data()[((size_t)argv[1].fixnum_value())]);
 }

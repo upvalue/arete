@@ -1,6 +1,6 @@
 ;; sdl.scm - minimal sdl example that runs on the interpreter
 
-;; (import (prefix (sdl) sdl:))
+(import (prefix (sdl) sdl:))
 
 (sdl:init 640 480)
 

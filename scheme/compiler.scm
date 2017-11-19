@@ -1017,5 +1017,8 @@
             (set-top-level-value! k (top-level-value (string->symbol (string-append "##arete#" (symbol->string k)))))))))
 )))
 
+(expand-import (top-level-value '*user-module*) '(arete))
 (set-top-level-value! 'compiler compile-toplevel)
+(set-top-level-value! '*push-module* (top-level-value '*user-module*))
+(set-top-level-value! '*current-module* (top-level-value '*user-module*))
 

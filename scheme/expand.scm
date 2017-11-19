@@ -1,5 +1,8 @@
 ;; expand.scm - most basic boot functionality, macroexpansion & modules
 
+;; This file loads and installs the expander and module system. It sets the default module to (arete), after which
+;; point the other core files should be loaded, and then the default module should be set to the (user) module.
+
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
 

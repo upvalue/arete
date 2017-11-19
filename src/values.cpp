@@ -342,7 +342,7 @@ Value State::make_module(const std::string& name) {
   // Register module in module table
   table_set(get_global_value(G_MODULE_TABLE), val, module);
 
-  pretty_print(std::cout, module);
+  //pretty_print(std::cout, module);
   return module;
 }
 
@@ -370,13 +370,13 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
   exports = state.table_get(module, state.get_global_value(State::G_STR_MODULE_EXPORTS), found);
   AR_ASSERT(found);
 
-
   for(size_t i = 0; i != data.size(); i++) {
     const Defun* defun = data.at(i);
 
     std::ostringstream qname;
 
     name = state.make_string(defun->fn_name);
+    AR_ASSERT(defun->fn);
     cfn = state.make_c_function(name, closure, (c_function_t) defun->fn, defun->min_arity,
       defun->max_arity, defun->var_arity);
 
@@ -387,12 +387,10 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
     sym = state.get_symbol(qname.str());
     sym.set_symbol_value(cfn);
 
-    bool hashable;
-
     state.table_set(module, name, sym);
     state.table_set(exports, name, name);
   }
-  state.pretty_print(std::cout, module);
+  //state.pretty_print(std::cout, module);
 }
 
  Value State::make_c_function(Value name, Value closure, c_function_t addr, size_t min_arity,
@@ -407,6 +405,7 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
     cfn->set_header_bit(Value::CFUNCTION_CLOSURE_BIT);
   }
   cfn->addr = addr;
+  AR_ASSERT(cfn->addr);
   cfn->min_arity = min_arity;
   cfn->max_arity = max_arity;
   if(variable_arity)
@@ -419,6 +418,7 @@ void State::defun_core_closure(const std::string& cname, Value closure, c_closur
 
   AR_FRAME(this, cfn, sym, name, closure);
   name = make_string(cname);
+  AR_ASSERT(addr);
   cfn = make_c_function(name, closure, (c_function_t)addr, min_arity, max_arity, variable_arity);
 
   sym = get_symbol(name);
@@ -429,6 +429,7 @@ void State::defun_core(const std::string& cname, c_function_t addr, size_t min_a
   Value cfn, sym, name;
 
   AR_FRAME(this, cfn, sym, name);
+  AR_ASSERT(addr);
   name = make_string(cname);
   cfn = make_c_function(name, C_FALSE, addr, min_arity, max_arity, variable_arity);
 

@@ -28,6 +28,7 @@
   - [ ] Make certain strings immutable. We're using them as hash table keys, those should never be mutated.
   - [ ] Image saving: Images rely on C++ static initialization order to restore pointers to C++ functions. This may
     not be very portable at all.
+  - [ ] Image saving should include source code, or it should be somehow lazily loaded on errors.
   - [ ] Better hash table implementation and benchmarks
 
 * Compiler
