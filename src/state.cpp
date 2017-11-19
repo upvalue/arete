@@ -73,6 +73,7 @@ void State::boot() {
     "EXPANDER-PRINT",
     "expander",
     "compiler",
+    "FORBID-INTERPRETER",
     // I/O
     "*current-input-port*",
     "*current-output-port*",

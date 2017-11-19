@@ -941,12 +941,11 @@
   )
 )
 
-;; Recompiles a toplevel function that's been defined under the interpreter
-(define (recompile-function name)
-  (let* ((oldfn (top-level-value name))
-         (fn-name (function-name oldfn))
+;; Recompiles a function that's been defined under the interpreter
+(define (recompile-function oldfn)
+  (let* ((fn-name (function-name oldfn))
          (fn-body (function-body oldfn))
-         (macro? (env-syntax? #f name))
+         (is-macro? (macro? oldfn))
          ;; TODO Could just save the original arguments list in the Function; it doesn't really matter
          ;; if they are oversized as they won't exist during normal execution in any case
          (fn-proper-args (or (function-arguments oldfn) '()))
@@ -974,9 +973,11 @@
 
     (let ((fn (compile-lambda #f fn-exxxpr)))
       (OpenFn/name! fn fn-name)
-      (set-top-level-value! name (OpenFn->procedure fn))
-      (when macro?
-        (set-function-macro-bit! (top-level-value name))))))
+      ;(set-top-level-value! name (OpenFn->procedure fn))
+      (let ((result (OpenFn->procedure fn)))
+        (when is-macro?
+          (set-function-macro-bit! result))
+        result))))
 
 (define (time-function str cb)
   (let ((time-start (current-millisecond)))
@@ -1005,16 +1006,28 @@
               ;; TODO duplicate compile of qualified-name functionality
 
               (let ((is-macro (env-syntax? #f k)))
-                (recompile-function k)
+                (set-top-level-value! k (recompile-function v))
                 )
               
               ))))
+
+      ;; Recompile macros, which have not been defined at the toplevel.
+      (table-for-each
+        (lambda (k v)
+          (if (eq? (value-type v) 13)
+            (let ((vmf (recompile-function v)))
+              (table-set! (top-level-value '*core-module*) k vmf)
+              (table-set! (top-level-value '*user-module*) k vmf)
+              )))
+        (top-level-value '*core-module*))
+
       ;; After which point we'll just update the bindings.
       (top-level-for-each
         (lambda (k v)
           (if (and (eq? (value-type v) 13))
             (begin
             (set-top-level-value! k (top-level-value (string->symbol (string-append "##arete#" (symbol->string k)))))))))
+
 )))
 
 (expand-import (top-level-value '*user-module*) '(arete))

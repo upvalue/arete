@@ -565,70 +565,6 @@ Value fn_vector_length(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("vector-length", fn_vector_length, 1);
 
-Value fn_make_table(State& state, size_t argc, Value* argv) {
-  return state.make_table();
-}
-AR_DEFUN("make-table", fn_make_table, 0);
-
-Value fn_table_ref(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "table-ref";
-
-  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
-  AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
-
-  bool found;
-  Value result = state.table_get(argv[0], argv[1], found);
-  if(!found) return C_FALSE;
-  return result;
-}
-AR_DEFUN("table-ref", fn_table_ref, 2);
-
-Value fn_table_set(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "table-set!";
-
-  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
-  AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
-
-  return state.table_set(argv[0], argv[1], argv[2]);
-}
-AR_DEFUN("table-set!", fn_table_set, 3);
-
-Value fn_table_entries(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "table-entries";
-  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
-  return Value::make_fixnum(argv[0].table_entries());
-}
-AR_DEFUN("table-entries", fn_table_entries, 1);
-
-static Value fn_table_map_impl(const char* fn_name, bool map, State& state, size_t argc, Value* argv) {
-  AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
-  AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
-
-  Value fn = argv[0], lst = C_NIL, tmp;
-  TableIterator ti(argv[1]);
-  AR_FRAME(state, tmp, fn, lst, ti.table, ti.chain, ti.cell);
-
-  while(++ti) {
-    Value argv[2] = {ti.key(), ti.value()};
-    tmp = state.apply(fn, 2, argv);
-    if(tmp.is_active_exception()) return tmp;
-    if(map) {
-      lst = state.make_pair(tmp, lst);
-    }
-  }
-  return map ? lst : C_UNSPECIFIED;
-}
-
-Value fn_table_map(State& state, size_t argc, Value* argv) {
-  return fn_table_map_impl("table-map", true, state, argc, argv);
-}
-AR_DEFUN("table-map", fn_table_map, 2);
-
-Value fn_table_for_each(State& state, size_t argc, Value* argv) {
-  return fn_table_map_impl("table-for-each", false, state, argc, argv);
-}
-AR_DEFUN("table-for-each", fn_table_for_each, 2);
-
 ///// MACROEXPANSION SUPPORT
 
 /** Generate a unique, unused symbol */
@@ -1198,7 +1134,7 @@ Value fn_value_header_bit(State& state, size_t argc, Value* argv) {
   if(argv[0].immediatep()) {
     return state.eval_error("value-header bit got immediate object");
   }
-  return Value::make_boolean(argv[0].heap->get_header_bit(argv[1].fixnum_value() > 0));
+  return Value::make_boolean(argv[0].heap->get_header_bit(1 << argv[1].fixnum_value()));
 }
 AR_DEFUN("value-header-bit?", fn_value_header_bit, 2)
 

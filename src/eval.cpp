@@ -436,6 +436,12 @@ Value State::eval_apply_function(Value fn, size_t argc, Value* argv) {
 }
 
 Value State::eval_body(EvalFrame frame, Value body, bool single) {
+  if(get_global_value(G_FORBID_INTERPRETER) == C_TRUE) {
+    std::ostringstream os;
+    os << "interpreter has been disabled, but FUNCTION " << frame.fn_name << " was called";
+
+    return eval_error(os.str());
+  }
   Value exp, cell, tmp;
 
 tail_call:
@@ -724,7 +730,7 @@ tail_call:
             AR_ASSERT(!"should never reach this point");
             return C_FALSE;
           }
-          case CLOSURE:
+          //case CLOSURE:
           case VMFUNCTION: {
             Value fn = tmp, args = exp.cdr(), argv, varargs_begin, varargs_cur = C_NIL, closure;
             AR_FRAME(this, fn, args, argv, varargs_begin, varargs_cur, closure);
@@ -783,6 +789,7 @@ tail_call:
           }
           default: {
             std::ostringstream os;
+            std::cout << get_global_value(G_FORBID_INTERPRETER) << std::endl;
             os << "attempt to apply non-applicable value of type " << (Type) kar_type << ": " <<
               kar;
             return eval_error(os.str(), exp);

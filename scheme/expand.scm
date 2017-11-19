@@ -27,8 +27,6 @@
 
 ;; TODO disallow inter-module set!
 
-
-
 (define caar (lambda (x) (car (car x))))
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
@@ -60,6 +58,10 @@
 
 (define input-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 9))))
 (define output-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 10))))
+
+;; @returns whether a symbol is already qualified 
+(define (symbol-qualified? v)
+  (and (symbol? v) (value-header-bit? v 12)))
 
 (define current-input-port (lambda () (top-level-value'*current-input-port*)))
 (define current-output-port (lambda () (top-level-value '*current-output-port*)))
@@ -305,8 +307,10 @@
 (define expand-identifier
   (lambda (x env)
     (if (env-syntax? env x)
-      (raise-source x 'expand (print-string "used syntax" x "as value") (list x)))
-    (env-resolve env x)))
+      (raise-source x 'expand (print-string "used syntax" x "as value") (list x))
+      (if (symbol-qualified? x)
+        x
+        (env-resolve env x)))))
 
 ;; Expand and/or
 (define expand-and-or

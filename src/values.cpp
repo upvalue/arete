@@ -75,10 +75,15 @@ Value State::get_symbol(const std::string& name) {
     Value sym = heap, string;
     AR_FRAME(this, sym, string);
 
+
     string = make_string(name);
 
     sym.as<Symbol>()->value = C_UNDEFINED;
     sym.as<Symbol>()->name = string;
+
+    if(name[0] == '#') {
+      sym.heap->set_header_bit(Value::SYMBOL_QUALIFIED_BIT);
+    }
 
     symbol_table->insert(std::make_pair(name, (Symbol*) sym.heap));
 

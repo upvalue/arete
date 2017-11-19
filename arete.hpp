@@ -580,9 +580,15 @@ struct Value {
     return cmp.compare(symbol_name_data()) == 0;
   }
 
+  bool symbol_qualified() const {
+    AR_TYPE_ASSERT(type() == SYMBOL);
+    return heap->get_header_bit(SYMBOL_QUALIFIED_BIT);
+  }
+
   static const unsigned SYMBOL_IMMUTABLE_BIT = 1 << 9;
   static const unsigned SYMBOL_GENSYM_BIT = 1 << 10;
   static const unsigned SYMBOL_READ_BIT = 1 << 11;
+  static const unsigned SYMBOL_QUALIFIED_BIT = 1 << 12;
 
   // RENAMES
 
@@ -1708,6 +1714,7 @@ struct State {
     G_EXPANDER_PRINT,
     G_EXPANDER,
     G_COMPILER,
+    G_FORBID_INTERPRETER,
     G_CURRENT_INPUT_PORT,
     G_CURRENT_OUTPUT_PORT,
     // Modules
@@ -2196,7 +2203,7 @@ struct XReader {
   TokenType tokenize_number(bool negative = false);
 
   /** Reads a symbol into the buffer */
-  void tokenize_symbol();
+  void tokenize_symbol(bool tokenize_sharp = false);
 
   /** Reads a string into the buffer */
   void tokenize_string();

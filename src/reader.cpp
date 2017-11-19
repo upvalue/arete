@@ -143,11 +143,11 @@ XReader::TokenType XReader::tokenize_number(bool negative) {
   return TK_FLONUM;
 }
 
-void XReader::tokenize_symbol() {
+void XReader::tokenize_symbol(bool tokenize_sharp) {
   char c;
 
   while(peekc(c)) {
-    if(is_symbol(c)) {
+    if(is_symbol(c) || (tokenize_sharp && c == '#')) {
       getc(c);
       buffer += c;
     } else {
@@ -159,7 +159,7 @@ void XReader::tokenize_symbol() {
 void XReader::tokenize_string() {
   char c;
 
-	// MSVC error?
+	// TODO: MSVC error? Why.
   //AR_ASSERT(is.tellg() == token_start_position);
   eatc();
 
@@ -252,8 +252,12 @@ XReader::TokenType XReader::next_token() {
         tokenize_symbol();
         
         return TK_CHARACTER;
-      }
-      else if(c2 == ';') {
+      } else if(c2 == '#') {
+        // Fully qualified symbols, e.g. ##arete#car
+        buffer += "##";
+        tokenize_symbol(true);
+        return TK_SYMBOL;
+      } else if(c2 == ';') {
         // Expression comments
         if(!peekc(c2)) {
           unexpected_eof("after #; expression comment", line, position - 2);
@@ -437,7 +441,7 @@ Value XReader::read_expr(TokenType tk) {
       return state.make_string(buffer);
     case TK_SYMBOL: {
       Value sym = state.get_symbol(buffer);
-      if(sym.symbol_was_read()) {
+      if(!sym.symbol_was_read()) {
         sym.heap->set_header_bit(Value::SYMBOL_READ_BIT);
       }
       return sym;
