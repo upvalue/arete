@@ -75,6 +75,10 @@ heap.boot: bin/arete $(CXXOBJS) $(wildcard scheme/*.scm)
 	$(call colorecho, "IMG $@ ")
 	bin/arete scheme/expand.scm scheme/syntax.scm scheme/compiler.scm --eval "(pull-up-bootstraps)" --save-image $@
 
+heap32.boot: bin/arete32 $(CXXOBJS) $(wildcard scheme/*.scm)
+	$(call colorecho, "IMG $@ ")
+	bin/arete32 scheme/expand.scm scheme/syntax.scm scheme/compiler.scm --eval "(pull-up-bootstraps)" --save-image $@
+
 web/arete.js: $(ECXXOBJS) src/main.em.o
 	$(call colorecho, "LD $@ ")
 	$(ECXX) $(ELDFLAGS) -o $@ $^ $(EFILES)

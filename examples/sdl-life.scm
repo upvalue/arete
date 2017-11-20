@@ -1,4 +1,4 @@
-;; sdl.scm - basic SDL example
+;; sdl-life.scm - graphical game of life simulation
 
 (import (prefix (sdl) sdl:))
 
@@ -194,7 +194,6 @@
         (when (and (< x-tile grid-width) (< y-tile grid-height))
           (set-cell! (State/grid state) x-tile y-tile (if (= (get-cell (State/grid state) x-tile y-tile) 0) 1 0))
           (set! state-dirty #t))))))
-
 
 (sdl:clear)
 (sdl:render)

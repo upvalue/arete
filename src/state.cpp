@@ -14,8 +14,8 @@ extern void load_sdl(State&);
 State::State():
   gc(*this, ARETE_HEAP_SIZE),
   gensym_counter(0),
-  booted(false),
   tco_enabled(true),
+  booted(false),
   symbol_table(),
   source_names(),
   source_contents(),

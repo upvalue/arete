@@ -6,6 +6,8 @@
 ;; Scheme is so great, you can't program in it!
 ;; - A comment in the TinyCLOS source.
 
+;; TODO Toplevel renames
+
 ;; TODO Cannot use a macro defined in advance. Toplevel needs to behave like letrec-syntax, I think.
 
 ;; TODO: Problem
