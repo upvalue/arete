@@ -8,7 +8,12 @@
 
 ;; TODO Toplevel renames
 
+;; TODO Make modules compilable as individual units
+
 ;; TODO Cannot use a macro defined in advance. Toplevel needs to behave like letrec-syntax, I think.
+
+;; TODO: Fix redundant compilation, VM primitive compilation.
+;; TODO disallow inter-module set!
 
 ;; TODO: Problem
 ;; Something like this
@@ -17,17 +22,6 @@
 
 ;; Does not result in super-descriptive error messages because the name is gensym'd by the compiler
 ;; How can we propagate information about where a lambda was introduced through the expander to the compiler?
-
-;; TODO:
-
-;; TODO: USER module in which interaction-level stuff happens. Automatically imports (arete).
-;; TODO: Fix redundant compilation, VM primitive compilation.
-;; TODO: C++-side module creation and put SDL primitives into module
-
-;; TODO Dequalify names when they are used in errors. e.g. x => ##module#x becomes 
-;;   reference to undefined variable 'x' in module (module)
-
-;; TODO disallow inter-module set!
 
 (define caar (lambda (x) (car (car x))))
 (define cadr (lambda (x) (car (cdr x))))
@@ -473,6 +467,8 @@
 
   (for-each
     (lambda (k)
+      (if (table-ref mod (car k))
+        (print "warning: duplicate import" k))
       (table-set! mod (car k) (cdr k)))
     imports)
 
@@ -558,7 +554,7 @@
     ;; Check for special syntactic forms
     (if syntax?
       (cond
-        ((eq? kar 'module) (expand-module x env))
+        ((eq? kar 'define-library) (expand-module x env))
         ((eq? kar 'import)
          (if (not (table? env))
            (raise-source x "import must be part of module statement or be at toplevel"))
@@ -807,7 +803,8 @@
       (expand-cond-clause x env (cadr x) (cddr x)))))
 
 ;; Set up module system
-;(define module-table (make-table))
+
+;; This is finished at the end of compiler.scm
 
 (define *core-module* (module-make "arete"))
 
@@ -843,7 +840,7 @@
 (table-set! *user-module* "module-export-all" #t)
 (table-set! *user-module* "module-stage" 2)
 
-(expand-import *user-module* '(arete))
+;(expand-import *user-module* '(arete))
 
 (set-top-level-value! '*push-module* *user-module*)
 (set-top-level-value! '*current-module* *core-module*)

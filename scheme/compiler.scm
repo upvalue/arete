@@ -175,6 +175,45 @@
           i
           (loop (fx+ i 1)))))))
 
+;; Build tables correlating instructions to bytes and vice versa
+(define insns-to-bytes (make-table))
+(define bytes-to-insns (make-table))
+
+(define insn-list
+  '((push-constant 1)
+    (push-immediate 2)
+    (pop 3)
+    (global-get 4)
+    (global-set 5)
+    (local-get 6)
+    (local-set 7)
+    (upvalue-get 8)
+    (upvalue-set 9)
+    (close-over 10)
+    (apply 11)
+    (apply-tail 12)
+    (return 13)
+    (jump 14)
+    (jump-if-false 15)
+    (jump-if-true 16)
+    (+ 17)
+    (- 18)
+    (< 19)
+    (car 20)
+    (list-ref 21)
+    (eq? 22)
+    ))
+
+(let loop ((pare (car insn-list)) (rest (cdr insn-list)))
+  (table-set! insns-to-bytes (car pare) (cadr pare))
+  (table-set! bytes-to-insns (cadr pare) (car pare))
+  (unless (null? rest)
+    (loop (car rest) (cdr rest))))
+
+;(pretty-print insns-to-bytes)
+
+
+
 ;; This converts symbols into their equivalent fixnums
 (define (insn->byte fn insn)
   (cond
@@ -182,33 +221,9 @@
     ;; Replace labels with their location
     ((gensym? insn) (table-ref (OpenFn/labels fn) insn))
     (else 
-      (case insn
-        ;; See vm.cpp for details
-        (push-constant 1)
-        (push-immediate 2)
-        (pop 3)
-        (global-get 4)
-        (global-set 5)
-        (local-get 6)
-        (local-set 7)
-        (upvalue-get 8)
-        (upvalue-set 9)
-        (close-over 10)
-        (apply 11)
-        (apply-tail 12)
-        (return 13)
-        (jump 14)
-        (jump-if-false 15)
-        (jump-if-true 16)
-
-        (+ 17)
-        (- 18)
-        (< 19)
-        (car 20)
-        (list-ref 21)
-        (eq? 22)
-
-        (else (raise 'compile-internal "unknown named instruction" (list insn)))))))
+      (aif (table-ref insns-to-bytes insn)
+        it
+        (raise 'compile-internal "unknown named instruction" (list insn))))))
 
 ;; Adjust the stack size while recalculating the stack max if necessary
 (define (fn-adjust-stack fn size)
@@ -218,23 +233,36 @@
   (OpenFn/stack-max! fn (max new-size (OpenFn/stack-max fn)))
 )
 
+;; Build a table of stack effects
+(define stack-effects
+  (let ((table (make-table))
+        (lst '(
+               (-1 jump pop global-set eq? list-ref)
+               (0 words close-over return car)
+               (1 push-immediate push-constant global-get local-get upvalue-get)
+               (2 upvalue-set local-set))))
+    (let loop ((elt (car lst)) (rest (cdr lst)))
+      (let loop2 ((insns (cdr elt)))
+        (table-set! table (car insns) (car elt))
+        (unless (null? (cdr insns))
+          (loop2 (cdr insns))))
+      (unless (null? rest)
+        (loop (car rest) (cdr rest))))
+    table))
+
 ;; emit takes a named instruction and determines the stack effect of it based on its argument
 (define (emit fn . insns)
   (fn-adjust-stack fn 
-    (case (car insns)
-      ;; A note: jump does not actually pop the stack, but because it's always generated after a jump-if-false
-      ;; expression and conditionally evaluated, saying it does makes it simpler to check the stack size
-      ((jump pop global-set eq? list-ref) -1)
-      ((words close-over return car) 0)
-      ((push-immediate push-constant global-get local-get upvalue-get) 1)
-      ((upvalue-set local-set) 2) ;; TODO: Omitting the two here causes a horrific expansion error
-      ;; Only pops stack if argument is 1
-      ((jump-if-false jump-if-true) (if (fx= (list-ref insns 2) 1) -1 0))
-      ;; Variable microcode: Remove arguments from stack, and re-use one of the argument slots to push results
-      ((+ - <) (fx+ (fx- (cadr insns)) 1))
-      ;; Remove arguments from stack, but push a single result in the place of the function on the stack
-      ((apply apply-tail) (fx- (cadr insns)))
-      (else (raise 'compile-internal (print-string "unknown instruction" (car insns)) (list fn (car insns) insns)))
+    (aif (table-ref stack-effects (car insns))
+      it
+      (case (car insns)
+        ;; Only pops stack if argument is 1
+        ((jump-if-false jump-if-true) (if (fx= (list-ref insns 2) 1) -1 0))
+        ;; Variable microcode: Remove arguments from stack, and re-use one of the argument slots to push results
+        ((+ - <) (fx+ (fx- (cadr insns)) 1))
+        ;; Remove arguments from stack, but push a single result in the place of the function on the stack
+        ((apply apply-tail) (fx- (cadr insns)))
+        (else (raise 'compile-internal (print-string "unknown instruction" (car insns)) (list fn (car insns) insns))))
     ))
 
   ;; Stack size sanity check

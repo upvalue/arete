@@ -82,7 +82,7 @@ suites = (
     ('reader', ['--read', '{}']),
     ('preboot',  ['{}']),
     ('expander', ['scheme/expand.scm', 'scheme/syntax.scm', '{}']),
-    ('compiler',  ['--set', 'compiler-test-file', '"{}"',
+    ('compiler',  ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', '--set', 'compiler-test-file', '"{}"',
                    'tests/compiler-test.scm'])
 )
 
