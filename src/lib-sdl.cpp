@@ -257,7 +257,7 @@ AR_DEFUN("draw-line", sdl_draw_line, 4);
 Value sdl_delay(State& state, SDLModule* module, size_t argc, Value* argv) {
   static const char* fn_name = "sdl:delay";
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-  SDL_Delay(argv[0].fixnum_value());
+  SDL_Delay((unsigned) argv[0].fixnum_value());
   return C_UNSPECIFIED;
 }
 AR_DEFUN("delay", sdl_delay, 1);

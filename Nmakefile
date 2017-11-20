@@ -1,11 +1,15 @@
 LINK = link $(LDFLAGS) /out:$@ $**
 
+SDL_PATH=SDL2-2.0.7
+SDL_IMG_PATH=SDL2_image-2.0.2
+SDL_TTF_PATH=SDL2_ttf-2.0.14
+
 SRCS=src/builtins.cpp src/files.cpp src/lib-sdl.cpp src/platform.cpp src/strings.cpp src/vm.cpp vendor/linenoise/linenoise.cpp src/cli.cpp src/gc.cpp src/main.cpp src/reader.cpp src/table.cpp src/writer.cpp vendor/linenoise/wcwidth.cpp src/eval.cpp src/image.cpp src/numbers.cpp src/state.cpp src/values.cpp vendor/linenoise/ConvertUTF.cpp
 OBJS=src/builtins.obj src/files.obj src/lib-sdl.obj src/platform.obj src/strings.obj src/vm.obj vendor/linenoise/linenoise.obj src/cli.obj src/gc.obj src/main.obj src/reader.obj src/table.obj src/writer.obj vendor/linenoise/wcwidth.obj src/eval.obj src/image.obj src/numbers.obj src/state.obj src/values.obj vendor/linenoise/ConvertUTF.obj
 
 # Note: Stack size has to be massively increased for bootstrap to work.
-LDFLAGS = /nologo /Stack:8000000
-CFLAGS = /Ivendor\linenoise /nologo /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /DARETE_DEV  /DARETE_GC_STRATEGY="(ARETE_GC_SEMISPACE)" /DARETE_LOG_TAGS="(ARETE_LOG_TAG_VM)"  /EHsc
+LDFLAGS = /nologo /LIBpath:$(SDL_PATH)\lib\x64 /LIBpath:$(SDL_IMG_PATH)\lib\x64 /LIBpath:$(SDL_TTF_PATH)\lib\x64 SDL2.lib SDL2_image.lib SDL2_ttf.lib
+CFLAGS = /Ivendor\linenoise /I$(SDL_IMG_PATH)\include /I$(SDL_TTF_PATH)/include /I$(SDL_PATH)\include /nologo /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /DARETE_DEV  /DARETE_GC_STRATEGY="(ARETE_GC_SEMISPACE)" /DARETE_LOG_TAGS="(ARETE_LOG_TAG_VM)"  /DAR_LIB_SDL=1 /EHsc
 
 .cpp.obj:
 	cl $(CFLAGS) /I . /Fo$@ /c $<
@@ -13,7 +17,7 @@ CFLAGS = /Ivendor\linenoise /nologo /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /DARETE_DE
 all: arete.exe
 
 arete.exe: $(OBJS)
-	$(LINK)
+	link $(LDFLAGS) /out:$@ $**
 
 clean:
 	del $(OBJS)

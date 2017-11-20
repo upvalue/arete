@@ -119,10 +119,8 @@ void State::boot() {
   load_string_functions(*this);
   load_platform_functions(*this);
 
-#if AR_OS == AR_POSIX
   load_sdl(*this);
   register_feature("sdl");
-#endif
 
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_FEATURES, C_NIL);
