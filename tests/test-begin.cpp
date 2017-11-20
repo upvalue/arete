@@ -84,7 +84,7 @@ TEST_CASE("frames successfully save pointers to stack values") {
   Value y = Value::make_fixnum(555);
   AR_FRAME(state, v);
 
-  (*state.gc.frames[0]->values[0]) = (HeapValue*) y.bits;
+  (*state.gc.frames->values[0]) = (HeapValue*) y.bits;
   CHECK(v.fixnum_value() == 555);
 }
 

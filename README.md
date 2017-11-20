@@ -15,6 +15,11 @@ Currently:
 Will bootstrap the expander and compiler, then save them into a loadable image. Prepending --load-image heap.boot will
 make the files in examples/ and REPL work as expected.
 
+    make test-all
+
+Will run all tests. Since Arete has not been tested on a wide variety of systems, doing this before
+attempting to use it is probably a good idea.
+
 For development, scheme/expand.scm, scheme/syntax.scm and scheme/compiler.scm must be loaded in order. See the files
 for details on the various side-effecting things they do in order to bootstrap the system.
 

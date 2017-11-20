@@ -8,6 +8,9 @@
 
 // TODO: Memory usage could be reduced by actual bytecode, but this would increase complexity
 
+// TODO: Multiple return values cannot be implemented efficiently because we cannot grow the stack
+// on-demand.
+
 #include "arete.hpp"
 
 // TODO: Non C-stack improvement. There's no need to malloc every function call. Rather we should

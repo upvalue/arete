@@ -44,7 +44,7 @@ def run_tests(path, args = []):
     for test in tests:
         (test_path, result_path, expect_error, args) = test
 
-        kmd = ['./arete'] + args
+        kmd = ['./bin/arete'] + args
         cmd = subprocess.Popen(kmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         cmd_out, cmd_err = cmd.communicate()
@@ -81,8 +81,9 @@ def run_tests(path, args = []):
 suites = (
     ('reader', ['--read', '{}']),
     ('preboot',  ['{}']),
-    ('expander', ['scheme/syntax.scm', '{}']),
-    ('compiler',  ['--set', 'compiler-test-file', '"{}"', 'tests/compiler-test.scm'])
+    ('expander', ['scheme/expand.scm', 'scheme/syntax.scm', '{}']),
+    ('compiler',  ['--set', 'compiler-test-file', '"{}"',
+                   'tests/compiler-test.scm'])
 )
 
 if __name__ == '__main__':

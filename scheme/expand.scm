@@ -198,6 +198,15 @@
          res
          (env-lookup (vector-ref env 0) name))))))
 
+;; For env-compare. This will lookup NAME with rename-env and rename-expr if it is a rename, if not, it will look
+;; in ENV
+(define (env-lookup-maybe-rename env name)
+  (if (rename? name)
+    (begin
+      (env-lookup (rename-env name) (rename-expr name))
+    )
+    (env-lookup env name)))
+
 ;; Compare two identifiers to see if they "mean" the same thing
 ;; For example
 ;; 'else and (make-rename #f 'else) => #t
@@ -206,12 +215,9 @@
   (cond
     ((eq? a b) #t)
     ((and (symbol? a) (rename? b)) (env-compare env b a))
-    ((and (rename? a) (symbol? b))
+    ((and (rename? a) (identifier? b))
 
-     ;; here's the problem
-     ;; unquote resolves to ##arete#core#unquote
-     ;; #'unquote resolves to unquote.
-     (and (eq? (rename-expr a) b)
+     (and (eq? (rename-expr a) (rename-strip b))
       (apply 
          (lambda (renv rkey rvalue rfound)
            (apply
@@ -222,7 +228,7 @@
                (define rsenv (if (and (not rfound) (table? renv)) #f renv))
                (eq? rsenv senv))
 
-             (env-lookup env b)))
+             (env-lookup-maybe-rename env b)))
          (env-lookup (rename-env a) (rename-expr a)))))
 
     (else #f)))
