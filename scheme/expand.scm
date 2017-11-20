@@ -62,9 +62,8 @@
 (define current-input-port (lambda () (top-level-value'*current-input-port*)))
 (define current-output-port (lambda () (top-level-value '*current-output-port*)))
 
-(define self-evaluating?
-  (lambda (v)
-    (or (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v))))
+(define (self-evaluating? v)
+  (or (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v)))
 
 (define unspecified (if #f #f))
 
@@ -490,6 +489,9 @@
          (expand-import mod x))
        (cdr x)))
 
+    ((eq? kar 'begin)
+     (cons-source x (make-rename #f 'begin) (expand-map (cdr x) mod)))
+
     ((eq? kar 'export)
      (for-each-i
        (lambda (i cell)
@@ -517,7 +519,6 @@
   (if (not (fx> len 1))
     (raise-source x 'expand "module requires at least one argument (module name specifier)" (list x)))
 
-  ;; module fart...
   (define name (module-spec->string (cdr x) (cadr x)))
 
   (if (table-ref (top-level-value 'module-table) name)
@@ -531,12 +532,11 @@
 
   (set-top-level-value! '*current-module* mod)
 
-  (for-each
-    (lambda (x)
-      (expand-module-decl mod x env))
-    (cddr x))
-
-  unspecified
+  (cons-source x (make-rename #f 'begin)
+    (map
+      (lambda (x)
+        (expand-module-decl mod x env))
+      (cddr x)))
 )
 
 ;; Expand an application. Could be a special form, a macro, or a normal function application

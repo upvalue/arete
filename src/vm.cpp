@@ -493,6 +493,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         size_t insn = VM_CODE()[code_offset-1];
         size_t fargc = VM_CODE()[code_offset++];
         Value afn = f.stack[f.stack_i - fargc - 1];
+        if(!gc.live(afn)) {
+          // Stack underflow.
+          std::cout << f.stack_i << ' ' << fargc << std::endl;
+          std::cout << f.fn->name << std::endl;
+          std::cout << "NON-LIVE VALUE ON STACK " << afn.bits << std::endl;
+        }
         AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " " << f.stack_i);
         AR_ASSERT(gc.live(afn));
         AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " fargc: " << fargc << " fn: " << afn);
@@ -983,12 +989,17 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       // Source code information is available
       size_t i = 0;
       VMSourceLocation vmloc = sources.blob_ref<VMSourceLocation>(0);
-      for(i = 1; i < sources.blob_length() / 5; i++) {
-        VMSourceLocation vmloc2 = sources.blob_ref<VMSourceLocation>(i);
-        if(vmloc2.code >= code_offset) {
-          break;
+      // If there is more than one source location,
+      // we'll iterate through the source-locations until we find the one closest to the piece of
+      // code we just errored out on
+      if(sources.blob_length() != 5) {
+        for(i = 1; i <= sources.blob_length() / 5; i++) {
+          VMSourceLocation vmloc2 = sources.blob_ref<VMSourceLocation>(i);
+          if(vmloc2.code >= code_offset) {
+            break;
+          }
+          vmloc = vmloc2;
         }
-        vmloc = vmloc2;
       }
 
       SourceLocation loc;
@@ -996,6 +1007,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       loc.line = vmloc.line;
       loc.begin = vmloc.begin;
       loc.length = vmloc.length;
+      AR_ASSERT(vmloc.source < source_names.size());
 
       std::ostringstream os;
       os << source_info(loc, f.fn->name);

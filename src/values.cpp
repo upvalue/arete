@@ -500,6 +500,7 @@ Value State::make_src_pair(Value car, Value cdr, SourceLocation& loc) {
   AR_FRAME(this, pare, car, cdr);
   pare = make_pair(car, cdr, sizeof(Pair));
   pare.heap->set_header_bit(Value::PAIR_SOURCE_BIT);
+  AR_ASSERT(loc.source < source_names.size());
   AR_ASSERT(pare.type() == PAIR);
   AR_ASSERT(pare.pair_has_source());
   pare.set_pair_src(loc);
@@ -510,6 +511,7 @@ Value State::make_src_pair(Value car, Value cdr, SourceLocation& loc) {
 Value State::make_src_pair(Value car, Value cdr, Value src) {
   if(src.heap_type_equals(PAIR) && src.pair_has_source()) {
     SourceLocation loc(src.pair_src());
+    AR_ASSERT(loc.source < source_names.size());
     return make_src_pair(car, cdr, loc);
   }
   return make_pair(car, cdr);

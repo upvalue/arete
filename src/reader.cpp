@@ -76,6 +76,7 @@ Value XReader::make_src_pair(Value kar, Value kdr, unsigned line, unsigned posit
   src.line = line;
   src.begin = position;
   src.length = length;
+  AR_ASSERT(src.source < state.source_names.size());
 
   return state.make_src_pair(kar, kdr, src);
 }

@@ -1060,9 +1060,9 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   sources = rec.record_ref(3);
   if(sources.type() == VECTOR && sources.vector_length() > 0) {
     size_t length = sources.vector_length();
-    sources_blob = state.make_blob<size_t>(length);
+    sources_blob = state.make_blob<unsigned>(length);
     for(size_t i = 0; i != length; i++) {
-      sources_blob.blob_set<size_t>(i, sources.vector_ref(i).fixnum_value());
+      sources_blob.blob_set<unsigned>(i, sources.vector_ref(i).fixnum_value());
     }
   }
 

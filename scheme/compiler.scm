@@ -178,9 +178,11 @@
 ;; Build tables correlating instructions to bytes and vice versa
 (define insns-to-bytes (make-table))
 (define bytes-to-insns (make-table))
+;; TODO make this a vector.
 
 (define insn-list
-  '((push-constant 1)
+  '((bad 0)
+    (push-constant 1)
     (push-immediate 2)
     (pop 3)
     (global-get 4)
@@ -346,7 +348,15 @@
 
   (for-each-i
     (lambda (i sub-x)
-      (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f))
+      (let ((stack-size (OpenFn/stack-size fn)))
+        (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f)
+        (unless (eq? (fx+ stack-size 1) (OpenFn/stack-size fn))
+          (when (not (eq? stack-size (OpenFn/stack-size fn)))
+            (raise 'compile-internal (print-string "function argument has unexpected effect on stack")))
+          ;; TODO: side-effecting statements and the stack
+          (emit fn 'push-immediate (value-bits unspecified))
+
+          )))
     (cdr x))
 
   ;; Stack size sanity check
@@ -557,6 +567,7 @@
     (table-set! (OpenFn/env fn) name var)
     (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1)))
 
+  ;; Detect function names
   (let ((result (compile-expr fn (list-ref x 2) (list-tail x 2) tail?)))
     (when (procedure? result)
       (begin
@@ -610,6 +621,8 @@
 
   (emit fn 'jump-if-false then-branch-end 1)
   (compile-expr fn then-branch (list-tail x 2) tail?)
+
+  ;; TODO: side-effecting statements and the stack
 
   ;; Something side-effecty happened in a value context so we'll push unspecified on the stack
   ;; e.g. (if #t (set! x #t))
@@ -794,6 +807,7 @@
 (define (compile-toplevel body mod)
   (define fn (OpenFn/make (aif (source-name body) (string->symbol (string-append "toplevel:" it)) 'vm-toplevel)))
 
+
   (OpenFn/toplevel?! fn #t)
 
   (scan-defines fn body)
@@ -815,7 +829,6 @@
   ;(print "toplevel stack size" (OpenFn/stack-size fn))
 
   (let ((result (OpenFn->procedure fn)))
-    #;(set-vmfunction-log! result #t)
     result))
 
 ;; Analysis pass

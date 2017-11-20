@@ -154,6 +154,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
     XReader reader(*this, liness, true, line_name.str());
 
     x = reader.read();
+
     // Don't add comments/expressionless lines to history
     if(x == C_EOF) {
       history_add = false;
