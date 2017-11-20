@@ -125,7 +125,6 @@ bool State::enter_repl(bool read_only, const char* history_file) {
     }
     promptss << i << "> ";
 
-
     std::ostringstream line_name;
     line_name << "repl-line-" << i;
 
@@ -140,7 +139,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
     }
 
 #else
-    std::cout << prompt;
+    std::cout << promptss.str();
     size_t size = 0;
     //char* line = 0;
 		char line[512];

@@ -508,7 +508,7 @@ Value State::make_src_pair(Value car, Value cdr, SourceLocation& loc) {
 }
 
 Value State::make_src_pair(Value car, Value cdr, Value src) {
-  if(src.pair_has_source()) {
+  if(src.heap_type_equals(PAIR) && src.pair_has_source()) {
     SourceLocation loc(src.pair_src());
     return make_src_pair(car, cdr, loc);
   }

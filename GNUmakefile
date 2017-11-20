@@ -1,6 +1,6 @@
 # Variables
 CXX := g++
-CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
+CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor/linenoise 
 CFLAGS := $(CFLAGS) -g3 -O3 
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
 LDFLAGS := -lm -fno-rtti -fno-exceptions
@@ -17,7 +17,7 @@ CXXOBJS32 := $(patsubst %.o,%.32.o,$(CXXOBJS))
 DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) src/main.d
 
 # Files to include with Emscripten builds
-EFILES := $(addprefix --preload-file ,$(wildcard *.boot *.scm scheme/*.scm examples/*.scm examples/*.ttf))
+EFILES := $(addprefix --preload-file ,$(wildcard heap32.boot *.scm scheme/*.scm examples/*.scm examples/*.ttf))
 
 ARETE_LIBS := sdl test
 
@@ -28,7 +28,7 @@ ifeq ($(findstring sdl,$(ARETE_LIBS)),sdl)
 	CXXFLAGS := $(CXXFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) -DAR_LIB_SDL=1
 	ECXXFLAGS := $(CXXFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) -DAR_LIB_SDL=1 -s USE_SDL=2 -s USE_SDL_TTF=2
 	LDFLAGS := $(LDFLAGS) $(shell pkg-config --libs sdl2 SDL2_ttf)
-	ELDFLAGS := $(ELDFLAGS) -s USE_SDL=2 -s USE_SDL_TTF=2
+	ELDFLAGS := $(ELDFLAGS) -s USE_SDL=2 -s USE_SDL_TTF=2 -s NO_EXIT_RUNTIME=1
 else
 	CXXFLAGS := $(CXXFLAGS) -DAR_LIB_SDL=0
 endif
@@ -47,7 +47,7 @@ endef
 
 %.em.o: CPPFLAGS := $(CPPFLAGS) -DAR_LINENOISE=0
 %.em.o: %.cpp 
-	$(call colorecho, "CCJS $< ")
+	$(call colorecho, "EMCC $< ")
 	$(ECXX) $(ECXXFLAGS) -MMD -MF $(patsubst %.o,%.d,$@) -c -o $@ $<
 
 %.32.o: %.cpp
@@ -75,13 +75,13 @@ heap.boot: bin/arete $(CXXOBJS) $(wildcard scheme/*.scm)
 	$(call colorecho, "IMG $@ ")
 	bin/arete scheme/expand.scm scheme/syntax.scm scheme/compiler.scm --eval "(pull-up-bootstraps)" --save-image $@
 
-heap32.boot: bin/arete32 $(CXXOBJS) $(wildcard scheme/*.scm)
+heap32.boot: bin/arete32 $(wildcard scheme/*.scm)
 	$(call colorecho, "IMG $@ ")
 	bin/arete32 scheme/expand.scm scheme/syntax.scm scheme/compiler.scm --eval "(pull-up-bootstraps)" --save-image $@
 
-web/arete.js: $(ECXXOBJS) src/main.em.o
+web/arete.js: $(ECXXOBJS) src/main.em.o heap32.boot
 	$(call colorecho, "LD $@ ")
-	$(ECXX) $(ELDFLAGS) -o $@ $^ $(EFILES)
+	$(ECXX) $(ELDFLAGS) -o $@ $(ECXXOBJS) src/main.em.o $(EFILES)
 
 arete-distilled.cpp: $(wildcard src/*.cpp)
 	$(call colorecho "arete.cpp")
