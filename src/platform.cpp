@@ -68,6 +68,15 @@ Value fn_file_exists(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("file-exists?", fn_file_exists, 1);
 
+Value fn_path_separator(State& state, size_t argc, Value* argv) {
+#if AR_OS == AR_POSIX
+	return state.make_char('/');
+#else
+	return state.make_char('\\');
+#endif
+}
+AR_DEFUN("path-separator", fn_path_separator, 0);
+
 void load_platform_functions(State& state) {
   platform.install(state);
 }

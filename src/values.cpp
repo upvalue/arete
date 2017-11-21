@@ -187,24 +187,6 @@ void State::record_set(Value rec_, unsigned field, Value value) {
   rec->fields[field] = value;
 }
 
-Value State::make_string(const std::string& body) {
-  String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + body.size()));
-  heap->bytes = body.size();
-  strncpy(heap->data, body.c_str(), body.size());
-  AR_ASSERT(heap->data[heap->bytes] == '\0');
-
-  return heap;
-}
-
-Value State::string_copy(Value x) {
-  AR_FRAME(this, x);
-  String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + x.string_bytes()));
-  strncpy(heap->data, x.string_data(), x.string_bytes());
-  heap->bytes = x.string_bytes();
-  heap->data[x.string_bytes()] = '\0';
-  return heap;
-}
-
 /** Make an exception from Scheme values */
 Value State::make_exception(Value tag, Value message, Value irritants) {
   Value exc;

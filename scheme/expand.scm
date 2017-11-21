@@ -67,21 +67,40 @@
 
 (define unspecified (if #f #f))
 
-(define list-tail
-  (lambda (lst i)
-    (if (or (null? lst) (not (pair? lst)))
-      (raise 'type "list-tail expects a list with at least one element as its argument" (list lst)))
+(define (list-tail lst i)
+  (if (or (null? lst) (not (pair? lst)))
+    (raise 'type "list-tail expects a list with at least one element as its argument" (list lst)))
 
-    (if (= i 0)
-      lst
-      ((lambda (loop)
-        (loop loop (cdr lst) 1))
-       (lambda (loop rest ii)
-         (if (null? rest)
-           (raise 'type "list-tail bounds error" (list lst (length lst) i)))
-         (if (= ii i)
-           rest
-           (loop loop (cdr rest) (+ ii 1))))))))
+  (if (= i 0)
+    lst
+    ((lambda (loop)
+      (loop loop (cdr lst) 1))
+     (lambda (loop rest ii)
+       (if (null? rest)
+         (raise 'type "list-tail bounds error" (list lst (length lst) i)))
+       (if (= ii i)
+         rest
+         (loop loop (cdr rest) (+ ii 1)))))))
+
+(define (assq obj alist)
+  (if (null? alist)
+    #f
+    (if (eq? (caar alist) obj)
+      (car alist)
+      (assq obj (cdr alist)))))
+
+(define (string-map-i i limit src dst fn)
+  (string-set! dst i (fn (string-ref src i)))
+  (if (not (fx= (fx+ i 1) limit))
+    (string-map-i (fx+ i 1) limit src dst fn)))
+
+(define (string-map fn str)
+  (define ret (make-string (string-length str)))
+  (define len (string-length str))
+  (if (fx= len 0)
+    ret
+    (string-map-i 0 len str ret fn))
+  ret)
 
 ;;;;; EXPAND! Expansion pass
 
@@ -118,7 +137,7 @@
     ((table? env)
      (begin
        (table-set! env name (if (eq? value 'variable) (module-qualify env name) value))
-       (if (eq? (table-ref env "module-export-all") #t)
+       (if (or (eq? (table-ref env "module-export-all") #t) (table-ref (table-ref env "module-exports") name))
          (table-set! (table-ref env "module-exports") name name))
 
 
@@ -335,7 +354,6 @@
         (if (not (null? str)) (string-append (car str) "#" (symbol->string (car lst))) (symbol->string (car lst)))
         ))))
 
-
 (define (module-make name)
   (define mod (make-table))
 
@@ -353,13 +371,20 @@
         (raise-source src 'expand (print-string "arguments to import specifier" name " must all be symbols") (list syms))))
     syms))
 
+(define *module-load-paths* '("." "/usr/share/lib/arete"))
+(define *module-extensions* '(".scm" ".sld"))
 
-(define (assq obj alist)
-  (if (null? alist)
+(define (module-try-load name paths exts)
+  (if (null? exts)
     #f
-    (if (eq? (caar alist) obj)
-      (car alist)
-      (assq obj (cdr alist)))))
+    (if (null? paths)
+      (module-try-load name *module-load-paths* (cdr exts))
+      (begin
+        (define path (string-append (car paths) (make-string 1 (path-separator)) name (car exts)))
+        (print ";; checking" path)
+        (if (file-exists? path)
+          path
+          (module-try-load name (cdr paths) exts))))))
 
 (define (module-load src name)
   (define mod (table-ref (top-level-value 'module-table) name))
@@ -375,12 +400,12 @@
       ;; ./thing/asdf.sld
       ;; ./thing/asdf.scm
       ;; etc
-
-
-      (define file (string-append name ".scm"))
-      (load file)
+      (define path (module-try-load (string-map (lambda (c) (if (eqv? c #\#) (path-separator) c)) name) *module-load-paths* *module-extensions*))
+      (if (not path)
+        (raise-source src 'expand (print-string "Could not find a file for module" name "in paths" *module-load-paths* "with extensions" *module-extensions*) (list name)))
+      (load path)
       (if (not (table-ref (top-level-value 'module-table) name))
-        (raise-source src 'expand (print-string "expected loading file" file "to provide module but it did not") (list name)))
+        (raise-source src 'expand (print-string "expected loading file" path "to provide module" name "but it did not") (list name)))
       (table-ref (top-level-value 'module-table) name))
   ) ;if
 )
@@ -471,7 +496,6 @@
       (table-set! mod (car k) (cdr k)))
     imports)
 
-  ;(print imports)
   unspecified)
 
 (define (expand-toplevel-import x env)
@@ -513,7 +537,6 @@
   ) ;cond
 )
 
-
 (define (expand-module x env)
   (define len (length x))
   (if (not (fx> len 1))
@@ -530,13 +553,19 @@
   (table-set! mod "module-name" name)
   (table-set! mod "module-stage" 1)
 
-  (set-top-level-value! '*current-module* mod)
+  (if (eq? (car x) 'module)
+    (set-top-level-value! '*current-module* mod))
 
-  (cons-source x (make-rename #f 'begin)
-    (map
-      (lambda (x)
-        (expand-module-decl mod x env))
-      (cddr x)))
+  (define result
+    (cons-source x (make-rename #f 'begin)
+      (map
+        (lambda (x)
+          (expand-module-decl mod x env))
+        (cddr x))))
+
+  (table-set! mod "module-stage" 2)
+
+  result
 )
 
 ;; Expand an application. Could be a special form, a macro, or a normal function application
@@ -554,7 +583,7 @@
     ;; Check for special syntactic forms
     (if syntax?
       (cond
-        ((eq? kar 'define-library) (expand-module x env))
+        ((or (eq? kar 'define-library) (eq? kar 'module)) (expand-module x env))
         ((eq? kar 'import)
          (if (not (table? env))
            (raise-source x "import must be part of module statement or be at toplevel"))

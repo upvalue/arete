@@ -1865,6 +1865,7 @@ struct State {
   }
 
   Value make_string(const std::string& body);
+  Value make_string(size_t length);
 
   template <class T>
   Value make_blob(size_t count) {

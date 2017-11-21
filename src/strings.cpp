@@ -4,6 +4,34 @@
 
 namespace arete {
 
+Value State::make_string(const std::string& body) {
+  String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + body.size()));
+  heap->bytes = body.size();
+  strncpy(heap->data, body.c_str(), body.size());
+  AR_ASSERT(heap->data[heap->bytes] == '\0');
+
+  return heap;
+}
+
+Value State::make_string(size_t length) {
+  String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + length));
+  heap->bytes = length;
+  memset(heap->data, 'a', length);
+  AR_ASSERT(heap->data[heap->bytes] == '\0');
+  return heap;
+}
+
+Value State::string_copy(Value x) {
+  AR_FRAME(this, x);
+  String* heap = static_cast<String*>(gc.allocate(STRING, sizeof(String) + x.string_bytes()));
+  strncpy(heap->data, x.string_data(), x.string_bytes());
+  heap->bytes = x.string_bytes();
+  heap->data[x.string_bytes()] = '\0';
+  return heap;
+}
+
+///// SCHEME FUNCTIONS
+
 DefunGroup strings("strings");
 
 // Conversions
@@ -43,7 +71,6 @@ Value fn_char_numeric(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("char-numeric?", fn_char_numeric, 1);
 
-
 Value fn_string_append(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string-append";
   std::ostringstream os;
@@ -63,6 +90,22 @@ Value fn_string_copy(State& state, size_t argc, Value* argv) {
   return state.string_copy(argv[0]);
 }
 AR_DEFUN("string-copy", fn_string_copy, 1);
+
+Value fn_make_string(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "make-string";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  char fill = '$';
+  if(argc == 2) {
+    AR_FN_EXPECT_TYPE(state, argv, 1, CHARACTER);
+    fill = (char) argv[1].character();
+  }
+  Value str = state.make_string((size_t) argv[0].fixnum_value());
+
+  memset(str.as_unsafe<String>()->data, fill, str.string_bytes());
+
+  return str;
+}
+AR_DEFUN("make-string", fn_make_string, 1, 2);
 
 #define AR_FN_CHECK_BOUNDS(state, tipe, len, idx) \
   if(len <= (size_t) idx) { \
@@ -93,6 +136,13 @@ Value fn_string_ref(State& state, size_t argc, Value* argv) {
   return state.make_char(argv[0].string_data()[((size_t)argv[1].fixnum_value())]);
 }
 AR_DEFUN("string-ref", fn_string_ref, 2);
+
+Value fn_string_length(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "string-length";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  return Value::make_fixnum((ptrdiff_t) argv[0].string_bytes());
+}
+AR_DEFUN("string-length", fn_string_length, 1);
 
 void load_string_functions(State& state) {
   strings.install(state);
