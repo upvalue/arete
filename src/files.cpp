@@ -102,6 +102,19 @@ Value fn_close_port(State& state, size_t argc, Value* argv) {
 AR_DEFUN("close-output-port", fn_close_port, 1);
 AR_DEFUN("close-input-port", fn_close_port, 1);
 
+Value fn_flush_port(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "flush-port";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FILE_PORT);
+
+  if(argv[0].file_port_writable()) {
+    std::ostream* handle = argv[0].file_port_output_handle();
+    handle->flush();
+  }
+
+  return C_UNSPECIFIED;
+}
+AR_DEFUN("flush-output-port", fn_flush_port, 1);
+
 // Extract a file port from an argument, or return *current-input-port*
 #define  AR_MAYBE_INPUT_PORT(state, argv, argc, argi, name) \
   Value name ; \
