@@ -383,6 +383,8 @@
         (vector-set! vec i elt)
         (if (null? rest) vec (loop (car rest) (cdr rest) (+ i 1)))))))
 
+(define (vector . lst) (list->vector lst))
+
 ;; SRFI-0
 
 (define (cond-expand-check-feature x form)

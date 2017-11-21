@@ -119,7 +119,7 @@ Value State::table_get_cell(Value table, Value key) {
   if(unhashable) return unhashable_error(key);
   Value chain = C_FALSE;
   chain = table.as<Table>()->chains->data[index];
-  while(chain.type() == PAIR) {
+  while(chain.heap_type_equals(PAIR)) {
     if(equals(chain.caar(), key)) {
       return chain.car();
     }
@@ -215,10 +215,10 @@ Value fn_table_ref(State& state, size_t argc, Value* argv) {
 
   bool found;
   Value result = state.table_get(argv[0], argv[1], found);
-  if(!found) return C_FALSE;
+  if(!found) return argc == 3 ? argv[2] : C_FALSE;
   return result;
 }
-AR_DEFUN("table-ref", fn_table_ref, 2);
+AR_DEFUN("table-ref", fn_table_ref, 2, 3);
 
 Value fn_table_set(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "table-set!";
@@ -229,6 +229,37 @@ Value fn_table_set(State& state, size_t argc, Value* argv) {
   return state.table_set(argv[0], argv[1], argv[2]);
 }
 AR_DEFUN("table-set!", fn_table_set, 3);
+
+Value fn_table_delete(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "table-delete!";
+
+  AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
+  AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
+
+  Value tbl = argv[0], key = argv[1];
+  bool unhashable;
+
+  ptrdiff_t index = state.hash_index(tbl, key, unhashable);
+  Value chain = C_FALSE, prev = C_FALSE;
+
+  chain = tbl.as<Table>()->chains->data[index];
+  
+  while(chain.heap_type_equals(PAIR)) {
+    if(state.equals(chain.caar(), key)) {
+      if(prev == C_FALSE) {
+        tbl.as<Table>()->chains->data[index] = chain.cdr();
+      } else {
+        prev.set_cdr(chain.cdr());
+      }
+      break;
+    }
+    prev = chain;
+    chain = chain.cdr();
+  }
+  
+  return C_UNSPECIFIED;
+}
+AR_DEFUN("table-delete!", fn_table_delete, 2);
 
 Value fn_table_entries(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "table-entries";

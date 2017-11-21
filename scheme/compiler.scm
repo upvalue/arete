@@ -53,6 +53,7 @@
 ;; We could transform it to something with OP_LOCAL_SET 0 to a function's own adress.
 
 (set-top-level-value! 'COMPILER-VM-PRIMITIVES #t)
+(set-top-level-value! 'COMPILER-WARN-UNDEFINED #f)
 
 ;; OpenFn is a record representing a function in the process of being compiled.
 
@@ -351,8 +352,8 @@
       (let ((stack-size (OpenFn/stack-size fn)))
         (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f)
         (unless (eq? (fx+ stack-size 1) (OpenFn/stack-size fn))
-          (when (not (eq? stack-size (OpenFn/stack-size fn)))
-            (raise 'compile-internal (print-string "function argument has unexpected effect on stack")))
+          #;(when (not (eq? stack-size (OpenFn/stack-size fn)))
+            (raise-source x 'compile-internal (print-string "function argument has unexpected effect on stack") (list x)))
           ;; TODO: side-effecting statements and the stack
           (emit fn 'push-immediate (value-bits unspecified))
 
@@ -361,7 +362,7 @@
 
   ;; Stack size sanity check
   ;; Except for toplevel functions
-  (unless (or (OpenFn/toplevel? fn) (eq? (fx- (OpenFn/stack-size fn) argc) stack-check))
+  #;(unless (or (OpenFn/toplevel? fn) (eq? (fx- (OpenFn/stack-size fn) argc) stack-check))
     (raise 'compile-internal (print-string "expected function stack size" (OpenFn/stack-size fn)
                                            "to match 0 + function arguments" stack-check) (list fn x)))
 
@@ -439,7 +440,7 @@
       (cons 'global x)
       (if (OpenFn/toplevel? search-fn)
         (begin
-          (unless (or (top-level-bound? x) (table-ref (OpenFn/env search-fn) x))
+          (unless (or (top-level-bound? x) (table-ref (OpenFn/env search-fn) x) (not (top-level-value 'COMPILER-WARN-UNDEFINED)))
             (print-source src "Warning: reference to undefined variable" (symbol-dequalify x)))
           (cons 'global x))
         (aif (table-ref (OpenFn/env search-fn) x)
