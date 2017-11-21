@@ -2030,7 +2030,7 @@ struct State {
   Value eval_exp(Value exp);
   Value eval_apply_function(Value fn, size_t argc, Value* argv);
   /** The primary application function */
-  Value eval_list(Value lst, bool expand = true);
+  Value eval_list(Value lst, bool expand = true, Value env = C_FALSE);
 
   // Build a list of out of temps
   Value temps_to_list(size_t limit = 0);

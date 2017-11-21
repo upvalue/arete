@@ -630,6 +630,17 @@ Value fn_set_vmfunction_name(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("set-vmfunction-name!", fn_set_vmfunction_name, 2);
 
+Value fn_set_vmfunction_macro_env(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-vmfunction-macro-env!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
+
+  VMFunction* fn = argv[0].as<VMFunction>();
+  fn->macro_env = argv[1];
+
+  return C_UNSPECIFIED;
+}
+AR_DEFUN("set-vmfunction-macro-env!", fn_set_vmfunction_macro_env, 2);
+
 Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-vmfunction-log!";
   AR_FN_EXPECT_TYPE(state, argv, 1, CONSTANT);
@@ -851,12 +862,12 @@ Value fn_rename_gensym(State& state, size_t argc, Value* argv) {
 AR_DEFUN("rename-gensym", fn_rename_gensym, 1);
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
-  Value env = argv[1], exp = argv[0];
+  Value env = argc == 2 ? argv[1] : C_FALSE, exp = argv[0];
   AR_FRAME(state, env, exp);
   exp = state.make_pair(exp, C_NIL);
-  return state.eval_list(exp, false);
+  return state.eval_list(exp, false, env);
 }
-AR_DEFUN("eval", fn_eval, 2);
+AR_DEFUN("eval", fn_eval, 1, 2);
 
 ///// MISC
 

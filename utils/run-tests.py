@@ -1,5 +1,8 @@
 # run-tests.py - A simple test runner that compares output to expected output pre-written into files.
 
+# TODO: allow quick running of specific tests. Could give pattern as an argument and only run tests which
+# match that
+
 import glob
 import subprocess
 import os
@@ -83,7 +86,12 @@ suites = (
     ('preboot',  ['{}']),
     ('expander', ['scheme/expand.scm', 'scheme/syntax.scm', '{}']),
     ('compiler',  ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', '--set', 'compiler-test-file', '"{}"',
-                   'tests/compiler-test.scm'])
+                   'tests/compiler-test.scm']),
+    ('modules', ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', 
+        '--eval', "(set-top-level-value! '*module-load-paths* (append (top-level-value '*module-load-paths) (list \"tests/modules\")))",
+        
+        
+        '{}']),
 )
 
 if __name__ == '__main__':

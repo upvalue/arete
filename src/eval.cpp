@@ -811,9 +811,10 @@ Value State::eval_exp(Value exp) {
   return eval_body(frame, exp, true);
 }
 
-Value State::eval_list(Value lst, bool expand) {
+Value State::eval_list(Value lst, bool expand, Value env) {
   Value elt, lst_top, tmp, compiler, vfn;
   EvalFrame frame;
+  frame.env = env;
   lst_top = lst;
   compiler = get_global_value(G_COMPILER);
 

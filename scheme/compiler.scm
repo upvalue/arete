@@ -807,7 +807,6 @@
 (define (compile-toplevel body mod)
   (define fn (OpenFn/make (aif (source-name body) (string->symbol (string-append "toplevel:" it)) 'vm-toplevel)))
 
-
   (OpenFn/toplevel?! fn #t)
 
   (scan-defines fn body)
@@ -860,6 +859,7 @@
 
     (let ((fn (compile-lambda #f fn-exxxpr)))
       (when is-macro?
+        (set-vmfunction-macro-env! fn (function-env oldfn))
         (set-function-macro-bit! fn))
       fn)
 

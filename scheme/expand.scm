@@ -45,6 +45,7 @@
 (define rename? (lambda (v) (eq? (value-type v) 16)))
 (define identifier? (lambda (v) (or (rename? v) (symbol? v))))
 (define (function? v) (eq? (value-type v) 13))
+(define (vmfunction? v) (eq? (value-type v) 19))
 
 (define list (lambda lst lst))
 
@@ -161,7 +162,8 @@
 
 ;; Env lookup
 
-;; This has to be done like this, because we cannot store #<syntax> or #<undefined> in named variables.
+;; This has to be done like this, because we cannot store #<syntax> or #<undefined> in named variables as the 
+;; interpreter will error out when this happens.
 (define (env-check-syntax name)
   (if (fx= (value-bits (top-level-value name)) 34) 'syntax (top-level-value name)))
 
@@ -182,25 +184,31 @@
      (begin
        (list #f (rename-strip name) (env-check-syntax (rename-strip name)) #t)))
     ((table? env)
-     (begin
-       (define strip (rename-strip name))
-       (if (table-ref env strip)
-         ;; this variable is defined, can either be a transformer which is 
-         ;; returned directly for the use of the expander,
-         ;; or is a reference to a variable
-         (if (procedure? (table-ref env strip))
-           (list env strip (table-ref env strip) #t)
-           (list env (table-ref env strip) 'variable #t))
-         ;; problem
+     (if (rename? name)
+       (begin
+         (if (table? (rename-env name))
+           #t#;(print (cdr (env-lookup (rename-env name) (rename-expr name)))))
+         ;(print (env-lookup (rename-env name) (rename-expr name)))
+         (env-lookup (rename-env name) (rename-expr name)))
+       (begin
+         (define strip (rename-strip name))
+         (if (table-ref env strip)
+           ;; this variable is defined, can either be a transformer which is 
+           ;; returned directly for the use of the expander,
+           ;; or is a reference to a variable
+           (if (procedure? (table-ref env strip))
+             (list env strip (table-ref env strip) #t)
+             (list env (table-ref env strip) 'variable #t))
+           ;; problem
 
-         ;; if a variable is not defined, sometimes we want to treat it basically as a toplevel value.
-         ;; for example, (env-compare #f 'else (make-rename <some table> 'else)) => #t
-         ;; we also want to check for built-in syntax
-         ;; but for most code we want to return a qualified name so that something in a module can reference
-         ;; something defined later on in a module.
-         (if (eq? (env-check-syntax strip) 'syntax)
-           (list #f strip 'syntax #t)
-           (list env (module-qualify env strip) unspecified #f)))))
+           ;; if a variable is not defined, sometimes we want to treat it basically as a toplevel value.
+           ;; for example, (env-compare #f 'else (make-rename <some table> 'else)) => #t
+           ;; we also want to check for built-in syntax
+           ;; but for most code we want to return a qualified name so that something in a module can reference
+           ;; something defined later on in a module.
+           (if (eq? (env-check-syntax strip) 'syntax)
+             (list #f strip 'syntax #t)
+             (list env (module-qualify env strip) unspecified #f))))))
     ;; local environment
     ((vector? env)
      (begin
@@ -371,7 +379,7 @@
         (raise-source src 'expand (print-string "arguments to import specifier" name " must all be symbols") (list syms))))
     syms))
 
-(define *module-load-paths* '("." "/usr/share/lib/arete"))
+(define *module-load-paths* '("."))
 (define *module-extensions* '(".scm" ".sld"))
 
 (define (module-try-load name paths exts)
@@ -380,8 +388,9 @@
     (if (null? paths)
       (module-try-load name *module-load-paths* (cdr exts))
       (begin
+        ;(print exts paths)
         (define path (string-append (car paths) (make-string 1 (path-separator)) name (car exts)))
-        (print ";; checking" path)
+        ;(print ";; checking" path)
         (if (file-exists? path)
           path
           (module-try-load name (cdr paths) exts))))))
@@ -499,9 +508,11 @@
   unspecified)
 
 (define (expand-toplevel-import x env)
-  (if (not (and (list? x) (fx= (length x) 2)))
-    (raise-source x 'expand "bad import spec" (list x)))
-  (expand-import env (cadr x)))
+  (if (not (list? x))
+    (raise-source x 'expand "import spec must be a list" (list x)))
+  (for-each
+    (lambda (x) (expand-import env x))
+    (cdr x)))
 
 (define (expand-module-decl mod x env)
   (define kar (car x))
@@ -593,11 +604,11 @@
         ((or (eq? kar 'letrec-syntax) (eq? kar 'let-syntax)) (expand-let-syntax x env))
         ((or (eq? kar 'and) (eq? kar 'or)) (expand-and-or x env))
         ((eq? kar 'lambda) (expand-lambda x env))
-        ((eq? kar 'begin) (cons-source x (car x) (expand-map (cdr x) env)))
+        ((eq? kar 'begin) (cons-source x (make-rename #f 'begin) (expand-map (cdr x) env)))
         ((eq? kar 'if) (expand-if x env))
         ((eq? kar 'set!) (expand-set x env))
         ((eq? kar 'cond) (expand-cond x env))
-        ((eq? kar 'quote) x)
+        ((eq? kar 'quote) (cons-source x (make-rename #f 'quote) (cdr x)))
         (else (begin 
                 (expand-macro x env))))
       ;; Normal function application
@@ -649,7 +660,7 @@
       (if (fx= len 4)
         (set! else-branch (list-ref x 3))))
 
-    (list-source x (car x) (expand (list-ref x 1) env) (expand (list-ref x 2) env) (expand else-branch env))))
+    (list-source x (make-rename #f 'if) (expand (list-ref x 1) env) (expand (list-ref x 2) env) (expand else-branch env))))
 
 (define expand-set
   (lambda (x env)
@@ -664,7 +675,7 @@
     (if (not (identifier? name))
       (raise-source (cdr x) 'expand "set! expects an identifier as its first arguments" (list x)))
 
-    (list-source x (car x) (expand (list-ref x 1) env) (expand (list-ref x 2) env))))
+    (list-source x (make-rename #f 'set!) (expand (list-ref x 1) env) (expand (list-ref x 2) env))))
 
 (define expand
   (lambda (x env)
@@ -692,10 +703,13 @@
         (table-set! (table-ref env "module-exports") name #t)))
 
     (set! expanded-body (expand body env))
-    (set! fn (eval expanded-body #f))
+    (set! fn (eval expanded-body env))
 
     (if (not (procedure? fn))
       (raise-source (cddr x) 'expand "define-syntax body did not evaluate to a function" (list x)))
+
+    (if (vmfunction? fn)
+      (set-vmfunction-macro-env! fn env))
 
     (set! fn-arity (function-min-arity fn))
 
@@ -862,6 +876,19 @@
          (table-set! (table-ref *core-module* "module-exports") k k)
          (table-set! *core-module* k k))
        (module-qualify *core-module* k)))))
+
+
+(define (make-empty-module name)
+  (define mod (module-make name))
+  (table-set! (top-level-value 'module-table) name mod)
+  (table-set! mod "module-export-all" #t)
+  (table-set! mod "module-stage" 2)
+  mod)
+  
+(make-empty-module "scheme#base")
+(make-empty-module "scheme#write")
+(make-empty-module "scheme#time")
+(make-empty-module "scheme#read")
 
 (define *user-module* (module-make "user"))
 
