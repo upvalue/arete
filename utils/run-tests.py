@@ -88,7 +88,7 @@ suites = (
     ('compiler',  ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', '--set', 'compiler-test-file', '"{}"',
                    'tests/compiler-test.scm']),
     ('modules', ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', 
-        '--eval', "(set-top-level-value! '*module-load-paths* (append (top-level-value '*module-load-paths) (list \"tests/modules\")))",
+        '--eval', "(set-top-level-value! '*module-paths* (append (top-level-value '*module-paths*) (list \"tests/modules\")))",
         
         
         '{}']),

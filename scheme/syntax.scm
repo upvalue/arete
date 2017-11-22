@@ -233,15 +233,6 @@
       ,@(map (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
       ,@body))))
 
-(define (max a b) (if (< a b) b a))
-(define (min a b) (if (> a b) b a))
-
-(define (values . rest)
-  (cons (list 'values) rest))
-
-(define (call-with-values producer consumer)
-  (apply consumer (cdr (producer))))
-
 ;; Records.
 
 (define-syntax define-record
@@ -325,6 +316,52 @@
     
   )) ;; lambda (x)
 
+;;;;; NUMBERS
+
+(define exact? fixnum?)
+(define inexact? flonum?)
+(define (integer? x)
+  (or (fixnum? x) (eqv? (floor x) x)))
+(define (max a b) (if (< a b) b a))
+(define (min a b) (if (> a b) b a))
+
+;;;;; MULTIPLE RETURN VALUES
+
+(define (values . rest)
+  (cons (list 'values) rest))
+
+(define (call-with-values producer consumer)
+  (apply consumer (cdr (producer))))
+
+;;;;; STRINGS
+
+(define (list->string lst)
+  (unless (list? lst)
+    (raise 'type "string->list expected list as first argument" (list lst)))
+  (if (null? lst)
+    ""
+    (let ((str (make-string (length lst))))
+      (let loop ((elt (car lst))
+                 (rest (cdr lst))
+                 (i 0))
+        (unless (char? elt)
+          (raise 'type (print-string "string->list expected a list of characters but got " elt) (list elt)))
+        (string-set! str i elt)
+        (if (null? rest)
+          str
+          (loop (car rest) (cdr rest) (fx+ i 1)))))))
+
+(define (string->list str)
+  (if (fx= (string-length str) 0)
+    '()
+    (let loop ((i (string-length str))
+               (lst '()))
+      (if (fx= i 0)
+        lst
+        (loop (fx- i 1) (cons (string-ref str (fx- i 1)) lst))))))
+
+(define (string . lst) (list->string lst))
+
 ;; PORTS
 
 (define (call-with-input-file path thunk)
@@ -375,6 +412,15 @@
       (filter fn (cdr lst)))))
 
 ;; VECTORS
+
+(define (vector->list vec)
+  (if (fx= (vector-length vec) 0)
+    '()
+    (let loop ((i (vector-length vec)) (lst '()))
+      (if (fx= i 0)
+        lst
+        (loop (fx- i 1) (cons (vector-ref vec (fx- i 1)) lst))))))
+
 
 (define (list->vector lst)
   (if (null? lst)

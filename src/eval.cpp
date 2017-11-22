@@ -860,7 +860,6 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
       Value vfn = fn.closure_unbox();
 
       // VMFunctions do not create their own rest arguments.
-
       if(vfn.vm_function_variable_arity()) {
         temps.clear();
         for(size_t i = 0; i != argc; i++) {

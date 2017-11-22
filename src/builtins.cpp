@@ -427,6 +427,22 @@ Value fn_member(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("member", fn_member, 2);
 
+Value fn_reverse(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "reverse";
+  if(argv[0] == C_NIL) return C_NIL;
+  size_t length = argv[0].list_length();
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (length > 0));
+
+  state.temps.clear();
+  for(size_t i = 0; i != length; i++) {
+    state.temps.push_back(argv[0].car());
+      argv[0] = argv[0].cdr();
+  }
+  std::reverse(state.temps.begin(), state.temps.end());
+  return state.temps_to_list();
+}
+AR_DEFUN("reverse", fn_reverse, 1);
+
 Value fn_apply(State& state, size_t argc, Value* argv) {
   const char* fn_name = "apply";
 

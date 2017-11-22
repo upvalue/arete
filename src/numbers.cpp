@@ -194,6 +194,51 @@ Value fn_floor(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("floor", fn_floor, 1);
 
+Value fn_ceiling(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "ceiling";
+
+  if(argv[0].fixnump()) return argv[0];
+
+  AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].heap_type_equals(FLONUM));
+  return state.make_flonum(ceil(argv[0].flonum_value()));
+}
+AR_DEFUN("ceiling", fn_ceiling, 1);
+
+Value fn_modulo(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "modulo";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  return Value::make_fixnum(argv[0].fixnum_value() % argv[1].fixnum_value());
+}
+AR_DEFUN("modulo", fn_modulo, 2);
+
+Value fn_quotient(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "quotient";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  ldiv_t div = ldiv(argv[0].fixnum_value(), argv[1].fixnum_value());
+  return Value::make_fixnum(div.quot);
+}
+AR_DEFUN("quotient", fn_quotient, 2);
+
+Value fn_remainder(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "remainder";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  ldiv_t div = ldiv(argv[0].fixnum_value(), argv[1].fixnum_value());
+  return Value::make_fixnum(div.rem);
+}
+AR_DEFUN("remainder", fn_remainder, 2);
+
+Value fn_number_to_string(State& state, size_t argc, Value* argv) {
+  static const char* fn_name;
+  AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
+  std::ostringstream os;
+  os << argv[0];
+  return state.make_string(os.str());
+}
+AR_DEFUN("number->string", fn_number_to_string, 1);
+
 void State::load_numeric_functions() {
   // Numbers
   numbers.install(*this);

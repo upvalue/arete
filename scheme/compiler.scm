@@ -53,7 +53,7 @@
 ;; We could transform it to something with OP_LOCAL_SET 0 to a function's own adress.
 
 (set-top-level-value! 'COMPILER-VM-PRIMITIVES #t)
-(set-top-level-value! 'COMPILER-WARN-UNDEFINED #f)
+(set-top-level-value! 'COMPILER-WARN-UNDEFINED #t)
 
 ;; OpenFn is a record representing a function in the process of being compiled.
 
@@ -859,6 +859,7 @@
          )
 
     (let ((fn (compile-lambda #f fn-exxxpr)))
+      (set-vmfunction-name! fn fn-name)
       (when is-macro?
         (set-vmfunction-macro-env! fn (function-env oldfn))
         (set-function-macro-bit! fn))

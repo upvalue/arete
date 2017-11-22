@@ -34,6 +34,7 @@
 
 (define fixnum? (lambda (v) (eq? (value-type v) 1)))
 (define flonum? (lambda (v) (eq? (value-type v) 4)))
+(define (number? x) (or (fixnum? x) (flonum? x)))
 (define constant? (lambda (v) (eq? (value-type v) 2)))
 (define boolean? (lambda (v) (or (eq? v #t) (eq? v #f))))
 (define char? (lambda (v) (eq? (value-type v) 6)))
@@ -379,14 +380,14 @@
         (raise-source src 'expand (print-string "arguments to import specifier" name " must all be symbols") (list syms))))
     syms))
 
-(define *module-load-paths* '("."))
+(define *module-paths* '("."))
 (define *module-extensions* '(".scm" ".sld"))
 
 (define (module-try-load name paths exts)
   (if (null? exts)
     #f
     (if (null? paths)
-      (module-try-load name *module-load-paths* (cdr exts))
+      (module-try-load name *module-paths* (cdr exts))
       (begin
         ;(print exts paths)
         (define path (string-append (car paths) (make-string 1 (path-separator)) name (car exts)))
@@ -409,9 +410,9 @@
       ;; ./thing/asdf.sld
       ;; ./thing/asdf.scm
       ;; etc
-      (define path (module-try-load (string-map (lambda (c) (if (eqv? c #\#) (path-separator) c)) name) *module-load-paths* *module-extensions*))
+      (define path (module-try-load (string-map (lambda (c) (if (eqv? c #\#) (path-separator) c)) name) *module-paths* *module-extensions*))
       (if (not path)
-        (raise-source src 'expand (print-string "Could not find a file for module" name "in paths" *module-load-paths* "with extensions" *module-extensions*) (list name)))
+        (raise-source src 'expand (print-string "Could not find a file for module" name "in paths" *module-paths* "with extensions" *module-extensions*) (list name)))
       (load path)
       (if (not (table-ref (top-level-value 'module-table) name))
         (raise-source src 'expand (print-string "expected loading file" path "to provide module" name "but it did not") (list name)))
