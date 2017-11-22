@@ -373,7 +373,8 @@ void State::print_exception(std::ostream& os, Value exc) {
     }
 
     os << ARETE_COLOR_BLUE << exc.exception_message().string_data() << ARETE_COLOR_RESET << std::endl;
-
+  } else if(exc.exception_tag() == globals[State::S_READ_ERROR]) {
+    os << exc.exception_message().string_data();
   } else {
     os << exc << std::endl;
   }

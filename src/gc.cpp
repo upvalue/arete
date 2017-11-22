@@ -91,9 +91,6 @@ void State::finalize(Type object_type, Value object, bool called_by_gc) {
   }
 }
 
-size_t gc_collect_timer = 0;
-size_t gc_alloc_timer = 0;
-
 #ifdef ARETE_BENCH_GC
 struct GCTimer {
   GCTimer(size_t& timer_): timer(timer_) {
@@ -101,6 +98,10 @@ struct GCTimer {
   }
 
   ~GCTimer() {
+    end();
+  }
+
+  void end() {
     timer += (std::chrono::duration_cast<std::chrono::microseconds>((
       std::chrono::high_resolution_clock::now() - t1))).count();
   }
@@ -114,6 +115,11 @@ struct GCTimer {
   ~GCTimer() {}
 };
 #endif
+
+size_t gc_collect_timer = 0;
+size_t gc_alloc_timer = 0;
+size_t gc_overall_timer = 0;
+GCTimer gc_overall_timer_i(gc_overall_timer);
 
 Block::Block(size_t size_, unsigned char mark_bit): size(size_) {
   data = static_cast<char*>(malloc(size));
@@ -135,8 +141,11 @@ void State::print_gc_stats(std::ostream& os) {
   std::cout << ((gc_collect_timer + gc_alloc_timer) / 1000) << " ms total" << std::endl;
 # else
   std::cout << ((size_t)((((char*)gc.active->data + gc.block_cursor) - (char*)gc.active->data)) / 1024) << "kb allocated" << std::endl;
-
 # endif
+
+  // TODO: This cannot be called twice and remain accurate
+  gc_overall_timer_i.end();
+  std::cout << "approximately " << ((double)(gc_collect_timer + gc_alloc_timer) * 100) / (double)(gc_overall_timer) << "% of program time spent in GC" << std::endl;
 
 #endif
 }

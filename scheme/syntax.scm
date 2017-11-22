@@ -63,10 +63,24 @@
     ;; let return
     result))
 
-(define (append x y)
+(define (reduce fn lst)
+  (if (null? lst)
+    '()
+    (let ((len (length lst)))
+      (let loop ((i 0)
+                 (result (car lst)))
+        (if (fx= i (fx- len 1))
+          result
+          (begin
+            (loop (fx+ i 1) (fn result (list-ref lst (fx+ i 1))))))))))
+
+(define (append1 x y)
   (if (pair? x)
       (cons (car x) (append (cdr x) y))
       y))
+
+(define (append . lsts)
+  (reduce (lambda (a b) (append1 a b)) lsts))
 
 (define (qq-list c lst)
   (if (pair? lst)
@@ -392,16 +406,6 @@
 (define (assv obj alist) (assoc-impl eqv? obj alist))
 (define (assoc obj alist) (assoc-impl equal? obj alist))
 
-(define (reduce fn lst)
-  (if (null? lst)
-    '()
-    (let ((len (length lst)))
-      (let loop ((i 0)
-                 (result (car lst)))
-        (if (fx= i (fx- len 1))
-          result
-          (begin
-            (loop (fx+ i 1) (fn result (list-ref lst (fx+ i 1))))))))))
 
 #;(define (filter fn lst)
   (if (null? lst)

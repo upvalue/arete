@@ -6,7 +6,9 @@
 * Language
   - [ ] Gradual typing
 
-* SRFIs
+* RNRS & SRFIs
+  - [ ] Syntax-rules
+  - [ ] map & for-each must accept multiple lists as arguments
   - [ ] SRFI 89: Optional arguments
 
 * Interpreter
