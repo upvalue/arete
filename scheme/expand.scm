@@ -902,5 +902,5 @@
 (set-top-level-value! '*push-module* *user-module*)
 (set-top-level-value! '*current-module* *core-module*)
 
-;; Install expander
+; Install expander
 (set-top-level-value! 'expander expand-toplevel)

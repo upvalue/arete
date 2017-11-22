@@ -258,7 +258,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   AR_ASSERT(gc.vm_frames == &f);
 
   AR_LOG_VM("ENTERING FUNCTION " << f.fn->name << " closure: " << (f.closure == 0 ? "#f" : "#t")
-     << " free_variables: " << f.fn->free_variables);
+     << " free_variables: " << f.fn->free_variables << " stack_max: " << f.fn->stack_max);
 
   // Allocate function's required storage
 #if AR_USE_C_STACK
@@ -327,6 +327,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       VM_CASE(OP_POP): {
         AR_LOG_VM("pop");
+        AR_ASSERT(f.stack_i > 0 && "stack underflow");
         f.stack_i--;
         VM_DISPATCH();
       }
@@ -383,8 +384,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       VM_CASE(OP_LOCAL_GET): {
         size_t idx = VM_CODE()[code_offset++];
-        AR_LOG_VM("local-get idx: " << idx << " = " << f.locals[idx]);
         f.stack[f.stack_i++] = f.locals[idx];
+        AR_LOG_VM("local-get idx: " << idx << " = " << f.locals[idx]);
         VM_DISPATCH();
       }
 
@@ -412,7 +413,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       VM_CASE(OP_UPVALUE_SET): {
         AR_ASSERT(f.closure);
         size_t idx = VM_CODE()[code_offset++];
-        AR_ASSERT(f.stack_i >= 1);
+        AR_ASSERT("stack underflow" && f.stack_i >= 1);
         Value val = f.stack[--f.stack_i];
         Value upval = f.closure->upvalues->data[idx];
         upval.upvalue_set(val);
@@ -648,7 +649,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       ///// FLOW CONTROL
 
       VM_CASE(OP_RETURN): {
-        AR_LOG_VM("return");
+        AR_LOG_VM("return " << f.stack_i);
         AR_PRINT_STACK();
         Value ret = f.stack_i == 0 ? C_UNSPECIFIED : f.stack[f.stack_i - 1];
         f.close_over();

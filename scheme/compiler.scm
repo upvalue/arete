@@ -178,7 +178,7 @@
 
 ;; Build tables correlating instructions to bytes and vice versa
 (define insns-to-bytes (make-table))
-(define bytes-to-insns (make-table))
+;(define bytes-to-insns (make-table))
 ;; TODO make this a vector.
 
 (define insn-list
@@ -209,13 +209,9 @@
 
 (let loop ((pare (car insn-list)) (rest (cdr insn-list)))
   (table-set! insns-to-bytes (car pare) (cadr pare))
-  (table-set! bytes-to-insns (cadr pare) (car pare))
+  ;(table-set! bytes-to-insns (cadr pare) (car pare))
   (unless (null? rest)
     (loop (car rest) (cdr rest))))
-
-;(pretty-print insns-to-bytes)
-
-
 
 ;; This converts symbols into their equivalent fixnums
 (define (insn->byte fn insn)
@@ -240,10 +236,10 @@
 (define stack-effects
   (let ((table (make-table))
         (lst '(
-               (-1 jump pop global-set eq? list-ref)
+               (-1 jump pop global-set eq? list-ref local-set upvalue-set)
                (0 words close-over return car)
                (1 push-immediate push-constant global-get local-get upvalue-get)
-               (2 upvalue-set local-set))))
+               )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
       (let loop2 ((insns (cdr elt)))
         (table-set! table (car insns) (car elt))
@@ -285,6 +281,23 @@
     (emit fn 'push-immediate (value-bits x))
     (emit fn 'push-constant (register-constant fn x)))
 )
+
+;; Stack management
+
+;; This will push unspecified in the case that something side-effecty has happened
+(define (maybe-push-unspecified fn x original-stack)
+  (if (fx= (OpenFn/stack-size fn) original-stack)
+    (compile-constant fn unspecified)))
+
+;; This will pop a value in the case that something non side-effecty has happened in a side-effecty context
+;; e.g. in the case of (begin (set! x #t) 2) we don't want to pop the first "argument" which results in no stack changes
+;; in the case of (begin x 2) we want to pop "x" as it does nothing
+(define (maybe-pop fn x original-stack)
+  ;(print x original-stack (OpenFn/stack-size fn))
+  (if (fx= (OpenFn/stack-size fn) (fx+ original-stack 1))
+    (emit fn 'pop)
+    (if (not (fx= (OpenFn/stack-size fn) original-stack))
+      (raise-source x 'compiler-internal "expected expression to push only one value onto the stack" (list (OpenFn/stack-size fn) original-stack x)))))
 
 (define (fn-push-source fn x)
   (aif (list-get-source x)
@@ -352,7 +365,7 @@
       (let ((stack-size (OpenFn/stack-size fn)))
         (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f)
         (unless (eq? (fx+ stack-size 1) (OpenFn/stack-size fn))
-          #;(when (not (eq? stack-size (OpenFn/stack-size fn)))
+          (when (not (eq? stack-size (OpenFn/stack-size fn)))
             (raise-source x 'compile-internal (print-string "function argument has unexpected effect on stack") (list x)))
           ;; TODO: side-effecting statements and the stack
           (emit fn 'push-immediate (value-bits unspecified))
@@ -362,7 +375,7 @@
 
   ;; Stack size sanity check
   ;; Except for toplevel functions
-  #;(unless (or (OpenFn/toplevel? fn) (eq? (fx- (OpenFn/stack-size fn) argc) stack-check))
+  (unless (or (OpenFn/toplevel? fn) (eq? (fx- (OpenFn/stack-size fn) argc) stack-check))
     (raise 'compile-internal (print-string "expected function stack size" (OpenFn/stack-size fn)
                                            "to match 0 + function arguments" stack-check) (list fn x)))
 
@@ -618,29 +631,35 @@
   (define then-branch-end (gensym 'if-else))
   (define else-branch-end (gensym 'if-end))
 
+  (define check-stack (OpenFn/stack-size fn))
   (compile-expr fn condition (list-tail x 1) #f)
+  ;(maybe-push-unspecified fn x check-stack)
 
   (emit fn 'jump-if-false then-branch-end 1)
+
+  (set! check-stack (OpenFn/stack-size fn))
   (compile-expr fn then-branch (list-tail x 2) tail?)
+  ;(maybe-push-unspecified fn x check-stack)
 
   ;; TODO: side-effecting statements and the stack
 
   ;; Something side-effecty happened in a value context so we'll push unspecified on the stack
   ;; e.g. (if #t (set! x #t))
-  (if (eq? (OpenFn/stack-size fn) 0)
-    (emit fn 'push-immediate (value-bits unspecified)))
+  ;(if (eq? (OpenFn/stack-size fn) 0)
+  ;  (emit fn 'push-immediate (value-bits unspecified)))
 
   (emit fn 'jump else-branch-end)
   (register-label fn then-branch-end)
 
+  ;(set! check-stack (OpenFn/stack-size fn))
   (compile-expr fn else-branch (if (fx= (length x) 4) (list-tail x 3) #f) tail?)
+  ;(maybe-push-unspecified fn x check-stack)
 
   (register-label fn else-branch-end))
 
 ;; With ands, we generate a push-constant #f at the end of the expression, then a series of jump-if-falses that jump
 ;; to that push-constant if evaluation fails. The final jump-if-false has an argument of 0, meaning that the successful
 ;; (true) condition will be left on the stack.
-
 (define (compile-and fn x tail?)
   (define and-fail-pop (gensym 'and-fail-pop))
   (define and-fail (gensym 'and-fail))
@@ -714,10 +733,19 @@
 ;; Compiling a begin is fairly simple -- just need to make sure the last expression is considered a tail call.
 (define (compile-begin fn x tail?)
   (define x-len (fx- (length x) 2))
-  (for-each-i 
-    (lambda (i sub-x)
-      (compile-expr fn sub-x (list-tail x i) (and tail? (fx= i x-len))))
-    (cdr x)))
+  (if (null? (cdr x))
+    (emit fn 'push-immediate (value-bits unspecified))
+    (for-each-i 
+      (lambda (i sub-x)
+        (define stack-size (OpenFn/stack-size fn))
+        ;(print sub-x (OpenFn/stack-size fn))
+        (compile-expr fn sub-x (list-tail x i) (and tail? (fx= i x-len)))
+        ;(print sub-x (OpenFn/stack-size fn))
+        ;; Expression is here for side-effects. Pop it.
+        (unless (fx= i x-len)
+          (maybe-pop fn sub-x stack-size))
+      )
+      (cdr x))))
 
 (define (compile-special-form fn x src type tail?)
   (compiler-log fn "compiling special form" type x)
@@ -733,7 +761,9 @@
     (or (compile-or fn x tail?))
     (quote (compile-quote fn x))
     (begin (compile-begin fn x tail?))
-    (else (raise 'compile-internal "unknown special form" (list x)))))
+    (else
+      (begin
+        (raise 'compile-internal "unknown special form" (list type (car x)))))))
 
 (define (special-form x)
   (when (rename? x)
@@ -751,14 +781,30 @@
       (compiler-log fn "expr source:" it)
       (register-source fn src))
   )
-  (cond
-    ((self-evaluating? x) (compile-constant fn x))
-    ((identifier? x) (compile-identifier fn x src))
-    ((list? x)
-     (aif (special-form (car x))
-       (compile-special-form fn x src it tail?)
-       (compile-apply fn x tail?)))
-    (else (raise 'compile-internal "don't know how to compile expression" (list x)))))
+
+  (define check-stack (OpenFn/stack-size fn))
+
+  (define result
+    (cond
+      ((self-evaluating? x) (compile-constant fn x))
+      ((identifier? x) (compile-identifier fn x src))
+      ((list? x)
+       (aif (special-form (car x))
+         (begin
+           (compile-special-form fn x src it tail?))
+         (compile-apply fn x tail?)))
+      (else (raise 'compile-internal "don't know how to compile expression" (list x)))))
+
+  ;; We'll push UNSPECIFIED on the stack in case this expression happens in a context where a value must be consumed
+  ;; such as (if #t (set! x #t) (set! x #f)) etc
+  (if (fx= check-stack (OpenFn/stack-size fn))
+    (compile-constant fn unspecified)
+    (unless (fx= check-stack (fx- (OpenFn/stack-size fn) 1))
+      (raise 'compile-internal "expression resulted in stack growing by more than 1" (list x))))
+
+
+
+  result)
 
 ;; Compiler entry point; compiles a list of expressions and adds them to a function
 (define (compile fn body)
@@ -815,10 +861,9 @@
   (compile fn body)
   (compile-finish fn)
 
-  ;(print "toplevel stack size" (OpenFn/stack-size fn))
-
   (let ((result (OpenFn->procedure fn)))
     result))
+
 ;; A copying append that uses source information
 (define (append-source src lst elt)
   (let loop ((lst lst))
@@ -864,14 +909,6 @@
         (set-vmfunction-macro-env! fn (function-env oldfn))
         (set-function-macro-bit! fn))
       fn)
-
-    #;(let ((fn (compile-lambda #f fn-exxxpr)))
-      (OpenFn/name! fn fn-name)
-      ;(set-top-level-value! name (OpenFn->procedure fn))
-      (let ((result (OpenFn->procedure fn)))
-        (when is-macro?
-          (set-function-macro-bit! result))
-        result))
   ))
 
 (define (time-function str cb)

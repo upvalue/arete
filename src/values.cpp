@@ -499,13 +499,43 @@ Value State::make_src_pair(Value car, Value cdr, Value src) {
   return make_pair(car, cdr);
 }
 
+size_t Value::list_length() {
+  Value check(bits);
+  if(check == C_NIL || !check.heap_type_equals(PAIR)) return 0;
+  size_t len = 0;
+  while(true) {
+    if(check == C_NIL) break;
+    else if(!check.heap_type_equals(PAIR)) return 0;
+    else {
+      ++len, check = check.cdr();
+    }
+  }
+  return len;
+}
+
+bool Value::listp() {
+  return bits == C_NIL || list_length() > 0;
+}
+
+Value Value::list_ref(size_t n) const {
+  Value check(bits);
+  size_t i = 0;
+  while(check.type() == PAIR && i++ != n) {
+    check = check.cdr();
+    if(check.type() != PAIR && check != C_NIL) {
+      AR_TYPE_ASSERT(!"list-ref in non-list");
+      return C_NIL;
+    }
+  }
+  return check.car();
+}
+
 
 Value State::make_char(char c) {
   Char* heap = static_cast<Char*>(gc.allocate(CHARACTER, sizeof(Char)));
   heap->datum = c;
   return heap;
 }
-
 
 ///// VECTORS
 

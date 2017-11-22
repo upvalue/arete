@@ -732,8 +732,9 @@ tail_call:
           }
           case CLOSURE:
           case VMFUNCTION: {
-            Value fn = tmp, args = exp.cdr(), argv, varargs_begin, varargs_cur = C_NIL, closure;
-            AR_FRAME(this, fn, args, argv, varargs_begin, varargs_cur, closure);
+            Value fn = tmp, args = exp.cdr(), argv, closure;
+            ListAppender rest;
+            AR_FRAME(this, fn, args, argv, rest.head, rest.tail,  closure);
 
             if(fn.heap_type_equals(CLOSURE)) {
               closure = fn;
@@ -767,16 +768,10 @@ tail_call:
               while(args.heap_type_equals(PAIR)) {
                 tmp = eval_body(frame, args.car(), true);
                 EVAL_CHECK(tmp, args);
-                if(varargs_cur == C_NIL) {
-                  varargs_begin = varargs_cur = make_pair(tmp, C_NIL);
-                } else {
-                  tmp = make_pair(tmp, C_NIL);
-                  varargs_cur.set_cdr(tmp);
-                  varargs_cur = tmp;
-                }
+                rest.append(*this, tmp);
                 args = args.cdr();
               }
-              vector_storage_append(argv, varargs_begin);
+              vector_storage_append(argv, rest.head);
               argc++;
             }
 
@@ -844,7 +839,11 @@ Value State::eval_list(Value lst, bool expand, Value env) {
     Value argv[2] = {lst, get_global_value(G_CURRENT_MODULE)};
     tmp = apply(compiler, 2, argv);
     if(tmp.is_active_exception()) return tmp;
-    return apply(tmp, 0, 0);
+
+    if(get_global_value(G_VM_LOG_REPL) != C_UNDEFINED && get_global_value(G_VM_LOG_REPL) != C_FALSE) {
+      tmp.heap->set_header_bit(Value::VMFUNCTION_LOG_BIT);
+    }
+    return apply(tmp, 0, 0); 
   }
 
   return C_UNSPECIFIED;

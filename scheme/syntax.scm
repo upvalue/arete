@@ -320,8 +320,7 @@
 
 (define exact? fixnum?)
 (define inexact? flonum?)
-(define (integer? x)
-  (or (fixnum? x) (eqv? (floor x) x)))
+(define (integer? x) (or (fixnum? x) (eqv? (floor x) x)))
 (define (max a b) (if (< a b) b a))
 (define (min a b) (if (> a b) b a))
 
@@ -480,6 +479,7 @@
                   new-results
                   (loop (cadr clauses) (cddr clauses) new-results)
                   )))))))
+
 ;; While loop
 
 (define-syntax while
@@ -491,7 +491,27 @@
           ,@(cddr x)
           (,#'loop ,(cadr x))))))
 
-;; compatibility
+;; SRFI 1
+
+(define (every1 pred lst)
+  (if (null? lst)
+    #t
+    (let loop ((elt (car lst)) (rest (cdr lst)))
+      (if (not (pred elt))
+        #f
+        (if (null? rest)
+          #t
+          (loop (car rest) (cdr rest)))))))
+
+(define (every pred . lsts)
+  (let loop ((lst (car lsts)) (rest (cdr lsts)))
+    (if (not (every1 pred lst))
+      #f
+      (if (null? rest)
+        #t
+        (loop (car rest) (cdr rest))))))
+
+;; COMPATIBILITY
 
 (define-syntax er-macro-transformer
   (lambda (x)

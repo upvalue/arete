@@ -137,6 +137,38 @@ Value fn_string_ref(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("string-ref", fn_string_ref, 2);
 
+Value fn_substring(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "substring";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  AR_FN_EXPECT_POSITIVE(state, argv, 1);
+  AR_FN_EXPECT_POSITIVE(state, argv, 2);
+
+  AR_FN_CHECK_BOUNDS(state, "string", argv[0].string_bytes(), argv[1].fixnum_value());
+  AR_FN_CHECK_BOUNDS(state, "string", argv[0].string_bytes() + 1, argv[2].fixnum_value());
+
+  Value str = argv[0];
+  size_t end = (size_t) argv[2].fixnum_value(), start = (size_t)argv[1].fixnum_value();
+  AR_FRAME(state, str);
+
+  Value substr = state.make_string(end - start);
+  const char* substring = (str.string_data() + start);
+
+  memcpy(substr.string_data_mod(), substring, end - start);
+
+  return substr;
+}
+AR_DEFUN("substring", fn_substring, 3);
+
+Value fn_string_equals(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "string=?";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
+  if(argv[0].string_bytes() != argv[1].string_bytes()) return C_FALSE;
+
+  return Value::make_boolean(strncmp(argv[0].string_data(), argv[1].string_data(), argv[0].string_bytes()) == 0);
+}
+AR_DEFUN("string=?", fn_string_equals, 2);
+
 Value fn_string_length(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string-length";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);

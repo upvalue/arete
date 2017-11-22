@@ -69,6 +69,7 @@ void State::boot() {
     "file", "read", "eval", "type", "expand", "syntax",
     // Various variables
     "TCO-ENABLED",
+    "VM-LOG-REPL",
     "*features*",
     "*command-line*",
     "EXPANDER-PRINT",

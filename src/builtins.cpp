@@ -456,7 +456,6 @@ Value fn_apply(State& state, size_t argc, Value* argv) {
   AR_FRAME(state, fn, args, tmp, sub_argv);
 
   sub_argv = state.make_vector_storage(length);
-  size_t i = 0;
   while(args.heap_type_equals(PAIR)) {
     state.vector_storage_append(sub_argv, args.car());
     args = args.cdr();
@@ -671,7 +670,8 @@ Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
   if(argv[1] == C_FALSE) {
     fn.heap->unset_header_bit(Value::VMFUNCTION_LOG_BIT);
   } else {
-    fn.heap->set_header_bit(Value::VMFUNCTION_LOG_BIT);
+    if(!fn.heap->get_header_bit(Value::VMFUNCTION_LOG_BIT))
+      fn.heap->set_header_bit(Value::VMFUNCTION_LOG_BIT);
   }
 
   return C_UNSPECIFIED;

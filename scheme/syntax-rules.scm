@@ -63,12 +63,10 @@
        #f))
     (else
       (print "could not match:" pattern form) #f)
-    
     ))
 
 ;; (let ((var x)) y)
 ;; we have to rename everything except those variables which are introduced by the user.
-
 
 (print (syntax-rules-match '... '(hello) '(hello)))
 (print (syntax-rules-match '... '(hello one) '(hello 1)))
@@ -77,7 +75,6 @@
 (print (syntax-rules-match '... '(hello one ...) '(hello bug)))
 (print (syntax-rules-match '... '(hello one) '(hello (1))))
 (print (syntax-rules-match '... '(hello (one two three ...)) '(hello (1 2 3 4))))
-;(print (syntax-rules-match '(herro one two three) '(herro two three)))
 (print (syntax-rules-match '... '(hello (one two three)) '(hello (four five six))))
 (print (syntax-rules-match '... '(hello (one two three ...)) '(hello (four five six))))
 (print (syntax-rules-match '... '(hello one two three ...) '(hello 1 2)))
@@ -87,8 +84,6 @@
 
 ;; remove _ and asdf from name
 
-;;
-
 #;(define-syntax asdf
   (syntax-rules ()
     ((_ #t))))
@@ -97,6 +92,8 @@
 ;; Something like (_ one two three)
 ;; We have to map over it, touch every identifier, but we also have to deal with ...; maybe map-i?
 
+;; how do we expand the ellipses?
+;; We find the ellipses
 
 ;; (define-syntax let1
 ;;   ((_ name value body)
@@ -110,6 +107,7 @@
 ;;   ((_ value)
 ;;    (print value)))
 
+;; (#'print value)
 
 ;; (define-syntax bind1
 ;;   ((_ name value)
@@ -124,3 +122,7 @@
 ;; (lambda (name name-shadow) #t)
 ;; (#'lambda (name #'name-shadow) #t)
 
+;; asdf ...
+
+
+;; use FOLD-RIGHT

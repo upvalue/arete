@@ -285,6 +285,7 @@ struct HeapValue {
     AR_ASSERT(!get_header_bit(bit));
     header += bit;
   }
+
   void unset_header_bit(unsigned bit) {
     header -= bit;
   }
@@ -301,9 +302,9 @@ struct HeapValue {
 
   void flip_mark_bit() { header += get_mark_bit() ? -256 : 256; }
 #if ARETE_64_BIT
-  static const unsigned HEADER_INT_SHIFT = 32;
+  static const size_t HEADER_INT_SHIFT = 32;
 #else
-  static const unsigned HEADER_INT_SHIFT = 16;
+  static const size_t HEADER_INT_SHIFT = 16;
 #endif
 
 };
@@ -605,8 +606,8 @@ struct Value {
   size_t table_entries() const;
 
   // PAIRS
-  size_t list_length() const;
-  bool listp() const;
+  size_t list_length();
+  bool listp();
   Value list_ref(size_t) const;
 
   Value car() const;
@@ -622,8 +623,8 @@ struct Value {
 
   // True if a pair has been allocated with source code information
   static const unsigned PAIR_SOURCE_BIT = 1 << 9; 
-  // True if a pair has been generated as a result of the expansion pass
-  static const unsigned PAIR_GENERATED_BIT = 1 << 10;
+  // True if a pair is immutable
+  static const unsigned PAIR_IMMUTABLE_BIT = 1 << 10;
 
   /* Check whether a pair has source code information attached to it */
   bool pair_has_source() const {
@@ -631,9 +632,9 @@ struct Value {
     return heap->get_header_bit(PAIR_SOURCE_BIT);
   }
 
-  bool pair_generated() const {
+  bool pair_immutable() const {
     AR_TYPE_ASSERT(type() == PAIR);
-    return heap->get_header_bit(PAIR_GENERATED_BIT);
+    return heap->get_header_bit(PAIR_IMMUTABLE_BIT);
   }
 
   /** Return a pair's source code information. This is an error if the pair does not have
@@ -874,44 +875,6 @@ inline Value Value::car() const {
   return static_cast<Pair*>(heap)->data_car;
 }
 
-inline size_t Value::list_length() const {
-  Value check(bits);
-  if(check == C_NIL || !check.heap_type_equals(PAIR)) return 0;
-  size_t len = 0;
-  while(true) {
-    if(check == C_NIL) break;
-    else if(!check.heap_type_equals(PAIR)) return 0;
-    else {
-      ++len, check = check.cdr();
-    }
-  }
-  /*
-  while(check.heap_type_equals(PAIR)) {
-    ++len;
-    check = check.cdr();
-    if(check == C_NIL) break;
-  }
-  */
-  return len;
-}
-
-inline bool Value::listp() const {
-  return bits == C_NIL || list_length() > 0;
-}
-
-inline Value Value::list_ref(size_t n) const {
-  Value check(bits);
-  size_t i = 0;
-  while(check.type() == PAIR && i++ != n) {
-    check = check.cdr();
-    if(check.type() != PAIR && check != C_NIL) {
-      AR_TYPE_ASSERT(!"list-ref in non-list");
-      return C_NIL;
-    }
-  }
-  return check.car();
-}
-
 inline Value Value::caar() const {
   AR_TYPE_ASSERT(type() == PAIR);
   return car().car();
@@ -949,11 +912,13 @@ inline Value Value::cdr() const {
 
 inline void Value::set_car(Value v) {
   AR_TYPE_ASSERT(type() == PAIR);
+  AR_TYPE_ASSERT(!pair_immutable());
   static_cast<Pair*>(heap)->data_car = v;
 }
 
 inline void Value::set_cdr(Value v) {
   AR_TYPE_ASSERT(type() == PAIR);
+  AR_TYPE_ASSERT(!pair_immutable());
   static_cast<Pair*>(heap)->data_cdr = v;
 }
 
@@ -1694,6 +1659,7 @@ struct State {
     S_SYNTAX_ERROR,
     // Global variables
     G_TCO_ENABLED,
+    G_VM_LOG_REPL,
     G_FEATURES,
     G_COMMAND_LINE,
     G_EXPANDER_PRINT,
