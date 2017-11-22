@@ -150,6 +150,7 @@
 
     (apply pretty-print rest)))
 
+
 ;; This function registers the source of a particular expression, by creating a vector with the offset of its code
 ;; and its source code information (see SourceLocation in arete.hpp).
 (define (register-source fn cell)
@@ -284,12 +285,7 @@
 
 ;; Stack management
 
-;; This will push unspecified in the case that something side-effecty has happened
-(define (maybe-push-unspecified fn x original-stack)
-  (if (fx= (OpenFn/stack-size fn) original-stack)
-    (compile-constant fn unspecified)))
-
-;; This will pop a value in the case that something non side-effecty has happened in a side-effecty context
+;; This will pop a value in the case that evaluation has happened in a side-effecty context
 ;; e.g. in the case of (begin (set! x #t) 2) we don't want to pop the first "argument" which results in no stack changes
 ;; in the case of (begin x 2) we want to pop "x" as it does nothing
 (define (maybe-pop fn x original-stack)
@@ -360,16 +356,25 @@
 
   (set! stack-check (OpenFn/stack-size fn))
 
+
+  ;; Extract an argument list 
+  (define argument-list
+    (if (and (pair? (car x)) (eq? (rename-strip (caar x)) 'lambda))
+      (and (pair? (cadar x)) (cadar x))
+      #f))
+
+  (define argument-list-length (if argument-list (length argument-list) 0))
+
   (for-each-i
     (lambda (i sub-x)
-      (let ((stack-size (OpenFn/stack-size fn)))
-        (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f)
-        (unless (eq? (fx+ stack-size 1) (OpenFn/stack-size fn))
-          (when (not (eq? stack-size (OpenFn/stack-size fn)))
-            (raise-source x 'compile-internal (print-string "function argument has unexpected effect on stack") (list x)))
-          ;; TODO: side-effecting statements and the stack
-          (emit fn 'push-immediate (value-bits unspecified))
+      (define result (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f))
+      (when argument-list
+        (if (fx= i argument-list-length)
+          (print-source x "Inline function application appears to have too many arguments")
+          (if (vmfunction? result)
+            (set-vmfunction-name! result (list-ref argument-list i)))
 
+          
           )))
     (cdr x))
 
@@ -816,8 +821,6 @@
       ;; No tail calls in toplevel programs, so that something like
       ;; (define x (vm-function)) at REPL will work.
       (compile-expr fn x (list-tail body i) (and (not (OpenFn/toplevel? fn)) (fx= i end)))
-      #;(if (OpenFn/toplevel? fn)
-        (emit fn 'pop))
     )
 
     body)

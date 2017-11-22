@@ -435,6 +435,8 @@
 
 ;; SRFI-0
 
+;; TODO: This needs to be rewritten in the style of module-imports, to allow recursion.
+
 (define (cond-expand-check-feature x form)
   (unless (and (list? form) (not (null? form)))
     (raise-source form 'syntax "cond-expand feature requirement must be a list with at least one element" (list form)))
@@ -445,7 +447,13 @@
     ((or)
      (reduce (lambda (a b) (or a b)) (map (lambda (x) (if (memq x (top-level-value '*features*)) #t #f)) (cdr form))))
     ((else) #t)
-    ((library) (raise 'syntax "cond-expand does not support library yet" (list form))))
+    ((library)
+     (unless (fx= (length form) 2)
+       (raise 'syntax "cond-expand library expression must have only one argument" (list form)))
+     ;(print (cdr x))
+     (if (table-ref (top-level-value 'module-table) (module-spec->string (cdr form) (cadr form)))
+       #t
+       #f)))
 )
 
 ;; Print and return an intermediate value. For printf-debugging convenience.

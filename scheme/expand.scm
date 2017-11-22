@@ -28,6 +28,7 @@
 (define cdar (lambda (x) (cdr (car x))))
 (define cddr (lambda (x) (cdr (cdr x))))
 (define caddr (lambda (x) (car (cdr (cdr x)))))
+(define (cadar x) (car (cdr (car x))))
 (define cdddr (lambda (x) (cdr (cdr (cdr x)))))
 
 (define not (lambda (x) (eq? x #f)))

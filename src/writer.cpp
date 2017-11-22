@@ -187,8 +187,15 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os << '>';
     }
+    case CLOSURE:
     case VMFUNCTION: {
-      os << "#<vmfunction " << v.vm_function_name();
+      if(v.heap_type_equals(CLOSURE)) {
+        os << "#<closure ";
+        v = v.closure_unbox();
+      } else {
+        os << "#<vmfunction ";
+      }
+      os << v.vm_function_name();
       os << ' ' << v.vm_function_min_arity() << '-';
       if(v.vm_function_variable_arity()) {
         os << "rest";
@@ -218,8 +225,6 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os << ' ' << path << '>';
     }
-    case CLOSURE:
-      return os << "#<closure " << v.bits << ">";
     case UPVALUE:
       return os << "#<upvalue " << v.bits << '>';
     case BLOB:
