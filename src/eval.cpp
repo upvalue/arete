@@ -730,7 +730,7 @@ tail_call:
             AR_ASSERT(!"should never reach this point");
             return C_FALSE;
           }
-          //case CLOSURE:
+          case CLOSURE:
           case VMFUNCTION: {
             Value fn = tmp, args = exp.cdr(), argv, varargs_begin, varargs_cur = C_NIL, closure;
             AR_FRAME(this, fn, args, argv, varargs_begin, varargs_cur, closure);
@@ -856,8 +856,25 @@ Value State::eval_list(Value lst, bool expand, Value env) {
 
 Value State::apply(Value fn, size_t argc, Value* argv) {
   switch(fn.type()) {
-    case VMFUNCTION: case CLOSURE:
+    case VMFUNCTION: case CLOSURE: {
+      Value vfn = fn.closure_unbox();
+
+      // VMFunctions do not create their own rest arguments.
+
+      if(vfn.vm_function_variable_arity()) {
+        temps.clear();
+        for(size_t i = 0; i != argc; i++) {
+          temps.push_back(argv[i]);
+        }
+
+        unsigned rest_argi = vfn.vm_function_max_arity();
+        
+        temps[rest_argi] = temps_to_list(rest_argi);
+        return apply_vm(fn, rest_argi+1, &temps[0]);
+      }
+
       return apply_vm(fn, argc, argv);
+    }
     case CFUNCTION:
       return fn.c_function_apply(*this, argc, argv);
     case FUNCTION: {

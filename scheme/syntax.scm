@@ -239,6 +239,9 @@
 (define (values . rest)
   (cons (list 'values) rest))
 
+(define (call-with-values producer consumer)
+  (apply consumer (cdr (producer))))
+
 ;; Records.
 
 (define-syntax define-record

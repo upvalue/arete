@@ -439,10 +439,9 @@ Value fn_apply(State& state, size_t argc, Value* argv) {
   Value fn = argv[0], args = argv[1], tmp;
   AR_FRAME(state, fn, args, tmp, sub_argv);
 
-  args = argv[1];
-
   sub_argv = state.make_vector_storage(length);
-  while(args.type() == PAIR) {
+  size_t i = 0;
+  while(args.heap_type_equals(PAIR)) {
     state.vector_storage_append(sub_argv, args.car());
     args = args.cdr();
   }

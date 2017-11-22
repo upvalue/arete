@@ -281,74 +281,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   f.stack = (Value*) stack;
   f.locals = (Value*) locals;
   f.upvalues = upvalue_count ? (Value*) upvalues : 0;
-#else
-#if 0
-  size_t alloc_size = f.fn->stack_max + f.fn->local_count + upvalue_count;
-  AR_LOG_VM("VM: growing heap-allocated stack at " << vm_stack_i << " by " << alloc_size);
-
-  // This is quite tricky, 
-
-  // we can't realloc easily in the middle of VM execution because pointers have already been saved
-  // on the stack at each function call. We have to update them all in place. But even that isn't
-  // enough, because we copy locals from the existing stack, so we have to leave an unused margin at
-  // the end of the stack, allocate and do that first, then realloc.
-
-  f.vm_stack_begin = vm_stack_i;
-  vm_stack_i += alloc_size;
-
-  void* stack = ((char*) vm_stack) + (f.vm_stack_begin * sizeof(void*));
-  void* locals = (((char*) vm_stack) + ((f.vm_stack_begin + f.fn->stack_max) * sizeof(void*)));
-  void* upvalues = (((char*) vm_stack) +
-    + ((f.vm_stack_begin + f.fn->stack_max + f.fn->local_count) * sizeof(void*)));
-
-  // Initialize local variables
-  memcpy(locals, argv, argc * sizeof(Value));
-
-  for(unsigned i = argc; i < f.fn->local_count; i++) { 
-    ((Value*)locals)[i] = C_UNSPECIFIED;
-  }
-
-  if(vm_stack_i + alloc_size > (vm_stack_size - 256)) {
-    AR_ASSERT(vm_stack_i < vm_stack_size);
-    AR_LOG_VM("VM: reallocating heap-allocated stack to " << vm_stack_size * 2);
-    std::cerr << "REALLOCATING HEAP-ALLOCATED STACK TO " << vm_stack_size * 2 << std::endl;
-    vm_stack_size *= 2;
-    AR_ASSERT(vm_stack_i + alloc_size < vm_stack_size);
-    vm_stack = (void**)realloc(vm_stack, vm_stack_size * sizeof(void*));
-
-    for(VMFrame* fi = &f; fi != 0; fi = fi->previous) {
-      AR_ASSERT(!fi->destroyed);
-      // Update all pointers
-      fi->stack = (Value*)(((char*) vm_stack) + (fi->vm_stack_begin * sizeof(void*)));
-      fi->locals = (Value*)(((char*) vm_stack) + ((fi->vm_stack_begin + fi->fn->stack_max) * sizeof(void*)));
-      if(fi->upvalues) {
-        fi->upvalues = (Value*)(((char*) vm_stack) +
-          ((fi->vm_stack_begin + fi->fn->stack_max + fi->fn->local_count) * sizeof(void*)));
-      }
-    }
-  } else {
-    f.stack = (Value*) stack;
-    f.locals = (Value*) locals;
-    f.upvalues = upvalue_count ? (Value*) upvalues : 0;
-  }
-
-    /*
-  std::cout << "stack " << f.fn->stack_max << " @ " << (size_t) stack << std::endl;
-
-  std::cout << "locals " << f.fn->local_count << " @ stack + " << (f.fn->stack_max * sizeof(void*)) << ' ' << (size_t) locals << std::endl;
-  if(upvalue_count) {
-    std::cout << "upvals " << upvalue_count << " @ stack + " << ((f.fn->stack_max + f.fn->local_count) * sizeof(void*)) << ' ' << (size_t) upvalues;
-  }
-  */
-#endif 
-/*
-  size_t alloc_size = (f.fn->stack_max + f.fn->local_count + upvalue_count);
-  void* stack_storage = malloc(alloc_size * sizeof(void*));
-
-  f.stack = (Value*) stack_storage;
-  f.locals = (Value*)  ((char*) stack_storage) + (f.fn->stack_max * sizeof(void*));
-  f.upvalues = (Value*) ((char*) f.locals) + (f.fn->local_count * sizeof(void*));
-  */
 #endif
   // Initialize local variables
   memcpy(f.locals, argv, argc * sizeof(Value));
@@ -538,13 +470,14 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
             break;
           }
+
           case VMFUNCTION:
           case CLOSURE: {
             // Check for a closure and extract function from it if necessary,
             // so we can inspect the actual function
             Value to_apply = afn;
 
-            if(afn.type() == CLOSURE) {
+            if(afn.heap_type_equals(CLOSURE)) {
               afn = afn.closure_function();
             }
 

@@ -83,8 +83,6 @@
 
 ;;
 
-(define *iterate* #f)
-
 (set-cell! grid 2 0 1)
 (set-cell! grid 3 1 1)
 (set-cell! grid 1 2 1)
