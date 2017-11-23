@@ -603,7 +603,9 @@
   (define name (cadr x))
   (define result (fn-lookup fn name src))
 
-  (compile-expr fn (list-ref x 2) (list-tail x 2) tail?)
+  (let ((fn (compile-expr fn (list-ref x 2) (list-tail x 2) tail?)))
+    (if (vmfunction? fn)
+      (set-vmfunction-name! fn name)))
 
   (case (car result)
     (global
@@ -962,7 +964,6 @@
           (if (and (eq? (value-type v) 13))
             (begin
             (set-top-level-value! k (top-level-value (string->symbol (string-append "##arete#" (symbol->string k)))))))))
-
 )))
 
 (expand-import (top-level-value '*user-module*) '(arete))

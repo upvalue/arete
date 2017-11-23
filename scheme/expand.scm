@@ -547,6 +547,9 @@
          (table-set! (table-ref mod "module-exports") name value))
      (cdr x)))
 
+    (else
+      (raise-source x 'expand "only import, export and begin are currently supported as part of module declarations" (list x)))
+
   ) ;cond
 )
 

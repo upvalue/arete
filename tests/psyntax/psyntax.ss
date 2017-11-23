@@ -776,7 +776,7 @@
 
 (define-syntax build-lexical-var
   (syntax-rules ()
-    ((_ ae id) (gensym))))
+    ((_ ae id) (gensym id))))
 
 (define-syntax lexical-var? gensym?)
 

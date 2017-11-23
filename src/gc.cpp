@@ -91,6 +91,11 @@ void State::finalize(Type object_type, Value object, bool called_by_gc) {
   }
 }
 
+size_t gc_collect_timer = 0;
+size_t gc_alloc_timer = 0;
+size_t gc_overall_timer = 0;
+size_t gc_longest_pause = 0;
+
 #ifdef ARETE_BENCH_GC
 struct GCTimer {
   GCTimer(size_t& timer_): timer(timer_) {
@@ -98,12 +103,18 @@ struct GCTimer {
   }
 
   ~GCTimer() {
-    end();
+    size_t elapsed = 
+      (std::chrono::duration_cast<std::chrono::microseconds>((
+        std::chrono::high_resolution_clock::now() - t1))).count();
+    gc_longest_pause = std::max(elapsed, gc_longest_pause);
+    timer += elapsed;
   }
 
   void end() {
-    timer += (std::chrono::duration_cast<std::chrono::microseconds>((
-      std::chrono::high_resolution_clock::now() - t1))).count();
+    size_t elapsed = 
+      (std::chrono::duration_cast<std::chrono::microseconds>((
+        std::chrono::high_resolution_clock::now() - t1))).count();
+    timer += elapsed;
   }
 
   size_t& timer;
@@ -116,9 +127,6 @@ struct GCTimer {
 };
 #endif
 
-size_t gc_collect_timer = 0;
-size_t gc_alloc_timer = 0;
-size_t gc_overall_timer = 0;
 GCTimer gc_overall_timer_i(gc_overall_timer);
 
 Block::Block(size_t size_, unsigned char mark_bit): size(size_) {
@@ -146,6 +154,7 @@ void State::print_gc_stats(std::ostream& os) {
   // TODO: This cannot be called twice and remain accurate
   gc_overall_timer_i.end();
   std::cout << "approximately " << ((double)(gc_collect_timer + gc_alloc_timer) * 100) / (double)(gc_overall_timer) << "% of program time spent in GC" << std::endl;
+  std::cout << "longest pause: " << (gc_longest_pause / 1000) << "ms" << std::endl;
 
 #endif
 }

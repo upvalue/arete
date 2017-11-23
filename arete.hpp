@@ -262,7 +262,7 @@ struct HeapValue {
   // .... .... .... ....
   // ffff fffm tttt tttt
   // . = an integer (32-bit on 64-bit systems, 16-bit on 32-bit systems) used for
-  //     writing objects with shared references
+  //     writing objects with shared references. could also be used for caching various computations.
   // f = object-specific flags
   // m = mark bit for incremental GC
   // t = type
