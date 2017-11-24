@@ -1107,10 +1107,8 @@ inline void Value::upvalue_set(const Value rhs) {
 inline Value Value::upvalue() {
   AR_TYPE_ASSERT(type() == UPVALUE);
   if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
-    //return static_cast<Upvalue*>(heap)->converted;
     return as<Upvalue>()->U.converted;
   } else {
-    // return *(static_cast<Upvalue*>(heap)->local);
     return *(as<Upvalue>()->U.local);
   }
 }

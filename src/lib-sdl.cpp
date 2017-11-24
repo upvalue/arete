@@ -1,8 +1,8 @@
-// lib-sdl.cpp - SDL bindings for Arete.
+// lib-sdl.cpp - SDL2 bindings for Arete.
 
 #if AR_LIB_SDL
 
-// TODO: Also, there's a lot to unpack here...if my C++Fu were better and I had the time
+// TODO: There's a lot to unpack here...if my C++Fu were better and I had the time
 // I'd much rather have something ike
 // accessor(FIXNUM, "sdl:event-mouse-x", &SDL_Event->button.x) or something magical like that,
 // rather than writing all these out by hand, which is pretty tedious!
@@ -161,24 +161,72 @@ Value sdl_event_timer_tag(State& state, SDLModule* module, size_t argc, Value* a
 }
 AR_DEFUN("event-timer-tag", sdl_event_timer_tag, 1);
 
+Value sdl_event_key_modifiers(State& state, SDLModule* module, size_t argc, Value* argv) {
+
+}
+AR_DEFUN("event-key-modifiers", sdl_event_key_modifiers, 1);
+
 Value sdl_event_key(State& state, SDLModule* module, size_t argc, Value* argv) {
   static const char* fn_name = "sdl:event-key";
   AR_FN_EXPECT_RECORD_ISA(state, argv, 0, module->data.event_tag);
 
   SDL_Event* e = state.record_data<SDL_Event>(module->data.event_tag, argv[0]);
 
-  std::cout << "Scancode: " << e->key.keysym.scancode << std::endl;
+  // If the scancode can be represented as a character
+  if(e->key.keysym.scancode <= SDL_SCANCODE_CAPSLOCK) {
+    return state.make_char((char) e->key.keysym.sym);
+  }
+
+  //std::cout << "Scancode: " << e->key.keysym.scancode << std::endl;
   switch(e->key.keysym.scancode) {
-    case SDL_SCANCODE_RETURN:
-      return state.get_symbol("return");
-    case SDL_SCANCODE_BACKSPACE:
-      return state.get_symbol("backspace");
-    case SDL_SCANCODE_ESCAPE:
-      return state.get_symbol("escape");
+    case SDL_SCANCODE_RETURN: return state.make_char('\r');
+    case SDL_SCANCODE_BACKSPACE: return state.make_char('\b');
+    case SDL_SCANCODE_ESCAPE: return state.get_symbol(27);
+    case SDL_SCANCODE_F1: return state.get_symbol("f1");
+    case SDL_SCANCODE_F2: return state.get_symbol("f2");
+    case SDL_SCANCODE_F3: return state.get_symbol("f3");
+    case SDL_SCANCODE_F4: return state.get_symbol("f4");
+    case SDL_SCANCODE_F5: return state.get_symbol("f5");
+    case SDL_SCANCODE_F6: return state.get_symbol("f6");
+    case SDL_SCANCODE_F7: return state.get_symbol("f7");
+    case SDL_SCANCODE_F8: return state.get_symbol("f8");
+    case SDL_SCANCODE_F9: return state.get_symbol("f9");
+    case SDL_SCANCODE_F10: return state.get_symbol("f10");
+    case SDL_SCANCODE_F11: return state.get_symbol("f11");
+    case SDL_SCANCODE_F12: return state.get_symbol("f12");
+    case SDL_SCANCODE_HOME: return state.get_symbol("home");
+    case SDL_SCANCODE_DELETE: return state.get_symbol("delete");
+    case SDL_SCANCODE_UP: return state.get_symbol("up");
+    case SDL_SCANCODE_LEFT: return state.get_symbol("left");
+    case SDL_SCANCODE_RIGHT: return state.get_symbol("right");
+    case SDL_SCANCODE_DOWN: return state.get_symbol("down");
+    case SDL_SCANCODE_LCTRL: return state.get_symbol("lctrl");
+    case SDL_SCANCODE_LSHIFT: return state.get_symbol("lshift");
+    case SDL_SCANCODE_LALT: return state.get_symbol("lalt");
+    case SDL_SCANCODE_RCTRL: return state.get_symbol("rctrl");
+    case SDL_SCANCODE_RALT: return state.get_symbol("ralt");
+    case SDL_SCANCODE_RSHIFT: return state.get_symbol("rshift");
+    case SDL_SCANCODE_LGUI: return state.get_symbol("gui");
+    case SDL_SCANCODE_KP_0: return state.get_symbol("kp0");
+    case SDL_SCANCODE_KP_1: return state.get_symbol("kp1");
+    case SDL_SCANCODE_KP_2: return state.get_symbol("kp2");
+    case SDL_SCANCODE_KP_3: return state.get_symbol("kp3");
+    case SDL_SCANCODE_KP_4: return state.get_symbol("kp4");
+    case SDL_SCANCODE_KP_5: return state.get_symbol("kp5");
+    case SDL_SCANCODE_KP_6: return state.get_symbol("kp6");
+    case SDL_SCANCODE_KP_7: return state.get_symbol("kp7");
+    case SDL_SCANCODE_KP_8: return state.get_symbol("kp8");
+    case SDL_SCANCODE_KP_9: return state.get_symbol("kp9");
+    case SDL_SCANCODE_KP_ENTER: return state.get_symbol("kp-enter");
+    case SDL_SCANCODE_KP_MULTIPLY: return state.get_symbol("kp-multiply");
+    case SDL_SCANCODE_KP_DIVIDE: return state.get_symbol("kp-divide");
+    case SDL_SCANCODE_KP_PLUS: return state.get_symbol("kp-plus");
+    case SDL_SCANCODE_KP_MINUS: return state.get_symbol("kp-minus");
     default: break;
   }
 
-  return state.make_char((char) e->key.keysym.sym);
+  return state.get_symbol("unknown");
+
 }
 AR_DEFUN("event-key", sdl_event_key, 1);
 
@@ -452,8 +500,6 @@ void load_sdl(State& state) {
   AR_ASSERT(module.type() == RECORD);
   AR_FRAME(state, module);
 
-  // Install functions
-  // creates a table
   sdl_functions.install_module(state, "sdl", module);
 }
 

@@ -265,12 +265,14 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   AR_ASSERT(gc.live(f.fn->name));
   AR_ASSERT(gc.live(f.fn->constants));
   AR_ASSERT(gc.live(f.fn->macro_env));
+  /*
   if(f.fn->sources) {
     AR_ASSERT(gc.live(f.fn->sources));
   }
   if(f.fn->free_variables) {
     AR_ASSERT(gc.live(f.fn->free_variables));
   }
+  */
   size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;     
 
   // Add storage to VM frame
@@ -284,10 +286,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 #endif
   // Initialize local variables
   memcpy(f.locals, argv, argc * sizeof(Value));
-
-  for(unsigned i = (unsigned)argc; i < f.fn->local_count; i++) { 
-    f.locals[i] = C_UNSPECIFIED;
-  }
+  memset(f.locals + argc, 0, (f.fn->local_count  - argc) * sizeof(Value));
 
   if(f.fn->free_variables != 0) {
     // Allocate upvalues as needed
@@ -440,7 +439,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           case CFUNCTION: {
             size_t min_arity = afn.as<CFunction>()->min_arity;
             size_t max_arity = afn.as<CFunction>()->max_arity;
-            bool var_arity = afn.c_function_variable_arity();
 
             if(fargc < min_arity) {
               std::ostringstream os;
@@ -448,12 +446,15 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
                 "but only got " << fargc;
               f.exception = eval_error(os.str());
               goto exception;
-            } else if(fargc > max_arity && !var_arity) {
-              std::ostringstream os;
-              os << "function " << afn << " expected at most " << max_arity << " arguments " <<
-                "but got " << fargc;
-              f.exception = eval_error(os.str());
-              goto exception;
+            } else if(fargc > max_arity) {
+              if(!afn.c_function_variable_arity()) {
+                std::ostringstream os;
+                os << "function " << afn << " expected at most " << max_arity << " arguments " <<
+                  "but got " << fargc;
+                f.exception = eval_error(os.str());
+                goto exception;
+
+              }
             } 
 
             // AR_PRINT_STACK();

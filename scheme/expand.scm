@@ -275,11 +275,6 @@
     (env-lookup env name)))
 
 (define (env-syntax? env name)
-  (if (eq? (top-level-value 'fart) #t)
-    (begin
-      (pretty-print env)
-      (pretty-print name)
-      (pretty-print (env-lookup env name))))
   (apply 
     (lambda (env name value found)
       (or (eq? value 'syntax) (function-macro? value)))

@@ -231,13 +231,65 @@ Value fn_remainder(State& state, size_t argc, Value* argv) {
 AR_DEFUN("remainder", fn_remainder, 2);
 
 Value fn_number_to_string(State& state, size_t argc, Value* argv) {
-  static const char* fn_name;
+  static const char* fn_name = "number->string";
   AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
   std::ostringstream os;
   os << argv[0];
   return state.make_string(os.str());
 }
 AR_DEFUN("number->string", fn_number_to_string, 1);
+
+///// SRFI 151: Bitwise operations
+
+Value fn_bitwise_and(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "bitwise-and";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+
+  ptrdiff_t fx = argv[0].fixnum_value();
+  for(size_t i = 1; i != argc; i++) {
+    AR_FN_EXPECT_TYPE(state, argv, i, FIXNUM);
+    fx &= argv[i].fixnum_value();
+  }
+
+  return Value::make_fixnum(fx);
+}
+AR_DEFUN("bitwise-and", fn_bitwise_and, 2, 2, true);
+
+Value fn_bitwise_or(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "bitwise-or";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+
+  ptrdiff_t fx = argv[0].fixnum_value();
+  for(size_t i = 1; i != argc; i++) {
+    AR_FN_EXPECT_TYPE(state, argv, i, FIXNUM);
+    fx |= argv[1].fixnum_value();
+  }
+
+  return Value::make_fixnum(fx);
+}
+AR_DEFUN("bitwise-ior", fn_bitwise_or, 2, 2, true);
+
+Value fn_bitwise_xor(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "bitwise-xor";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+
+  ptrdiff_t fx = argv[0].fixnum_value();
+  for(size_t i = 1; i != argc; i++) {
+    AR_FN_EXPECT_TYPE(state, argv, i, FIXNUM);
+    fx ^= argv[1].fixnum_value();
+  }
+
+  return Value::make_fixnum(fx);
+}
+AR_DEFUN("bitwise-xor", fn_bitwise_xor, 2, 2, true);
+
+Value fn_bitwise_not(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "bitwise-not";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+
+  return Value::make_fixnum(~argv[0].fixnum_value());
+}
+AR_DEFUN("bitwise-not", fn_bitwise_not, 1);
 
 void State::load_numeric_functions() {
   // Numbers

@@ -171,6 +171,11 @@ std::ostream& operator<<(std::ostream& os, Value v) {
     case CHARACTER: {
       os << "#\\";
       switch(v.character()) {
+        case 27: return os << "backspace";
+        case 127: return os << "delete";
+        case '\a': return os << "alarm";
+        case '\t': return os << "tab";
+        case '\r': return os << "return";
         case '\n': return os << "newline";
         case ' ': return os << "space";
       }

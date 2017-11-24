@@ -423,14 +423,12 @@
       ;; function where it was defined
       (let ((var (Var/make 0 x)))
         (compiler-log fn (OpenFn/name fn) "registered free variable" x)
-        ;; Calculate index in closure from closure length
-        ;(Var/idx! var (fx/ (vector-length closure) 2))
-        ;(print closure)
 
         (Var/idx! var (vector-length closure))
-        ;(Var/idx! var (fx/ (vector-length closure) 2))
+
         ;; This is an upvalue
         (Var/upvalue?! var #t)
+
         ;; Add to function environment
         (table-set! (OpenFn/env fn) x var)
 
