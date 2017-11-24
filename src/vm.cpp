@@ -99,8 +99,9 @@ static std::string depth_to_string(const VMFrame& f) {
   return str;
 }
 
-VMFrame::VMFrame(State& state_): state(state_), closure(0), 
-    stack(0), locals(0), upvalues(0), exception(C_FALSE),stack_i(0),
+VMFrame::VMFrame(State& state_): state(state_), 
+    //stack(0), locals(0), upvalues(0),
+    exception(C_FALSE), stack_i(0),
     depth(0), destroyed(false) {
   previous = state.gc.vm_frames;
   if(previous) {
@@ -132,24 +133,14 @@ void VMFrame::setup(Value to_apply) {
     fn = to_apply.as_unsafe<VMFunction>();
   }
 
-#if !AR_USE_C_STACK
-  size_t upvalue_count = fn->free_variables ? fn->free_variables->length : 0;
-  size_t alloc_size = (fn->stack_max + fn->local_count + upvalue_count);
-  stack = (Value*) malloc(alloc_size * sizeof(void*));
-  locals = (Value*)  (((char*) stack) + (fn->stack_max * sizeof(void*)));
-  if(upvalue_count)
-    upvalues = (Value*) (((char*) locals) + (fn->local_count * sizeof(void*)));
-#if 0
-  std::cerr << "allocated " << (alloc_size * sizeof(Value)) << "b stack space" <<std::endl;
-
-  std::cout << "stack " << fn->stack_max << " @ " << (size_t) stack << std::endl;
-
-  std::cout << "locals " << fn->local_count << " @ stack + " << (fn->stack_max * sizeof(void*)) << ' ' << (size_t) locals << std::endl;
-  if(upvalue_count) {
-    std::cout << "upvals " << upvalue_count << " @ stack + " << ((fn->stack_max + fn->local_count) * sizeof(void*)) << ' ' << (size_t) upvalues << std::endl;
+  if(!AR_USE_C_STACK) {
+    size_t upvalue_count = fn->free_variables ? fn->free_variables->length : 0;
+    size_t alloc_size = (fn->stack_max + fn->local_count + upvalue_count);
+    stack = (Value*) malloc(alloc_size * sizeof(void*));
+    locals = (Value*)  (((char*) stack) + (fn->stack_max * sizeof(void*)));
+    if(upvalue_count)
+      upvalues = (Value*) (((char*) locals) + (fn->local_count * sizeof(void*)));
   }
-#endif
-#endif
 }
 
 // Due to something related to the way clang destroys stack-allocated variably sized
@@ -177,11 +168,10 @@ void VMFrame::close_over() {
     }
   }
 
-#if !AR_USE_C_STACK
-  free(stack);
-  //state.vm_stack_i = vm_stack_begin;
-  // std::cerr << "restoring state.vm_stack_i to " << vm_stack_begin << std::endl;
-#endif
+  if(!AR_USE_C_STACK) {
+    free(stack);
+  }
+
   fn = 0;
   closure = 0;
   upvalues = 0;
@@ -252,6 +242,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   // Frames lost due to tail call optimization
   size_t frames_lost = 0;
   VMFrame f(*this);
+
   f.setup(fn);
  tail:
 
@@ -262,19 +253,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   // Allocate function's required storage
 #if AR_USE_C_STACK
-  AR_ASSERT(gc.live(f.fn->name));
-  AR_ASSERT(gc.live(f.fn->constants));
-  AR_ASSERT(gc.live(f.fn->macro_env));
-  /*
-  if(f.fn->sources) {
-    AR_ASSERT(gc.live(f.fn->sources));
-  }
-  if(f.fn->free_variables) {
-    AR_ASSERT(gc.live(f.fn->free_variables));
-  }
-  */
-  size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;     
-
+  size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;
   // Add storage to VM frame
   void* stack[f.fn->stack_max];
   void* locals[f.fn->local_count];
@@ -282,7 +261,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   f.stack = (Value*) stack;
   f.locals = (Value*) locals;
+
   f.upvalues = upvalue_count ? (Value*) upvalues : 0;
+  if(upvalue_count)
+    f.upvalues = (Value*) upvalues;
+
+
 #endif
   // Initialize local variables
   memcpy(f.locals, argv, argc * sizeof(Value));
@@ -308,9 +292,9 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
 	f.code = (size_t*) f.fn->code_pointer();
 
-  if(f.depth > (size_t)get_global_value(G_STACK_MAX).fixnum_value_or_zero()) {
+  if(f.depth > (size_t)get_global_value(G_RECURSION_LIMIT).fixnum_value_or_zero()) {
     std::ostringstream os;
-    os << "function call exceeded G_STACK_MAX (" << get_global_value(G_STACK_MAX) << ")";
+    os << "non-tail recusive calls exceeded G_RECURSION_LIMIT (" << get_global_value(G_RECURSION_LIMIT) << ")";
     f.exception = eval_error(os.str());
     goto exception;
   }

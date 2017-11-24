@@ -505,6 +505,42 @@
           ,@(cddr x)
           (,#'loop ,(cadr x))))))
 
+;; Do loop
+
+;; (do 1: ((var init step)) 
+;;     2: (test expression)
+;;    body)
+;; (let loop ((lambda 
+
+(define-syntax do
+  (lambda (x)
+    (unless (> (length x) 2)
+      (raise-source x 'syntax "do loop needs at least two elements: variables and test" (list x)))
+
+    (let ((varb (list-ref x 1))
+          (test (list-ref x 2))
+          (body (if (= (length x) 3) unspecified (list-ref x 3))))
+
+      (define vars
+        (map
+          (lambda (v)
+            (unless (and (> (length v) 1) (< (length v) 4))
+              (raise-source v 'syntax "do loop variable binding expects at least two but no more than three elements: variable name and initial value" (list v)))
+
+            (list (list-ref v 0) (list-ref v 1) (if (eq? (length v) 2) (list-ref v 0) (list-ref v 2))))
+          varb))
+
+      `(,#'let ,#'loop (,@(map (lambda (v) (list (list-ref v 0) (list-ref v 1))) vars))
+         (,#'if ,(list-ref test 0)
+           (,#'begin ,@(cdr test))
+           (,#'begin
+             ,body
+             (,#'loop ,@(map (lambda (v) (list-ref v 2)) vars)))))))
+
+  );;do
+
+
+
 ;; SRFI 1
 
 (define (every1 pred lst)

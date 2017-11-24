@@ -1673,7 +1673,7 @@ struct State {
     G_EXPANDER,
     G_COMPILER,
     // Flags that can be changed by users
-    G_STACK_MAX,
+    G_RECURSION_LIMIT,
     G_TCO_ENABLED,
     G_VM_LOG_REPL,
     G_EXPANDER_PRINT,

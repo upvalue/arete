@@ -73,7 +73,7 @@ void State::boot() {
     "expander",
     "compiler",
     // Flags
-    "STACK-MAX",
+    "RECURSION-LIMIT",
     "TCO-ENABLED",
     "VM-LOG-REPL",
     "EXPANDER-PRINT",
@@ -125,7 +125,7 @@ void State::boot() {
   load_sdl(*this);
   register_feature("sdl");
 
-  set_global_value(G_STACK_MAX, Value::make_fixnum(1300));
+  set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(1300));
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_FEATURES, C_NIL);
   set_global_value(G_TCO_ENABLED, C_TRUE);
