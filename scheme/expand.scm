@@ -886,6 +886,8 @@
   mod)
   
 (make-empty-module "scheme#base")
+(make-empty-module "scheme#cxr")
+(make-empty-module "scheme#file")
 (make-empty-module "scheme#write")
 (make-empty-module "scheme#time")
 (make-empty-module "scheme#read")

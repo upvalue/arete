@@ -332,6 +332,7 @@
 
 ;;;;; NUMBERS
 
+(define (zero? x) (or (eq? x 0) (eqv? x 0.0)))
 (define exact? fixnum?)
 (define inexact? flonum?)
 (define (integer? x) (or (fixnum? x) (eqv? (floor x) x)))
@@ -519,7 +520,7 @@
 
     (let ((varb (list-ref x 1))
           (test (list-ref x 2))
-          (body (if (= (length x) 3) unspecified (list-ref x 3))))
+          (body (if (= (length x) 3) unspecified (cdddr x))))
 
       (define vars
         (map
@@ -534,12 +535,10 @@
          (,#'if ,(list-ref test 0)
            (,#'begin ,@(cdr test))
            (,#'begin
-             ,body
+             ,@body
              (,#'loop ,@(map (lambda (v) (list-ref v 2)) vars)))))))
 
   );;do
-
-
 
 ;; SRFI 1
 

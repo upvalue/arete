@@ -242,6 +242,7 @@ Value fn_newline(State& state, size_t argc, Value* argv) {
 
   std::ostream& os = *port.file_port_output_handle();
   os << std::endl;
+  os.flush();
   if(&os == &std::cout) os.flush();
 
   return C_UNSPECIFIED;

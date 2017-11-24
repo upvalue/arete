@@ -245,6 +245,41 @@ Value fn_number_to_string(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("number->string", fn_number_to_string, 1);
 
+Value fn_string_to_number(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "string->number";
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+
+  const char* data = argv[0].string_data();
+  size_t length = argv[0].string_bytes();
+
+  bool flonum = false;
+  std::stringstream os;
+  for(size_t i = 0; i != length; i++) {
+    if(!isdigit(data[i]) && data[i] != '.') {
+      std::ostringstream os;
+      os << "invalid or unsupported number syntax: " << argv[0];
+      return state.type_error(os.str());
+    }
+
+    if(data[i] == '.') {
+      flonum = true;
+    }
+
+    os << data[i];
+  }
+
+  if(flonum) { 
+    double x;
+    os >> x;
+    return state.make_flonum(x);
+  } else {
+    ptrdiff_t x;
+    os >> x;
+    return Value::make_fixnum(x);
+  }
+}
+AR_DEFUN("string->number", fn_string_to_number, 1);
+
 ///// SRFI 151: Bitwise operations
 
 Value fn_bitwise_and(State& state, size_t argc, Value* argv) {
