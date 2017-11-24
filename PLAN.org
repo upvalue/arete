@@ -12,12 +12,18 @@
   - [ ] SRFI 89: Optional arguments
 
 * Interpreter
-  - [ ] Tail-call optimization.
+  - [x] Tail-call optimization.
     This may not be a big deal, but I've had to bump the stack size manually on Emscripten/Windows builds because it's
     so stack hungry. (AR_FRAME may also be a part of this as much as the lack of TCO). It might be simpler to just
     include a precompiled bytecode image for most use cases.
   - [ ] Lookup cache
     Might help.
+
+* Jettison interpreter
+  we have kind of a rickety bootstrap where we have to (a) write the expander in a primitive version of the language
+  because things like LET aren't available and (b) recompiling the whole system in-place is rather complex. However,
+  this does allow us to rapidly and easily change the language. We'd probably need better facilities for cross-platform
+  serialization of the heap (or compiling single files to FASLs) before we do this.
 
 * Memory management
   - [ ] Symbol collection

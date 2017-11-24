@@ -341,7 +341,9 @@
 ;;;;; MULTIPLE RETURN VALUES
 
 (define (values . rest)
-  (cons (list 'values) rest))
+  (if (and (not (null? rest)) (null? (cdr rest)))
+    (car rest)
+    (cons (list 'values) rest)))
 
 (define (call-with-values producer consumer)
   (apply consumer (cdr (producer))))

@@ -308,6 +308,13 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
 	f.code = (size_t*) f.fn->code_pointer();
 
+  if(f.depth > (size_t)get_global_value(G_STACK_MAX).fixnum_value_or_zero()) {
+    std::ostringstream os;
+    os << "function call exceeded G_STACK_MAX (" << get_global_value(G_STACK_MAX) << ")";
+    f.exception = eval_error(os.str());
+    goto exception;
+  }
+
   AR_ASSERT(gc.live((HeapValue*) f.code));
 
   while(true) {
@@ -544,7 +551,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
               // Pop arguments
               f.stack_i -= (fargc);
-              AR_ASSERT(f.stack_i > 0);
+              AR_ASSERT("stack underflow" && f.stack_i > 0);
 
               // Finally, check for an exception
               if(f.stack[f.stack_i - 1].is_active_exception()) {
@@ -555,24 +562,12 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             break;
           }
           case FUNCTION: {
-            /*
-            temps.clear();
-            temps.push_back(C_NIL);
-
-            for(size_t i = 0; i != fargc; i++) {
-              temps[0] = make_pair(f.stack[f.stack_i - i - 1], temps[0]);
-            }
-
-            f.stack[f.stack_i - fargc - 1] =
-              eval_apply_function(f.stack[f.stack_i - fargc - 1], temps[0]);
-            */
-
             f.stack[f.stack_i - fargc - 1] =
               eval_apply_function(f.stack[f.stack_i - fargc - 1], fargc, &f.stack[f.stack_i - fargc]);
 
             f.stack_i -= (fargc);
 
-            AR_ASSERT(f.stack_i > 0);
+            AR_ASSERT("stack underflow" && f.stack_i > 0);
 
             if(f.stack[f.stack_i - 1].is_active_exception()) {
               f.exception = f.stack[f.stack_i - 1];
@@ -949,7 +944,17 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       if(frames_lost > 0) {
         os << std::endl << "-- " << frames_lost << " frames lost due to tail call optimization";
       }
-      stack_trace.push_back(os.str());
+      std::string line(os.str());
+      if(stack_trace.size() > 0) {
+        StackTrace& last = stack_trace.at(stack_trace.size() - 1);
+        if(last.text.compare(line) == 0) {
+          last.seen++;
+        } else {
+          stack_trace.push_back(line);
+        }
+      } else {
+        stack_trace.push_back(line);
+      }
     }
 
 

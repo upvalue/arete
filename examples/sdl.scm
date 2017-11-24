@@ -7,6 +7,7 @@
 (define event (sdl:make-event))
 (define done #f)
 
+
 (define (loop)
   (if (sdl:poll-event event)
     (if (eq? (sdl:event-type event) 'key-down)

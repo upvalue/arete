@@ -185,14 +185,20 @@ AR_DEFUN("fx/", fn_fx_div, 2, 2);
 
 Value fn_floor(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "floor";
-
   if(argv[0].fixnump()) return argv[0];
-
   AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].heap_type_equals(FLONUM));
 
   return state.make_flonum(floor(argv[0].flonum_value()));
 }
 AR_DEFUN("floor", fn_floor, 1);
+
+Value fn_round(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "round";
+  if(argv[0].fixnump()) return argv[0];
+  AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].heap_type_equals(FLONUM));
+  return state.make_flonum(trunc(argv[0].flonum_value()));
+}
+AR_DEFUN("round", fn_round, 1);
 
 Value fn_ceiling(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "ceiling";

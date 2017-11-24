@@ -68,13 +68,15 @@ void State::boot() {
     // Tags for errors that may be thrown by the runtime
     "file", "read", "eval", "type", "expand", "syntax",
     // Various variables
-    "TCO-ENABLED",
-    "VM-LOG-REPL",
     "*features*",
     "*command-line*",
-    "EXPANDER-PRINT",
     "expander",
     "compiler",
+    // Flags
+    "STACK-MAX",
+    "TCO-ENABLED",
+    "VM-LOG-REPL",
+    "EXPANDER-PRINT",
     "FORBID-INTERPRETER",
     // I/O
     "*current-input-port*",
@@ -123,6 +125,7 @@ void State::boot() {
   load_sdl(*this);
   register_feature("sdl");
 
+  set_global_value(G_STACK_MAX, Value::make_fixnum(1300));
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_FEATURES, C_NIL);
   set_global_value(G_TCO_ENABLED, C_TRUE);

@@ -1,24 +1,32 @@
 # Variables
+
+# Normal compilation flags
 CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
 CFLAGS := $(CFLAGS) -g3 -O3 
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
 LDFLAGS := -lm -fno-rtti -fno-exceptions
 
+# Emscripten
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) 
 ECXXFLAGS := -s ASSERTIONS=1 -s EMULATE_FUNCTION_POINTER_CASTS=1 -Os $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -DAR_LINENOISE=0 -DARETE_LOG_TAGS="(ARETE_LOG_TAG_IMAGE|ARETE_LOG_TAG_DEFUN)"
 ELDFLAGS := -Os -s ASSERTIONS=1 -s EMULATE_FUNCTION_POINTER_CASTS=1
 
+# Retrieve compilation targets
 CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
 CXXOBJS := $(CXXOBJS) $(patsubst %.cpp,%.o,$(wildcard vendor/linenoise/*.cpp))
 CXXOBJS32 := $(patsubst %.o,%.32.o,$(CXXOBJS))
-DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) src/main.d
+DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) $(ECXXOBJS:.o=.d) src/main.d
 
 # Files to include with Emscripten builds
 EFILES := $(addprefix --preload-file ,$(wildcard heap32.boot *.scm scheme/*.scm examples/*.scm examples/*.ttf))
 
+# 
+PREFIX = /usr/local/stow/arete
+
+# Libraries to build
 ARETE_LIBS := sdl test
 
 # site.mk allows the user to override settings
@@ -101,7 +109,7 @@ test-all: tests/test-semispace
 	tests/test-semispace
 	python utils/run-tests.py
 
-.PHONY: count clean cleaner
+.PHONY: count clean cleaner install
 
 count:
 	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard scheme/*.scm)
@@ -111,3 +119,8 @@ clean:
 
 cleaner: clean
 	rm -f $(wildcard vendor/linenoise/*.d vendor/linenoise/*.o)
+
+install: arete heap.boot
+	install -d $(PREFIX)/bin
+	install -m 0755 arete $(PREFIX)/bin
+	install -m 0644 heap.boot $(PREFIX)/share/arete

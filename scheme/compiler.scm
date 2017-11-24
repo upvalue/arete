@@ -4,55 +4,18 @@
 
 ;; - Alan Perlis.
 
-;; DONE Closures (via upvalues)
-;; DONE define
-;; DONE set!
-;; DONE if
-;; DONE and/or
-;; TODO Check lambda body
-;; TODO Proper error reporting
-
 ;; TODO. All we need to implement display closures would be a simple analysis pass to check set! on variables.
 ;; This would remove a pointer dereference for variables which are not set!, which might actually be a decent boost
 ;; given the naive way certain expressions (e.g. (let loop ())) introduce free variables
 
-;; TODO: Optimization
-
-;; TODO: Figure out how to get more detailed about function names and preserve them in stack traces.
-;; eg (define (myfn) (let loop () #t))
-;; an error in let-loop should give more information than it does.
 
 ;; Compiler parameters
 
-;; If #t, will generate opcodes in place of functions like +, -, etc.
-
-;; Most basic inlining
-;; ((lambda (x) x) 5)
-;; How do we do this simply? We have to gensym x somehow. There has to be an analysis pass that generates information
-;; about variables, whether they are set! or not.
-
-;; ((lambda (x) x) #t)
-;; ((lambda (<Binding original: 'x name: '#:x0 mutated: #f>) x) #t)
-;; ((lambda (<Binding original: 'x name: '#:x0 mutated: #f>) '#:x0) #t)
-
-;; Then fn-lookup will have to use this new Binding struct.
-
-;; lookup X and replace with NAME
-
-;; We could do a simple analysis pass like over code, replacing introduced bindings (in define, and in lambda args)
-;; with a binding structure like this. Without building a full AST or intermediate language
-
-;; This would enable (1) display closures and (2) simple inlining, because each binding will now have a unique gensym'd
-;; name and knowledge about mutation.
-
-;; Really, we'd just like to inline lambda in the CAR position. That should provide a good speedup by optimizing let
-;; and let* expressions.
-
-;; (let loop () #t)
-;; Can this be optimized as well? Right now it expands to (lambda () (define loop (...)) (lambda () body)....
-;; We could transform it to something with OP_LOCAL_SET 0 to a function's own adress.
-
+;; If true, generate opcodes for things like +. Currently fairly inflexible and means procedures like + can't be
+;; redefined (which they probably shouldn't be allowed to in any case)
 (set-top-level-value! 'COMPILER-VM-PRIMITIVES #t)
+
+;; If true, warn about undefined variables
 (set-top-level-value! 'COMPILER-WARN-UNDEFINED #t)
 
 ;; OpenFn is a record representing a function in the process of being compiled.

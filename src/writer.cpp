@@ -388,8 +388,14 @@ void State::print_exception(std::ostream& os, Value exc) {
 void State::print_stack_trace(std::ostream& os, bool clear) {
   if(stack_trace.size() > 0)
     os << "Stack trace: " << std::endl;
-  for(size_t i = 0; i != stack_trace.size(); i++)
-    os << stack_trace.at(i) << std::endl;
+
+  for(size_t i = 0; i != stack_trace.size(); i++) {
+    os << stack_trace.at(i).text;
+    if(stack_trace.at(i).seen > 0) {
+      os << " [x" << stack_trace.at(i).seen << ']';
+    }
+    os << std::endl;
+  }
 
   if(clear)
     stack_trace.clear();

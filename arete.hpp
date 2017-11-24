@@ -469,14 +469,18 @@ struct Value {
   // FIXNUMS
 
   /** Quick fixnum check. */
-  bool fixnump() {
+  bool fixnump() const {
     return bits & 1;
   }
 
   ptrdiff_t fixnum_value() const {
-    AR_ASSERT(type_unsafe() == FIXNUM);
+    AR_TYPE_ASSERT(fixnump());
     
     return bits >> 1;
+  }
+
+  ptrdiff_t fixnum_value_or_zero() const {
+    return fixnump() ? fixnum_value() : 0;
   }
 
   /** Create a fixnum */
@@ -1605,8 +1609,16 @@ struct State {
   /** A GC-tracked array of temporary values. May be cleared by function calls. */
   std::vector<Value> temps;
 
+  struct StackTrace {
+    StackTrace(const std::string& text_): text(text_), seen(0) {}
+    ~StackTrace() {}
+
+    std::string text;
+    size_t seen;
+  };
+
   /** A stack trace. */
-  std::vector<std::string> stack_trace;
+  std::vector<StackTrace> stack_trace;
   
   State();
   ~State();
@@ -1656,14 +1668,17 @@ struct State {
     S_EXPAND_ERROR,
     S_SYNTAX_ERROR,
     // Global variables
-    G_TCO_ENABLED,
-    G_VM_LOG_REPL,
     G_FEATURES,
     G_COMMAND_LINE,
-    G_EXPANDER_PRINT,
     G_EXPANDER,
     G_COMPILER,
+    // Flags that can be changed by users
+    G_STACK_MAX,
+    G_TCO_ENABLED,
+    G_VM_LOG_REPL,
+    G_EXPANDER_PRINT,
     G_FORBID_INTERPRETER,
+    // stdin/stdout
     G_CURRENT_INPUT_PORT,
     G_CURRENT_OUTPUT_PORT,
     // Modules
