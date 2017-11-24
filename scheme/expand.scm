@@ -583,6 +583,8 @@
 (define expand-apply
   (lambda (x env)
     (define kar (car x))
+    (if (eq? (top-level-value 'EXPANDER-PRINT) #t)
+      (print x))
     (define len (length x))
     (define syntax? (and (identifier? kar) (env-syntax? env kar)))
 
@@ -800,35 +802,43 @@
 ;; cond expander
 (define expand-cond-full-clause
   (lambda (x env clause rest)
-    (define len #f)
-    (define condition #f)
-    (define body #f)
-
-    (if (not (list? clause))
+    (if (or (null? clause) (not (list? clause)))
       (raise-source clause 'expand "cond clause should be a list" (list clause)))
 
-    (set! len (length clause))
+    (define len (length clause))
 
-    (if (not (> len 1))
-      (raise-source clause 'expand "cond clause should have two members: condition and body" (list x clause)))
-
-    (set! condition (car clause))
-    (set! body (cdr clause))
+    (define condition (car clause))
+    (define body (cdr clause))
 
     ;; Handle else clause
     (if (env-compare env condition (make-rename env 'else))
-      (set! condition #t))
+      (begin
+        (set! condition #t)))
 
     (define result
+      (if (null? body)
+        ;; We may need to return this value
+        ((lambda (name)
+           (list-source x 
+             (list-source x 
+                (make-rename #f 'lambda)
+                name
+                (list-source x
+                  (make-rename #f 'if)
+                  name
+                  name
+                  (if (null? rest) unspecified (expand-cond-full-clause x (car rest) (cdr rest)))))
+             (expand condition env)))
+         (gensym))
 
-    (list-source x
-      (make-rename #f 'if)
-      (expand condition env)
-      (expand (cons-source x (make-rename #f 'begin) body) env)
-      ;(list-source x (make-rename #f 'begin) (expand-map body env))
-      (if (null? rest)
-        unspecified
-        (expand-cond-full-clause x env (car rest) (cdr rest))))
+
+        (list-source x
+          (make-rename #f 'if)
+          (expand condition env)
+          (expand (cons-source x (make-rename #f 'begin) body) env)
+          (if (null? rest)
+            unspecified
+            (expand-cond-full-clause x env (car rest) (cdr rest)))))
     )
 
     result))

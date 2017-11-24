@@ -19,6 +19,16 @@
   - [ ] Lookup cache
     Might help.
 
+* Virtual machine
+  - We can't run things like the R7RS ack benchmark because of all the recursion it causes.
+    Arete's VM is definitely very stack hungry, it has no intelligent way of growing the stack.
+    I tried simply failing to malloc when a certain recursion limit is reached, but that still
+    doesn't do enough, presumably because VMFrame itself and perhaps the various AR_FRAMEs mean
+    it uses a lot of stack space.
+
+    Not sure how important it is in practice; the R7RS ack benchmark results in something like
+    300000 non-tail recursive calls, for reference, Python's default limit is 1000.
+
 * Jettison interpreter
   we have kind of a rickety bootstrap where we have to (a) write the expander in a primitive version of the language
   because things like LET aren't available and (b) recompiling the whole system in-place is rather complex. However,
