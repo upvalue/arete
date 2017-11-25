@@ -111,18 +111,21 @@ Value sdl_event_type(State& state, SDLModule* module, size_t argc, Value* argv) 
 
   SDL_Event* e = state.record_data<SDL_Event>(module->data.event_tag, argv[0]);
   switch(e->type) {
-    case SDL_QUIT:
-      return state.get_symbol("quit");
-    case SDL_KEYDOWN:
-      return state.get_symbol("key-down");
-    case SDL_MOUSEBUTTONDOWN:
-      return state.get_symbol("mouse-down");
-    case SDL_USEREVENT: {
-      return state.get_symbol("timer");
+    case SDL_QUIT: return state.get_symbol("quit");
+    case SDL_KEYDOWN: return state.get_symbol("key-down");
+    case SDL_MOUSEBUTTONDOWN: return state.get_symbol("mouse-down");
+    case SDL_USEREVENT: return state.get_symbol("timer");
+    case SDL_WINDOWEVENT: {
+      switch(e->window.event) {
+        case SDL_WINDOWEVENT_SHOWN: return state.get_symbol("window-shown");
+        case SDL_WINDOWEVENT_FOCUS_GAINED: return state.get_symbol("window-focus-gained");
+        default: break;
+      }
     }
     default:
       return C_FALSE;
   }
+  return C_FALSE;
 }
 AR_DEFUN("event-type", sdl_event_type, 1);
 
@@ -162,7 +165,7 @@ Value sdl_event_timer_tag(State& state, SDLModule* module, size_t argc, Value* a
 AR_DEFUN("event-timer-tag", sdl_event_timer_tag, 1);
 
 Value sdl_event_key_modifiers(State& state, SDLModule* module, size_t argc, Value* argv) {
-
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("event-key-modifiers", sdl_event_key_modifiers, 1);
 
@@ -359,7 +362,7 @@ Value sdl_draw_text(State& state, SDLModule* module, size_t argc, Value* argv) {
     SDL_Surface* solid = TTF_RenderText_Blended(cfont, argv[1].string_data(), module->data.draw_color);
     SDL_Texture* texture = SDL_CreateTextureFromSurface(module->data.renderer, solid);
 
-    std::cout << argv[2].fixnum_value() << ' ' << argv[3].fixnum_value() << std::endl;
+    //std::cout << argv[2].fixnum_value() << ' ' << argv[3].fixnum_value() << std::endl;
     SDL_Rect rect = {(int)argv[2].fixnum_value(), (int)argv[3].fixnum_value(), 0, 0};
     SDL_QueryTexture(texture, 0, 0, &rect.w, &rect.h);
 

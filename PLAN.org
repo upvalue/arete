@@ -3,6 +3,10 @@
     Right now, we use argc/argv style, which is convenient for the VM design but probably problematic from a performance
     standpoint and is awkward to use from C++.
 
+* Utilities
+  - [ ] A pattern matcher
+  - [ ] A less tedious way of writing macros
+
 * Language
   - [ ] Gradual typing
 
@@ -10,6 +14,9 @@
   - [ ] Syntax-rules
   - [ ] map & for-each must accept multiple lists as arguments
   - [ ] SRFI 89: Optional arguments
+
+* Expander
+  - [ ] Chez Scheme identifier-syntax
 
 * Interpreter
   - [x] Tail-call optimization.
@@ -31,9 +38,11 @@
 
 * Jettison interpreter
   we have kind of a rickety bootstrap where we have to (a) write the expander in a primitive version of the language
-  because things like LET aren't available and (b) recompiling the whole system in-place is rather complex. However,
-  this does allow us to rapidly and easily change the language. We'd probably need better facilities for cross-platform
-  serialization of the heap (or compiling single files to FASLs) before we do this.
+  because things like LET aren't available and (b) recompiling the whole system in-place is rather complex.
+  
+  However, this does allow us to rapidly and easily change the language. We'd
+  probably need better facilities for cross-platform serialization of the
+  heap (or compiling single files to FASLs) before we do this.
 
 * Memory management
   - [ ] Symbol collection

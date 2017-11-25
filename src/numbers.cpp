@@ -183,6 +183,20 @@ Value fn_fx_div(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("fx/", fn_fx_div, 2, 2);
 
+Value fn_expt(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "expt";
+  AR_FN_ASSERT_ARG(state, 0, "to be numeric", argv[0].numeric());
+  AR_FN_ASSERT_ARG(state, 1, "to be numeric", argv[1].numeric());
+
+  bool exact = argv[0].fixnump() && argv[1].fixnump();
+
+  double result = pow(argv[0].fixnump() ? (double)argv[0].fixnum_value() : argv[0].flonum_value(),
+    argv[1].fixnump() ? (double) argv[1].fixnum_value() : argv[1].flonum_value());
+
+  return exact ? Value::make_fixnum((ptrdiff_t) result) : state.make_flonum(result);
+}
+AR_DEFUN("expt", fn_expt, 2, 2);
+
 Value fn_floor(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "floor";
   if(argv[0].fixnump()) return argv[0];

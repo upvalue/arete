@@ -337,7 +337,12 @@
 (define expand-identifier
   (lambda (x env)
     (if (env-syntax? env x)
-      (raise-source x 'expand (print-string "used syntax" x "as value") (list x))
+      (apply
+        (lambda (env name value found)
+          (if (or (eq? value 'syntax) (not (function-identifier-macro? x)))
+            (expand-macro x env value)
+            (raise-source x 'expand (print-string "used syntax" x "as value") (list x))))
+        (env-lookup env x))
       (if (symbol-qualified? x)
         x
         (env-resolve env x)))))
@@ -612,7 +617,7 @@
         ((eq? kar 'cond) (expand-cond x env))
         ((eq? kar 'quote) (cons-source x (make-rename #f 'quote) (cdr x)))
         (else (begin 
-                (expand-macro x env))))
+                (expand-macro x env (list-ref (env-lookup env (car x)) 2)))))
       ;; Normal function application
       ;; Needs to be annotated with src info, right?
       ;; map-source?
@@ -696,6 +701,7 @@
     (define expanded-body #f)
     (define fn #f)
     (define fn-arity #f)
+    (define identifier-transformer #f)
 
     (if (not (symbol? name))
       (raise-source (cdr x) 'expand "define-syntax first argument (macro name) must be a symbol" (list x (cdr x))))
@@ -704,7 +710,14 @@
       (if (table-ref env "module-export-all")
         (table-set! (table-ref env "module-exports") name #t)))
 
+    (if (eq? (car body) 'identifier-transformer)
+      (begin
+        (set! body (cadr body))
+        (set! identifier-transformer #t)
+        (print "found identifier transformer" body)))
+
     (set! expanded-body (expand body env))
+
     (set! fn (eval expanded-body env))
 
     (if (not (procedure? fn))
@@ -720,6 +733,8 @@
 
     (set-function-name! fn name)
     (set-function-macro-bit! fn)
+    (if identifier-transformer
+      (set-function-identifier-macro-bit! fn))
 
     (env-define env name fn #t)
 
@@ -772,24 +787,29 @@
 
     (cons-source x (make-rename #f 'begin) (expand body new-env))))
 
-;; Expand a macro appplication
+;; Expand a macro application
 (define expand-macro 
-  (lambda (x env)
-    (define lookup (list-ref (env-lookup env (car x)) 2))
-    (define arity (function-min-arity lookup))
+  (lambda (x env transformer)
+    ;(define lookup (list-ref (env-lookup env (car x)) 2))
+    (define arity (function-min-arity transformer))
     (define saved-rename-env (top-level-value '*current-rename-env*))
+    (define identifier-application? (and (not (identifier? x)) (function-identifier-macro? transformer)))
+    (define form (if identifier-application? (car x) x))
 
-    (set-top-level-value! '*current-rename-env* (function-env lookup))
+    (set-top-level-value! '*current-rename-env* (function-env transformer))
+
+    (if (and (not (identifier? x)) (function-identifier-macro? transformer))
+      (set! form (car x)))
 
     (define result
       (if (eq? arity 1)
         ;; Only pass form
-        (lookup x)
+        (transformer form)
         (if (eq? arity 2)
           ;; Only pass form and comparison procedure
-          (lookup x (lambda (a b) (env-compare env a b)))
+          (transformer form (lambda (a b) (env-compare env a b)))
 
-          (lookup x
+          (transformer form
             ;; rename procedure
             (lambda (name) (make-rename (function-env lookup) name))
             ;; compare procedure
@@ -797,7 +817,9 @@
 
     (set-top-level-value! '*current-rename-env* saved-rename-env)
 
-    (expand result env)))
+    (if identifier-application?
+      (cons-source x result (expand-map (cdr x) env)) 
+      (expand result env))))
 
 ;; cond expander
 (define expand-cond-full-clause
@@ -827,7 +849,7 @@
                   (make-rename #f 'if)
                   name
                   name
-                  (if (null? rest) unspecified (expand-cond-full-clause x (car rest) (cdr rest)))))
+                  (if (null? rest) unspecified (expand-cond-full-clause x env (car rest) (cdr rest)))))
              (expand condition env)))
          (gensym))
 

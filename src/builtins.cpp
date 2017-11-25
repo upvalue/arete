@@ -721,6 +721,41 @@ Value fn_function_is_macro(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("function-macro?", fn_function_is_macro, 1);
 
+Value fn_function_is_identifier_macro(State& state, size_t argc, Value* argv) {
+  switch(argv[0].type()) {
+    case FUNCTION:
+      return Value::make_boolean(argv[0].heap->get_header_bit(Value::FUNCTION_IDENTIFIER_MACRO_BIT));
+    case CLOSURE:
+    case VMFUNCTION: {
+      Value fn = argv[0].closure_unbox();
+      return Value::make_boolean(fn.heap->get_header_bit(Value::VMFUNCTION_IDENTIFIER_MACRO_BIT));
+    }
+    default: break;
+  }
+
+  return C_FALSE;
+}
+AR_DEFUN("function-identifier-macro?", fn_function_is_identifier_macro, 1);
+
+Value fn_set_function_identifier_macro_bit(State& state, size_t argc, Value* argv) {
+  switch(argv[0].type()) {
+    case FUNCTION:
+      if(argv[0].heap->get_header_bit(Value::FUNCTION_IDENTIFIER_MACRO_BIT)) return argv[0];
+      argv[0].heap->set_header_bit(Value::FUNCTION_IDENTIFIER_MACRO_BIT);
+      break;
+    case CLOSURE:
+    case VMFUNCTION: {
+      Value fn = argv[0].closure_unbox();
+      if(fn.heap->get_header_bit(Value::VMFUNCTION_IDENTIFIER_MACRO_BIT)) return argv[0];
+      fn.heap->set_header_bit(Value::VMFUNCTION_IDENTIFIER_MACRO_BIT);
+      break;
+    }
+    default: break;
+  }
+  return argv[0];
+}
+AR_DEFUN("set-function-identifier-macro-bit!", fn_set_function_identifier_macro_bit, 1);
+
 Value fn_function_min_arity(State& state, size_t argc, Value* argv) {
   switch(argv[0].type()) {
     case FUNCTION: {

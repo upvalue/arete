@@ -655,6 +655,7 @@ struct Value {
   
   // FUNCTIONS
   static const unsigned FUNCTION_MACRO_BIT = 1 << 10;
+  static const unsigned FUNCTION_IDENTIFIER_MACRO_BIT = 1 << 11;
 
   Value function_name() const;
   Value function_arguments() const;
@@ -701,6 +702,7 @@ struct Value {
   static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
   static const unsigned VMFUNCTION_LOG_BIT = 1 << 10;
   static const unsigned VMFUNCTION_MACRO_BIT = 1 << 11;
+  static const unsigned VMFUNCTION_IDENTIFIER_MACRO_BIT = 1 << 12;
 
   // UPVALUES
   
