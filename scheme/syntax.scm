@@ -82,6 +82,12 @@
 (define (append . lsts)
   (reduce (lambda (a b) (append1 a b)) lsts))
 
+(define (fold-right f init seq) 
+  (if (null? seq) 
+    init 
+    (f (car seq) 
+      (fold-right f init (cdr seq))))) 
+
 (define (qq-list c lst)
   (if (pair? lst)
     (let ((obj (car lst)))

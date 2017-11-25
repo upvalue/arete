@@ -1,7 +1,11 @@
 // reader.cpp - S-Expression reader.
+
 #define ARETE_LOG_READ(msg) ARETE_LOG((ARETE_LOG_TAG_READER), "read", msg)
 
 #include "arete.hpp"
+
+// TODO: Table literals
+// TODO: Record literals
 
 namespace arete {
 
