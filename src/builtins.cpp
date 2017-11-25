@@ -924,13 +924,13 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "raise";
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
-  Value tag = argv[0], message = argv[1], irritants = argv[2], exc;
+  Value tag = argv[0], message = argv[1], irritants = argc == 3 ? argv[2] : C_FALSE, exc;
   AR_FRAME(state, tag, message, irritants, exc);
   exc = state.make_exception(tag, message, irritants);
   AR_ASSERT(exc.is_active_exception());
   return exc;
 }
-AR_DEFUN("raise", fn_raise, 3);
+AR_DEFUN("raise", fn_raise, 2, 3);
 
 Value fn_raise_source(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "raise-source";

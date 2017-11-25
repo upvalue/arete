@@ -9,6 +9,10 @@
 
 * Language
   - [ ] Gradual typing
+  - [ ] Delimited continuations
+
+    Shift/reset. We'd need to replace is_active_exception with something that
+    can communicate return values to a SHIFT point.
 
 * RNRS & SRFIs
   - [ ] Syntax-rules

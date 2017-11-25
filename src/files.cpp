@@ -91,6 +91,20 @@ Value fn_open_input_file(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("open-input-file", fn_open_input_file, 1);
 
+Value fn_open_output_string(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "open-output-string"; (void) fn_name;
+
+  std::ostringstream* os = new std::ostringstream;
+  std::ostream* os2 = os;
+
+  FilePort* port = static_cast<FilePort*>(state.gc.allocate(FILE_PORT, sizeof(FilePort)));
+  port->set_header_bit(Value::FILE_PORT_INPUT_BIT);
+  port->output_handle = os2;
+  
+  return port;
+}
+AR_DEFUN("open-output-string", fn_open_output_string, 0);
+
 Value fn_close_port(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "close-port";
   AR_FN_EXPECT_TYPE(state, argv, 0, FILE_PORT);

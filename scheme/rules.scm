@@ -15,6 +15,7 @@
 (define (rules-shadowed? name)
   #f)
 
+
 (define (rules-try ellipses pattern form literals)
    (let ((kar (rules-match ellipses (car pattern) (car form) literals))
          (kdr (rules-match ellipses (cdr pattern) (cdr form) literals)))
@@ -74,6 +75,16 @@
 (define (try-cons a b)
   (and a (cons a b)))
 
+;; TODO We cannot use #f to terminate. Perhaps a qualified-symbol would be appropriate here, as something we can
+;; rightfully say should not occur in source code, e.g. ##terminate
+
+;; need to change try-cons and (and b)
+
+;; The PROBLEM. We cease on consuming a list, but then have no way of "consuming" the other lists
+
+
+;; (1 3 5 7) (
+
 (define (fold-template matches lst)
   (fold-right
     (lambda (a b)
@@ -81,27 +92,48 @@
         (cond 
           ((pair? a)
            (if (and (pair? b) (eq? (car b) '...))
-             (let ((nmatches (map (lambda (c) (if (eq? (cadr c) 'splat) (list (car c) 'splat-consume (caddr c)) c)) matches))
-                   (expected-lengths (map (lambda (c) (list (car c) (if (eq? (cadr c) 'splat) (length (caddr c)) #f))) matches)))
+
+             (let* ((nmatches (map (lambda (c) (if (eq? (cadr c) 'splat) (list (car c) 'splat-consume (caddr c) '()) c)) matches))
+                    (expected-lengths (map (lambda (c) (list (car c) (if (eq? (cadr c) 'splat) (length (caddr c)) #f))) matches))
+                    (first-attempt (fold-template nmatches a)))
                (let loop
-                 ((attempt (fold-template nmatches a))
-                  (result '()))
+                 ((attempt first-attempt)
+                  (result (list first-attempt)))
 
                  ;; Attempt terminated, now check for errors
                  (if (not attempt)
                    (begin
-                     ;; CHECKING LENGTHS.
-                     (map2
-                       (lambda (a b)
-                         (if (and (eq? (cadr a) 'splat-consume) (eq? (cadr b) #f))
-                           (raise 'expand "... consumed too many values" (list a))))
+                     ;; Checking for early termination is tricky because evaluation stops right-to-left
+                     ;; We keep a list of values consumed for each name
+
+                     ;; If any of those lists do not have the same lengths, or if there are still unconsumed values
+                     ;; in any list that has been touched, it is an error
+                     (let ((consumption-limit (reduce min (map1 (lambda (c) (print c)(length (cadddr c))) (filter (lambda (c) (and (eq? (cadr c) 'splat-consume) (not (null? (cadddr c))))) nmatches)))))
+
+                       (map1 
+                         (lambda (c)
+                           (print c)
+                           ;; Some values were consumed, meaning caddr c (values not consumed) should be NULL,
+                           ;; which will fail if a value not rightmost resulted in consumption
+                           (when (eq? (cadr c) 'splat-consume)
+                             (when (and (not (eq? (caddr c) '())) (not (eq? (cadddr c) '())))
+                               (raise 'expand (print-string "template value" (car c) "was given too many values and ... resulted in length mismatches")))
+
+                             ;; Some values were consumed, meaning cadddr c should equal consumption-limit,
+                             ;; which will fail if a value rightmost resulted in consumption
+                             (when (and (not (null? (cadddr c))) (not (fx= (length (cadddr c)) consumption-limit)))
+                               (raise 'expand (print-string "template value" (car c) "was given too many values and ... resulted in length mismatches")))))
+                         nmatches)
+
+                     ;; Checking proper consumption of values
                        nmatches expected-lengths)
-                     ;; (map (a b) nmatches expected-lengths). check splat-consume for #f
-                     ;(print "ye result:" result)
-                     ;(print matches)
                      (append result (cdr b)))
                    (begin
-                     (loop (fold-template nmatches a) (cons attempt result))))))
+                     (let ((attempt (fold-template nmatches a)))
+                       (print attempt result)
+                       ;(print attempt)
+                       ;(print result)
+                       (loop attempt (append result (list attempt))))))))
 
              (try-cons (fold-template matches a) b)))
           ((symbol? a)
@@ -110,33 +142,41 @@
              (if (and (pair? b) (eq? (car b) '...))
                (if (not match)
                  (raise 'expand "... occurred in syntax-rules template after" a "which is not a pattern variable" (list a))
-                 (if (eq? (cadr match) 'single)
+                 (if (not (eq? (cadr match) 'splat))
                    (raise 'expand (print-string "... occurred in syntax-rules template after" a "which is not a pattern variable") (list a))
                    (append (caddr match) (cdr b))))
                ;; splat not requested
                (begin
-                 (try-cons
+                 (let ((kar
                    ;; matched variable
                    (if match
                      (case (cadr match)
                        ;; if this is a '... we want to just pass it through to the next invocation of this function
-                       (single a)
+                       (single (caddr match))
                        (splat
                          (raise 'expand (print-string "syntax-rules template substitution" a "must be followed by ...") (list a )))
                        (splat-consume
+                         ;; We cannot rely on order of evaluation as it depends on how the user has entered them
+                         ;; However, we also cannot rely on early termination. How do we continue "consuming" but
+                         ;; also indicate finishing?
                          (let ((lst (caddr match)))
                            (if (null? lst)
                              (begin
-                               (set-car! (cddr match) #f)
                                #f)
                              (begin
                                (if (not lst)
                                  (raise 'expand (print-string "... length mismatch") (list lst)))
+                               ;; Note consumed value
+                               (set-car! (cdddr match) (cons (car lst) (cadddr match)))
                                (set-car! (cddr match) (cdr lst))
                                (car lst))))
                             ))
-                       (if (eq? a '...) a (make-rename #f a)))
-                   b)))))
+                       (if (eq? a '...) a (make-rename #f a)))))
+                   (if (eq? kar #f)
+                     #f
+                     (try-cons kar b))
+                   #;(try-cons kar b)
+                   )))))
 
           (else (try-cons a b)))))
     '() lst))
@@ -164,7 +204,7 @@
           (if (not match)
             (raise 'expand (print-string "... occurred in syntax-rules template after" a "which is not in the pattern") (list a))
             (if (eq? (cadr match) 'single)
-              (raise 'expand (print-string "... occurred in syntax-rules template after" a "which did not have a ... after it in the pattern (or ... was already used)") (list a))
+              (raise 'expand (print-string "... occurred in syntax-rules template after" a "which did not have a ... after it in the pattern") (list a))
               ;; Simple
               (append (caddr match) (cdr b))
                 #;(let ((single-matches (filter (lambda (m)
@@ -193,10 +233,14 @@
     (else (cons a b))))
 |#
 
-(print (fold-template '((hello single hello) (one single 1)) '(hello one)))
-(print (fold-template '((hello single hello) (one splat (1 2 3))) '(hello one ...)))
-(print (fold-template '((hello single hello) (one splat (1 3 5)) (two splat (2 4 6))) '(hello (begin (print one two) ...))))
+;(print (fold-template '((hello single hello) (one single 1)) '(hello one)))
+;(print (fold-template '((hello single hello) (one splat (1 2 3))) '(hello one ...)))
+;; if we terminate on the rightmost list we have no way of checking results by golly
 
+(print (fold-template '((hello single hello) (thing single "thing") (one splat (1 3 5)) (two splat (2 4 6)) (three splat (0 0 0 5))) '(hello (begin (print thing) (print  one two) ... (print three) ... ))))
+;(print (fold-template '((hello single hello) (one splat (1 3 5)) (two splat (2 4 6)) (three splat (0 0 0 5))) '(hello (begin (print three one two) ...))))
+;(print (fold-template '((hello single hello) (one splat (1 3 5)) (two splat (2 4 6 8)) (three splat (0 0 0))) '(hello (begin (print three one two) ...))))
+ 
 #;(define (rules-substitute matches template)
   (fold-right (lambda (a b) (fold-template matches a b)) '() template))
 
@@ -326,4 +370,4 @@ Here's a Problem.
                        (display asdf)
                        (newline)) ...
                      (newline)))))
-|#
+ 9|#
