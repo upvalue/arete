@@ -710,11 +710,11 @@
       (if (table-ref env "module-export-all")
         (table-set! (table-ref env "module-exports") name #t)))
 
-    (if (eq? (car body) 'identifier-transformer)
+    (if (eq? (car body) 'identifier)
       (begin
         (set! body (cadr body))
         (set! identifier-transformer #t)
-        (print "found identifier transformer" body)))
+        #;(print "found identifier transformer" body)))
 
     (set! expanded-body (expand body env))
 
@@ -798,8 +798,11 @@
 
     (set-top-level-value! '*current-rename-env* (function-env transformer))
 
-    (if (and (not (identifier? x)) (function-identifier-macro? transformer))
+    (if identifier-application?
       (set! form (car x)))
+
+    (if (and (identifier? x) (not (function-identifier-macro? transformer)))
+      (raise-source x (print-string "use of syntax" x "as value") (list x)))
 
     (define result
       (if (eq? arity 1)
@@ -811,7 +814,7 @@
 
           (transformer form
             ;; rename procedure
-            (lambda (name) (make-rename (function-env lookup) name))
+            (lambda (name) (make-rename (function-env transformer) name))
             ;; compare procedure
             (lambda (a b) (env-compare env a b))))))
 
