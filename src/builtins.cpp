@@ -312,9 +312,9 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
 }
 
 Value fn_map_proper(State& state, size_t argc, Value* argv) {
-  return fn_map_impl(state, argc, argv, "map", false, true, false);
+  return fn_map_impl(state, argc, argv, "map1", false, true, false);
 }
-AR_DEFUN("map", fn_map_proper, 2);
+AR_DEFUN("map1", fn_map_proper, 2);
 
 Value fn_map_improper(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "map-improper", true, true, false);
@@ -351,7 +351,6 @@ Value fn_filter(State& state, size_t argc, Value* argv) {
   AR_FN_ASSERT_ARG(state, 0, "to be applicable", (argv[0].applicable()));
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
   
-  // TODO: This pattern, which is repeated quite often, could be 
   Value fn = argv[0], lst = argv[1], result = C_NIL, tmp;
   ListAppender a;
   AR_FRAME(state, fn, lst, result, tmp, a.head, a.tail);

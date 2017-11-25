@@ -42,7 +42,7 @@
            bindings))
 
     (set! vals 
-      (map (lambda (binding)
+      (map1 (lambda (binding)
              ;; TODO expand.
              (cadr binding)
              ) bindings))
@@ -81,6 +81,15 @@
 
 (define (append . lsts)
   (reduce (lambda (a b) (append1 a b)) lsts))
+
+(define (alist-check-cell lst cell)
+  (if (not (pair? cell))
+    (raise 'type (print-string "alist method encountered invalid alist cell" cell) (list lst cell))))
+
+(define (alist-copy lst)
+  (map1 (lambda (x)
+         (alist-check-cell lst x)
+           (cons (car x) (cdr x))) lst))
 
 (define (fold-right f init seq) 
   (if (null? seq) 
@@ -231,8 +240,8 @@
             (raise-source (list-tail (cadr x) i) 'syntax "let* binding must be a list with two elements" (list binding))))
         bindings)
 
-    `(,#'let (,@(map (lambda (b) (list-source b (car b) #'unspecified)) bindings))
-      ,@(map (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
+    `(,#'let (,@(map1 (lambda (b) (list-source b (car b) #'unspecified)) bindings))
+      ,@(map1 (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
       ,@body))))
 
 ;; TODO: letrec restrictions.
@@ -249,8 +258,8 @@
             (raise-source (list-tail (cadr x) i) 'syntax "let* binding must be a list with two elements" (list binding))))
         bindings)
 
-    `(,#'let (,@(map (lambda (b) (list-source b (car b) #'unspecified)) bindings))
-      ,@(map (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
+    `(,#'let (,@(map1 (lambda (b) (list-source b (car b) #'unspecified)) bindings))
+      ,@(map1 (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
       ,@body))))
 
 ;; Records.
@@ -311,7 +320,7 @@
       fields))
 
     (set! constructor
-      `(,#'define (,(string->symbol (string-append name-string "/make")) ,@(map rename fields))
+      `(,#'define (,(string->symbol (string-append name-string "/make")) ,@(map1 rename fields))
         (,#'let ((,#'instance (,#'make-record ,name)))
         ,@(map-i
           (lambda (i x)
@@ -325,7 +334,7 @@
 
     `(,#'begin
        (,#'define ,name
-        (,#'let ((,#'fields (list ,@(map (lambda (x) `(,#'quote ,x)) fields))))
+        (,#'let ((,#'fields (list ,@(map1 (lambda (x) `(,#'quote ,x)) fields))))
           (begin
             ;(print ,#'fields)
             (,#'register-record-type ,name-string ,field-count 0 ,#'fields ,parent))))
@@ -415,6 +424,13 @@
 (define (assv obj alist) (assoc-impl eqv? obj alist))
 (define (assoc obj alist) (assoc-impl equal? obj alist))
 
+(define map map1)
+
+(define (map2 f ls1 ls2)
+  (let loop ((ls1 ls1) (ls2 ls2))
+    (if (null? ls1)
+      '()
+      (cons (apply f (list (car ls1) (car ls2))) (loop (cdr ls1) (cdr ls2))))))
 
 #;(define (filter fn lst)
   (if (null? lst)
@@ -422,6 +438,9 @@
     (if (fn (car lst))
       (cons (car lst) (filter fn (cdr lst)))
       (filter fn (cdr lst)))))
+
+;; Redefine map
+
 
 ;; VECTORS
 
@@ -565,6 +584,16 @@
       (if (null? rest)
         #t
         (loop (car rest) (cdr rest))))))
+
+;; ASSERTIONS
+
+(define-syntax assert-equal?
+  (lambda (x)
+    `(,#'let ((,#'result1 ,(list-ref x 1))
+              (,#'result2 ,(list-ref x 2)))
+        (,#'unless (,#'equal? ,#'result1 ,#'result2)
+          (,#'raise 'assert (,#'print-string "Assertion failure: expected expression" (quote ,(list-ref x 1)) "to equal" (quote ,(list-ref x 2))) (,#'list ,#'result1 ,#'result2))))))
+
 
 ;; COMPATIBILITY
 

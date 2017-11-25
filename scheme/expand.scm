@@ -283,7 +283,7 @@
 ;; Shorthand for mapping expand because it's so common
 (define expand-map
   (lambda (x env)
-    (map (lambda (sub-x) (expand sub-x env)) x)))
+    (map1 (lambda (sub-x) (expand sub-x env)) x)))
 
 (define expand-define
   (lambda (x env)
@@ -448,7 +448,7 @@
        (if (not (fx= (length spec) 3))
          (raise-source (cdddr spec) 'expand "prefix specifier must have exactly three elements" (list spec)))
        (define pfx-str (symbol->string (caddr spec)))
-       (map
+       (map1
          (lambda (cell)
            (if (pair? cell)
              (cons (string->symbol (string-append pfx-str (symbol->string (car cell)))) (cdr cell))
@@ -467,7 +467,7 @@
            (if (or (not (list? x)) (not (fx= (length x) 2)) (not (symbol? (car x))) (not (symbol? (cadr x))))
              (raise-source spec 'expand (print-string "arguments to rename specifier must all be lists with two symbols") (list spec))))
          renames)
-       (map
+       (map1
          (lambda (cell)
            (if cell
              (begin
@@ -574,7 +574,7 @@
 
   (define result
     (cons-source x (make-rename #f 'begin)
-      (map
+      (map1
         (lambda (x)
           (expand-module-decl mod x env))
         (cddr x))))
