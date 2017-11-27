@@ -61,7 +61,7 @@
 #define AR_VM_LOG_ALWAYS true
 
 #define AR_LOG_VM(msg) \
-  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT))) { \
+  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", depth_to_string(f) << msg); \
   }
 //#define AR_LOG_VM(msg)
@@ -616,6 +616,19 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         // Drop condition from stack
         code_offset = VM_CODE()[code_offset];
         AR_LOG_VM("jump " << code_offset);
+
+/*
+        if(VM_CODE()[code_offset] == OP_JUMP || VM_CODE()[code_offset] == OP_JUMP_IF_FALSE) {
+          static size_t jmp_to_jmp = 0;
+          std::cout << "JUMP TO JMP " << jmp_to_jmp++ << std::endl;
+        }
+
+        if(VM_CODE()[code_offset] == OP_RETURN) {
+          static size_t jmp_to_ret = 0;
+          std::cout << "JUMP TO RET " << jmp_to_ret++ << std::endl;
+        }
+        */
+
         VM_DISPATCH();
       }
 

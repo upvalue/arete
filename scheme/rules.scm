@@ -1,9 +1,15 @@
-;; rules.scm - rules implementation
+;; rules.scm - syntax-rules implementation
+
+;; How this works: rules-match checks a syntax-rules pattern against a given form
+;; It does this by diving into that form and returning an association list for the template substitution if successful,
+;; and #f if it fails
+
+;; If a pattern is successfully matched, rules-substitute does a fold-right over the template. The only tricky part
+;; (which I am not happy about) is the ... handling; it copies the alist from rules-match and modifies it for each
+;; iteration, then does some tricky math to make sure that all the lists used by the ... have been fully consumed
 
 ;; TODO Literals
-
 ;; TODO Substitutions
-
 ;; TODO Dotted list
 ;; TODO Vectors
 
@@ -34,7 +40,6 @@
     ;; Check for literals
     ((and (eq? pattern form) (identifier? pattern) (memq pattern literals) (not (rules-shadowed? pattern)))
      (begin
-       ;(print "found ye literal" pattern)
        (list '(#t #t))))
     ((and (identifier? pattern) (or (identifier? form) (self-evaluating? form)))
      (list (list pattern 'single form)))
@@ -130,10 +135,9 @@
                      (append result (cdr b)))
                    (begin
                      (let ((attempt (fold-template nmatches a)))
-                       (print attempt result)
                        ;(print attempt)
                        ;(print result)
-                       (loop attempt (append result (list attempt))))))))
+                       (loop attempt (if attempt (append result (list attempt)) result)))))))
 
              (try-cons (fold-template matches a) b)))
           ((symbol? a)
@@ -180,64 +184,12 @@
 
           (else (try-cons a b)))))
     '() lst))
-  #|
-
-  #;(cond
-    ((pair? a)
-     (if (and (pair? b) (eq? (car b) '...))
-       ;; Splat requested against more complex source
-       ;; We need a way to "consume" the splat each time it is encountered
-       ;; What we'll do - replace 'splat with 'splat-consume
-       ;; 'splat-consume will mutate the alist given in place
-       ;; if it runs into NULL it will cause an error
-       (let ((matches-consume (map (lambda (c) (if (eq? (cadr c) 'splat) (list (car c) 'splat-consume (caddr c)) c)) matches)))
-         (cons
-           (fold-right (lambda (a b) (fold-template matches-consume a b)) '() a)
-           b))
-       (cons (fold-right (lambda (a b) (fold-template matches a b)) '() a) b)))
-    ((symbol? a)
-      (let* ((match (assq a matches))
-             (kar (or match a)))
-
-        (if (and (pair? b) (eq? (car b) '...))
-          ;; A splat has been requested
-          (if (not match)
-            (raise 'expand (print-string "... occurred in syntax-rules template after" a "which is not in the pattern") (list a))
-            (if (eq? (cadr match) 'single)
-              (raise 'expand (print-string "... occurred in syntax-rules template after" a "which did not have a ... after it in the pattern") (list a))
-              ;; Simple
-              (append (caddr match) (cdr b))
-                #;(let ((single-matches (filter (lambda (m)
-                                                (if (eq? (car m) a)
-                                                  (list (car m) 'single (caddr m)))) matches)))
-                  (print "single-matches:" single-matches)
-                  (append (fold-right (lambda (a b) (fold-template single-matches a b)) '() a) (cdr b)))))
-          ;; A splat has not been requested
-          (cons
-            (if match
-              (case (cadr match)
-                (single (if (eq? a '...) a (make-rename #f a)))
-                (splat 
-                  (raise 'expand (print-string "syntax-rules template name" a "must be followed by a ...") (list a)))
-                (splat-consume
-                  (let ((lst (caddr match)))
-                    (if (null? lst)
-                      (raise 'expand (print-string "... given uneven lists; pattern variable" (car match) "ran out") (list a)))
-                    (set-car! (cddr match) (cdr lst))
-                    (car lst))))
-                (if (eq? a '...) 
-                  a
-                  (make-rename #f a)))
-            b))))
-
-    (else (cons a b))))
-|#
 
 ;(print (fold-template '((hello single hello) (one single 1)) '(hello one)))
 ;(print (fold-template '((hello single hello) (one splat (1 2 3))) '(hello one ...)))
 ;; if we terminate on the rightmost list we have no way of checking results by golly
 
-(print (fold-template '((hello single hello) (thing single "thing") (one splat (1 3 5)) (two splat (2 4 6)) (three splat (0 0 0 5))) '(hello (begin (print thing) (print  one two) ... (print three) ... ))))
+(print (fold-template '((hello single hello) (thing single "thing") (one splat (1 3 5)) (two splat (2 4 6)) (three splat (0 0 0 5))) '(hello (begin (print thing) (print  one two) ... (begin (print three) ... )))))
 ;(print (fold-template '((hello single hello) (one splat (1 3 5)) (two splat (2 4 6)) (three splat (0 0 0 5))) '(hello (begin (print three one two) ...))))
 ;(print (fold-template '((hello single hello) (one splat (1 3 5)) (two splat (2 4 6 8)) (three splat (0 0 0))) '(hello (begin (print three one two) ...))))
  

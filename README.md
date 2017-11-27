@@ -13,7 +13,9 @@ Currently:
     bin/arete --load-image heap.boot
 
 Will bootstrap the expander and compiler, then save them into a loadable image. Prepending --load-image heap.boot will
-make the files in examples/ and REPL work as expected.
+make the files in examples/ and REPL work as expected, for example:
+
+    bin/arete --load-image heap.boot examples/life.scm
 
     make test-all
 

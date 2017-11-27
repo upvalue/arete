@@ -101,6 +101,17 @@
   (lambda (id name fn)
     (%Var/make id name #f #f #f (OpenFn/depth fn))))
 
+;; Print a list of INSNs with labels added in pairs. Note: does not work with multiple labels at same spot
+(define (print-insns fn)
+  (let* ((insns (OpenFn/insns fn))
+         (insns-limit (vector-length insns))
+         (labels (table-map (lambda (k v) (list v k)) (OpenFn/labels fn))))
+
+    (let loop ((i 0) (lst '()))
+      (if (fx= i insns-limit)
+        (print (reverse lst))
+        (let ((insn (vector-ref insns i)))
+          (loop (fx+ i 1) (aif (assq i labels) (cons insn (cons (cdr it) lst)) (cons insn lst))))))))
 (define (compiler-log fn . rest)
   (when (not (eq? (top-level-value 'COMPILER-LOG) unspecified))
     (display "arete:cc:")
