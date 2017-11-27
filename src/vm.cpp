@@ -58,7 +58,7 @@
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
 #define VM_CODE() (f.code)
 
-#define AR_VM_LOG_ALWAYS true
+#define AR_VM_LOG_ALWAYS 0
 
 #define AR_LOG_VM(msg) \
   if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
@@ -613,7 +613,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
 
       VM_CASE(OP_JUMP): {
-        // Drop condition from stack
         code_offset = VM_CODE()[code_offset];
         AR_LOG_VM("jump " << code_offset);
 
@@ -638,10 +637,10 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         size_t pop = VM_CODE()[code_offset++];
 
         if(val == C_FALSE) {
-          AR_LOG_VM("jump-if-false jumping " << jmp_offset);
+          AR_LOG_VM("jump-if-false jumping " << jmp_offset << ' ' << (pop ? "popping" : "not popping"));
           code_offset = jmp_offset;
         } else {
-          AR_LOG_VM("jump-if-false not jumping" << jmp_offset);
+          AR_LOG_VM("jump-if-false not jumping" << jmp_offset << ' ' << (pop ? "popping" : "not popping"));
         }
 
         f.stack_i -= pop;

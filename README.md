@@ -17,6 +17,8 @@ make the files in examples/ and REPL work as expected, for example:
 
     bin/arete --load-image heap.boot examples/life.scm
 
+Will run a simple Conway's Game of Life simulation.
+
     make test-all
 
 Will run all tests. Since Arete has not been tested on a wide variety of systems, doing this before

@@ -226,6 +226,8 @@
 
 ;; emit takes a named instruction and determines the stack effect of it based on its argument
 (define (emit fn . insns)
+  (compiler-log fn insns)
+
   (fn-adjust-stack fn 
     (aif (table-ref stack-effects (car insns))
       it
@@ -263,7 +265,6 @@
 ;; e.g. in the case of (begin (set! x #t) 2) we don't want to pop the first "argument" which results in no stack changes
 ;; in the case of (begin x 2) we want to pop "x" as it does nothing
 (define (maybe-pop fn x original-stack)
-  ;(print x original-stack (OpenFn/stack-size fn))
   (if (fx= (OpenFn/stack-size fn) (fx+ original-stack 1))
     (emit fn 'pop)
     (if (not (fx= (OpenFn/stack-size fn) original-stack))
@@ -636,75 +637,25 @@
 
   (register-label fn else-branch-end))
 
-;; With ands, we generate a push-constant #f at the end of the expression, then a series of jump-if-falses that jump
-;; to that push-constant if evaluation fails. The final jump-if-false has an argument of 0, meaning that the successful
-;; (true) condition will be left on the stack.
-(define (compile-and fn x tail?)
-  (define and-fail-pop (gensym 'and-fail-pop))
-  (define and-fail (gensym 'and-fail))
-  (define and-end (gensym 'and-end))
-  (define x-len (length x))
-  (define argc (fx- x-len 2))
-
-  ;; (and 1 2 3)
-  ;; jump-if-false needs to drop all conditions except for the last one
-  ;; then we need a pop instruction
-
-  (if (fx= x-len 1)
-    (compile-constant fn #t) 
-    (begin
-      (for-each-i 
-        (lambda (i sub-x)
-          ;; Emit a jump-if-false for each expression
-          ;; If it's at the expression
-          ;(print i argc)
-          (compile-expr fn sub-x (list-tail x (fx+ i 1)) (and tail? (fx= i argc)))
-          (emit fn 'jump-if-false (if (fx= i argc) and-fail-pop and-fail) (if (fx= i argc) 0 1)))
-        (cdr x))
-
-      (emit fn 'jump and-end)
-      (register-label fn and-fail-pop)
-
-      ;; Manually adjust stack size: and will always result in one value being pushed on the stack after it's 
-      ;; evaluated, whether successful or not.
-      (OpenFn/stack-size! fn (fx+ (OpenFn/stack-size fn) 1))
-
-      (emit fn 'pop)
-      (register-label fn and-fail)
-
-      (compile-constant fn #f)
-      (register-label fn and-end)
-    )
-  )
-)
-
-;; (or a b c)
-;; (if a a (if b b (if c c #f)))
-(define (compile-or fn x tail?)
-  (define x-len (length x))
-  (if (fx= x-len 1)
-    (compile-constant fn #f)
-
-    (let ((or-success (gensym 'or-success))
-          (or-fail-pop (gensym 'or-fail-pop))
-          (or-fail (gensym 'or-fail))
-          (argc (fx- x-len 2)))
+;; Short circuiting evaluation expressions: AND/OR.
+;; These jump to the end upon meeting their condition (false for and, true for or)
+;; Otherwise, they pop the result and evaluate the next expression.
+(define (compile-condeval type fn x tail?)
+  (if (null? (cdr x))
+    (compile-constant fn (eq? type 'and)) ;; (and) => #t, (or) => #f
+    (let ((x-len (fx- (length x) 2))
+          (condeval-end (gensym 'condeval-end))
+          (jmp (if (eq? type 'and) 'jump-if-false 'jump-if-true)))
       (for-each-i
         (lambda (i sub-x)
-          (compile-expr fn sub-x (list-tail x (fx+ i 1)) (and tail? (fx= i argc)))
-          (emit fn 'jump-if-true or-success 0)
-          (if (not (fx= i argc)) (emit fn 'pop)))
+          (unless (fx= i 0)
+            (emit fn 'pop))
+          (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f)
+          (unless (fx= i x-len)
+            (emit fn jmp condeval-end 0)))
         (cdr x))
 
-      (emit fn 'jump or-success)
-      (register-label fn or-fail-pop)
-
-      (compile-constant fn #f)
-      (register-label fn or-success)
-    )
-
-  )
-)
+      (register-label fn condeval-end))))
 
 (define (compile-quote fn x)
   (compile-constant fn (cadr x)))
@@ -736,8 +687,8 @@
     (define (compile-define fn x #f))
     (set! (compile-set! fn x src #f))
     (if (compile-if fn x tail?))
-    (and (compile-and fn x tail?))
-    (or (compile-or fn x tail?))
+    (and (compile-condeval 'and fn x tail?))
+    (or (compile-condeval 'or fn x tail?))
     (quote (compile-quote fn x))
     (begin (compile-begin fn x tail?))
     (else
@@ -754,7 +705,10 @@
   (if (memq x '(lambda define set! if begin and or quote)) x #f))
 
 (define (compile-expr fn x src tail?)
+  (and #f #f)
   (compiler-log fn "compiling expr" x)
+
+
   (aif (and src (list-get-source src))
     (begin
       (compiler-log fn "expr source:" it)
@@ -870,6 +824,7 @@
 
          #;(fn (OpenFn/make fn-name))
          (fn-expr (append (list-source fn-body 'lambda fn-args) fn-body))
+
          
          ;(fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
          (fn-exxxpr

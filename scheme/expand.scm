@@ -633,6 +633,7 @@
     (define bindings (cadr x))
     (define new-env (env-make env))
 
+
     (if (or (null? bindings) (pair? bindings))
       (for-each-improper-i
         (lambda (i arg)
