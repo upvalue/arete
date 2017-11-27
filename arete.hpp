@@ -684,7 +684,6 @@ struct Value {
   Value c_function_apply(State&, size_t, Value*);
 
   // VM FUNCTIONS
-  unsigned vm_function_constant_count() const;
   unsigned vm_function_min_arity() const;
   unsigned vm_function_max_arity() const;
   bool vm_function_is_macro() const {
@@ -1045,7 +1044,7 @@ struct VMFunction : HeapValue {
   Blob* sources;
   Value macro_env;
 
-  unsigned constant_count, min_arity, max_arity, stack_max, local_count;
+  unsigned min_arity, max_arity, stack_max, local_count;
   size_t bytecode_size;
 
   static const unsigned CLASS_TYPE = VMFUNCTION;
@@ -1057,10 +1056,6 @@ struct VMFunction : HeapValue {
 
 inline Value Value::vm_function_macro_env() const {
   return as<VMFunction>()->macro_env;
-}
-
-inline unsigned Value::vm_function_constant_count() const {
-  return as<VMFunction>()->constant_count;
 }
 
 inline unsigned Value::vm_function_min_arity() const {

@@ -200,17 +200,17 @@ enum {
   // Flow control
   OP_RETURN = 13,
   OP_JUMP = 14,
-  OP_JUMP_IF_FALSE = 15,
-  OP_JUMP_IF_TRUE = 16,
-
+  OP_JUMP_WHEN = 15,
+  OP_JUMP_WHEN_POP = 16,
+  OP_JUMP_UNLESS = 17,
   // Instructions below this point are primitive versions of the builtin C++ routines for speed;
   // they are not necessary for code to execute correctly.
-  OP_ADD = 17,
-  OP_SUB = 18,
-  OP_LT = 19,
-  OP_CAR = 20,
-  OP_LIST_REF = 21,
-  OP_EQ = 22,
+  OP_ADD = 18,
+  OP_SUB = 19,
+  OP_LT = 20,
+  OP_CAR = 21,
+  OP_LIST_REF = 22,
+  OP_EQ = 23,
 };
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
@@ -224,7 +224,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     
     &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
 
-    &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_IF_FALSE, &&LABEL_OP_JUMP_IF_TRUE,
+    &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
 
     // Primitives implemented directly in the VM
     &&LABEL_OP_ADD, &&LABEL_OP_SUB,
@@ -616,42 +616,35 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         code_offset = VM_CODE()[code_offset];
         AR_LOG_VM("jump " << code_offset);
 
-/*
-        if(VM_CODE()[code_offset] == OP_JUMP || VM_CODE()[code_offset] == OP_JUMP_IF_FALSE) {
-          static size_t jmp_to_jmp = 0;
-          std::cout << "JUMP TO JMP " << jmp_to_jmp++ << std::endl;
-        }
-
-        if(VM_CODE()[code_offset] == OP_RETURN) {
-          static size_t jmp_to_ret = 0;
-          std::cout << "JUMP TO RET " << jmp_to_ret++ << std::endl;
-        }
-        */
-
         VM_DISPATCH();
       }
 
-      VM_CASE(OP_JUMP_IF_FALSE): {
+      VM_CASE(OP_JUMP_WHEN): {
         size_t jmp_offset = VM_CODE()[code_offset++];
         Value val = f.stack[f.stack_i-1];
-        size_t pop = VM_CODE()[code_offset++];
 
         if(val == C_FALSE) {
-          AR_LOG_VM("jump-if-false jumping " << jmp_offset << ' ' << (pop ? "popping" : "not popping"));
+          AR_LOG_VM("jump-if-false jumping " << jmp_offset);
           code_offset = jmp_offset;
         } else {
-          AR_LOG_VM("jump-if-false not jumping" << jmp_offset << ' ' << (pop ? "popping" : "not popping"));
+          AR_LOG_VM("jump-if-false not jumping" << jmp_offset);
         }
-
-        f.stack_i -= pop;
 
         VM_DISPATCH();
       }
 
-      VM_CASE(OP_JUMP_IF_TRUE): {
+      VM_CASE(OP_JUMP_WHEN_POP): {
+        size_t jmp_offset = VM_CODE()[code_offset++];
+        if(f.stack[--f.stack_i] == C_FALSE) {
+          code_offset = jmp_offset;
+        }
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_JUMP_UNLESS): {
         size_t jmp_offset = VM_CODE()[code_offset++];
         Value val = f.stack[f.stack_i-1];
-        size_t pop = VM_CODE()[code_offset++];
 
         if(val == C_FALSE) {
           AR_LOG_VM("jump-if-true not jumping " << jmp_offset);
@@ -660,9 +653,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           code_offset = jmp_offset;
         }
 
-        if(pop) {
-          f.stack_i--;
-        }
         VM_DISPATCH();
       }
 

@@ -1128,15 +1128,12 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
 
   size_t insn_count = insns.vector_length();
   size_t bytecode_size = (size_t) insn_count * sizeof(size_t);
-  unsigned constant_count = (unsigned) constants.vector_length();
 
   // Determine actual size of VMFunction
-  size += (constant_count * sizeof(Value));
   size += (bytecode_size);
 
   VMFunction* vfn = static_cast<VMFunction*>(state.gc.allocate(VMFUNCTION, size));
 
-  vfn->constant_count = constant_count;
   vfn->min_arity = (unsigned)rec.record_ref(9).fixnum_value();
   vfn->max_arity = (unsigned)rec.record_ref(10).fixnum_value();
   vfn->bytecode_size = (unsigned)bytecode_size;

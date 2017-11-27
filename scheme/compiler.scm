@@ -18,6 +18,8 @@
 ;; If true, warn about undefined variables
 (set-top-level-value! 'COMPILER-WARN-UNDEFINED #t)
 
+(set-top-level-value! 'cd #t)
+
 ;; OpenFn is a record representing a function in the process of being compiled.
 
 ;; Note: Internal structure is manipulated by openfn_to_procedure in builtins.cpp and that must be updated
@@ -112,6 +114,7 @@
         (print (reverse lst))
         (let ((insn (vector-ref insns i)))
           (loop (fx+ i 1) (aif (assq i labels) (cons insn (cons (cdr it) lst)) (cons insn lst))))))))
+
 (define (compiler-log fn . rest)
   (when (not (eq? (top-level-value 'COMPILER-LOG) unspecified))
     (display "arete:cc:")
@@ -123,7 +126,6 @@
     (display " ")
 
     (apply pretty-print rest)))
-
 
 ;; This function registers the source of a particular expression, by creating a vector with the offset of its code
 ;; and its source code information (see SourceLocation in arete.hpp).
@@ -172,14 +174,15 @@
     (apply-tail 12)
     (return 13)
     (jump 14)
-    (jump-if-false 15)
-    (jump-if-true 16)
-    (+ 17)
-    (- 18)
-    (< 19)
-    (car 20)
-    (list-ref 21)
-    (eq? 22)
+    (jump-when 15)
+    (jump-when-pop 16)
+    (jump-unless 17)
+    (+ 18)
+    (- 19)
+    (< 20)
+    (car 21)
+    (list-ref 22)
+    (eq? 23)
     ))
 
 (let loop ((pare (car insn-list)) (rest (cdr insn-list)))
@@ -211,8 +214,8 @@
 (define stack-effects
   (let ((table (make-table))
         (lst '(
-               (-1 jump pop global-set eq? list-ref local-set upvalue-set)
-               (0 words close-over return car)
+               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set)
+               (0 jump jump-when jump-unless words close-over return car)
                (1 push-immediate push-constant global-get local-get upvalue-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -232,8 +235,6 @@
     (aif (table-ref stack-effects (car insns))
       it
       (case (car insns)
-        ;; Only pops stack if argument is 1
-        ((jump-if-false jump-if-true) (if (fx= (list-ref insns 2) 1) -1 0))
         ;; Variable microcode: Remove arguments from stack, and re-use one of the argument slots to push results
         ((+ - <) (fx+ (fx- (cadr insns)) 1))
         ;; Remove arguments from stack, but push a single result in the place of the function on the stack
@@ -327,7 +328,7 @@
           (set! primitive-args #t))
 
       (set! primitive it)))
-    (compile-expr fn (car x) x #f))
+    (compile-expr fn (car x) #f x #f))
 
   (set! stack-check (OpenFn/stack-size fn))
 
@@ -342,7 +343,7 @@
 
   (for-each-i
     (lambda (i sub-x)
-      (define result (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f))
+      (define result (compile-expr fn sub-x #f (list-tail x (fx+ i 1)) #f))
       (when argument-list
         (if (fx= i argument-list-length)
           (print-source x "Inline function application appears to have too many arguments")
@@ -560,7 +561,7 @@
     (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1)))
 
   ;; Detect function names
-  (let ((result (compile-expr fn (list-ref x 2) (list-tail x 2) tail?)))
+  (let ((result (compile-expr fn (list-ref x 2) #f (list-tail x 2) tail?)))
     (when (procedure? result)
       (begin
         (set-vmfunction-name! result (symbol-dequalify name)))))
@@ -576,7 +577,7 @@
   (define name (cadr x))
   (define result (fn-lookup fn name src))
 
-  (let ((fn (compile-expr fn (list-ref x 2) (list-tail x 2) tail?)))
+  (let ((fn (compile-expr fn (list-ref x 2) #f (list-tail x 2) tail?)))
     (if (vmfunction? fn)
       (set-vmfunction-name! fn name)))
 
@@ -604,38 +605,72 @@
     (compiler-log fn "added label" label "@" (vector-length (OpenFn/insns fn)))
     (table-set! labels label (vector-length (OpenFn/insns fn)))))
 
-(define (compile-if fn x tail?)
+ 
+;; Work in progress: destination driven code generation
+
+;; This passes around a "control destination" which can be jumped to directly.
+;; if cd is #t, jumps will be replaced by a return. For example
+;; ((lambda () (if #t #t #f)) can return directly rather than jumping to a RETURN at the end of the if-expression
+;; if cd is a single gensym, jumps can go to that, for example
+;; (if #t (if #t 1 2) 3)
+;; the jump after 1 can go directly to the end of the toplevel if expression
+
+;; TODO pairs of labels so that things like (if (and 1 2 3)) can jump to parts of if expressions based on
+;; their values
+
+;; This vastly reduces the amount of jumps-to-jumps generated, and completely reduces the amount of jumps-to-returns
+;; Unfortunately, this seems to have negligible impact on performance :(
+
+;; Emit an unconditional jump instruction
+(define (emit-jump fn cd label)
+  (if (top-level-value 'cd)
+    (cond 
+      ((gensym? cd)
+       (emit fn 'jump label))
+      ((eq? cd #f)
+       (emit fn 'jump label))
+      ((eq? cd #t)
+       (emit fn 'return))
+      (else (raise 'compiler-internal "unknown control destination" (list cd))))
+    (emit fn 'jump label)))
+      
+(define (control-destination cd label)
+  (if (and (top-level-value 'cd) (gensym? cd))
+    (begin
+      ;(print "skipping to control destination" cd)
+      cd
+    )
+  label))
+
+(define (compile-if fn x cd tail?)
   (define condition (cadr x))
   (define then-branch (list-ref x 2))
   (define else-branch (if (fx= (length x) 4) (list-ref x 3)))
   (define then-branch-end (gensym 'if-else))
   (define else-branch-end (gensym 'if-end))
 
-  (define check-stack (OpenFn/stack-size fn))
-  (compile-expr fn condition (list-tail x 1) #f)
-  ;(maybe-push-unspecified fn x check-stack)
+  ;(print "control destination" cd)
 
-  (emit fn 'jump-if-false then-branch-end 1)
+  (define check-stack (OpenFn/stack-size fn))
+  (compile-expr fn condition #f (list-tail x 1) #f)
+
+  ;(emit fn 'jump-if-false then-branch-end 1)
+  (emit fn 'jump-when-pop then-branch-end)
 
   (set! check-stack (OpenFn/stack-size fn))
-  (compile-expr fn then-branch (list-tail x 2) tail?)
-  ;(maybe-push-unspecified fn x check-stack)
+  (compile-expr fn then-branch (control-destination cd else-branch-end) (list-tail x 2) tail?)
 
-  ;; TODO: side-effecting statements and the stack
-
-  ;; Something side-effecty happened in a value context so we'll push unspecified on the stack
-  ;; e.g. (if #t (set! x #t))
-  ;(if (eq? (OpenFn/stack-size fn) 0)
-  ;  (emit fn 'push-immediate (value-bits unspecified)))
-
-  (emit fn 'jump else-branch-end)
+  (emit-jump fn cd else-branch-end)
   (register-label fn then-branch-end)
 
-  ;(set! check-stack (OpenFn/stack-size fn))
-  (compile-expr fn else-branch (if (fx= (length x) 4) (list-tail x 3) #f) tail?)
-  ;(maybe-push-unspecified fn x check-stack)
+  (compile-expr fn else-branch else-branch-end (if (fx= (length x) 4) (list-tail x 3) #f) tail?)
 
-  (register-label fn else-branch-end))
+  (register-label fn else-branch-end)
+
+  ;; Manually adjust stack for conditional evaluation
+  (OpenFn/stack-size! fn (fx- (OpenFn/stack-size fn) 1))
+
+  )
 
 ;; Short circuiting evaluation expressions: AND/OR.
 ;; These jump to the end upon meeting their condition (false for and, true for or)
@@ -645,20 +680,19 @@
     (compile-constant fn (eq? type 'and)) ;; (and) => #t, (or) => #f
     (let ((x-len (fx- (length x) 2))
           (condeval-end (gensym 'condeval-end))
-          (jmp (if (eq? type 'and) 'jump-if-false 'jump-if-true)))
+          (jmp (if (eq? type 'and) 'jump-when 'jump-unless)))
       (for-each-i
         (lambda (i sub-x)
           (unless (fx= i 0)
             (emit fn 'pop))
-          (compile-expr fn sub-x (list-tail x (fx+ i 1)) #f)
+          (compile-expr fn sub-x #f (list-tail x (fx+ i 1)) (and tail? (fx= i x-len)))
           (unless (fx= i x-len)
-            (emit fn jmp condeval-end 0)))
+            (emit fn jmp condeval-end)))
         (cdr x))
 
       (register-label fn condeval-end))))
 
-(define (compile-quote fn x)
-  (compile-constant fn (cadr x)))
+(define (compile-quote fn x) (compile-constant fn (cadr x)))
 
 ;; Compiling a begin is fairly simple -- just need to make sure the last expression is considered a tail call.
 (define (compile-begin fn x tail?)
@@ -669,7 +703,7 @@
       (lambda (i sub-x)
         (define stack-size (OpenFn/stack-size fn))
         ;(print sub-x (OpenFn/stack-size fn))
-        (compile-expr fn sub-x (list-tail x i) (and tail? (fx= i x-len)))
+        (compile-expr fn sub-x #f (list-tail x i) (and tail? (fx= i x-len)))
         ;(print sub-x (OpenFn/stack-size fn))
         ;; Expression is here for side-effects. Pop it.
         (unless (fx= i x-len)
@@ -677,7 +711,7 @@
       )
       (cdr x))))
 
-(define (compile-special-form fn x src type tail?)
+(define (compile-special-form fn x cd src type tail?)
   (compiler-log fn "compiling special form" type x)
   (case type
     (lambda (compile-lambda fn x))
@@ -686,7 +720,7 @@
     ;; So something like (set! var (fn)) should not destroy the stack frame.
     (define (compile-define fn x #f))
     (set! (compile-set! fn x src #f))
-    (if (compile-if fn x tail?))
+    (if (compile-if fn x (if tail? #t cd) tail?))
     (and (compile-condeval 'and fn x tail?))
     (or (compile-condeval 'or fn x tail?))
     (quote (compile-quote fn x))
@@ -704,7 +738,7 @@
 
   (if (memq x '(lambda define set! if begin and or quote)) x #f))
 
-(define (compile-expr fn x src tail?)
+(define (compile-expr fn x cd src tail?)
   (and #f #f)
   (compiler-log fn "compiling expr" x)
 
@@ -724,7 +758,7 @@
       ((list? x)
        (aif (special-form (car x))
          (begin
-           (compile-special-form fn x src it tail?))
+           (compile-special-form fn x cd src it tail?))
          (compile-apply fn x tail?)))
       (else (raise 'compile-internal "don't know how to compile expression" (list x)))))
 
@@ -748,7 +782,7 @@
       (register-source fn (list-tail body i))
       ;; No tail calls in toplevel programs, so that something like
       ;; (define x (vm-function)) at REPL will work.
-      (compile-expr fn x (list-tail body i) (and (not (OpenFn/toplevel? fn)) (fx= i end)))
+      (compile-expr fn x #f (list-tail body i) (and (not (OpenFn/toplevel? fn)) (fx= i end)))
     )
 
     body)
@@ -760,6 +794,7 @@
 ;; Compiler finisher -- converts symbolic VM instructions into actual fixnums
 (define (compile-finish fn)
   (compiler-log fn fn)
+  ;(print-insns fn)
 
   (let loop ((i 0))
     (unless (fx= i (vector-length (OpenFn/insns fn)))
