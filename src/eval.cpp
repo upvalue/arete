@@ -21,7 +21,9 @@
 // Check if an error has occurred; if it has, trace it and return it
 #define EVAL_CHECK_FRAME(frame, exp, src) \
   if((exp).is_active_exception()) { \
-    EVAL_TRACE_FRAME(frame, (src)); \
+    if((exp).exception_trace()) { \
+      EVAL_TRACE_FRAME(frame, (src)); \
+    } \
     return (exp); \
   }
 

@@ -652,7 +652,14 @@ struct Value {
 
   // EXCEPTION
   static const unsigned EXCEPTION_ACTIVE_BIT = 1 << 9;
+  // If not set, no stack trace will be generated. Used to implement 
+  // one-shot continuations
+  static const unsigned EXCEPTION_TRACE_BIT = 1 << 10;
+
+  void exception_deactivate();
+  void exception_activate();
   bool is_active_exception() const;
+  bool exception_trace() const;
   Value exception_tag() const;
   Value exception_message() const;
   Value exception_irritants() const;
@@ -688,6 +695,11 @@ struct Value {
   Value c_function_apply(State&, size_t, Value*);
 
   // VM FUNCTIONS
+  static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
+  static const unsigned VMFUNCTION_LOG_BIT = 1 << 10;
+  static const unsigned VMFUNCTION_MACRO_BIT = 1 << 11;
+  static const unsigned VMFUNCTION_IDENTIFIER_MACRO_BIT = 1 << 12;
+
   unsigned vm_function_min_arity() const;
   unsigned vm_function_max_arity() const;
   bool vm_function_is_macro() const {
@@ -701,11 +713,6 @@ struct Value {
   Value vm_function_macro_env() const;
   size_t* vm_function_code() const;
   VectorStorage* vm_function_constants() const;
-
-  static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
-  static const unsigned VMFUNCTION_LOG_BIT = 1 << 10;
-  static const unsigned VMFUNCTION_MACRO_BIT = 1 << 11;
-  static const unsigned VMFUNCTION_IDENTIFIER_MACRO_BIT = 1 << 12;
 
   // UPVALUES
   
@@ -937,8 +944,27 @@ struct Exception : HeapValue {
   Value tag, irritants, message;
 };
 
+inline void Value::exception_activate() {
+  AR_TYPE_ASSERT(heap_type_equals(EXCEPTION));
+  if(!heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT)) {
+    heap->set_header_bit(Value::EXCEPTION_ACTIVE_BIT);
+  }
+}
+
+inline void Value::exception_deactivate() {
+  AR_TYPE_ASSERT(heap_type_equals(EXCEPTION));
+  if(heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT)) {
+    heap->unset_header_bit(Value::EXCEPTION_ACTIVE_BIT);
+  }
+}
+
 inline bool Value::is_active_exception() const {
   return heap_type_equals(EXCEPTION) && heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT);
+}
+
+inline bool Value::exception_trace() const {
+  AR_TYPE_ASSERT(heap_type_equals(EXCEPTION));
+  return heap->get_header_bit(Value::EXCEPTION_TRACE_BIT);
 }
 
 inline Value Value::exception_tag() const {
@@ -1662,6 +1688,7 @@ struct State {
     S_EXCEPT,
     S_PREFIX,
     // Errors that may be thrown by the runtime
+    S_CONTINUATION,
     S_FILE_ERROR,
     S_READ_ERROR,
     S_EVAL_ERROR,
@@ -2042,9 +2069,6 @@ struct State {
 
   ///// Virtual machine
   Value apply_vm(Value fn, size_t argc, Value* argv);
-
-  /** Print a readable version of a function's bytecode. */
-  void disassemble(std::ostream&, Value);
 
   // Command line interface
 

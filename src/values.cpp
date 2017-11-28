@@ -194,6 +194,7 @@ Value State::make_exception(Value tag, Value message, Value irritants) {
   Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
   exc.heap = heap;
   heap->set_header_bit(Value::EXCEPTION_ACTIVE_BIT);
+  heap->set_header_bit(Value::EXCEPTION_TRACE_BIT);
   heap->tag = tag;
   heap->message = message;
   heap->irritants = irritants;

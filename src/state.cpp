@@ -66,6 +66,7 @@ void State::boot() {
     // Modules
     "unqualified", "only", "except", "prefix",
     // Tags for errors that may be thrown by the runtime
+    "continuation",
     "file", "read", "eval", "type", "expand", "syntax",
     // Various variables
     "*features*",

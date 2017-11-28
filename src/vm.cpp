@@ -925,49 +925,50 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     // We take an array of VMSourceLocations and cycle through them until we find the closest
     // one to the code position at which the exception occurred.
 
-    Value sources(f.fn->sources);
-    if(sources.type() == BLOB && sources.blob_length() > 0) {
-      // Source code information is available
-      size_t i = 0;
-      VMSourceLocation vmloc = sources.blob_ref<VMSourceLocation>(0);
-      // If there is more than one source location,
-      // we'll iterate through the source-locations until we find the one closest to the piece of
-      // code we just errored out on
-      if(sources.blob_length() != 5) {
-        for(i = 1; i <= sources.blob_length() / 5; i++) {
-          VMSourceLocation vmloc2 = sources.blob_ref<VMSourceLocation>(i);
-          if(vmloc2.code >= code_offset) {
-            break;
+    if(f.exception.exception_trace()) {
+      Value sources(f.fn->sources);
+      if(sources.type() == BLOB && sources.blob_length() > 0) {
+        // Source code information is available
+        size_t i = 0;
+        VMSourceLocation vmloc = sources.blob_ref<VMSourceLocation>(0);
+        // If there is more than one source location,
+        // we'll iterate through the source-locations until we find the one closest to the piece of
+        // code we just errored out on
+        if(sources.blob_length() != 5) {
+          for(i = 1; i <= sources.blob_length() / 5; i++) {
+            VMSourceLocation vmloc2 = sources.blob_ref<VMSourceLocation>(i);
+            if(vmloc2.code >= code_offset) {
+              break;
+            }
+            vmloc = vmloc2;
           }
-          vmloc = vmloc2;
         }
-      }
 
-      SourceLocation loc;
-      loc.source = vmloc.source;
-      loc.line = vmloc.line;
-      loc.begin = vmloc.begin;
-      loc.length = vmloc.length;
-      AR_ASSERT(vmloc.source < source_names.size());
+        SourceLocation loc;
+        loc.source = vmloc.source;
+        loc.line = vmloc.line;
+        loc.begin = vmloc.begin;
+        loc.length = vmloc.length;
+        AR_ASSERT(vmloc.source < source_names.size());
 
-      std::ostringstream os;
-      os << source_info(loc, f.fn->name);
-      if(frames_lost > 0) {
-        os << std::endl << "-- " << frames_lost << " frames lost due to tail call optimization";
-      }
-      std::string line(os.str());
-      if(stack_trace.size() > 0) {
-        StackTrace& last = stack_trace.at(stack_trace.size() - 1);
-        if(last.text.compare(line) == 0) {
-          last.seen++;
+        std::ostringstream os;
+        os << source_info(loc, f.fn->name);
+        if(frames_lost > 0) {
+          os << std::endl << "-- " << frames_lost << " frames lost due to tail call optimization";
+        }
+        std::string line(os.str());
+        if(stack_trace.size() > 0) {
+          StackTrace& last = stack_trace.at(stack_trace.size() - 1);
+          if(last.text.compare(line) == 0) {
+            last.seen++;
+          } else {
+            stack_trace.push_back(line);
+          }
         } else {
           stack_trace.push_back(line);
         }
-      } else {
-        stack_trace.push_back(line);
       }
     }
-
 
     AR_ASSERT(!f.destroyed);
     Value exc = f.exception;
@@ -975,22 +976,4 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     AR_ASSERT(exc.is_active_exception());
     return exc;
 }
-
-void State::disassemble(std::ostream& os, Value fn) {
-  VMFunction *vmf;
-  if(fn.type() == CLOSURE) {
-    vmf = fn.closure_function();
-  } else {
-    vmf = fn.as<VMFunction>();
-  }
-
-  os << "vmfunction " << vmf->name << std::endl;
-
-  // size_t i = 0;
-
-  while(true) {
-
-  }
-}
-
 }

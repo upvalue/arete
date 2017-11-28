@@ -594,6 +594,33 @@
         (,#'unless (,#'equal? ,#'result1 ,#'result2)
           (,#'raise 'assert (,#'print-string "Assertion failure: expected expression" (quote ,(list-ref x 1)) "to equal" (quote ,(list-ref x 2))) (,#'list ,#'result1 ,#'result2))))))
 
+;; ONE-SHOT CONTINUATIONS
+
+(define (call/1cc thunk)
+  (define tag (gensym))
+  (define (trigger-continuation value)
+    (raise-continuation tag value))
+  (define result
+    (try
+      (lambda () (thunk (lambda (value) (trigger-continuation value))))
+      (lambda (exc)
+        (if (and (eq? (exception-tag exc) 'continuation) (eq? (exception-message exc) tag))
+          (exception-irritants exc)
+          #f))))
+  (set! trigger-continuation
+    (lambda (value)
+      (raise 'eval "Attempt to invoke spent one-shot continuation" tag)))
+  result)
+
+;; We define call/cc and dynamic-wind on the simpler unwind-protect and call/1cc. It won't support more extreme uses
+;; of continuations but for many of them, is sufficient.
+
+(define call/cc call/1cc)
+(define call-with-current-continuation call/1cc)
+
+(define (dynamic-wind before thunk after)
+  (before)
+  (unwind-protect thunk after))
 
 ;; COMPATIBILITY
 

@@ -930,6 +930,15 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("raise", fn_raise, 2, 3);
 
+Value fn_raise_continuation(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "raise-continuation";
+  AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+  Value exc = state.make_exception(state.globals[State::S_CONTINUATION], argv[0], argv[1]);
+  exc.heap->unset_header_bit(Value::EXCEPTION_TRACE_BIT);
+  return exc;
+}
+AR_DEFUN("raise-continuation", fn_raise_continuation, 2);
+
 Value fn_raise_source(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "raise-source";
 
@@ -951,6 +960,72 @@ Value fn_raise_source(State& state, size_t argc, Value* argv) {
   return exc;
 }
 AR_DEFUN("raise-source", fn_raise_source, 4);
+
+Value fn_exception_tag(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "exception-tag";
+
+  AR_FN_EXPECT_TYPE(state, argv, 0, EXCEPTION);
+  return argv[0].exception_tag();
+}
+AR_DEFUN("exception-tag", fn_exception_tag, 1);
+
+Value fn_exception_message(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "exception-message";
+  AR_FN_EXPECT_TYPE(state, argv, 0, EXCEPTION);
+  return argv[0].exception_message();
+}
+AR_DEFUN("exception-message", fn_exception_message, 1);
+
+Value fn_exception_irritants(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "exception-irritants";
+  AR_FN_EXPECT_TYPE(state, argv, 0, EXCEPTION);
+  return argv[0].exception_irritants();
+}
+AR_DEFUN("exception-irritants", fn_exception_irritants, 1);
+
+Value fn_try(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "try";
+  AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
+  AR_FN_ASSERT_ARG(state, 1, "to be applicable", argv[1].applicable());
+
+  Value body = argv[0], handler = argv[1], ret, exc;
+  AR_FRAME(state, ret, handler, body, exc);
+
+  ret = state.apply(body, 0, nullptr);
+
+  if(ret.is_active_exception()) {
+    Value args[1] = {ret};
+    exc = ret;
+    exc.exception_deactivate();
+    AR_ASSERT(!exc.is_active_exception());
+    ret = state.apply(handler, 1, args);
+    if(ret == C_FALSE) {
+      exc.exception_activate();
+      return exc;
+    }
+    if(ret.is_active_exception()) return ret;
+  }
+  return ret;
+}
+AR_DEFUN("try", fn_try, 2);
+
+Value fn_unwind_protect(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "unwind-protect";
+
+  AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
+  AR_FN_ASSERT_ARG(state, 1, "to be applicable", argv[1].applicable());
+
+  Value body = argv[0], protection = argv[1], ret;
+  AR_FRAME(state, body, protection, ret);
+
+  ret = state.apply(body, 0, nullptr);
+  if(ret.is_active_exception()) {
+    Value ret2 = state.apply(protection, 0, nullptr);
+    if(ret2.is_active_exception()) return ret2;
+  }
+  return ret;
+}
+AR_DEFUN("unwind-protect", fn_unwind_protect, 2);
 
 ///// RECORDS
 Value fn_register_record_type(State& state, size_t argc, Value* argv) {
