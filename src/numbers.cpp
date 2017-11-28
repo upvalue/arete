@@ -250,6 +250,42 @@ Value fn_remainder(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("remainder", fn_remainder, 2);
 
+Value fn_atan(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "atan";
+  AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
+
+  double y = argv[0].fixnump() ? (double) argv[0].fixnum_value() : argv[0].flonum_value();
+
+  if(argc == 1) {
+    return state.make_flonum(atan(y));
+  }
+
+  AR_FN_ASSERT_ARG(state, 1, "to be a number", argv[1].numeric());
+  double x = argv[1].fixnump() ? (double) argv[1].fixnum_value() : argv[1].fixnum_value();
+
+  return state.make_flonum(atan2(y, x));
+}
+AR_DEFUN("atan", fn_atan, 1, 2);
+
+// Define trigonometric builtins that take one fixnum or flonum as argument, always return a flonum
+// and have the same name as their math.h equivalent
+
+#define DEFUN_TRIG(name) \
+  Value fn_ ## name (State& state, size_t argc, Value* argv) { \
+    static const char* fn_name = #name; \
+    AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric()); \
+    return state.make_flonum(name (argv[0].fixnump() ? (double) argv[0].fixnum_value() : argv[0].flonum_value())); \
+  }  \
+  AR_DEFUN(#name, fn_ ##name, 1);
+
+DEFUN_TRIG(exp);
+DEFUN_TRIG(cos);
+DEFUN_TRIG(sin);
+DEFUN_TRIG(log);
+DEFUN_TRIG(tan);
+DEFUN_TRIG(asin);
+DEFUN_TRIG(acos);
+
 Value fn_number_to_string(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "number->string";
   AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
