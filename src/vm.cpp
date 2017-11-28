@@ -210,14 +210,16 @@ enum {
   OP_JUMP_WHEN = 15,
   OP_JUMP_WHEN_POP = 16,
   OP_JUMP_UNLESS = 17,
+  // Instructions below here are exploded variations on existing primitives
+  OP_LOCAL_GET_0 = 18,
   // Instructions below this point are primitive versions of the builtin C++ routines for speed;
   // they are not necessary for code to execute correctly.
-  OP_ADD = 18,
-  OP_SUB = 19,
-  OP_LT = 20,
-  OP_CAR = 21,
-  OP_LIST_REF = 22,
-  OP_EQ = 23,
+  OP_ADD = 19,
+  OP_SUB = 20,
+  OP_LT = 21,
+  OP_CAR = 22,
+  OP_LIST_REF = 23,
+  OP_EQ = 24,
 };
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
@@ -232,6 +234,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
 
     &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
+
+    &&LABEL_OP_LOCAL_GET_0,
 
     // Primitives implemented directly in the VM
     &&LABEL_OP_ADD, &&LABEL_OP_SUB,
@@ -702,6 +706,13 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
         VM_DISPATCH();
       }
+
+      VM_CASE(OP_LOCAL_GET_0): {
+        f.stack[f.stack_i++] = f.locals[0];
+        VM_DISPATCH();
+      }
+
+      ///// OPEN CODED PRIMITIVES
 
       VM_CASE(OP_ADD): {
         size_t argc = VM_NEXT_INSN();

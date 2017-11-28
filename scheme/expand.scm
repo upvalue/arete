@@ -23,6 +23,10 @@
 ;; Does not result in super-descriptive error messages because the name is gensym'd by the compiler
 ;; How can we propagate information about where a lambda was introduced through the expander to the compiler?
 
+;; TODO: Internal definitions. Currently we just assume variables we haven't seen yet are global/module variables.
+
+;; How do we handle this gracefully? Can we put off the resolution of variables until later?
+
 (define caar (lambda (x) (car (car x))))
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
