@@ -1,4 +1,4 @@
-// strings.cpp - Strings and characters
+// strings.cpp - Strings, characters, and bytevectors
 
 #include "arete.hpp"
 
@@ -107,13 +107,6 @@ Value fn_make_string(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("make-string", fn_make_string, 1, 2);
 
-#define AR_FN_CHECK_BOUNDS(state, tipe, len, idx) \
-  if(len <= (size_t) idx) { \
-    std::ostringstream os; \
-    os << "attempted to get index " << (idx) << " in a " << tipe << " of length " << (len); \
-    return state.type_error(os.str()); \
-  }
-
 Value fn_string_set(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string-set!";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
@@ -175,6 +168,61 @@ Value fn_string_length(State& state, size_t argc, Value* argv) {
   return Value::make_fixnum((ptrdiff_t) argv[0].string_bytes());
 }
 AR_DEFUN("string-length", fn_string_length, 1);
+
+Value fn_make_bytevector(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "make-bytevector";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+
+  size_t sz = static_cast<size_t>(argv[0].fixnum_value());
+  Value bv = state.make_bytevector<uint8_t>(sz);
+
+  if(argc == 2) {
+    AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+    size_t fill = static_cast<size_t>(argv[1].fixnum_value());
+    if(fill != 0) {
+      for(size_t i = 0; i != sz; i++) {
+        bv.bv_set<uint8_t>(i, fill);
+      }
+    }
+  }
+  return bv;
+}
+AR_DEFUN("make-bytevector", fn_make_bytevector, 1, 2);
+
+Value fn_bytevector_length(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "bytevector-length";
+  AR_FN_EXPECT_TYPE(state, argv, 0, BYTEVECTOR);
+  return argv[0].bv_length();
+}
+AR_DEFUN("bytevector-length", fn_bytevector_length, 1);
+
+Value fn_bytevector_u8_ref(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "bytevector-u8-ref";
+  AR_FN_EXPECT_TYPE(state, argv, 0, BYTEVECTOR);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  AR_FN_CHECK_BOUNDS(state, "bytevector", argv[0].bv_length(), argv[1].fixnum_value());
+  return Value::make_fixnum(argv[0].bv_ref<uint8_t>(argv[1].fixnum_value()));
+}
+AR_DEFUN("bytevector-u8-ref", fn_bytevector_u8_ref, 2);
+
+Value fn_bytevector_u8_set(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "bytevector-u8-set!";
+  AR_FN_EXPECT_TYPE(state, argv, 0, BYTEVECTOR);
+  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
+  AR_FN_CHECK_BOUNDS(state, "bytevector", argv[0].bv_length(), argv[1].fixnum_value());
+  ptrdiff_t value = argv[2].fixnum_value();
+
+  AR_FN_CHECK_FX_RANGE(state, 2, argv[2], 0, 255);
+
+  argv[0].bv_set<uint8_t>((size_t) argv[1].fixnum_value(), static_cast<uint8_t>(value));
+
+  return C_UNSPECIFIED;
+}
+
+AR_DEFUN("bytevector-u8-set!", fn_bytevector_u8_set, 3);
+
+// AR_DEFUN("fixnum-vector->bytevector")
 
 void load_string_functions(State& state) {
   strings.install(state);

@@ -530,11 +530,7 @@ Value fn_vector_set(State& state, size_t argc, Value* argv) {
 
   size_t position = argv[1].fixnum_value();
 
-  if(argv[0].vector_length() <= (size_t) argv[1].fixnum_value()) {
-    std::ostringstream os;
-    os << "vector-set! bounds error, attempted to set position " << argv[1].fixnum_value() << " on a vector of length " << argv[0].vector_length();
-    return state.eval_error(os.str());
-  }
+  AR_FN_CHECK_BOUNDS(state, "vector", argv[0].vector_length(), argv[1].fixnum_value());
 
   argv[0].vector_set(position, argv[2]);
   return C_UNSPECIFIED;
@@ -558,11 +554,7 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
 
   size_t position = argv[1].fixnum_value();
 
-  if(argv[0].vector_length() <= position) {
-    std::ostringstream os;
-    os << "vector-ref bounds error, attempted to get position " << argv[1].fixnum_value() << " on a vector of length " << argv[0].vector_length();
-    return state.eval_error(os.str());
-  }
+  AR_FN_CHECK_BOUNDS(state, "vector", argv[0].vector_length(), argv[1].fixnum_value());
 
   return argv[0].vector_ref(argv[1].fixnum_value());
 }

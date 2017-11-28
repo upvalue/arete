@@ -232,8 +232,15 @@ std::ostream& operator<<(std::ostream& os, Value v) {
     }
     case UPVALUE:
       return os << "#<upvalue " << v.bits << '>';
-    case BYTEVECTOR:
-      return os << "#<blob " << v.bits << ">";
+    case BYTEVECTOR: {
+      os << "#u8(";
+      for(size_t i = 0; i != v.bv_length(); i++) {
+        os << (unsigned) v.bv_ref<unsigned char>(i);
+        if(i + 1 != v.bv_length()) os << ' ';
+      }
+      return os << ")";
+    }
+      return os << "#< " << v.bits << ">";
     case RENAME: {
       Value env = v.rename_env(),
         sym = v.rename_gensym() == C_FALSE ? v.rename_expr() : v.rename_gensym();

@@ -2428,4 +2428,18 @@ struct TableIterator {
     return state.type_error(__os.str()); \
   }
 
+#define AR_FN_CHECK_BOUNDS(state, tipe, len, idx) \
+  if(len <= (size_t) idx) { \
+    std::ostringstream os; \
+    os << fn_name << " attempted to get index " << (idx) << " in a " << tipe << " of length " << (len); \
+    return state.type_error(os.str()); \
+  }
+
+#define AR_FN_CHECK_FX_RANGE(state, arg, val, min, max) \
+  if((val).fixnum_value() < (min) || (val).fixnum_value() > (max)) { \
+    std::ostringstream os; \
+    os << fn_name << " needed argument " << (arg) << " to be " << min << " < " << (val).fixnum_value() << " max"; \
+    return state.type_error(os.str()); \
+  }
+
 #endif // ARETE_HPP
