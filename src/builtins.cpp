@@ -1180,22 +1180,22 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
 
   if(free_vars.type() == VECTOR && free_vars.vector_length() > 0) {
     size_t length = free_vars.vector_length();
-    free_vars_blob = state.make_blob<size_t>(length);
+    free_vars_blob = state.make_bytevector<size_t>(length);
     for(size_t i = 0; i != length; i++) {
-      free_vars_blob.blob_set<size_t>(i, free_vars.vector_ref(i).fixnum_value());
-      AR_ASSERT(((size_t*) free_vars_blob.as<Blob>()->data)[i] ==
+      free_vars_blob.bv_set<size_t>(i, free_vars.vector_ref(i).fixnum_value());
+      AR_ASSERT(((size_t*) free_vars_blob.as<Bytevector>()->data)[i] ==
         (size_t)free_vars.vector_ref(i).fixnum_value());
     }
 
-    AR_ASSERT(free_vars_blob.blob_length() == length);
+    AR_ASSERT(free_vars_blob.bv_length() == length);
   }
 
   sources = rec.record_ref(3);
   if(sources.type() == VECTOR && sources.vector_length() > 0) {
     size_t length = sources.vector_length();
-    sources_blob = state.make_blob<unsigned>(length);
+    sources_blob = state.make_bytevector<unsigned>(length);
     for(size_t i = 0; i != length; i++) {
-      sources_blob.blob_set<unsigned>(i, sources.vector_ref(i).fixnum_value());
+      sources_blob.bv_set<unsigned>(i, sources.vector_ref(i).fixnum_value());
     }
   }
 
@@ -1213,8 +1213,8 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   vfn->stack_max = (unsigned)rec.record_ref(6).fixnum_value();
   vfn->local_count = (unsigned)rec.record_ref(5).fixnum_value();
   vfn->name = rec.record_ref(0);
-  vfn->free_variables = static_cast<Blob*>(free_vars_blob.heap);
-  vfn->sources = static_cast<Blob*>(sources_blob.heap);
+  vfn->free_variables = static_cast<Bytevector*>(free_vars_blob.heap);
+  vfn->sources = static_cast<Bytevector*>(sources_blob.heap);
 
   // Check for variable arity
   if(rec.record_ref(11) == C_TRUE) {
@@ -1262,7 +1262,7 @@ Value fn_value_copy(State& state, size_t argc, Value* argv) {
   Value v1 = argv[0], v2;
   if(v1.immediatep()) return v1;
   AR_FRAME(state, v1, v2);
-  v2 = state.gc.allocate(BLOB, v1.heap->size);
+  v2 = state.gc.allocate(BYTEVECTOR, v1.heap->size);
   memcpy(v2.heap, v1.heap, v1.heap->size);
   return v2;
 }

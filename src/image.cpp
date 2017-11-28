@@ -89,7 +89,7 @@ struct PointerUpdater {
   
   void update_pointers(HeapValue* heap) {
     switch(heap->get_type()) {
-      case FLONUM: case STRING: case CHARACTER: case BLOB: 
+      case FLONUM: case STRING: case CHARACTER: case BYTEVECTOR: 
         break;
 
       // One pointer
@@ -139,8 +139,8 @@ struct PointerUpdater {
         static_cast<VMFunction*>(heap)->name = update_value(static_cast<VMFunction*>(heap)->name);
         static_cast<VMFunction*>(heap)->constants = (VectorStorage*)update_heapvalue(static_cast<VMFunction*>(heap)->constants);
         static_cast<VMFunction*>(heap)->macro_env = update_value(static_cast<VMFunction*>(heap)->macro_env);
-        static_cast<VMFunction*>(heap)->sources = (Blob*)update_heapvalue(static_cast<VMFunction*>(heap)->sources);
-        static_cast<VMFunction*>(heap)->free_variables = (Blob*)update_heapvalue(static_cast<VMFunction*>(heap)->free_variables);
+        static_cast<VMFunction*>(heap)->sources = (Bytevector*)update_heapvalue(static_cast<VMFunction*>(heap)->sources);
+        static_cast<VMFunction*>(heap)->free_variables = (Bytevector*)update_heapvalue(static_cast<VMFunction*>(heap)->free_variables);
         break;
       }
 
@@ -226,7 +226,7 @@ struct ImageWriter {
 
   void serialize_value(HeapValue* heap) {
     updater.update_pointers(heap);
-    if(heap->header == BLOB) {
+    if(heap->header == BYTEVECTOR) {
       //std::cout << "Writing blob of size " << heap->size << std::endl;
     }
     fwrite(heap, heap->size, 1, f);
@@ -329,7 +329,7 @@ struct ImageReader {
       switch(v.get_type()) {
         case FILE_PORT: {
           HeapValue* heap = (HeapValue*) sweep;
-          heap->header = BLOB;
+          heap->header = BYTEVECTOR;
           heap->size = v.size;
 
           sweep += v.size;

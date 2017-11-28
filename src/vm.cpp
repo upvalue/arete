@@ -938,16 +938,16 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
     if(f.exception.exception_trace()) {
       Value sources(f.fn->sources);
-      if(sources.type() == BLOB && sources.blob_length() > 0) {
+      if(sources.type() == BYTEVECTOR && sources.bv_length() > 0) {
         // Source code information is available
         size_t i = 0;
-        VMSourceLocation vmloc = sources.blob_ref<VMSourceLocation>(0);
+        VMSourceLocation vmloc = sources.bv_ref<VMSourceLocation>(0);
         // If there is more than one source location,
         // we'll iterate through the source-locations until we find the one closest to the piece of
         // code we just errored out on
-        if(sources.blob_length() != 5) {
-          for(i = 1; i <= sources.blob_length() / 5; i++) {
-            VMSourceLocation vmloc2 = sources.blob_ref<VMSourceLocation>(i);
+        if(sources.bv_length() != 5) {
+          for(i = 1; i <= sources.bv_length() / 5; i++) {
+            VMSourceLocation vmloc2 = sources.bv_ref<VMSourceLocation>(i);
             if(vmloc2.code >= code_offset) {
               break;
             }

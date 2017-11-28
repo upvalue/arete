@@ -222,7 +222,7 @@ enum Type {
   FLONUM = 4,
   STRING = 5,
   CHARACTER = 6,
-  BLOB = 7,
+  BYTEVECTOR = 7,
   // Have pointers
   SYMBOL = 8,
   VECTOR = 9,
@@ -334,19 +334,18 @@ struct Char : HeapValue {
 };
 
 /**
- * A Blob is a heap-allocated value with no pointers,
- * intended to store binary data.
+ * A bytevector is a value for storing binary data.
  */
-struct Blob : HeapValue {
+struct Bytevector : HeapValue {
   size_t length;
 
   char data[1];
 
-  template <class T> T blob_ref(size_t idx) const {
+  template <class T> T bv_ref(size_t idx) const {
     return ((T*) data)[idx];
   }
 
-  static const unsigned CLASS_TYPE = BLOB;
+  static const unsigned CLASS_TYPE = BYTEVECTOR;
 };
 
 /**
@@ -383,7 +382,7 @@ struct Value {
   /** Returns true if the value contains no pointers. */
   bool atomic() const {
     switch(type()) {
-      case FIXNUM: case FLONUM: case CONSTANT: case STRING: case BLOB: return true;
+      case FIXNUM: case FLONUM: case CONSTANT: case STRING: case BYTEVECTOR: return true;
       default: return false;
     }
   }
@@ -547,16 +546,16 @@ struct Value {
     return string_equals(cmp);
   }
 
-  // BLOBS
-  template <class T> void blob_set(size_t idx, const T val) {
-    ((T*)(as<Blob>()->data))[idx] = val;
+  // BYTEVECTORS
+  template <class T> void bv_set(size_t idx, const T val) {
+    ((T*)(as<Bytevector>()->data))[idx] = val;
   }
 
-  template <class T> T blob_ref(size_t idx) const {
-    return ((T*) as<Blob>()->data)[idx];
+  template <class T> T bv_ref(size_t idx) const {
+    return ((T*) as<Bytevector>()->data)[idx];
   }
 
-  size_t blob_length() const { return as<Blob>()->length; }
+  size_t bv_length() const { return as<Bytevector>()->length; }
 
   // CHARACTERS
   char character() const {
@@ -1070,8 +1069,8 @@ inline bool Value::c_function_variable_arity() const {
 struct VMFunction : HeapValue {
   Value name;
   VectorStorage* constants;
-  Blob* free_variables;
-  Blob* sources;
+  Bytevector* free_variables;
+  Bytevector* sources;
   Value macro_env;
 
   unsigned min_arity, max_arity, stack_max, local_count;
@@ -1875,8 +1874,9 @@ struct State {
   Value make_string(size_t length);
 
   template <class T>
-  Value make_blob(size_t count) {
-    Blob* heap = static_cast<Blob*>(gc.allocate(BLOB, sizeof(Blob) + (count * sizeof(T))));
+  Value make_bytevector(size_t count) {
+    Bytevector* heap = static_cast<Bytevector*>(gc.allocate(BYTEVECTOR,
+      sizeof(Bytevector) + (count * sizeof(T))));
     heap->length = count;
     return heap;
   }

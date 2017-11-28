@@ -78,7 +78,7 @@ void State::finalize(Type object_type, Value object, bool called_by_gc) {
       }
       break;
     }
-    case BLOB: {
+    case BYTEVECTOR: {
       break;
     }
     default: 
@@ -359,7 +359,7 @@ void GCSemispace::collect(size_t request, bool force) {
     switch(obj->get_type()) {
 #define AR_COPY(type, field) copy((HeapValue**) &(((type*)obj)->field))
       // No pointers
-      case FLONUM: case CHARACTER: case STRING: case BLOB: break;
+      case FLONUM: case CHARACTER: case STRING: case BYTEVECTOR: break;
       // One pointer
       case UPVALUE:
         if(!obj->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
@@ -525,7 +525,7 @@ void GCIncremental::mark(HeapValue* v) {
   AR_ASSERT(marked(v));
 
   switch(v->get_type()) {
-    case FLONUM: case STRING: case CHARACTER: case BLOB:
+    case FLONUM: case STRING: case CHARACTER: case BYTEVECTOR:
       break;
     // One pointer
     case UPVALUE:

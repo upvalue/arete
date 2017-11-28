@@ -85,7 +85,7 @@ std::ostream& operator<<(std::ostream& os, Type type) {
     case PAIR: return os << "pair";
     case EXCEPTION: return os << "exception";
     case FUNCTION: return os << "function";
-    case BLOB: return os << "blob";
+    case BYTEVECTOR: return os << "bytevector";
     case UPVALUE: return os << "upvalue";
     case VMFUNCTION: return os << "vmfunction";
     case CFUNCTION: return os << "cfunction";
@@ -232,7 +232,7 @@ std::ostream& operator<<(std::ostream& os, Value v) {
     }
     case UPVALUE:
       return os << "#<upvalue " << v.bits << '>';
-    case BLOB:
+    case BYTEVECTOR:
       return os << "#<blob " << v.bits << ">";
     case RENAME: {
       Value env = v.rename_env(),
