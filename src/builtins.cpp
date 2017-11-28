@@ -67,8 +67,7 @@ AR_DEFUN("cons", fn_cons, 2);
 /** cons that copies source information from a given expression */
 Value fn_cons_source(State& state, size_t argc, Value* argv) {
   const char* fn_name = "cons-source";
-  Value pare, src, kar, kdr;
-  AR_FRAME(state, pare, kar, kdr);
+  Value pare, src;
   src = argv[0];
   Type type = src.type();
 
@@ -78,13 +77,12 @@ Value fn_cons_source(State& state, size_t argc, Value* argv) {
 
   AR_FN_ASSERT_ARG(state, 0, "to be a pair with source information",
     (type == PAIR && src.pair_has_source()));
-  kar = argv[1];
-  kdr = argv[2];
+
   SourceLocation loc;
   if(type == PAIR) {
     loc = (src.pair_src());
   } 
-  pare = state.make_src_pair(kar, kdr, loc);
+  pare = state.make_src_pair(argv[1], argv[2], loc);
   return pare;
 }
 AR_DEFUN("cons-source", fn_cons_source, 3);

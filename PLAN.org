@@ -78,3 +78,10 @@
 
 * Various optimizations that probably won't make a difference
   - [x] heap_type_equals() primitive, for when we want to check whether the type of a heap object matches a type.
+
+  - [ ] We could collapse CFunctions and VMFunctions most likely, and remove indirections from the process of function
+    application. Specifically, all CFunctions could take a closure argument which would be C_FALSE by default. We could
+    even combine Closure and VMFunction at the cost of more memory usage. Otherwise, the only difference between
+    apply_vm and CFunction is that apply_vm relies on rest arguments having already been created
+    . But we could do that at the top of apply_vm
+

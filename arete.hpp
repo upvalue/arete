@@ -79,7 +79,7 @@
 #endif
 
 #ifndef ARETE_HEAP_SIZE 
-# define ARETE_HEAP_SIZE (1024 * 1024 * 2)
+# define ARETE_HEAP_SIZE (1024 * 1024 * 8)
 #endif 
 
 #ifndef ARETE_GC_LOAD_FACTOR
@@ -461,10 +461,14 @@ struct Value {
 
   std::string type_desc() const;
 
-  bool heap_type_equals(Type tipe) const {
-    if((bits & 3) == 0 && (bits != 0)) return (heap->get_type() == tipe);
-    return false;
+  Type heap_type() const {
+    return (((bits & 3) == 0) && (bits != 0)) ? (Type)heap->get_type() : FIXNUM;
   }
+
+  bool heap_type_equals(Type tipe) const {
+    return (((bits & 3) == 0) && (bits != 0) && heap->get_type() == tipe);
+  }
+
 
   // FIXNUMS
 

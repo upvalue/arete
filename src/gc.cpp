@@ -220,7 +220,7 @@ void GCCommon::visit_roots(T& walker) {
         walker.touch((HeapValue**) &link->locals[i]);
 
     // Update code pointer.
-    link->code = link->fn->code_pointer();
+    //link->code = link->fn->code_pointer();
 
     // I lost like two hours to a missing paren here
     // Like this: link->code = (size_t*)(char*) (link->fn) + sizeof(VMFunction);
