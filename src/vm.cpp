@@ -318,7 +318,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   if(f.depth > (size_t)get_global_value(G_RECURSION_LIMIT).fixnum_value_or_zero()) {
     std::ostringstream os;
-    os << "non-tail recusive calls exceeded G_RECURSION_LIMIT (" << get_global_value(G_RECURSION_LIMIT) << ")";
+    os << "non-tail recursive calls exceeded G_RECURSION_LIMIT (" << get_global_value(G_RECURSION_LIMIT) << ")";
     f.exception = eval_error(os.str());
     goto exception;
   }

@@ -8,7 +8,6 @@
 ;; This would remove a pointer dereference for variables which are not set!, which might actually be a decent boost
 ;; given the naive way certain expressions (e.g. (let loop ())) introduce free variables
 
-
 ;; Compiler parameters
 
 ;; If true, generate opcodes for things like +. Currently fairly inflexible and means procedures like + can't be
@@ -247,7 +246,7 @@
   (when (fx< (OpenFn/stack-size fn) 0)
     (raise 'compile-internal "stack underflow" (list insns (OpenFn/stack-size fn) fn)))
 
-  (for-each
+  (for-each1
     (lambda (insn) 
       ;; Words isn't a real instruction, just an argument to emit that means we don't need to check
       ;; stack size
@@ -433,7 +432,7 @@
       (cons 'global x)
       (if (OpenFn/toplevel? search-fn)
         (begin
-          (unless (or (top-level-bound? x) (table-ref (OpenFn/env search-fn) x) (not (top-level-value 'COMPILER-WARN-UNDEFINED)))
+          #;(unless (or (top-level-bound? x) (table-ref (OpenFn/env search-fn) x) (not (top-level-value 'COMPILER-WARN-UNDEFINED)))
             (print-source src "Warning: reference to undefined variable" (symbol-dequalify x)))
           (cons 'global x))
         (aif (table-ref (OpenFn/env search-fn) x)
@@ -473,6 +472,39 @@
       (if (or (null? rest) (not (pair? rest)))
         i
         (loop (cdr rest) (fx+ i 1))))))
+
+(define (scan-local-defines-expr fn x)
+  (when (pair? x)
+    (cond
+      ((eq? (rename-strip (car x)) 'define)
+        (let ((var (Var/make (OpenFn/local-count fn) (cadr x))))
+          (table-set! (OpenFn/env fn) (cadr x) var)
+          (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))))
+      ((eq? (rename-strip (car x)) 'quote) #f)
+      (else
+        (for-each-improper (lambda (expr) (scan-local-defines-expr fn expr)) x)))))
+
+(define (scan-local-defines fn body)
+  (for-each-improper
+    (lambda (x)
+      (scan-local-defines-expr fn x))
+
+
+
+
+      #|
+      (when (and (pair? x))
+        (when (eq? (rename-strip (car x)) 'define)
+          (let ((var (Var/make (OpenFn/local-count fn) (cadr x))))
+            (table-set! (OpenFn/env fn) (cadr x) var)
+            (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))))
+
+        (when (eq? (rename-strip (car x)) 'begin)
+          (scan-local-defines fn (cdr x)))))
+    |#
+
+    body)
+ )
 
 (define (compile-lambda fn x)
   ;; Create a new OpenFn with fn as a parent
@@ -522,6 +554,7 @@
             (begin
               (table-set! (OpenFn/env sub-fn) rest (Var/make (+ i 1) rest))))))))
 
+  (scan-local-defines sub-fn (cddr x))
   ;; Compile the lambda's body
   (compile sub-fn (cddr x))
 
@@ -554,12 +587,14 @@
 
 (define (compile-define fn x tail?)
   (define name (cadr x))
-  (define var #f)
+  (define var (table-ref (OpenFn/env fn) name))
+  #;(define var #f)
 
-  (unless (OpenFn/toplevel? fn)
+  #;(unless (OpenFn/toplevel? fn)
     (set! var (Var/make (OpenFn/local-count fn) name))
     (table-set! (OpenFn/env fn) name var)
     (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1)))
+
 
   ;; Detect function names
   (let ((result (compile-expr fn (list-ref x 2) #f (list-tail x 2) tail?)))
@@ -785,7 +820,6 @@
       ;; (define x (vm-function)) at REPL will work.
       (compile-expr fn x #f (list-tail body i) (and (not (OpenFn/toplevel? fn)) (fx= i end)))
     )
-
     body)
 
   (emit fn 'return)
@@ -803,7 +837,7 @@
       (loop (fx+ i 1)))))
 
 (define (scan-defines fn body)
-  (for-each
+  (for-each1
     (lambda (x)
       ;; It is possible for #<unspecified> 
       ;; to occur in toplevel bodies because it is returned by the expander.
@@ -818,14 +852,14 @@
 
 ;; This is where most expressions will enter the compiler, it creates a function on-the-fly and returns it for
 ;; execution
-(define (compile-toplevel body mod)
+(define (compile-toplevel body)
   (define fn (OpenFn/make (aif (source-name body) (string->symbol (string-append "toplevel:" it)) 'vm-toplevel)))
 
   (OpenFn/toplevel?! fn #t)
 
-  (scan-defines fn body)
+  ;(scan-defines fn body)
 
-  (compile fn body)
+  (compile fn (list body))
   (compile-finish fn)
 
   (let ((result (OpenFn->procedure fn)))
@@ -867,7 +901,7 @@
            ;; Unexpanded boot functions which use COND
            ;; need to be expanded.
            (if (memq fn-name '(module-import-eval expand-apply expand env-lookup env-define env-compare env-resolve expand-module-decl))
-             (expand fn-expr #f)
+             (expand-toplevel fn-expr #f)
              fn-expr))
          )
 
@@ -930,7 +964,7 @@
 )))
 
 (expand-import (top-level-value '*user-module*) '(arete))
-(set-top-level-value! 'compiler compile-toplevel)
 (set-top-level-value! '*push-module* (top-level-value '*user-module*))
 (set-top-level-value! '*current-module* (top-level-value '*user-module*))
+(set-top-level-value! 'compiler compile-toplevel)
 

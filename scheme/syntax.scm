@@ -424,7 +424,25 @@
 (define (assv obj alist) (assoc-impl eqv? obj alist))
 (define (assoc obj alist) (assoc-impl equal? obj alist))
 
-(define map map1)
+(define (map pred . lsts)
+  (if (null? (car lsts))
+    '()
+    (let loop ((args (map1 (lambda (lst) (car lst)) lsts))
+               (rest (map1 (lambda (lst) (cdr lst)) lsts)))
+      (cons (apply pred args)
+            (if (null? (car rest))
+              '()
+              (loop (map1 (lambda (lst) (car lst)) rest) (map1 (lambda (lst) (cdr lst)) rest)))))))
+
+(define (for-each pred . lsts)
+  (if (null? (car lsts))
+    unspecified
+    (let loop ((args (map1 (lambda (lst) (car lst)) lsts))
+               (rest (map1 (lambda (lst) (cdr lst)) lsts)))
+      (apply pred args)
+      (if (null? (car rest))
+        unspecified
+        (loop (map1 (lambda (lst) (car lst)) rest) (map1 (lambda (lst) (cdr lst)) rest))))))
 
 (define (map2 f ls1 ls2)
   (let loop ((ls1 ls1) (ls2 ls2))

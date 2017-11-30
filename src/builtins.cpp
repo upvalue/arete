@@ -320,9 +320,9 @@ Value fn_map_improper(State& state, size_t argc, Value* argv) {
 AR_DEFUN("map-improper", fn_map_improper, 2);
 
 Value fn_foreach_proper(State& state, size_t argc, Value* argv) {
-  return fn_map_impl(state, argc, argv, "for-each", true, false, false);
+  return fn_map_impl(state, argc, argv, "for-each1", true, false, false);
 }
-AR_DEFUN("for-each", fn_foreach_proper, 2);
+AR_DEFUN("for-each1", fn_foreach_proper, 2);
 
 Value fn_foreach_improper(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "for-each-improper", true, false, false);

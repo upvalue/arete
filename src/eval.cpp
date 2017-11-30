@@ -809,13 +809,15 @@ Value State::eval_exp(Value exp) {
 }
 
 Value State::eval_list(Value lst, bool expand, Value env) {
-  Value elt, lst_top, tmp, compiler, vfn;
+  Value elt, lst_top, tmp, compiler, expander, vfn;
   EvalFrame frame;
   frame.env = env;
   lst_top = lst;
+  expander = get_global_value(G_EXPANDER);
   compiler = get_global_value(G_COMPILER);
 
-  AR_FRAME(this, lst, elt, lst_top, tmp, compiler, vfn);
+  AR_FRAME(this, lst, elt, lst_top, tmp, compiler, expander, vfn);
+  #if 1
   while(lst.heap_type_equals(PAIR)) {
     tmp = lst.car();
     if(expand) {
@@ -828,6 +830,16 @@ Value State::eval_list(Value lst, bool expand, Value env) {
     if(compiler == C_UNDEFINED) {
       tmp = eval_body(frame, tmp, true);
       if(tmp.is_active_exception() || lst.cdr() == C_NIL) return tmp;
+    } else {
+      Value argv[1] = {tmp};
+      tmp = apply(compiler, 1, argv);
+      if(tmp.is_active_exception()) return tmp;
+
+      if(get_global_value(G_VM_LOG_REPL) == C_TRUE) {
+        tmp.heap->set_header_bit(Value::VMFUNCTION_LOG_BIT);
+      }
+
+      tmp = apply(tmp, 0, 0);
     }
 
     if(tmp.is_active_exception()) return tmp;
@@ -837,9 +849,10 @@ Value State::eval_list(Value lst, bool expand, Value env) {
 
   lst = lst_top;
 
+#if 0
   if(compiler != C_UNSPECIFIED && compiler != C_UNDEFINED) {
-    Value argv[2] = {lst, get_global_value(G_CURRENT_MODULE)};
-    tmp = apply(compiler, 2, argv);
+    Value argv[1] = {lst, get_global_value(G_CURRENT_MODULE)};
+    tmp = apply(compiler, 1, argv);
     if(tmp.is_active_exception()) return tmp;
 
     if(get_global_value(G_VM_LOG_REPL) != C_UNDEFINED && get_global_value(G_VM_LOG_REPL) != C_FALSE) {
@@ -847,8 +860,25 @@ Value State::eval_list(Value lst, bool expand, Value env) {
     }
     return apply(tmp, 0, 0); 
   }
+  #endif
 
-  return C_UNSPECIFIED;
+  //return C_UNSPECIFIED;
+  #endif
+  #if 0
+  if(expander != C_UNSPECIFIED && expander != C_UNDEFINED) {
+    Value argv[2] = {lst, get_global_value(G_CURRENT_MODULE)};
+    tmp = apply(expander, 2, argv);
+    if(tmp.is_active_exception()) return tmp;
+    lst = tmp;
+  }
+
+  if(compiler == C_UNSPECIFIED || compiler == C_UNDEFINED) {
+    tmp = eval_body(frame, lst, false);
+  }
+  #endif
+
+
+  return tmp;
 }
 
 //

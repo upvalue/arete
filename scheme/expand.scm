@@ -23,10 +23,6 @@
 ;; Does not result in super-descriptive error messages because the name is gensym'd by the compiler
 ;; How can we propagate information about where a lambda was introduced through the expander to the compiler?
 
-;; TODO: Internal definitions. Currently we just assume variables we haven't seen yet are global/module variables.
-
-;; How do we handle this gracefully? Can we put off the resolution of variables until later?
-
 (define caar (lambda (x) (car (car x))))
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
@@ -149,8 +145,6 @@
        (table-set! env name (if (eq? value 'variable) (module-qualify env name) value))
        (if (or (eq? (table-ref env "module-export-all") #t) (table-ref (table-ref env "module-exports") name))
          (table-set! (table-ref env "module-exports") name name))
-
-
     ))
     ((vector? env) (begin
                      (vector-append! env name)
@@ -187,11 +181,12 @@
 ;; (necessary for rename gensyms) the value of the key in the environment, and whether the variable was "found"
 ;; (variables may be referenced before definition)
 (define (env-lookup env name)
+  (define strip (rename-strip name))
   (cond
     ;; toplevel
     ((eq? env #f)
      (begin
-       (list #f (rename-strip name) (env-check-syntax (rename-strip name)) #t)))
+       (list #f strip (env-check-syntax strip) #t)))
     ((table? env)
      (if (rename? name)
        (begin
@@ -200,7 +195,6 @@
          ;(print (env-lookup (rename-env name) (rename-expr name)))
          (env-lookup (rename-env name) (rename-expr name)))
        (begin
-         (define strip (rename-strip name))
          (if (table-ref env strip)
            ;; this variable is defined, can either be a transformer which is 
            ;; returned directly for the use of the expander,
@@ -220,12 +214,11 @@
              (list env (module-qualify env strip) unspecified #f))))))
     ;; local environment
     ((vector? env)
-     (begin
-       (define len (vector-length env))
-       (define res (env-vec-lookup env len 1 name))
+     ((lambda (res)
        (if res 
          res
-         (env-lookup (vector-ref env 0) name))))))
+         (env-lookup (vector-ref env 0) name)))
+      (env-vec-lookup env (vector-length env) 1 name)))))
 
 ;; For env-compare. This will lookup NAME with rename-env and rename-expr if it is a rename, if not, it will look
 ;; in ENV
@@ -382,7 +375,7 @@
 
 ;; Check a list of specifiers
 (define (module-check-spec src name syms)
-  (for-each
+  (for-each1
     (lambda (x)
       (if (not (symbol? x))
         (raise-source src 'expand (print-string "arguments to import specifier" name " must all be symbols") (list syms))))
@@ -467,34 +460,30 @@
     ((eq? kar 'except)
      (module-import-filter spec 'except (lambda (cell forbidden) (and cell (not (memq (car cell) forbidden))))))
     ((eq? kar 'rename)
-     (begin
-       (define renames (cddr spec))
-       (for-each
+     ((lambda (renames)
+       (for-each1
          (lambda (x)
            (if (or (not (list? x)) (not (fx= (length x) 2)) (not (symbol? (car x))) (not (symbol? (cadr x))))
              (raise-source spec 'expand (print-string "arguments to rename specifier must all be lists with two symbols") (list spec))))
          renames)
        (map1
          (lambda (cell)
-           (if cell
-             (begin
-               (define check (assq (car cell) renames))
-               (if check
-                 (cons (cadr check) (cdr cell))
-                 cell))
+           (define check (and cell (assq (car cell) renames)))
+           (if check
+             (cons (cadr check) (cdr cell))
              cell))
-         (module-import-eval (cadr spec)))))
+         (module-import-eval (cadr spec))))))
 
     (else
-      ;; This is an actual module specifier (or should be), load it if necessary and import it.
-      (begin
-        (define module-name (module-spec->string spec spec))
-        (define mod (module-load spec module-name))
+      ((lambda (mod)
         (table-map
           (lambda (k v)
             (cons k (table-ref mod v)))
-          (table-ref mod "module-exports"))
-      ))))
+          (table-ref mod "module-exports")))
+
+       (module-load spec (module-spec->string spec spec))))
+
+      ))
 
 (define (module-import! mod1 mod2-spec)
   (define mod2-name (module-spec->string mod2-spec mod2-spec))
@@ -507,7 +496,7 @@
 (define (expand-import mod spec)
   (define imports (filter (lambda (v) v) (module-import-eval spec)))
 
-  (for-each
+  (for-each1
     (lambda (k)
       (if (table-ref mod (car k))
         (print "warning: duplicate import" k))
@@ -519,7 +508,7 @@
 (define (expand-toplevel-import x env)
   (if (not (list? x))
     (raise-source x 'expand "import spec must be a list" (list x)))
-  (for-each
+  (for-each1
     (lambda (x) (expand-import env x))
     (cdr x)))
 
@@ -528,7 +517,7 @@
 
   (cond
     ((eq? kar 'import)
-     (for-each
+     (for-each1
        (lambda (x)
          (expand-import mod x))
        (cdr x)))
@@ -617,7 +606,7 @@
         ((eq? kar 'define-syntax) (expand-define-syntax x env))
         ((or (eq? kar 'letrec-syntax) (eq? kar 'let-syntax)) (expand-let-syntax x env))
         ((or (eq? kar 'and) (eq? kar 'or)) (expand-and-or x env))
-        ((eq? kar 'lambda) (expand-lambda x env))
+        ((eq? kar 'lambda) (lambda () (expand-lambda x env)))
         ((eq? kar 'begin) (cons-source x (make-rename #f 'begin) (expand-map (cdr x) env)))
         ((eq? kar 'if) (expand-if x env))
         ((eq? kar 'set!) (expand-set x env))
@@ -637,7 +626,6 @@
 
     (define bindings (cadr x))
     (define new-env (env-make env))
-
 
     (if (or (null? bindings) (pair? bindings))
       (for-each-improper-i
@@ -697,12 +685,49 @@
     (cond
       ((self-evaluating? x) x)
       ((identifier? x) (expand-identifier x env))
-      (else (begin
-              (expand-apply x env))))))
+      (else (expand-apply x env)))))
 
-(define expand-toplevel
-  (lambda (x env)
-    (expand x env)))
+(define (expand-delayed x)
+  (if (pair? x)
+    (map-improper expand-delayed x)
+    (if (procedure? x)
+      (expand-delayed (x))
+      x)))
+
+(define (expand-body body env)
+  (map1
+    expand-delayed
+    (map1 (lambda (sub-x) (expand sub-x env)) results)))
+
+#|
+(define (expand-toplevel body env)
+  (define results
+    (map1
+      (lambda (sub-x) (expand sub-x env))
+      body))
+
+  (map1
+    (lambda (sub-x)
+      (define result (expand-delayed sub-x))
+      (if (and (top-level-value 'EXPANDER-PRINT) (not (eq? (top-level-value 'EXPANDER-PRINT) unspecified)))
+        (begin
+          (print-source sub-x)
+          (print "Expanded to:" result)))
+      result)
+    results))
+
+      #|(lambda (sub-x)
+           (define result (expand sub-x env))
+           (if (and (top-level-value 'EXPANDER-PRINT) (not (eq? (top-level-value 'EXPANDER-PRINT) unspecified)))
+             (begin
+               (print-source sub-x)
+               (print "Expanded to:" result)))
+           result) body))
+
+  (expand-delayed results))|#
+|#
+(define (expand-toplevel x env)
+  (expand-delayed (expand x env)))
 
 (define expand-define-transformer!
   (lambda (x env name body)
@@ -724,7 +749,7 @@
         (set! identifier-transformer #t)
         #;(print "found identifier transformer" body)))
 
-    (set! expanded-body (expand body env))
+    (set! expanded-body (expand-delayed (expand body env)))
 
     (set! fn (eval expanded-body env))
 
@@ -779,7 +804,7 @@
     (if (not (list? bindings))
       (raise-source (cadr x) 'expand "let-syntax bindings list must be a valid list" (list x (cadr x))))
 
-    (for-each
+    (for-each1
       (lambda (x)
         (define name #f)
         (define body #f)
@@ -919,7 +944,6 @@
          (table-set! (table-ref *core-module* "module-exports") k k)
          (table-set! *core-module* k k))
        (module-qualify *core-module* k)))))
-
 
 (define (make-empty-module name)
   (define mod (module-make name))
