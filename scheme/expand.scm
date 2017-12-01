@@ -15,13 +15,8 @@
 ;; TODO: Fix redundant compilation, VM primitive compilation.
 ;; TODO disallow inter-module set!
 
-;; TODO: Problem
-;; Something like this
-;; (let loop ()
-;;   (error))
-
-;; Does not result in super-descriptive error messages because the name is gensym'd by the compiler
-;; How can we propagate information about where a lambda was introduced through the expander to the compiler?
+;; TODO Disallow (if #t (define x #t) (define x #f)) with a helpful error message
+;; This will probably require adding some parameters to the expander. 
 
 (define caar (lambda (x) (car (car x))))
 (define cadr (lambda (x) (car (cdr x))))

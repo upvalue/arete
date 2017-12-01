@@ -575,6 +575,7 @@
       (aif (OpenFn/closure sub-fn)
         (begin
           (emit fn 'close-over (vector-length it))
+
           (let loop ((i 0))
             (unless (eq? i (vector-length it))
               (let ((var (vector-ref it i)))
@@ -588,13 +589,6 @@
 (define (compile-define fn x tail?)
   (define name (cadr x))
   (define var (table-ref (OpenFn/env fn) name))
-  #;(define var #f)
-
-  #;(unless (OpenFn/toplevel? fn)
-    (set! var (Var/make (OpenFn/local-count fn) name))
-    (table-set! (OpenFn/env fn) name var)
-    (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1)))
-
 
   ;; Detect function names
   (let ((result (compile-expr fn (list-ref x 2) #f (list-tail x 2) tail?)))
