@@ -28,7 +28,6 @@
 (define (caddr x) (car (cdr (cdr x))))
 (define (cadddr x) (car (cdr (cdr (cdr x)))))
 
-
 (define not (lambda (x) (eq? x #f)))
 
 (define fixnum? (lambda (v) (eq? (value-type v) 1)))

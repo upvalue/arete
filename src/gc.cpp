@@ -2,7 +2,7 @@
 
 // TODO: Reduction of code duplication between collectors. It should be possible to share
 // the code that visits the pointers. The marking collector is recursive and uses a GOTO to save
-// stack space. The copying collector is not.
+// stack space. The copying collector is not and does not.
 
 // TODO: Finalizers should probably simply be disabled in production builds; this should be used
 // for warnings only.

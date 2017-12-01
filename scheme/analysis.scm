@@ -1,5 +1,7 @@
 ;; analyze.scm - Analysis pass
 
+;; TODO Can we do closure generation here without too much trouble?
+
 ;; closure sharing
 ;; (define (make-counter)
 ;;   (define count 0)
@@ -46,9 +48,12 @@
   (%Env/make parent (make-table)))
 
 (define (Env/add-location! env name)
-  (define location (Location/make name (gensym name) (table-entries (Env/bindings env)) #f))
-  (table-set! (Env/bindings env) name location)
-  location)
+  (if (eq? env #f)
+    name
+    (begin
+      (define location (Location/make name (gensym name) (table-entries (Env/bindings env)) #f))
+      (table-set! (Env/bindings env) name location)
+      location)))
 
 (define (Env/lookup env name)
   (if (eq? env #f)
@@ -95,8 +100,6 @@
               (Env/add-location! sub-env rest)
               (AnalyzedFn/var-arity! fn #t)))))))
 
-  (pretty-print fn)
-
   (AnalyzedFn/body! fn (analyze-expr sub-env (cddr x)))
 
   #;(cons-source x (car x) (cons-source x new-arguments (map (lambda (x) (analyze-expr sub-env x)) (cddr x))))
@@ -111,17 +114,22 @@
 
     (cons-source x (car x) (cons-source x location (map (lambda (x) (analyze-expr env x)) (cddr x))))))
 
+(define (analyze-define env x)
+  (define loc (Env/add-location! env (cadr x)))
+  (cons-source x (car x) (cons-source x loc (cddr x))))
+
 ;; Most expressions just need their CDR analyzed for occurences of identifiers
 (define (analyze-recons env x)
-  (cons-source x (car x) (map1 analyze-expr (cdr x))))
+  (cons-source x (car x) (map1 (lambda (sub-x) (analyze-expr env sub-x)) (cdr x))))
 
 (define (analyze-expr env x)
   (cond
     ((pair? x)
-     ;(print (car x))
      (case (rename-strip (car x))
        (lambda (analyze-lambda env x))
-       ((and or) (analyze-recons env x))
+       (define (analyze-define env x))
+       (quote x)
+       ((and or if begin) (analyze-recons env x))
        ((set!) (analyze-set env x))
        (else (map1 (lambda (x) (analyze-expr env x)) x))))
     ((identifier? x) 
@@ -137,9 +145,32 @@
 
 ;; (analyze-toplevel '(lambda () (define (internal2) (internal1)) (define (internal1) (internal2))))
 
+(define qq-list
+  '(lambda (c lst) 
+    (if (pair? lst)
+      (let ((obj (car lst)))
+        (if (and (pair? obj) (c #'unquote-splicing (car obj)))
+          (if (cdr lst)
+            (list #'append (cadr obj) (qq-list c (cdr lst)))
+            (cadr obj))
+          ;; TODO: This could be replaced with cons* for less calls and less confusing output
+          (list #'cons (qq-object c obj) (qq-list c (cdr lst)))
+        ))
+      (begin
+        (set! c #t)
+        (if (null? lst) 
+          '()
+          (list #'quote lst))))))
+
+;; TODO: If we want to compile stuff as blocks, how do we inline stuff at the module level?
+
 (begin
-  (print (analyze-toplevel '(lambda (a b) a b (set! a #t) ((lambda (b) b) 5) b))))
+  #|
+  (print (analyze-toplevel '(lambda (a b) a b (set! a #t) ((lambda (b) b) 5) b)))
   (print (analyze-toplevel '(lambda (a b) a b (set! a #t) ((lambda (b) (if b b b)) 5) b)))
   (print (analyze-toplevel '(lambda asdf #t)))
-  (print (analyze-toplevel '(lambda (a b . c) (lambda () c))))
+  (pretty-print (analyze-toplevel '(begin (define fart #t) (lambda (a b . c) (define y #t) (lambda () c (set! fart #t))))))
+  |#
 
+  (pretty-print (analyze-toplevel (expand-toplevel qq-list (top-level-value '*core-module*))))
+  )

@@ -958,6 +958,8 @@
 )))
 
 (expand-import (top-level-value '*user-module*) '(arete))
+
+;; Turn over default execution to the (user) module
 (set-top-level-value! '*push-module* (top-level-value '*user-module*))
 (set-top-level-value! '*current-module* (top-level-value '*user-module*))
 (set-top-level-value! 'compiler compile-toplevel)

@@ -13,6 +13,9 @@
 ;; TODO Improper lists
 ;; TODO Vectors
 
+;; TODO rewrite with fold instead of fold-right. 
+;; TODO do not use mutation
+
 (define ellipses '...)
 
 (define (rules-rename name)
@@ -58,13 +61,16 @@
            (list (list (car pattern) 'splat form))
            ;; This is not an ellipses so try to match it normally
            (rules-try ellipses pattern form literals))
-         ;; More form
 
-         ;; one or more elements after ...
-         (if (and (eq? (cadr pattern) ellipses))
-           (list (list (car pattern) 'splat form))
-           ;; no special cases, continue
-           (rules-try ellipses pattern form literals))))
+         ;; There's more form but not more pattern
+         (if (null? (cdr pattern))
+           #f
+           ;; one or more elements after ...
+           (if (and (eq? (cadr pattern) ellipses))
+             (list (list (car pattern) 'splat form))
+             ;; no special cases, continue
+             (rules-try ellipses pattern form literals))))
+       )
      )
     ;; Handle ellipses with null
     ((and (pair? pattern) (null? form))
@@ -76,8 +82,6 @@
       #;(print "could not match:" pattern form) #f)
     ))
 
-(define (try-cons a b)
-  (and a (cons a b)))
 
 ;; TODO We cannot use #f to terminate. Perhaps a qualified-symbol would be appropriate here, as something we can
 ;; rightfully say should not occur in source code, e.g. ##terminate
@@ -86,13 +90,17 @@
 
 ;; The PROBLEM. We cease on consuming a list, but then have no way of "consuming" the other lists
 
-
 ;; (1 3 5 7) (
+
+(define terminate '##terminate)
+
+(define (try-cons a b)
+  (and (not (eq? a terminate)) (cons a b)))
 
 (define (fold-template matches lst)
   (fold-right
     (lambda (a b)
-      (and b
+      (and (not (eq? b terminate))
         (cond 
           ((pair? a)
            (if (and (pair? b) (eq? (car b) '...))
@@ -164,8 +172,7 @@
                          ;; also indicate finishing?
                          (let ((lst (caddr match)))
                            (if (null? lst)
-                             (begin
-                               #f)
+                             (begin terminate)
                              (begin
                                (if (not lst)
                                  (raise 'expand (print-string "... length mismatch") (list lst)))
@@ -175,8 +182,8 @@
                                (car lst))))
                             ))
                        (if (eq? a '...) a (make-rename #f a)))))
-                   (if (eq? kar #f)
-                     #f
+                   (if (eq? kar terminate)
+                     terminate
                      (try-cons kar b))
                    #;(try-cons kar b)
                    )))))
@@ -184,3 +191,53 @@
           (else (try-cons a b)))))
     '() lst))
 
+;; (define-syntax thing
+;;   (syntax-rules (literals)
+;;     ((pattern) template) ...))
+
+(print "fold-template test" (fold-template '((hello single hello)) '(begin #t)))
+(print "fold-template test" (fold-template '((hello single hello)) '(#t)))
+
+(define (syntax-rules-matcher literals pare rest)
+  (if (not (list? pare))
+    (raise-source pare 'syntax "syntax-rules argument must be a list (pattern and template)" (list pare)))
+
+  (let ((pattern (car pare)) (template (cdr pare)))
+    (if (not (list? pattern))
+      (raise-source pare 'syntax "syntax-rules pattern (first element) must be a list" (list pare)))
+
+    (if (not (and (list? template) (null? (cdr template))))
+      (raise-source (cdr template) 'syntax "syntax-rules template must only have one element" (list pare)))
+
+    `(let ((maybe (rules-match '... (quote ,pattern) form ,literals)))
+       (print "rules-match result" maybe form)
+       (if maybe 
+         (cons 'begin (fold-template maybe (quote ,template)))
+         ,(if (null? rest) #f (syntax-rules-matcher literals (car rest) (cdr rest)))))))
+
+(define-syntax syntax-rules
+  (lambda (x)
+    (unless (fx> (length x) 2)
+      (raise-source x 'syntax "syntax-rules must have at least two arguments (literals list and one pattern/template pair)" (list x)))
+    (define literals (cadr x))
+    (define pares (cddr x))
+
+    (if (not (and (list? literals) (every symbol? literals)))
+      (raise-source x 'syntax "syntax-rules literals list must be a list of symbols"))
+
+    (define body (syntax-rules-matcher literals (car pares) (cdr pares)))
+
+    (print body)
+    (pi `(lambda (x)
+       (let ((form x))
+         (pi ,body))))))
+
+
+(define-syntax gub
+  (syntax-rules ()
+    ((_) (begin 1 2 3))
+    ((_ rst ...) (begin rst ...))
+    ((_ asdf) asdf)
+    ))
+
+(print "gub:"(gub 123 4 5 6))

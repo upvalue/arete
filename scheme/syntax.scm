@@ -22,9 +22,6 @@
         (set! bindings (list-ref x 1))
         (set! body (cddr x))))
 
-    ;(print let-fn-name)
-    ;(print "crashy crashy: " let-fn-name)
-
     (set! names
       (map-i (lambda (i binding)
              (define name #f)
@@ -507,9 +504,15 @@
 )
 
 ;; Print and return an intermediate value. For printf-debugging convenience.
-(define (pi x)
-  (print x)
-  x)
+(define (pi . rst)
+  (if (null? (cdr rst))
+    (begin
+      (print (car rst))
+      (car rst))
+    (begin
+      (print (car rst))
+      (print (cadr rst))
+      (cadr rst))))
 
 (define-syntax cond-expand
   (lambda (x)
