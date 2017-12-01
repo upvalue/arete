@@ -467,7 +467,8 @@
            (if check
              (cons (cadr check) (cdr cell))
              cell))
-         (module-import-eval (cadr spec))))))
+         (module-import-eval (cadr spec))))
+      (cddr spec)))
 
     (else
       ((lambda (mod)

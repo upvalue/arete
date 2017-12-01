@@ -4,9 +4,7 @@
 (define fn (OpenFn/make (string->symbol (top-level-value 'compiler-test-file))))
 (define fn-body (slurp-file (top-level-value 'compiler-test-file)))
 
-(compile fn fn-body)
-(compile-finish fn)
-
-(define proc (OpenFn->procedure fn))
+;(set-top-level-value! 'COMPILER-LOG #t)
+(define proc (compile-toplevel (cons 'begin fn-body)))
 
 (print (proc))
