@@ -418,7 +418,7 @@
 ;; Despite being long, this is fairly simple.
 
 ;; Basically, when it encounters the actual module specifier like say (sdl)
-;; It will load the module and return all its bindings in the form of a list correlating names with values
+;; It will load the module and return all its bindings in the form of an alist correlating names with values
 
 ;; The modifiers only, prefix, rename and except then modify that list with map & filter
 

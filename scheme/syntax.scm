@@ -140,6 +140,18 @@
     `(,#'if (,#'not ,(list-ref x 1))
         (,#'begin ,@(cddr x)))))
 
+
+(define (take lst limit)
+  (unless (fixnum? limit) (raise 'type "take expected second argument (limit) to be a fixnum"))
+  (let loop ((got 0)
+             (newlst '())
+             (lst lst))
+    (if (fx= got limit)
+      (reverse newlst)
+      (if (null? lst)
+        (raise 'bounds (print-string limit "values requested by take invocation but only got" got) (list lst limit))
+        (loop (fx+ got 1) (cons (car lst) newlst) (cdr lst))))))
+
 ;; This actually seriously slows down the compiler (which uses memv via case) vs using a C++ function.
 ;;Need some basic inlining for sure.
 

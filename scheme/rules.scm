@@ -19,7 +19,9 @@
 (define ellipses '...)
 
 (define (rules-rename name)
-  (make-rename #f name))
+  (if (eq? (top-level-value '*current-rename-env*) unspecified)
+    (make-rename #f name)
+    (make-rename (top-level-value '*current-rename-env*) name)))
 
 (define (rules-shadowed? name)
   #f)
@@ -30,6 +32,18 @@
      (if (or (not kar) (not kdr))
        #f
        (append kar kdr))))
+
+#|
+(define (rules-try-improper pattern form literals)
+  (let ((kar (rules-match ellipses (car pattern) (car form) literals)))
+    (if kar
+      (if (identifier? (cdr pattern))
+        (append kar (list (cdr pattern) 'single (cdr form)))
+        (let ((kdr (rules-match el
+        (if (not (equal? (cdr pattern) (cdr form)))
+          #f
+          kar)))))
+        |#
 
 (define (rules-match ellipses pattern form literals)
   (cond
@@ -56,20 +70,44 @@
        (rules-match ellipses (car pattern) (car form) literals)
        ;; Handle (asdf ...) (asdf)
        (if (null? (cdr form))
-         ;; This is an ellipses
+         ;; Ellipses, but not more form, so we match only one element
          (if (and (not (null? (cdr pattern))) (eq? (cadr pattern) ellipses))
            (list (list (car pattern) 'splat form))
            ;; This is not an ellipses so try to match it normally
            (rules-try ellipses pattern form literals))
 
-         ;; There's more form but not more pattern
          (if (null? (cdr pattern))
+           ;; There's more form but not more pattern
            #f
-           ;; one or more elements after ...
-           (if (and (eq? (cadr pattern) ellipses))
-             (list (list (car pattern) 'splat form))
-             ;; no special cases, continue
-             (rules-try ellipses pattern form literals))))
+           (if (not (pair? (cdr pattern)))
+             (rules-try ellipses pattern form literals)
+             ;; One or more elements after ...
+             (if (and (eq? (cadr pattern) ellipses))
+               ;; There may be elements in the pattern after ...
+               (begin
+                 (if (not (null? (cddr pattern)))
+                   (let* ((expect-after (length (cddr pattern)))
+                          (to-take (- (length form) expect-after)))
+
+                     (for-each-i
+                       (lambda (i x)
+                         (if (eq? x ellipses)
+                           (raise-source (list-tail (cddr pattern) (fx- i 1)) 'syntax "multiple ... on same level in pattern" (list pattern))))
+                       (cddr pattern))
+                     #;(every (lambda (i)
+                              (if (eq? i ellipses) (raise-source pattern 'syntax "multiple ... on same level in pattern" (list pattern))))
+                            (cddr pattern))
+
+                     (if (fx< to-take 0)
+                       #f
+                       (let ((rest (rules-try ellipses (cddr pattern) (list-tail form to-take) literals)))
+                         (and rest
+                              (cons (list (car pattern) 'splat (take form to-take)) rest)))))
+
+                   (list (list (car pattern) 'splat form)))
+               ) 
+               ;; no special cases, continue
+               (rules-try ellipses pattern form literals)))))
        )
      )
     ;; Handle ellipses with null
@@ -82,6 +120,30 @@
       #;(print "could not match:" pattern form) #f)
     ))
 
+(print (rules-match '... '(hello one ...) '(hello 1) '()))
+(print (rules-match '... '(hello) '(hello) '()))
+(print (rules-match '... '(hello one) '(hello 1) '()))
+(print (rules-match '... '(hello one two) '(hello bug 5) '()))
+(print (rules-match '... '(hello one ...) '(hello bug 5) '()))
+(print (rules-match '... '(hello one ...) '(hello bug) '()))
+(print (rules-match '... '(hello one) '(hello (1)) '()))
+(print (rules-match '... '(hello (one two three ...)) '(hello (1 2 3 4)) '()))
+(print (rules-match '... '(hello (one two three)) '(hello (four five six)) '()))
+(print (rules-match '... '(hello (one two three ...)) '(hello (four five six)) '()))
+(print (rules-match '... '(hello one two three ...) '(hello 1 2) '()))
+(print (rules-match '... '(hello "atoms") '(hello "atoms") '()))
+(print (rules-match '... '(hello one ... two three four) '(hello 1 2 3) '()))
+(print (rules-match '... '(hello one ... two three four five) '(hello 1 2 3) '()))
+
+;(print "ok:"(rules-match '... '(thing . 5) '(thing . 6) '()))
+#|
+
+;; something like this means we need at least three elements,
+;; or rather, we need at least one element after ...
+
+;; So, when we encounter ..., we'll (1) check that there are no ... after ...
+;; and (2) how many elements are after it. Then we TAKE length of list - elements after it from the list, and continue
+;; rules-match with the cddr
 
 ;; TODO We cannot use #f to terminate. Perhaps a qualified-symbol would be appropriate here, as something we can
 ;; rightfully say should not occur in source code, e.g. ##terminate
@@ -181,7 +243,7 @@
                                (set-car! (cddr match) (cdr lst))
                                (car lst))))
                             ))
-                       (if (eq? a '...) a (make-rename #f a)))))
+                       (if (eq? a '...) a (rules-rename a)))))
                    (if (eq? kar terminate)
                      terminate
                      (try-cons kar b))
@@ -213,7 +275,9 @@
        (print "rules-match result" maybe form)
        (if maybe 
          (cons 'begin (fold-template maybe (quote ,template)))
-         ,(if (null? rest) #f (syntax-rules-matcher literals (car rest) (cdr rest)))))))
+         ,(if (null? rest)
+            `(raise 'syntax "syntax-rules failed to find a match for form" (list form))
+            (syntax-rules-matcher literals (car rest) (cdr rest)))))))
 
 (define-syntax syntax-rules
   (lambda (x)
@@ -228,10 +292,9 @@
     (define body (syntax-rules-matcher literals (car pares) (cdr pares)))
 
     (print body)
-    (pi `(lambda (x)
-       (let ((form x))
+    (pi `(,#'lambda (,#'x)
+       (let ((form ,#'x))
          (pi ,body))))))
-
 
 (define-syntax gub
   (syntax-rules ()
@@ -240,4 +303,24 @@
     ((_ asdf) asdf)
     ))
 
-(print "gub:"(gub 123 4 5 6))
+;; recursive syntax-rules invocation
+
+(define-syntax rekur
+  (syntax-rules ()
+    ((_) (rekur 123))
+    ((_ echo) (rekur "literal" echo))
+    ((_ "notliteral" thing) "bad result")
+    ((_ "literal" thing) thing)))
+
+
+;Current problem. ... is not supposed to match *everything*, we need to allow for matching after ... ! 
+
+(display
+(let-syntax
+  ((foo (syntax-rules ()
+          ((foo args ... penultimate ultimate)
+           (list ultimate penultimate args ...)))))
+   (foo 1 2 3 4 5)))
+(newline)
+
+|#
