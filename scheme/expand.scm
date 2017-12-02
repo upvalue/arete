@@ -175,6 +175,10 @@
 ;; (necessary for rename gensyms) the value of the key in the environment, and whether the variable was "found"
 ;; (variables may be referenced before definition)
 (define (env-lookup env name)
+  #;(if (eq? (top-level-value 'dbg) #t)
+    (begin
+      (print name)
+      (print env)))
   (define strip (rename-strip name))
   (cond
     ;; toplevel
@@ -271,7 +275,12 @@
 (define (env-syntax? env name)
   (apply 
     (lambda (env name value found)
-      (or (eq? value 'syntax) (function-macro? value)))
+      (if (eq? value 'syntax)
+        name
+        (if (function-macro? value)
+          'macro
+          #f))
+    )
     (env-lookup env name)))
 
 ;; Shorthand for mapping expand because it's so common
@@ -418,7 +427,7 @@
 ;; Despite being long, this is fairly simple.
 
 ;; Basically, when it encounters the actual module specifier like say (sdl)
-;; It will load the module and return all its bindings in the form of an alist correlating names with values
+;; It will load the module and return all its bindings in the form of a list correlating names with values
 
 ;; The modifiers only, prefix, rename and except then modify that list with map & filter
 
@@ -579,8 +588,6 @@
 (define expand-apply
   (lambda (x env)
     (define kar (car x))
-    (if (eq? (top-level-value 'EXPANDER-PRINT) #t)
-      (print x))
     (define len (length x))
     (define syntax? (and (identifier? kar) (env-syntax? env kar)))
 
@@ -592,6 +599,8 @@
     ;; Check for special syntactic forms
     (if syntax?
       (cond
+        ((eq? syntax? 'macro)
+                (expand-macro x env (list-ref (env-lookup env (car x)) 2)))
         ((or (eq? kar 'define-library) (eq? kar 'module)) (expand-module x env))
         ((eq? kar 'import)
          (if (not (table? env))
@@ -830,7 +839,7 @@
       (set! form (car x)))
 
     (if (and (identifier? x) (not (function-identifier-macro? transformer)))
-      (raise-source x (print-string "use of syntax" x "as value") (list x)))
+      (raise-source x 'expand (print-string "use of syntax" x "as value") (list x)))
 
     (define result
       (if (eq? arity 1)

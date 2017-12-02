@@ -52,11 +52,11 @@
      (if (equal? pattern form)
        '()
        #f))
-
     ;; Check for literals
     ((and (eq? pattern form) (identifier? pattern) (memq pattern literals) (not (rules-shadowed? pattern)))
-     (begin
-       (list '(#t #t))))
+     '())
+    ((and (not (eq? pattern form)) (identifier? pattern) (memq pattern literals) (not (rules-shadowed? pattern)))
+     #f)
     ((and (identifier? pattern) (or (identifier? form) (self-evaluating? form)))
      (list (list pattern 'single form)))
     ;; Check for NULL match
@@ -94,9 +94,6 @@
                          (if (eq? x ellipses)
                            (raise-source (list-tail (cddr pattern) (fx- i 1)) 'syntax "multiple ... on same level in pattern" (list pattern))))
                        (cddr pattern))
-                     #;(every (lambda (i)
-                              (if (eq? i ellipses) (raise-source pattern 'syntax "multiple ... on same level in pattern" (list pattern))))
-                            (cddr pattern))
 
                      (if (fx< to-take 0)
                        #f
@@ -135,8 +132,9 @@
 (print (rules-match '... '(hello one ... two three four) '(hello 1 2 3) '()))
 (print (rules-match '... '(hello one ... two three four five) '(hello 1 2 3) '()))
 
+(print (rules-match '... '(hello name value) '(hello name #t) '(name)))
+
 ;(print "ok:"(rules-match '... '(thing . 5) '(thing . 6) '()))
-#|
 
 ;; something like this means we need at least three elements,
 ;; or rather, we need at least one element after ...
@@ -271,7 +269,7 @@
     (if (not (and (list? template) (null? (cdr template))))
       (raise-source (cdr template) 'syntax "syntax-rules template must only have one element" (list pare)))
 
-    `(let ((maybe (rules-match '... (quote ,pattern) form ,literals)))
+    `(let ((maybe (rules-match '... (quote ,pattern) form (quote ,literals))))
        (print "rules-match result" maybe form)
        (if maybe 
          (cons 'begin (fold-template maybe (quote ,template)))
@@ -286,16 +284,22 @@
     (define literals (cadr x))
     (define pares (cddr x))
 
+    (print "!!!")
+    (print "ye literals" literals)
+    (print "!!!")
+
     (if (not (and (list? literals) (every symbol? literals)))
       (raise-source x 'syntax "syntax-rules literals list must be a list of symbols"))
 
     (define body (syntax-rules-matcher literals (car pares) (cdr pares)))
 
-    (print body)
-    (pi `(,#'lambda (,#'x)
-       (let ((form ,#'x))
-         (pi ,body))))))
+    (pi "res"`(,#'lambda (,#'x) 
 
+       (let ((form ,#'x))
+         ,body)))))
+
+
+#|
 (define-syntax gub
   (syntax-rules ()
     ((_) (begin 1 2 3))
@@ -305,22 +309,48 @@
 
 ;; recursive syntax-rules invocation
 
-(define-syntax rekur
+(define-syntax defyne
   (syntax-rules ()
-    ((_) (rekur 123))
-    ((_ echo) (rekur "literal" echo))
-    ((_ "notliteral" thing) "bad result")
-    ((_ "literal" thing) thing)))
+    ((_ name value)
+     (define name value))))
+
+(defyne asdf #t)
+
+(define-syntax hyg
+  (syntax-rules ()
+    ((_ value (code ...))
+     (let ((result value))
+       (begin code ...)
+       result))))
+
+|#
 
 
-;Current problem. ... is not supposed to match *everything*, we need to allow for matching after ... ! 
-
-(display
+#|
 (let-syntax
-  ((foo (syntax-rules ()
-          ((foo args ... penultimate ultimate)
-           (list ultimate penultimate args ...)))))
-   (foo 1 2 3 4 5)))
-(newline)
+  ((set! (syntax-rules (name)
+           ((_ name value) value)
+           ((_ x e)
+            (set! x e)))))
+  (define var #f)
+  (set! var #t)
+  (cons
+    (set! name #t) var)
+  )
 
+
+|#
+(set-top-level-value! 'EXPANDER-PRINT #t)
+(set-top-level-value! 'dbg #t)
+
+#|
+TODO:
+(print
+(let-syntax
+  ((set! (syntax-rules (return)
+           ((_ return value) value)
+           ((_ name value) (set! name value)))))
+  (define var #f)
+  (set! var #t)
+  (cons var (set! return #t))))
 |#
