@@ -67,6 +67,10 @@
 
 (define unspecified (if #f #f))
 
+(define (expander-trace . rest)
+  (if (eq? (top-level-value 'xtrace) #t)
+    (apply print (cons "expander:" rest))))
+
 (define (list-tail lst i)
   (if (or (null? lst) (not (pair? lst)))
     (raise 'type "list-tail expects a list with at least one element as its argument" (list lst)))
@@ -489,14 +493,6 @@
 
       ))
 
-(define (module-import! mod1 mod2-spec)
-  (define mod2-name (module-spec->string mod2-spec mod2-spec))
-  (define mod (table-ref (top-level-value 'module-table) mod2-name))
-
-  (print "importing" mod2-name "to" (table-ref mod1 "module-name"))
-
-  #t)
-
 (define (expand-import mod spec)
   (define imports (filter (lambda (v) v) (module-import-eval spec)))
 
@@ -616,8 +612,7 @@
         ((eq? kar 'set!) (expand-set x env))
         ((eq? kar 'cond) (expand-cond x env))
         ((eq? kar 'quote) (cons-source x (make-rename #f 'quote) (cdr x)))
-        (else (begin 
-                (expand-macro x env (list-ref (env-lookup env (car x)) 2)))))
+        (else (raise-source x 'expand (print-string "unknown special form" (car x)) (list x))))
       ;; Normal function application
       ;; Needs to be annotated with src info, right?
       ;; map-source?
@@ -791,38 +786,44 @@
 
     (expand-define-transformer! x env name body)))
 
-;; TODO (let-syntax () (define x #t))
 
-(define expand-let-syntax
-  (lambda (x env)
-    (define new-env (env-make env))
-    (define bindings #f)
-    (define body #f)
+;; TODO (let-syntax () (define x #t)) at module-level
+;; TODO
 
-    (if (fx< (length x) 3)
-      (raise-source x 'expand "let-syntax expands at least three arguments" (list x)))
+;; (let-syntax ((set! (syntax-rules () ((_ name value) (set! name value)))) (set!)
 
-    (set! bindings (cadr x))
-    (set! body (cddr x))
+;; How do we make this work?
 
-    (if (not (list? bindings))
-      (raise-source (cadr x) 'expand "let-syntax bindings list must be a valid list" (list x (cadr x))))
 
-    (for-each1
-      (lambda (x)
-        (define name #f)
-        (define body #f)
+(define (expand-let-syntax x env)
+  (define new-env (env-make env))
+  (define bindings #f)
+  (define body #f)
 
-        (if (not (fx= (length x) 2))
-          (raise-source x 'expand "let-syntax bindings should have two values: a name and a transform" (list x)))
+  (if (fx< (length x) 3)
+    (raise-source x 'expand "let-syntax expands at least three arguments" (list x)))
 
-        (set! name (car x))
-        (set! body (cadr x))
+  (set! bindings (cadr x))
+  (set! body (cddr x))
 
-        (expand-define-transformer! x new-env name body))
-      bindings)
+  (if (not (list? bindings))
+    (raise-source (cadr x) 'expand "let-syntax bindings list must be a valid list" (list x (cadr x))))
 
-    (cons-source x (make-rename #f 'begin) (expand body new-env))))
+  (for-each1
+    (lambda (x)
+      (define name #f)
+      (define body #f)
+
+      (if (not (fx= (length x) 2))
+        (raise-source x 'expand "let-syntax bindings should have two values: a name and a transform" (list x)))
+
+      (set! name (car x))
+      (set! body (cadr x))
+
+      (expand-define-transformer! x new-env name body))
+    bindings)
+
+  (cons-source x (make-rename #f 'begin) (expand body new-env)))
 
 ;; Expand a macro application
 (define expand-macro 
@@ -857,6 +858,17 @@
 
     (set-top-level-value! '*current-rename-env* saved-rename-env)
 
+    ;; In a let-syntax, the RESULTS of macro-expansion must be expanded in the parent environment -- right?
+    ;; And how to do that?
+
+    ;; #(asdf syntactic)
+    ;; #(asdf #t)
+    ;; #(asdf #f)
+
+    ;; (define asdf #t)
+    ;;   (let-syntax ((asdf (lambda (x) 'asdf)))
+    ;;     (asdf))
+
     (if identifier-application?
       (cons-source x result (expand-map (cdr x) env)) 
       (expand result env))))
@@ -864,6 +876,7 @@
 ;; cond expander
 (define expand-cond-full-clause
   (lambda (x env clause rest)
+
     (if (or (null? clause) (not (list? clause)))
       (raise-source clause 'expand "cond clause should be a list" (list clause)))
 
@@ -893,14 +906,37 @@
              (expand condition env)))
          (gensym))
 
-
-        (list-source x
-          (make-rename #f 'if)
-          (expand condition env)
-          (expand (cons-source x (make-rename #f 'begin) body) env)
-          (if (null? rest)
-            unspecified
-            (expand-cond-full-clause x env (car rest) (cdr rest)))))
+        ;; Handle => variation
+        (if (env-compare env (car body) (make-rename env '=>))
+          (begin
+            (if (null? (cdr body))
+              (raise-source body 'expand "cond expects function after =>" (list x))
+              (if (not (null? (cddr body)))
+                (raise-source body 'expand "cond expects only two elements in => clause" (list x))
+                ((lambda (name)
+                   ;; Generate a function in the CAR position so as to not double-evaluate
+                   (list-source x
+                     (list-source x
+                                  (make-rename #f 'lambda)
+                                  (list-source x name)
+                                  (list-source x
+                                               (make-rename #f 'if)
+                                               name
+                                              (list-source x (cadr body) name)
+                                              (if (null? rest)
+                                                unspecified
+                                                (expand-cond-full-clause x env (car rest) (cdr rest))))
+                                  )
+                     condition))
+                 (gensym 'result)))))
+          ;; Otherwise it's a simple if
+          (list-source x
+            (make-rename #f 'if)
+            (expand condition env)
+            (expand (cons-source x (make-rename #f 'begin) body) env)
+            (if (null? rest)
+              unspecified
+              (expand-cond-full-clause x env (car rest) (cdr rest))))))
     )
 
     result))
@@ -927,16 +963,6 @@
 (table-set! *core-module* "module-export-all" #t)
 (table-set! *core-module* "module-stage" 2)
 
-(define test (module-make "test"))
-
-(table-set! (top-level-value 'module-table) "test" test)
-
-(table-set! (table-ref test "module-exports") 'car #t)
-(table-set! (table-ref test "module-exports") 'cdr #t)
-
-(table-set! test 'car 'car)
-(table-set! test 'cdr 'cdr)
-
 (define *current-module* *core-module*)
 
 ;; populate core module with already-defined things
@@ -955,14 +981,9 @@
   (table-set! mod "module-export-all" #t)
   (table-set! mod "module-stage" 2)
   mod)
-  
-(make-empty-module "scheme#base")
-(make-empty-module "scheme#cxr")
-(make-empty-module "scheme#file")
-(make-empty-module "scheme#inexact")
-(make-empty-module "scheme#write")
-(make-empty-module "scheme#time")
-(make-empty-module "scheme#read")
+
+(for-each1 make-empty-module (list "scheme#base" "scheme#cxr" "scheme#file" "scheme#inexact" "scheme#write"
+                                   "#scheme#time" "scheme#read"))
 
 (define *user-module* (module-make "user"))
 

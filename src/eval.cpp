@@ -546,6 +546,8 @@ tail_call:
               if(length < 2) {
                 return eval_error("if must have at least two arguments (condition and then branch)",
                   exp);
+              } else if(length > 4) {
+                return eval_error("if must have at most four arguments (condition, then and else branch)", exp);
               }
               
               tmp = eval_body(frame, exp.cadr(), true);

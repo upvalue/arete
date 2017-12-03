@@ -558,8 +558,6 @@
   ;; Compile the lambda's body
   (compile sub-fn (cddr x))
 
-  ;(pretty-print sub-fn)
-  ;(when (top-level-value '*compiler-log*) (pretty-print sub-fn))
   ;; And it's finally done
   (compile-finish sub-fn)
 

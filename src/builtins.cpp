@@ -552,8 +552,6 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_EXPECT_POSITIVE(state, argv, 1);
 
-  size_t position = argv[1].fixnum_value();
-
   AR_FN_CHECK_BOUNDS(state, "vector", argv[0].vector_length(), argv[1].fixnum_value());
 
   return argv[0].vector_ref(argv[1].fixnum_value());
@@ -1170,7 +1168,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   // because it allocates
   free_vars = rec.record_ref(15);
 
-  if(free_vars.type() == VECTOR && free_vars.vector_length() > 0) {
+  if(free_vars.heap_type_equals(VECTOR) && free_vars.vector_length() > 0) {
     size_t length = free_vars.vector_length();
     free_vars_blob = state.make_bytevector<size_t>(length);
     for(size_t i = 0; i != length; i++) {
@@ -1223,6 +1221,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
   AR_ASSERT(((char*) code_array) > ((char*) &fn.as_unsafe<VMFunction>()->constants));
   
   for(size_t i = 0; i != insn_count; i++) {
+    AR_ASSERT(insns.vector_ref(i).fixnump());
     (*code_array++) = insns.vector_ref(i).fixnum_value();
   }
 

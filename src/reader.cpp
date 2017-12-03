@@ -225,7 +225,7 @@ XReader::TokenType XReader::next_token() {
         tokenize_symbol();
         return TK_SYMBOL;
       }
-    } else if(c == ' ' || c == '\r' || c == '\t' || c == '\n') {
+    } else if(c == ' ' || c == '\r' || c == '\t' || c == '\n' || c == 12) {
       eatc();
     } else if(c == '#') {
       // # Sharp syntax

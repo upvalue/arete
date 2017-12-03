@@ -340,11 +340,10 @@
 
 
 |#
-(set-top-level-value! 'EXPANDER-PRINT #t)
 (set-top-level-value! 'dbg #t)
+(set-top-level-value! 'EXPANDER-PRINT #t)
 
-#|
-TODO:
+;TODO: let-syntax, vs letrec-syntax
 (print
 (let-syntax
   ((set! (syntax-rules (return)
@@ -353,4 +352,3 @@ TODO:
   (define var #f)
   (set! var #t)
   (cons var (set! return #t))))
-|#
