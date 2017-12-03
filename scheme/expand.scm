@@ -788,12 +788,10 @@
 
 
 ;; TODO (let-syntax () (define x #t)) at module-level
-;; TODO
 
 ;; (let-syntax ((set! (syntax-rules () ((_ name value) (set! name value)))) (set!)
 
 ;; How do we make this work?
-
 
 (define (expand-let-syntax x env)
   (define new-env (env-make env))
@@ -823,7 +821,12 @@
       (expand-define-transformer! x new-env name body))
     bindings)
 
-  (cons-source x (make-rename #f 'begin) (expand body new-env)))
+  (define result 
+    (cons-source x (make-rename #f 'begin) (expand body new-env)))
+
+  (pretty-print new-env)
+
+  (expand result env))
 
 ;; Expand a macro application
 (define expand-macro 

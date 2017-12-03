@@ -960,7 +960,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         loc.line = vmloc.line;
         loc.begin = vmloc.begin;
         loc.length = vmloc.length;
-        AR_ASSERT(vmloc.source < source_names.size());
+        //AR_ASSERT(vmloc.source < source_names.size());
 
         std::ostringstream os;
         os << source_info(loc, f.fn->name);

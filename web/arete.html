@@ -12,15 +12,15 @@
 
       body {
         margin: 0;
-        padding: 0;
+        padding: 5px;
         font-family: arial;
       }
 
-      .emscripten { padding-right: 0; margin-left: auto; margin-right: auto; display: block; }
-      div.emscripten { text-align: center; }      
-      div.emscripten_border { border: 1px solid black; }
-      /* the canvas *must not* have any border or padding, or mouse coords will be wrong */
-      canvas.emscripten { border: 0px none; background-color: black; }
+      #arete-canvas {
+        width: 5px;
+        height: 5px;
+        border: 0px none;
+      }
 
       #status {
         display: inline-block;
@@ -60,7 +60,7 @@
         outline: none;
       }
 
-      .arete-root input, button {
+      .arete-root select, input, button {
         width:100%;
         padding: 5px;
         border: 1px solid #ccc;
@@ -69,12 +69,14 @@
         margin-bottom: 5px;
       }
 
-      input, button, .arete-repl {
+      input, button, select, .arete-repl {
         font-family: Consolas, Monaco, monospace;
         font-size: 12px;
       }
 
       .arete-repl {
+        overflow: scroll;
+        max-height: 65vh;
         padding: 5px;
         width: 100%;
         background-color: #eee;
@@ -83,38 +85,22 @@
     </style>
   </head>
   <body>
-    <!--
-    <div class="emscripten" id="status">Downloading...</div>
-<span id='controls'>
-  <span><input type="checkbox" id="resize">Resize canvas</span>
-  <span><input type="checkbox" id="pointerLock" checked>Lock/hide mouse pointer &nbsp;&nbsp;&nbsp;</span>
-  <span><input type="button" value="Fullscreen" onclick="Module.requestFullscreen(document.getElementById('pointerLock').checked, 
-                                                                            document.getElementById('resize').checked)">
-  </span>
-</span>
 
-    <div class="emscripten">
-      <progress value="0" max="100" id="progress" hidden=1></progress>
-    </div>
-
-    
-    <div class="emscripten_border">
-      <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()"></canvas>
-    </div>
-    <textarea id="output" rows="8"></textarea>
-
-  -->
-
+<div>This is a very alpha web demo for <a href="https://github.com/upvalue/arete">Arete Scheme</a>. Show stopping bugs not only likely, but positively guaranteed or your money back!</div>
+<canvas id="arete-canvas"></canvas>
 <div id="arete-root"></div>
 <script src="//unpkg.com/preact/dist/preact.min.js"></script>
 
 <script type='text/javascript'>
-var statusElement = document.getElementById('status');
-var progressElement = document.getElementById('progress');
-var spinnerElement = document.getElementById('spinner');
-
 const h = preact.h;
 let setState, getState;
+
+const gists = [
+  {
+    id: '5f974ad2f83f7e1987fcc2abf04c20ba',
+    name: "Conway's Game of Life (console version)",
+  }
+]
 
 class AreteInterface extends preact.Component {
   constructor() {
@@ -130,14 +116,76 @@ class AreteInterface extends preact.Component {
       dependenciesTotal: 1,
       message: false,
       consoleLines: [],
+      fileToLoad: '',
     }
+  }
+
+  schemeEvaluate(text) {
+    Module.ccall('ar_eval_and_print', null, ['string', 'string'], ['heap32.boot', text]);
   }
 
   enterLine(e) {
     e.preventDefault();
-    // Module.ccall('ar_init', null, ['number'], [this.r.value]);
-    Module.ccall('ar_eval_and_print', null, ['string', 'string'], ['heap32.boot', this.r.value]);
+    this.schemeEvaluate(this.r.value);
     this.r.value = '';
+  }
+
+  enterGistManual(e) {
+    e.preventDefault();
+    this.setState({
+      fileToLoad: e.target.value,
+    });
+  }
+
+  enterGist(e) {
+    e.preventDefault();
+    for (let i = 0; i != gists.length; i++) {
+      if (gists[i].id == e.target.value) {
+        this.setState({
+          fileToLoad: e.target.value
+        });
+      }
+    }
+  }
+
+  loadGist(e) {
+    e.preventDefault();
+
+    const gistId = this.state.fileToLoad;
+
+    this.setState({ fileToLoad: '' });
+
+    console.log('Loading gist ', gistId);
+    window.fetch(`https://api.github.com/gists/${gistId}`).then((res) => {
+      return res.json();
+    }).then((json) => {
+      const keys = Object.keys(json.files);
+      const key = keys[0];
+      const content = json.files[key].content;
+      this.schemeEvaluate(content);
+    })
+
+  }
+  
+  renderGists() {
+    const options = [
+      h('option', {value: 'none'}, 'vvv Select a gist from this dropdown vvv')
+    ];
+    for(let i = 0; i != gists.length; i++) {
+      const gist = gists[i];
+      options.push(h('option', { value: gists[i].id }, `${gist.name} (Gist ID: ${gist.id})`));
+    }
+    return options;
+  }
+
+  renderGistLinks() {
+    const links = [];
+
+    for(let i = 0; i != gists.length; i++) {
+      links.push(h('a', { href: `https://gist.github.com/${gists[i].id}`}, gists[i].name));
+    }
+
+    return links;
   }
 
   render(props, state) {
@@ -146,13 +194,29 @@ class AreteInterface extends preact.Component {
         h('p', null, `Loading: ${state.dependenciesLeft} / ${state.dependenciesTotal}.`),
       state.message && h('p', null, `${state.message ? state.message : ''}`),
       h('pre', { class: 'arete-repl' }, ...
-        this.state.consoleLines.slice(-100).map((line) =>  {
+        this.state.consoleLines.slice(-1000).map((line) =>  {
           return line;
         }),
       ),
       h('form', { onSubmit: (e) => this.enterLine(e) },
         h('input', { class: 'arete-cmd', type: 'text', ref: (r) => { this.r = r; }, placeholder: 'Enter scheme code...', }),
         h('button', { type: 'submit' }, '=>'),
+      ),
+      //h('form', { onSubmit: (e) => })
+      h('p', null, 'Or try loading a Scheme file from Gist:'),
+      h('form', { onSubmit: (e) => this.loadGist(e) },
+        h('select', { onChange: (e) => this.enterGist(e) },
+          this.renderGists(),
+        ),
+        h('input', { type: 'text', onInput: (e) => this.enterGistManual(e), ref: (r) => {this.gist_manual = r; }, placeholder: 'Enter a Gist ID manually'}),
+        h('button', {type: 'submit',
+          style: state.fileToLoad.length > 0 ? {fontWeight: 'bold'} : {},
+          disabled: state.fileToLoad.length === 0,
+        }, `Load gist ${state.fileToLoad}`),
+      ),
+      h('div', null, 
+        h('p', null, 'View Gist code'),
+        this.renderGistLinks(),
       )
     );
   }
@@ -182,8 +246,8 @@ window.Module = {
   printErr: (text) => printLine(text, true),
 
   canvas: (function() {
-    var canvas = document.getElementById('canvas');
-    //canvas.addEventListener("webglcontextlost", function(e) { alert('WebGL context lost. You will need to reload the page.'); e.preventDefault(); }, false);
+    var canvas = document.getElementById('arete-canvas');
+    canvas.addEventListener("webglcontextlost", function(e) { alert('WebGL context lost. You will need to reload the page.'); e.preventDefault(); }, false);
     return canvas;
   })(),
 

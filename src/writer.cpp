@@ -703,7 +703,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
   ps.indent_level = 2;
   ps.row_width = 120;
   ps.indent = 0;
-  //ps.table_max = 5;
+  ps.table_max = 5;
 
   ps.printed = printed;
   // Right now printing can't return an exception, but it might if we allow users to extend this

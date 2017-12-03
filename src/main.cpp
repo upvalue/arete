@@ -26,10 +26,6 @@ static size_t i = 0;
 extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
-extern void ar_init() {
-}
-
-EMSCRIPTEN_KEEPALIVE
 extern void ar_eval_and_print(const char* image, const char* str) {
   if(state == 0) {
     state = new arete::State();
@@ -52,6 +48,7 @@ extern void ar_eval_and_print(const char* image, const char* str) {
     x = reader.read();
     if(x.is_active_exception()) {
       state->print_exception(std::cerr, x);
+      break;
     }
 
     //std::cout << "reader: " << x << std::endl;
@@ -75,10 +72,6 @@ extern void ar_eval_and_print(const char* image, const char* str) {
   }
 }
 
-EMSCRIPTEN_KEEPALIVE
-extern void howdy() {
-  std::cout << "HELLO :)" << std::endl;
-}
 
 EMSCRIPTEN_KEEPALIVE
 int ar_free() {

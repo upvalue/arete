@@ -141,7 +141,7 @@ std::string State::source_info(const SourceLocation loc, Value fn_name,
     bool from_eval) {
   std::ostringstream ss;
   if(from_eval) ss << "eval: ";
-  AR_ASSERT(loc.source < source_names.size());
+  lazy_load_source(loc.source);
   ss << source_names.at(loc.source) << ':' << loc.line;
   if(fn_name == C_TRUE) 
     ss << " in toplevel";

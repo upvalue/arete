@@ -15,7 +15,11 @@ Currently:
 Will bootstrap the expander and compiler, then save them into a loadable image. Prepending --load-image heap.boot will
 make the files in examples/ and REPL work as expected, for example:
 
-    bin/arete --load-image heap.boot examples/life.scm
+    bin/arete --load-image heap.boot --repl
+
+Will run the read-eval-print loop.
+
+    bin/arete --load-image heap.boot examples/life.scm 
 
 Will run a simple Conway's Game of Life simulation.
 
