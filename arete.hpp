@@ -53,10 +53,10 @@
 # define AR_TYPE_ASSERT assert
 #elif ARETE_ASSERTION_LEVEL == 1
 # define AR_TYPE_ASSERT(x) if(!(x)) { std::cerr << "arete:assert: " << #x << " at " << __FILE__ << ':' << __LINE__ << " failed" << std::endl; }
-# define AR_ASSERT(x) 
+# define AR_ASSERT(x) ((void) 0)
 #else
-# define AR_ASSERT(x)
-# define AR_TYPE_ASSERT(x)
+# define AR_ASSERT(x) ((void) 0)
+# define AR_TYPE_ASSERT(x) ((void) 0)
 #endif
 
 #ifndef AR_LINENOISE
