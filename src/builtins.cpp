@@ -1009,10 +1009,10 @@ Value fn_unwind_protect(State& state, size_t argc, Value* argv) {
   AR_FRAME(state, body, protection, ret);
 
   ret = state.apply(body, 0, nullptr);
-  if(ret.is_active_exception()) {
-    Value ret2 = state.apply(protection, 0, nullptr);
-    if(ret2.is_active_exception()) return ret2;
-  }
+
+  Value ret2 = state.apply(protection, 0, nullptr);
+  if(ret2.is_active_exception()) return ret2;
+
   return ret;
 }
 AR_DEFUN("unwind-protect", fn_unwind_protect, 2);

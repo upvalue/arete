@@ -824,7 +824,7 @@
   (define result 
     (cons-source x (make-rename #f 'begin) (expand body new-env)))
 
-  (pretty-print new-env)
+  ;(pretty-print new-env)
 
   (expand result env))
 
@@ -877,72 +877,70 @@
       (expand result env))))
 
 ;; cond expander
-(define expand-cond-full-clause
-  (lambda (x env clause rest)
+(define (expand-cond-full-clause x env clause rest)
+  (if (or (null? clause) (not (list? clause)))
+    (raise-source clause 'expand "cond clause should be a list" (list clause)))
 
-    (if (or (null? clause) (not (list? clause)))
-      (raise-source clause 'expand "cond clause should be a list" (list clause)))
+  (define len (length clause))
 
-    (define len (length clause))
+  (define condition (car clause))
+  (define body (cdr clause))
 
-    (define condition (car clause))
-    (define body (cdr clause))
+  ;; Handle else clause
+  (if (env-compare env condition (make-rename env 'else))
+    (begin
+      (set! condition #t)))
 
-    ;; Handle else clause
-    (if (env-compare env condition (make-rename env 'else))
-      (begin
-        (set! condition #t)))
-
-    (define result
-      (if (null? body)
-        ;; We may need to return this value
-        ((lambda (name)
+  (define result
+    (if (null? body)
+      ;; We may need to return this value
+      ((lambda (name)
+         (list-source x 
            (list-source x 
-             (list-source x 
-                (make-rename #f 'lambda)
+              (make-rename #f 'lambda)
+              (list-source x name)
+              (list-source x
+                (make-rename #f 'if)
                 name
-                (list-source x
-                  (make-rename #f 'if)
-                  name
-                  name
-                  (if (null? rest) unspecified (expand-cond-full-clause x env (car rest) (cdr rest)))))
-             (expand condition env)))
-         (gensym))
+                name
+                (if (null? rest) unspecified (expand-cond-full-clause x env (car rest) (cdr rest)))))
+           (expand condition env)))
+       (gensym))
 
-        ;; Handle => variation
-        (if (env-compare env (car body) (make-rename env '=>))
-          (begin
-            (if (null? (cdr body))
-              (raise-source body 'expand "cond expects function after =>" (list x))
-              (if (not (null? (cddr body)))
-                (raise-source body 'expand "cond expects only two elements in => clause" (list x))
-                ((lambda (name)
-                   ;; Generate a function in the CAR position so as to not double-evaluate
+      ;; Handle => variation
+      (if (env-compare env (car body) (make-rename env '=>))
+        (begin
+          (if (null? (cdr body))
+            (raise-source body 'expand "cond expects function after =>" (list x))
+            (if (not (null? (cddr body)))
+              (raise-source body 'expand "cond expects only two elements in => clause" (list x))
+              ((lambda (name)
+                 ;; Generate a function in the CAR position so as to not double-evaluate
+                 (list-source x
                    (list-source x
-                     (list-source x
-                                  (make-rename #f 'lambda)
-                                  (list-source x name)
-                                  (list-source x
-                                               (make-rename #f 'if)
-                                               name
-                                              (list-source x (cadr body) name)
-                                              (if (null? rest)
-                                                unspecified
-                                                (expand-cond-full-clause x env (car rest) (cdr rest))))
-                                  )
-                     condition))
-                 (gensym 'result)))))
-          ;; Otherwise it's a simple if
-          (list-source x
-            (make-rename #f 'if)
-            (expand condition env)
-            (expand (cons-source x (make-rename #f 'begin) body) env)
-            (if (null? rest)
-              unspecified
-              (expand-cond-full-clause x env (car rest) (cdr rest))))))
-    )
+                                (make-rename #f 'lambda)
+                                (list-source x name)
+                                (list-source x
+                                             (make-rename #f 'if)
+                                             name
+                                            (list-source x (cadr body) name)
+                                            (if (null? rest)
+                                              unspecified
+                                              (expand-cond-full-clause x env (car rest) (cdr rest))))
+                                )
+                   condition))
+               (gensym 'result)))))
+        ;; Otherwise it's a simple if
+        (list-source x
+          (make-rename #f 'if)
+          (expand condition env)
+          (expand (cons-source x (make-rename #f 'begin) body) env)
+          (if (null? rest)
+            unspecified
+            (expand-cond-full-clause x env (car rest) (cdr rest))))))
+  )
 
-    result))
+  result)
 
 (define expand-cond-clause 
   (lambda (x env clause rest)
