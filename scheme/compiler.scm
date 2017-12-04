@@ -488,21 +488,6 @@
   (for-each-improper
     (lambda (x)
       (scan-local-defines-expr fn x))
-
-
-
-
-      #|
-      (when (and (pair? x))
-        (when (eq? (rename-strip (car x)) 'define)
-          (let ((var (Var/make (OpenFn/local-count fn) (cadr x))))
-            (table-set! (OpenFn/env fn) (cadr x) var)
-            (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))))
-
-        (when (eq? (rename-strip (car x)) 'begin)
-          (scan-local-defines fn (cdr x)))))
-    |#
-
     body)
  )
 

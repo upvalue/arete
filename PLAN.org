@@ -6,17 +6,20 @@
 * Utilities
   - [ ] A pattern matcher
   - [ ] A less tedious way of writing macros
+    Here's a thought: a reader macro for renames.
+    #`(let ((#,injection hello) (var #f)) (cons #,injection var))
+    this turns into a quasiquote with all symbols NOT inside unquotes
 
 * Language
   - [ ] Gradual typing
-  - [ ] Delimited continuations
+  - [x] Delimited continuations
 
     Shift/reset. We'd need to replace is_active_exception with something that
     can communicate return values to a SHIFT point.
 
 * RNRS & SRFIs
   - [ ] Syntax-rules
-  - [ ] map & for-each must accept multiple lists as arguments
+  - [x] map & for-each must accept multiple lists as arguments
   - [ ] SRFI 89: Optional arguments
 
 * Expander

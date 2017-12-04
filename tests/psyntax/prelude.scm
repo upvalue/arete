@@ -64,24 +64,7 @@
 
 ;; So, we're not supposed to expand or do anything to psyntax's output
 ;; But we have to, because we can't support letrec without our expander.
-
 (set! eval 
   (lambda (x)
-    (%eval (expand (cadr x) (top-level-value '*user-module*)))))
-
-(define (map proc ls . lol)
-  (define (map1 proc ls res)
-    (if (pair? ls)
-        (map1 proc (cdr ls) (cons (proc (car ls)) res))
-        (reverse res)))
-  (define (mapn proc lol res)
-    (if (every pair? lol)
-        (mapn proc
-              (map1 cdr lol '())
-              (cons (apply proc (map1 car lol '())) res))
-        (reverse res)))
-  (if (null? lol)
-      (map1 proc ls '())
-      (mapn proc (cons ls lol) '())))
-
+    (%eval (expand-toplevel (cadr x) (top-level-value '*user-module*)))))
 

@@ -52,10 +52,9 @@ Value fn_file_exists(State& state, size_t argc, Value* argv) {
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
 #if AR_OS == AR_POSIX
   struct stat st;
-  if(stat(argv[0].string_data(), &st) == -1) {
-    return C_FALSE;
+  if(stat(argv[0].string_data(), &st) != -1) {
+		return C_TRUE;
   }
-  return C_TRUE;
 #else
 	WIN32_FIND_DATA find;
 	HANDLE handle = FindFirstFile(argv[0].string_data(), &find);

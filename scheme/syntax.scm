@@ -429,7 +429,6 @@
           #f
           (loop (car rest) (cdr rest)))))))
 
-;(define (assq obj alist) (assoc-impl eq? obj alist))
 (define (assv obj alist) (assoc-impl eqv? obj alist))
 (define (assoc obj alist) (assoc-impl equal? obj alist))
 

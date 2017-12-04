@@ -25,7 +25,6 @@
 // objects (to mark them), but this might improve things. It would, however, increase complexity
 // quite a bit.
 
-
 #include <chrono>
 
 #include "arete.hpp"
@@ -139,7 +138,8 @@ Block::~Block() {
 }
 
 void State::print_gc_stats(std::ostream& os) {
-  os << (gc.heap_size / 1024) << "kb in use after " << gc.collections << " collections and "
+
+  os << (gc.heap_size / 1024) << "kb heap size after " << gc.collections << " collections and "
      << gc.allocations << " allocations " << std::endl;
 
 #ifdef ARETE_BENCH_GC
@@ -148,7 +148,7 @@ void State::print_gc_stats(std::ostream& os) {
   std::cout << (gc_alloc_timer / 1000) << "ms in allocation" << std::endl;
   std::cout << ((gc_collect_timer + gc_alloc_timer) / 1000) << " ms total" << std::endl;
 # else
-  std::cout << ((size_t)((((char*)gc.active->data + gc.block_cursor) - (char*)gc.active->data)) / 1024) << "kb allocated" << std::endl;
+  std::cout << ((size_t)((((char*)gc.active->data + gc.block_cursor) - (char*)gc.active->data)) / 1024) << "kb in use" << std::endl;
 # endif
 
   // TODO: This cannot be called twice and remain accurate

@@ -900,6 +900,7 @@ AR_DEFUN("rename-gensym", fn_rename_gensym, 1);
 
 Value fn_eval(State& state, size_t argc, Value* argv) {
   Value env = argc == 2 ? argv[1] : C_FALSE, exp = argv[0];
+  if(argv[0].applicable()) return argv[0];
   AR_FRAME(state, env, exp);
   exp = state.make_pair(exp, C_NIL);
   return state.eval_list(exp, false, env);

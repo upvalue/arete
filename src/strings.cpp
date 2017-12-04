@@ -71,6 +71,14 @@ Value fn_char_numeric(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("char-numeric?", fn_char_numeric, 1);
 
+Value fn_char_equals(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "char=?";
+  AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
+  AR_FN_EXPECT_TYPE(state, 1, argv, CHARACTER);
+  return Value::make_boolean(argv[0].character() == argv[1].character());
+}
+AR_DEFUN("char=?", fn_char_equals, 2);
+
 Value fn_string_append(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string-append";
   std::ostringstream os;

@@ -679,12 +679,11 @@
 
     (list-source x (make-rename #f 'set!) (expand (list-ref x 1) env) (expand (list-ref x 2) env))))
 
-(define expand
-  (lambda (x env)
-    (cond
-      ((self-evaluating? x) x)
-      ((identifier? x) (expand-identifier x env))
-      (else (expand-apply x env)))))
+(define (expand x env)
+  (cond
+    ((self-evaluating? x) x)
+    ((identifier? x) (expand-identifier x env))
+    (else (expand-apply x env))))
 
 (define (expand-delayed x)
   (if (pair? x)
@@ -698,33 +697,7 @@
     expand-delayed
     (map1 (lambda (sub-x) (expand sub-x env)) results)))
 
-#|
-(define (expand-toplevel body env)
-  (define results
-    (map1
-      (lambda (sub-x) (expand sub-x env))
-      body))
-
-  (map1
-    (lambda (sub-x)
-      (define result (expand-delayed sub-x))
-      (if (and (top-level-value 'EXPANDER-PRINT) (not (eq? (top-level-value 'EXPANDER-PRINT) unspecified)))
-        (begin
-          (print-source sub-x)
-          (print "Expanded to:" result)))
-      result)
-    results))
-
-      #|(lambda (sub-x)
-           (define result (expand sub-x env))
-           (if (and (top-level-value 'EXPANDER-PRINT) (not (eq? (top-level-value 'EXPANDER-PRINT) unspecified)))
-             (begin
-               (print-source sub-x)
-               (print "Expanded to:" result)))
-           result) body))
-
-  (expand-delayed results))|#
-|#
+;; Expander entry point
 (define (expand-toplevel x env)
   (expand-delayed (expand x env)))
 
@@ -785,7 +758,6 @@
     (set! body (caddr x))
 
     (expand-define-transformer! x env name body)))
-
 
 ;; TODO (let-syntax () (define x #t)) at module-level
 
@@ -888,8 +860,8 @@
 
   ;; Handle else clause
   (if (env-compare env condition (make-rename env 'else))
-    (begin
-      (set! condition #t)))
+    (set! condition #t)
+    (set! condition (expand condition env)))
 
   (define result
     (if (null? body)
@@ -904,7 +876,7 @@
                 name
                 name
                 (if (null? rest) unspecified (expand-cond-full-clause x env (car rest) (cdr rest)))))
-           (expand condition env)))
+           condition))
        (gensym))
 
       ;; Handle => variation
@@ -933,7 +905,7 @@
         ;; Otherwise it's a simple if
         (list-source x
           (make-rename #f 'if)
-          (expand condition env)
+          condition
           (expand (cons-source x (make-rename #f 'begin) body) env)
           (if (null? rest)
             unspecified
