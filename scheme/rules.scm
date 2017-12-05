@@ -117,6 +117,7 @@
       #;(print "could not match:" pattern form) #f)
     ))
 
+  #|
 (print (rules-match '... '(hello one ...) '(hello 1) '()))
 (print (rules-match '... '(hello) '(hello) '()))
 (print (rules-match '... '(hello one) '(hello 1) '()))
@@ -133,6 +134,7 @@
 (print (rules-match '... '(hello one ... two three four five) '(hello 1 2 3) '()))
 
 (print (rules-match '... '(hello name value) '(hello name #t) '(name)))
+|#
 
 ;(print "ok:"(rules-match '... '(thing . 5) '(thing . 6) '()))
 
@@ -184,7 +186,7 @@
 
                        (map1 
                          (lambda (c)
-                           (print c)
+                           ;(print c)
                            ;; Some values were consumed, meaning caddr c (values not consumed) should be NULL,
                            ;; which will fail if a value not rightmost resulted in consumption
                            (when (eq? (cadr c) 'splat-consume)
@@ -255,8 +257,8 @@
 ;;   (syntax-rules (literals)
 ;;     ((pattern) template) ...))
 
-(print "fold-template test" (fold-template '((hello single hello)) '(begin #t)))
-(print "fold-template test" (fold-template '((hello single hello)) '(#t)))
+;(print "fold-template test" (fold-template '((hello single hello)) '(begin #t)))
+;(print "fold-template test" (fold-template '((hello single hello)) '(#t)))
 
 (define (syntax-rules-matcher literals pare rest)
   (if (not (list? pare))
@@ -284,16 +286,12 @@
     (define literals (cadr x))
     (define pares (cddr x))
 
-    (print "!!!")
-    (print "ye literals" literals)
-    (print "!!!")
-
     (if (not (and (list? literals) (every symbol? literals)))
       (raise-source x 'syntax "syntax-rules literals list must be a list of symbols"))
 
     (define body (syntax-rules-matcher literals (car pares) (cdr pares)))
 
-    (pi "res"`(,#'lambda (,#'x) 
+    (pi "syntax-rules result"`(,#'lambda (,#'x) 
 
        (let ((form ,#'x))
          ,body)))))
@@ -340,15 +338,7 @@
 
 
 |#
-(set-top-level-value! 'dbg #t)
-(set-top-level-value! 'EXPANDER-PRINT #t)
+;(set-top-level-value! 'dbg #t)
+;(set-top-level-value! 'EXPANDER-PRINT #t)
 
 ;TODO: let-syntax, vs letrec-syntax
-(print
-(let-syntax
-  ((set! (syntax-rules (return)
-           ((_ return value) value)
-           ((_ name value) (set! name value)))))
-  (define var #f)
-  (set! var #t)
-  (cons var (set! return #t))))

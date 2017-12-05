@@ -631,16 +631,27 @@ Value fn_set_vmfunction_name(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("set-vmfunction-name!", fn_set_vmfunction_name, 2);
 
-Value fn_set_vmfunction_macro_env(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "set-vmfunction-macro-env!";
-  AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
+Value fn_set_function_macro_env(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "set-function-macro-env!";
+  AR_FN_EXPECT_ENV(state, 1);
 
-  VMFunction* fn = argv[0].as<VMFunction>();
-  fn->macro_env = argv[1];
+  switch(argv[0].type()) {
+    case VMFUNCTION: {
+      VMFunction* fn = argv[0].as<VMFunction>();
+      fn->macro_env = argv[1];
+      break;
+    }
+    case FUNCTION: {
+      Function* fn = argv[0].as<Function>();
+      fn->parent_env = argv[1];
+      break;
+    }
+    default: std::cerr << "set-function-macro-env! got a bad argument " << argv[0] << std::endl;
+  }
 
   return C_UNSPECIFIED;
 }
-AR_DEFUN("set-vmfunction-macro-env!", fn_set_vmfunction_macro_env, 2);
+AR_DEFUN("set-function-macro-env!", fn_set_function_macro_env, 2);
 
 Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "set-vmfunction-log!";

@@ -451,7 +451,11 @@
 
 (define (compile-identifier fn x src)
   (if (rename? x)
-    (set! x (rename-expr x)))
+    (begin
+      ;; how do we resolve a rename to its appropriate expansion-time location...can we do this with the information
+      ;; we have, or do we need to add some kind of annotation?
+      (print "stripping rename!" x)
+      (set! x (rename-expr x))))
   (define result (fn-lookup fn x src))
 
   (compiler-log fn "compiling identifier" result)
@@ -885,7 +889,7 @@
     (let ((fn (compile-lambda #f fn-exxxpr)))
       (set-vmfunction-name! fn fn-name)
       (when is-macro?
-        (set-vmfunction-macro-env! fn (function-env oldfn))
+        (set-function-macro-env! fn (function-env oldfn))
         (set-function-macro-bit! fn))
       fn)
   ))

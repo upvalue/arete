@@ -140,7 +140,7 @@
     ((eq? env #f) unspecified)
     ((table? env)
      (begin
-       (table-set! env name (if (eq? value 'variable) (module-qualify env name) value))
+       (table-set! env name (if (symbol? value) (module-qualify env name) value))
        (if (or (eq? (table-ref env "module-export-all") #t) (table-ref (table-ref env "module-exports") name))
          (table-set! (table-ref env "module-exports") name name))
     ))
@@ -604,7 +604,8 @@
          (expand-toplevel-import x env))
         ((eq? kar 'define) (expand-define x env))
         ((eq? kar 'define-syntax) (expand-define-syntax x env))
-        ((or (eq? kar 'letrec-syntax) (eq? kar 'let-syntax)) (expand-let-syntax x env))
+        ((eq? kar 'let-syntax) (expand-let-syntax 'let-syntax x env))
+        ((eq? kar 'letrec-syntax) (expand-let-syntax 'letrec-syntax x env))
         ((or (eq? kar 'and) (eq? kar 'or)) (expand-and-or x env))
         ((eq? kar 'lambda) (lambda () (expand-lambda x env)))
         ((eq? kar 'begin) (cons-source x (make-rename #f 'begin) (expand-map (cdr x) env)))
@@ -692,17 +693,12 @@
       (expand-delayed (x))
       x)))
 
-(define (expand-body body env)
-  (map1
-    expand-delayed
-    (map1 (lambda (sub-x) (expand sub-x env)) results)))
-
 ;; Expander entry point
 (define (expand-toplevel x env)
   (expand-delayed (expand x env)))
 
-(define expand-define-transformer!
-  (lambda (x env name body)
+(define define-transformer!
+  (lambda (x env trans-env name body)
     (define expanded-body #f)
     (define fn #f)
     (define fn-arity #f)
@@ -728,8 +724,7 @@
     (if (not (procedure? fn))
       (raise-source (cddr x) 'expand "define-syntax body did not evaluate to a function" (list x)))
 
-    (if (vmfunction? fn)
-      (set-vmfunction-macro-env! fn env))
+    (set-function-macro-env! fn trans-env)
 
     (set! fn-arity (function-min-arity fn))
 
@@ -745,39 +740,33 @@
 
     unspecified))
 
-(define expand-define-syntax
-  (lambda (x env)
-    (define len (length x))
-    (define name #f)
-    (define body #f)
+(define (expand-define-syntax x env)
+  (define len (length x))
+  (define name #f)
+  (define body #f)
 
-    (if (fx< len 3)
-      (raise-source x 'expand "define-syntax expects at least two arguments: a name and a body" (list x)))
+  (if (fx< len 3)
+    (raise-source x 'expand "define-syntax expects at least two arguments: a name and a body" (list x)))
 
-    (set! name (cadr x))
-    (set! body (caddr x))
+  (set! name (cadr x))
+  (set! body (caddr x))
 
-    (expand-define-transformer! x env name body)))
+  (define-transformer! x env env name body))
 
-;; TODO (let-syntax () (define x #t)) at module-level
-
-;; (let-syntax ((set! (syntax-rules () ((_ name value) (set! name value)))) (set!)
-
-;; How do we make this work?
-
-(define (expand-let-syntax x env)
+;; Expander for let-syntax and letrec-syntax
+(define (expand-let-syntax type x env)
   (define new-env (env-make env))
   (define bindings #f)
   (define body #f)
 
   (if (fx< (length x) 3)
-    (raise-source x 'expand "let-syntax expands at least three arguments" (list x)))
+    (raise-source x 'expand "let(rec)-syntax expands at least three arguments" (list x)))
 
   (set! bindings (cadr x))
   (set! body (cddr x))
 
   (if (not (list? bindings))
-    (raise-source (cadr x) 'expand "let-syntax bindings list must be a valid list" (list x (cadr x))))
+    (raise-source (cadr x) 'expand "let(rec)-syntax bindings list must be a valid list" (list x (cadr x))))
 
   (for-each1
     (lambda (x)
@@ -785,20 +774,20 @@
       (define body #f)
 
       (if (not (fx= (length x) 2))
-        (raise-source x 'expand "let-syntax bindings should have two values: a name and a transform" (list x)))
+        (raise-source x 'expand "let(rec)-syntax bindings should have two values: a name and a transformer" (list x)))
 
       (set! name (car x))
       (set! body (cadr x))
 
-      (expand-define-transformer! x new-env name body))
+      (define-transformer! x new-env (if (eq? type 'let-syntax) env new-env) name body))
     bindings)
 
   (define result 
-    (cons-source x (make-rename #f 'begin) (expand body new-env)))
+    (cons-source x (make-rename #f 'begin) (expand-toplevel body new-env)))
 
   ;(pretty-print new-env)
 
-  (expand result env))
+  (expand-toplevel result env))
 
 ;; Expand a macro application
 (define expand-macro 
