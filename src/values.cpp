@@ -94,7 +94,7 @@ Value State::get_symbol(const std::string& name) {
     sym.as<Symbol>()->value = C_UNDEFINED;
     sym.as<Symbol>()->name = string;
 
-    if(name[0] == '#') {
+    if(name.size() > 2 && name[0] == '#' && name[1] == '#') {
       sym.heap->set_header_bit(Value::SYMBOL_QUALIFIED_BIT);
     }
 

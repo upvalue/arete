@@ -262,6 +262,15 @@
 ;(print "fold-template test" (fold-template '((hello single hello)) '(begin #t)))
 ;(print "fold-template test" (fold-template '((hello single hello)) '(#t)))
 
+;; We need a way to quote things without stripping them, because identifiers in the form may be renamed
+;; as a result of being introduced by macro invocation
+(define (literal-no-strip x)
+  (if (pair? x)
+    (map-improper literal-no-strip x)
+    (if (symbol? x)
+      (list 'quote x)
+      x)))
+
 (define (syntax-rules-matcher literals pare rest)
   (if (not (list? pare))
     (raise-source pare 'syntax "syntax-rules argument must be a list (pattern and template)" (list pare)))
@@ -273,8 +282,11 @@
     (if (not (and (list? template) (null? (cdr template))))
       (raise-source (cdr template) 'syntax "syntax-rules template must only have one element" (list pare)))
 
+    ;; Problem: Form may contain renamed variables
+    ;; This is because macros may define macros
+
     `(let ((maybe (rules-match '... (quote ,pattern) form (quote ,literals))))
-       (print "rules-match result" maybe form)
+       (if (eq? (top-level-value 'rdbg) #t) (print "rules-match result" maybe form))
        (if maybe 
          (cons 'begin (fold-template maybe (quote ,template)))
          ,(if (null? rest)
@@ -293,10 +305,14 @@
 
     (define body (syntax-rules-matcher literals (car pares) (cdr pares)))
 
-    (pi "syntax-rules result"`(,#'lambda (,#'x) 
+    (define result `(,#'lambda (,#'expr) 
+       (let ((form ,#'expr))
+         ,body)))
 
-       (let ((form ,#'x))
-         ,body)))))
+    (if (eq? (top-level-value 'rdbg) #t)
+      (print result))
+
+    result))
 
 
 #|

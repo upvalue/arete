@@ -1,4 +1,4 @@
-;; expand.scm - most basic boot functionality, macroexpansion & modules
+;;expand.scm - most basic boot functionality, macroexpansion & modules
 
 ;; This file loads and installs the expander and module system. It sets the default module to (arete), after which
 ;; point the other core files should be loaded, and then the default module should be set to the (user) module.
@@ -176,6 +176,7 @@
 (define (module-qualify mod name)
   (string->symbol (string-append "##" (table-ref mod "module-name") "#" (symbol->string name))))
 
+;; Retrieve a rename-expr from a rename, leave other expressions alone
 (define (rename-strip id)
   (if (rename? id) (rename-expr id) id))
 
@@ -183,10 +184,10 @@
 ;; (necessary for rename gensyms) the value of the key in the environment, and whether the variable was "found"
 ;; (variables may be referenced before definition)
 (define (env-lookup env name)
-  #;(if (eq? (top-level-value 'dbg) #t)
+
+  (if (eq? (top-level-value 'dbg) #t)
     (begin
-      (print name)
-      (print env)))
+      (print name)))
   (define strip (rename-strip name))
   (cond
     ;; toplevel
@@ -590,13 +591,28 @@
   result
 )
 
+;; Strip an expression of all renames
+(define (strip-renames x)
+  (if (rename? x)
+    (rename-expr x)
+    (if (pair? x)
+      (map-improper strip-renames x)
+      x)))
+
 (define (expand-quote x env)
-  (if (fx> (length x) 2)
+  (if (fx> (length x) 3)
     (raise-source x 'expand "quote only takes one argument" (list x)))
 
-
-
-  (list-source x (make-rename #f 'quote) (if (rename? (cadr x)) (rename-strip (cadr x)) (cadr x))))
+  #|
+  (if (eq? (cadr x) (string->symbol "##no-strip"))
+    (begin
+      (print x)
+      (list-source x (make-rename #f 'quote) (list-ref x 2)))
+    (if (fx> (length x) 2)
+      (raise-source x 'expand "quote only takes one argument" (list x))
+      (list-source x (make-rename #f 'quote) (strip-renames (cadr x))))))
+|#
+  (list-source x (make-rename #f 'quote) (strip-renames (cadr x))))
   ;(list-source x 
 
   ;(cons-source x (make-rename #f 'quote) (cdr x)))
@@ -633,6 +649,7 @@
         ((eq? kar 'if) (expand-if x env))
         ((eq? kar 'set!) (expand-set x env))
         ((eq? kar 'cond) (expand-cond x env))
+        #;((eq? kar 'quote)  (cons-source x (make-rename #f 'quote) (cdr x)))
         ((eq? kar 'quote) (expand-quote x env))
         (else (raise-source x 'expand (print-string "unknown special form" (car x)) (list x))))
       ;; Normal function application
@@ -771,37 +788,32 @@
 (define (expand-let-syntax type x env)
   (define new-env (env-make env))
   (define bindings #f)
-  (define body #f)
 
   (if (fx< (length x) 3)
     (raise-source x 'expand "let(rec)-syntax expands at least three arguments" (list x)))
 
-  (set! bindings (cadr x))
-  (set! body (cddr x))
+  (define bindings (cadr x))
+  (define body (cddr x))
 
   (if (not (list? bindings))
     (raise-source (cadr x) 'expand "let(rec)-syntax bindings list must be a valid list" (list x (cadr x))))
 
   (for-each1
     (lambda (x)
-      (define name #f)
-      (define body #f)
-
       (if (not (fx= (length x) 2))
         (raise-source x 'expand "let(rec)-syntax bindings should have two values: a name and a transformer" (list x)))
 
-      (set! name (car x))
-      (set! body (cadr x))
+      (define name (car x))
+      (define body (cadr x))
 
       (define-transformer! x new-env (if (eq? type 'let-syntax) env new-env) name body))
     bindings)
 
   (define result 
-    (cons-source x (make-rename #f 'begin) (expand-toplevel body new-env)))
+    (cons-source x (make-rename #f 'begin) (expand-map body new-env)))
 
-  ;(pretty-print new-env)
-
-  (expand-toplevel result env))
+  #;(expand result env)
+  result)
 
 ;; Expand a macro application
 (define expand-macro 

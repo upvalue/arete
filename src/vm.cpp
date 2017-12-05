@@ -361,7 +361,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         f.stack[f.stack_i++] = sym.symbol_value();
         if(f.stack[f.stack_i - 1] == C_UNDEFINED) {
           std::ostringstream os;
-          os << "reference to undefined variable " << symbol_dequalify(sym);
+          os << "reference to undefined variable " << sym;//<< symbol_dequalify(sym);
           f.exception = eval_error(os.str());
           goto exception;
         }
