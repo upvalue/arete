@@ -302,6 +302,8 @@
   ;; If true, argument count will be emitted after the primitive thing
   (define primitive-args #f)
   ;; strip renames at this point
+  (when (rename? (car x))
+    (raise-source x 'compile-internal "rename encountered by compiler; this should never happen" (list x)))
   (define kar (if (rename? (car x)) (rename-expr (car x)) (car x)))
 
   (compiler-log fn "compiling application" x)

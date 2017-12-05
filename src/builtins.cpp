@@ -319,6 +319,11 @@ Value fn_map_improper(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("map-improper", fn_map_improper, 2);
 
+Value fn_map_improper_i(State& state, size_t argc, Value* argv) {
+  return fn_map_impl(state, argc, argv, "map-improper", true, true, true);
+}
+AR_DEFUN("map-improper-i", fn_map_improper_i, 2);
+
 Value fn_foreach_proper(State& state, size_t argc, Value* argv) {
   return fn_map_impl(state, argc, argv, "for-each1", true, false, false);
 }

@@ -144,9 +144,11 @@
        (if (or (eq? (table-ref env "module-export-all") #t) (table-ref (table-ref env "module-exports") name))
          (table-set! (table-ref env "module-exports") name name))
     ))
-    ((vector? env) (begin
-                     (vector-append! env name)
-                     (vector-append! env value)))
+    ((vector? env)
+     (begin
+       (vector-append! env name)
+       (vector-append! env (if (and (symbol? name) (not (gensym? name)) (eq? value 'variable)) (gensym name) (if (gensym? name) name value)))
+       (vector-ref env (fx- (vector-length env) 1))))
     (else (begin
             (raise 'expand "env-define failed" (list name value))))))
 
@@ -273,7 +275,10 @@
       (cond
         ((and (rename? key) (rename-gensym key)) (rename-gensym key))
         ((table? env) key)
-        (else name)))
+        (else
+          (if (gensym? value)
+            value
+            name))))
     (env-lookup env name)))
 
 (define (env-syntax? env name)
@@ -298,7 +303,6 @@
     (define value #f)
     (define kar #f)
     (define len (length x))
-    (define result #f)
 
     (if (fx< len 2)
       (raise-source x 'expand "define is missing first argument (name)" (list x)))
@@ -333,7 +337,7 @@
     ;; Handle module stuff
     (env-define env name 'variable)
 
-    (set! result (list-source x (make-rename #f 'define)
+    (define result (list-source x (make-rename #f 'define)
                               ;; We'll replace name with the actual gensym here if there is one
                               (env-resolve env name)
                               (expand value env)))
@@ -341,18 +345,22 @@
     result))
 
 ;; Expand an identifier
-(define expand-identifier
-  (lambda (x env)
-    (if (env-syntax? env x)
-      (apply
-        (lambda (env name value found)
-          (if (or (eq? value 'syntax) (not (function-identifier-macro? x)))
-            (expand-macro x env value)
-            (raise-source x 'expand (print-string "used syntax" x "as value") (list x))))
-        (env-lookup env x))
-      (if (symbol-qualified? x)
-        x
-        (env-resolve env x)))))
+(define (expand-identifier x env)
+  (if (env-syntax? env x)
+    (apply
+      (lambda (env name value found)
+        (if (or (eq? value 'syntax) (not (function-identifier-macro? x)))
+          (expand-macro x env value)
+          (raise-source x 'expand (print-string "used syntax" x "as value") (list x))))
+      (env-lookup env x))
+    (if (symbol-qualified? x)
+      x
+      (begin
+        (apply
+          (lambda (env name value found)
+            (env-resolve env x)
+            )
+        (env-lookup env x))))))
 
 ;; Expand and/or
 (define expand-and-or
@@ -619,66 +627,59 @@
       ;; map-source?
       (expand-map x env))))
 
-(define expand-lambda
-  (lambda (x env)
-    (if (fx< (length x) 3)
-      (raise-source x 'expand "lambda has no body" (list x)))
+(define (expand-lambda x env)
+  (if (fx< (length x) 3)
+    (raise-source x 'expand "lambda has no body" (list x)))
 
-    (define bindings (cadr x))
-    (define new-env (env-make env))
+  (define new-env (env-make env))
+  (define args (cadr x))
 
-    (if (or (null? bindings) (pair? bindings))
-      (for-each-improper-i
+  (define bindings
+    (if (or (null? args) (pair? args))
+      (map-improper-i
         (lambda (i arg)
           (if (not (identifier? arg))
             (raise-source (list-tail bindings i) 'expand "non-identifier in lambda argument list" (list x)))
-          ;; If a rename is encountered here, env-define will add a gensym
-          ;; then env-resolve will search for that gensym with env-lookup
-          ;; then bindings are map'd to remove renames
+
           (if (rename? arg)
-            (rename-gensym! arg))
-
-          (env-define new-env arg 'variable))
-        bindings)
-      ;; Argument is a single symbol or rename (e.g. rest arguments only)
-      (if (not (identifier? bindings))
+            (begin
+              (rename-gensym! arg)
+              (env-define new-env arg 'variable)
+              (rename-gensym arg))
+            (env-define new-env arg 'variable)))
+        args)
+      (if (not (identifier? args))
         (raise-source (cdr x) 'expand "non-identifier as lambda rest argument" (list x))
-        (env-define new-env bindings 'variable)))
+        (if (rename? args)
+          (begin (rename-gensym! args) (rename-gensym args))
+          (env-define new-env args 'variable)))))
 
-    ;; If bindings are renames, they should be gensym'd 
-    (set! bindings
-      (if (identifier? bindings)
-        (if (and (rename? bindings) (rename-gensym bindings)) (rename-gensym bindings) bindings)
-        (map-improper (lambda (x) (if (and (rename? x) (rename-gensym x)) (rename-gensym x) x)) bindings)))
+  (cons-source x (make-rename #f 'lambda) (cons-source x bindings (expand-map (cddr x) new-env))))
 
-    (cons-source x (make-rename #f 'lambda) (cons-source x bindings (expand-map (cddr x) new-env)))))
+(define (expand-if x env)
+  (define len (length x))
+  (define else-branch unspecified)
 
-(define expand-if
-  (lambda (x env)
-    (define len (length x))
-    (define else-branch unspecified)
+  (if (fx< len 3)
+    (raise-source x 'expand "if expression needs at least two arguments" (list x))
+    (if (fx= len 4)
+      (set! else-branch (list-ref x 3))))
 
-    (if (fx< len 3)
-      (raise-source x 'expand "if expression needs at least two arguments" (list x))
-      (if (fx= len 4)
-        (set! else-branch (list-ref x 3))))
+  (list-source x (make-rename #f 'if) (expand (list-ref x 1) env) (expand (list-ref x 2) env) (expand else-branch env)))
 
-    (list-source x (make-rename #f 'if) (expand (list-ref x 1) env) (expand (list-ref x 2) env) (expand else-branch env))))
+(define (expand-set x env)
+  (define len (length x))
+  (define name #f)
 
-(define expand-set
-  (lambda (x env)
-    (define len (length x))
-    (define name #f)
+  (if (not (fx= len 3))
+    (raise-source x 'expand "set! expression needs exactly two arguments" (list x)))
 
-    (if (not (fx= len 3))
-      (raise-source x 'expand "set! expression needs exactly two arguments" (list x)))
+  (set! name (cadr x))
 
-    (set! name (cadr x))
+  (if (not (identifier? name))
+    (raise-source (cdr x) 'expand "set! expects an identifier as its first arguments" (list x)))
 
-    (if (not (identifier? name))
-      (raise-source (cdr x) 'expand "set! expects an identifier as its first arguments" (list x)))
-
-    (list-source x (make-rename #f 'set!) (expand (list-ref x 1) env) (expand (list-ref x 2) env))))
+  (list-source x (make-rename #f 'set!) (expand (list-ref x 1) env) (expand (list-ref x 2) env)))
 
 (define (expand x env)
   (cond
