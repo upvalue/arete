@@ -243,7 +243,9 @@
                                (set-car! (cddr match) (cdr lst))
                                (car lst))))
                             ))
-                       (if (eq? a '...) a (rules-rename a)))))
+                       (if (eq? a '...)
+                         a
+                        (rules-rename a)))))
                    (if (eq? kar terminate)
                      terminate
                      (try-cons kar b))

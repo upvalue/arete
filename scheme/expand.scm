@@ -18,6 +18,8 @@
 ;; TODO Disallow (if #t (define x #t) (define x #f)) with a helpful error message
 ;; This will probably require adding some parameters to the expander. 
 
+;; TODO could avoid allocations by renaming special forms up front
+
 (define caar (lambda (x) (car (car x))))
 (define cadr (lambda (x) (car (cdr x))))
 (define cdar (lambda (x) (cdr (car x))))
@@ -588,6 +590,17 @@
   result
 )
 
+(define (expand-quote x env)
+  (if (fx> (length x) 2)
+    (raise-source x 'expand "quote only takes one argument" (list x)))
+
+
+
+  (list-source x (make-rename #f 'quote) (if (rename? (cadr x)) (rename-strip (cadr x)) (cadr x))))
+  ;(list-source x 
+
+  ;(cons-source x (make-rename #f 'quote) (cdr x)))
+
 ;; Expand an application. Could be a special form, a macro, or a normal function application
 (define expand-apply
   (lambda (x env)
@@ -620,7 +633,7 @@
         ((eq? kar 'if) (expand-if x env))
         ((eq? kar 'set!) (expand-set x env))
         ((eq? kar 'cond) (expand-cond x env))
-        ((eq? kar 'quote) (cons-source x (make-rename #f 'quote) (cdr x)))
+        ((eq? kar 'quote) (expand-quote x env))
         (else (raise-source x 'expand (print-string "unknown special form" (car x)) (list x))))
       ;; Normal function application
       ;; Needs to be annotated with src info, right?
