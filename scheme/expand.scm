@@ -718,8 +718,8 @@
     (define fn-arity #f)
     (define identifier-transformer #f)
 
-    (if (not (symbol? name))
-      (raise-source (cdr x) 'expand "define-syntax first argument (macro name) must be a symbol" (list x (cdr x))))
+    (if (not (identifier? name))
+      (raise-source (cdr x) 'expand "define-syntax first argument (macro name) must be an identifier" (list x (cdr x))))
 
     (if (table? env)
       (if (table-ref env "module-export-all")
@@ -745,7 +745,7 @@
     (if (fx< fn-arity 1)
       (raise-source (caddr x) 'expand "define-syntax body must evaluate to a function that takes one argument" (list x)))
 
-    (set-function-name! fn name)
+    (set-function-name! fn (rename-strip name))
     (set-function-macro-bit! fn)
     (if identifier-transformer
       (set-function-identifier-macro-bit! fn))
