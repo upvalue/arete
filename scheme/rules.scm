@@ -33,18 +33,6 @@
        #f
        (append kar kdr))))
 
-#|
-(define (rules-try-improper pattern form literals)
-  (let ((kar (rules-match ellipses (car pattern) (car form) literals)))
-    (if kar
-      (if (identifier? (cdr pattern))
-        (append kar (list (cdr pattern) 'single (cdr form)))
-        (let ((kdr (rules-match el
-        (if (not (equal? (cdr pattern) (cdr form)))
-          #f
-          kar)))))
-        |#
-
 (define (rules-match ellipses pattern form literals)
   (cond
     ;; Handle atomic values e.g. "string" "string"
@@ -136,40 +124,22 @@
 (print (rules-match '... '(hello name value) '(hello name #t) '(name)))
 |#
 
-;(print "ok:"(rules-match '... '(thing . 5) '(thing . 6) '()))
-
-;; something like this means we need at least three elements,
-;; or rather, we need at least one element after ...
-
-;; So, when we encounter ..., we'll (1) check that there are no ... after ...
-;; and (2) how many elements are after it. Then we TAKE length of list - elements after it from the list, and continue
-;; rules-match with the cddr
-
-;; TODO We cannot use #f to terminate. Perhaps a qualified-symbol would be appropriate here, as something we can
-;; rightfully say should not occur in source code, e.g. ##terminate
-
-;; need to change try-cons and (and b)
-
-;; The PROBLEM. We cease on consuming a list, but then have no way of "consuming" the other lists
-
-;; (1 3 5 7) (
-
 (define terminate '##terminate)
 
 (define (try-cons a b)
   (and (not (eq? a terminate)) (cons a b)))
 
-(define (fold-template matches lst)
+(define (fold-template ellipses matches lst)
   (fold-right
     (lambda (a b)
       (and (not (eq? b terminate))
         (cond 
           ((pair? a)
-           (if (and (pair? b) (eq? (car b) '...))
+           (if (and (pair? b) (eq? (car b) ellipses))
 
              (let* ((nmatches (map (lambda (c) (if (eq? (cadr c) 'splat) (list (car c) 'splat-consume (caddr c) '()) c)) matches))
                     (expected-lengths (map (lambda (c) (list (car c) (if (eq? (cadr c) 'splat) (length (caddr c)) #f))) matches))
-                    (first-attempt (fold-template nmatches a)))
+                    (first-attempt (fold-template ellipses nmatches a)))
                (let loop
                  ((attempt first-attempt)
                   (result (list first-attempt)))
@@ -203,16 +173,16 @@
                        nmatches expected-lengths)
                      (append result (cdr b)))
                    (begin
-                     (let ((attempt (fold-template nmatches a)))
+                     (let ((attempt (fold-template ellipses nmatches a)))
                        ;(print attempt)
                        ;(print result)
                        (loop attempt (if attempt (append result (list attempt)) result)))))))
 
-             (try-cons (fold-template matches a) b)))
+             (try-cons (fold-template ellipses matches a) b)))
           ((symbol? a)
            (let ((match (assq a matches)))
              ;; splat requested
-             (if (and (pair? b) (eq? (car b) '...))
+             (if (and (pair? b) (eq? (car b) ellipses))
                (if (not match)
                  (raise 'expand "... occurred in syntax-rules template after" a "which is not a pattern variable" (list a))
                  (if (not (eq? (cadr match) 'splat))
@@ -243,7 +213,7 @@
                                (set-car! (cddr match) (cdr lst))
                                (car lst))))
                             ))
-                       (if (eq? a '...)
+                       (if (eq? a ellipses)
                          a
                         (rules-rename a)))))
                    (if (eq? kar terminate)
@@ -271,7 +241,7 @@
       (list 'quote x)
       x)))
 
-(define (syntax-rules-matcher literals pare rest)
+(define (syntax-rules-matcher ellipses literals pare rest)
   (if (not (list? pare))
     (raise-source pare 'syntax "syntax-rules argument must be a list (pattern and template)" (list pare)))
 
@@ -285,78 +255,35 @@
     ;; Problem: Form may contain renamed variables
     ;; This is because macros may define macros
 
-    `(let ((maybe (rules-match '... (quote ,pattern) form (quote ,literals))))
+    `(let ((maybe (rules-match ',ellipses (quote ,pattern) form (quote ,literals))))
        (if (eq? (top-level-value 'rdbg) #t) (print "rules-match result" maybe form))
        (if maybe 
-         (cons 'begin (fold-template maybe (quote ,template)))
+         (cons 'begin (fold-template ',ellipses maybe (quote ,template)))
          ,(if (null? rest)
             `(raise 'syntax "syntax-rules failed to find a match for form" (list form))
-            (syntax-rules-matcher literals (car rest) (cdr rest)))))))
+            (syntax-rules-matcher ',ellipses literals (car rest) (cdr rest)))))))
+
+(define (syntax-rules-make-matcher ellipses literals pare rest)
+  (if (not (and (list? literals) (every symbol? literals)))
+    (raise-source x 'syntax "syntax-rules literals list must be a list of symbols"))
+
+  `(lambda (expr)
+     (let ((form expr))
+      ,(syntax-rules-matcher ellipses literals pare rest))))
 
 (define-syntax syntax-rules
   (lambda (x)
     (unless (fx> (length x) 2)
       (raise-source x 'syntax "syntax-rules must have at least two arguments (literals list and one pattern/template pair)" (list x)))
-    (define literals (cadr x))
-    (define pares (cddr x))
 
-    (if (not (and (list? literals) (every symbol? literals)))
-      (raise-source x 'syntax "syntax-rules literals list must be a list of symbols"))
+    ;; SRFI-46/R7RS: ellipses override
+    (if (symbol? (cadr x))
+      (let ((ellipses (cadr x))
+            (literals (caddr x))
+            (pares (cdddr x)))
+        (syntax-rules-make-matcher ellipses literals (car pares) (cdr pares)))
+      (let ((ellipses '...)
+            (literals (cadr x))
+            (pares (cddr x)))
+        (syntax-rules-make-matcher '... literals (car pares) (cdr pares))))))
 
-    (define body (syntax-rules-matcher literals (car pares) (cdr pares)))
-
-    (define result `(,#'lambda (,#'expr) 
-       (let ((form ,#'expr))
-         ,body)))
-
-    (if (eq? (top-level-value 'rdbg) #t)
-      (print result))
-
-    result))
-
-
-#|
-(define-syntax gub
-  (syntax-rules ()
-    ((_) (begin 1 2 3))
-    ((_ rst ...) (begin rst ...))
-    ((_ asdf) asdf)
-    ))
-
-;; recursive syntax-rules invocation
-
-(define-syntax defyne
-  (syntax-rules ()
-    ((_ name value)
-     (define name value))))
-
-(defyne asdf #t)
-
-(define-syntax hyg
-  (syntax-rules ()
-    ((_ value (code ...))
-     (let ((result value))
-       (begin code ...)
-       result))))
-
-|#
-
-
-#|
-(let-syntax
-  ((set! (syntax-rules (name)
-           ((_ name value) value)
-           ((_ x e)
-            (set! x e)))))
-  (define var #f)
-  (set! var #t)
-  (cons
-    (set! name #t) var)
-  )
-
-
-|#
-;(set-top-level-value! 'dbg #t)
-;(set-top-level-value! 'EXPANDER-PRINT #t)
-
-;TODO: let-syntax, vs letrec-syntax
