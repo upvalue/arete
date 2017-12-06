@@ -1,16 +1,14 @@
 ;; rules.scm - syntax-rules implementation
 
+
 ;; How this works: rules-match checks a syntax-rules pattern against a given form
 ;; It does this by diving into that form and returning an association list for the template substitution if successful,
 ;; and #f if it fails
 
-;; If a pattern is successfully matched, rules-substitute does a fold-right over the template. The only tricky part
+;; If a pattern is successfully matched, fold-template does a fold-right over the template. The only tricky part
 ;; (which I am not happy about) is the ... handling; it copies the alist from rules-match and modifies it for each
 ;; iteration, then does some tricky math to make sure that all the lists used by the ... have been fully consumed
 
-;; TODO Literals
-;; TODO Substitutions
-;; TODO Improper lists
 ;; TODO Vectors
 
 ;; TODO rewrite with fold instead of fold-right. 
@@ -26,14 +24,18 @@
 (define (rules-shadowed? name)
   #f)
 
-(define (rules-try ellipses pattern form literals)
-   (let ((kar (rules-match ellipses (car pattern) (car form) literals))
-         (kdr (rules-match ellipses (cdr pattern) (cdr form) literals)))
+(define (rules-try cmp ellipses pattern form literals)
+   (let ((kar (rules-match cmp ellipses (car pattern) (car form) literals))
+         (kdr (rules-match cmp ellipses (cdr pattern) (cdr form) literals)))
      (if (or (not kar) (not kdr))
        #f
        (append kar kdr))))
 
-(define (rules-match ellipses pattern form literals)
+(define (ellipses? cmp ellip item)
+  (and (symbol? ellip)
+    (cmp item (make-rename #f ellip))))
+
+(define (rules-match cmp ellipses pattern form literals)
   (cond
     ;; Handle atomic values e.g. "string" "string"
     ((and (self-evaluating? pattern) (self-evaluating? form))
@@ -55,22 +57,22 @@
      (list (list pattern 'single form)))
     ((and (pair? pattern) (pair? form))
      (if (and (null? (cdr pattern)) (null? (cdr form)))
-       (rules-match ellipses (car pattern) (car form) literals)
+       (rules-match cmp ellipses (car pattern) (car form) literals)
        ;; Handle (asdf ...) (asdf)
        (if (null? (cdr form))
          ;; Ellipses, but not more form, so we match only one element
-         (if (and (not (null? (cdr pattern))) (eq? (cadr pattern) ellipses))
+         (if (and (not (null? (cdr pattern))) (ellipses? cmp ellipses (cadr pattern)))
            (list (list (car pattern) 'splat form))
            ;; This is not an ellipses so try to match it normally
-           (rules-try ellipses pattern form literals))
+           (rules-try cmp ellipses pattern form literals))
 
          (if (null? (cdr pattern))
            ;; There's more form but not more pattern
            #f
            (if (not (pair? (cdr pattern)))
-             (rules-try ellipses pattern form literals)
+             (rules-try cmp ellipses pattern form literals)
              ;; One or more elements after ...
-             (if (and (eq? (cadr pattern) ellipses))
+             (if (ellipses? cmp ellipses (cadr pattern))
                ;; There may be elements in the pattern after ...
                (begin
                  (if (not (null? (cddr pattern)))
@@ -79,26 +81,26 @@
 
                      (for-each-i
                        (lambda (i x)
-                         (if (eq? x ellipses)
+                         (if (ellipses? cmp ellipses x)
                            (raise-source (list-tail (cddr pattern) (fx- i 1)) 'syntax "multiple ... on same level in pattern" (list pattern))))
                        (cddr pattern))
 
                      (if (fx< to-take 0)
                        #f
-                       (let ((rest (rules-try ellipses (cddr pattern) (list-tail form to-take) literals)))
+                       (let ((rest (rules-try cmp ellipses (cddr pattern) (list-tail form to-take) literals)))
                          (and rest
                               (cons (list (car pattern) 'splat (take form to-take)) rest)))))
 
                    (list (list (car pattern) 'splat form)))
                ) 
                ;; no special cases, continue
-               (rules-try ellipses pattern form literals)))))
+               (rules-try cmp ellipses pattern form literals)))))
        )
      )
     ;; Handle ellipses with null
     ((and (pair? pattern) (null? form))
 
-     (if (and (not (null? (cdr pattern))) (eq? (cadr pattern) ellipses))
+     (if (and (not (null? (cdr pattern))) (ellipses? cmp ellipses (cadr pattern)))
        (list (list (car pattern) 'splat '()))
        #f))
     (else
@@ -246,8 +248,8 @@
     (raise-source pare 'syntax "syntax-rules argument must be a list (pattern and template)" (list pare)))
 
   (let ((pattern (car pare)) (template (cdr pare)))
-    (if (not (list? pattern))
-      (raise-source pare 'syntax "syntax-rules pattern (first element) must be a list" (list pare)))
+    (if (not (pair? pattern))
+      (raise-source pare 'syntax "syntax-rules pattern (first element) must be a pair" (list pare)))
 
     (if (not (and (list? template) (null? (cdr template))))
       (raise-source (cdr template) 'syntax "syntax-rules template must only have one element" (list pare)))
@@ -255,7 +257,7 @@
     ;; Problem: Form may contain renamed variables
     ;; This is because macros may define macros
 
-    `(let ((maybe (rules-match ',ellipses (quote ,pattern) form (quote ,literals))))
+    `(let ((maybe (rules-match compare ',ellipses (quote ,pattern) form (quote ,literals))))
        (if (eq? (top-level-value 'rdbg) #t) (print "rules-match result" maybe form))
        (if maybe 
          (cons 'begin (fold-template ',ellipses maybe (quote ,template)))
@@ -267,7 +269,7 @@
   (if (not (and (list? literals) (every symbol? literals)))
     (raise-source x 'syntax "syntax-rules literals list must be a list of symbols"))
 
-  `(lambda (expr)
+  `(lambda (expr compare)
      (let ((form expr))
       ,(syntax-rules-matcher ellipses literals pare rest))))
 

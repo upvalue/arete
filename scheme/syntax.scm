@@ -362,6 +362,25 @@
 (define (integer? x) (or (fixnum? x) (eqv? (floor x) x)))
 (define (max a b) (if (< a b) b a))
 (define (min a b) (if (> a b) b a))
+(define (abs a) (if (< a 0) (- a) a))
+
+;;;;; DELAY/FORCE
+
+(define-syntax delay
+  (lambda (x)
+    (if (not (fx= (length x) 2))
+      (raise-source x 'syntax "delay only takes a single argument" (list x)))
+
+    `(,#'list '##delayed #f (,#'lambda () ,(cadr x)))))
+
+(define (force x)
+  (if (and (pair? x) (eq? (car x) '##delayed))
+    (if (eq? (cadr x) #f)
+      (let ((result ((caddr x))))
+        (set-car! (cdr x) #t)
+        (set-car! (cddr x) result)
+        result)
+      (caddr x))))
 
 ;;;;; MULTIPLE RETURN VALUES
 
@@ -416,12 +435,15 @@
 
 (define (call-with-output-string thunk)
   (let ((file (open-output-string)))
-    (unwind-proect (lambda () (thunk file))
-                   (lambda () (close-output-port file)))))
+    (unwind-protect (lambda ()
+                      (thunk file)
+                      (get-output-string file)
+                      )
+                    (lambda () (close-output-port file)))))
 
 (define (call-with-input-string thunk)
   (let ((file (open-input-string)))
-    (unwind-proect (lambda () (thunk file))
+    (unwind-protect (lambda () (thunk file))
                    (lambda () (close-input-port file)))))
 
 ;; LISTS

@@ -2100,6 +2100,30 @@ struct State {
 
 ///// READ! S-Expression reader
 
+/** Reads a number from a string. This has to be separated out so it can be called independently
+ * from Scheme in the form of number->string */
+struct NumberReader {
+  State& state;
+  std::string string;
+  int radix;
+  bool radix_set;
+  bool exact;
+  bool exact_set;
+  bool flonum_allowed;
+  /** A description of an error which has occurred. */
+  std::string error_desc;
+
+  NumberReader(State& state_, const std::string& string_);
+  ~NumberReader() {}
+
+  bool set_radix_param(int);
+  bool set_radix(int);
+  bool set_exact(bool);
+  bool consume_numeric_directive(size_t&);
+  bool check_radix_gte(int, char);
+  Value read();
+};
+
 /** 
  * S-expression reader.
  */

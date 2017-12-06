@@ -42,3 +42,8 @@ Arete uses the C++ STL, and optionally: the linenoise-ng library from ArangoDB (
 Arete currently supports some features of R5RS and R7RS. Full compliance is not the primary goal at present, but I have
 tried to hew to the standards. If you miss something, open an issue :)
 
+## Noted issues
+
+- equal? does not handle shared structure
+- Continuations not supported
+

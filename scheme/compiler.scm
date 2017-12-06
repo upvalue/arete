@@ -287,7 +287,7 @@
 (define primitive-table
   (alist->table '(
     ;; name min-argc max-argc variable-arity
-    (+ 1 1 #t)
+    (+ 0 0 #t)
     (- 1 1 #t)
     (car 1 1 #f)
     (eq? 2 2 #f)
@@ -334,19 +334,18 @@
 
   (set! stack-check (OpenFn/stack-size fn))
 
-
   ;; Extract an argument list 
   (define argument-list
     (if (and (pair? (car x)) (eq? (rename-strip (caar x)) 'lambda))
       (and (pair? (cadar x)) (cadar x))
       #f))
 
-  (define argument-list-length (if argument-list (length argument-list) 0))
+  (define argument-list-length (if (and argument-list (list? argument-list)) (length argument-list) #f))
 
   (for-each-i
     (lambda (i sub-x)
       (define result (compile-expr fn sub-x #f (list-tail x (fx+ i 1)) #f))
-      (when argument-list
+      (when (and argument-list argument-list-length)
         (if (fx= i argument-list-length)
           (print-source x "Inline function application appears to have too many arguments")
           (if (vmfunction? result)
@@ -366,8 +365,12 @@
   (if primitive
     (begin
       (if primitive-args
-        (emit fn (car primitive) (length (cdr x)))
-        (emit fn (car primitive)))
+        (if (and (eq? (car primitive) '+) (null? (cdr x)))
+          (compile-constant fn 0)
+          (emit fn (car primitive) (length (cdr x))))
+        (emit fn (car primitive))
+        
+      )
     )
     (emit fn (if tail? 'apply-tail 'apply) (length (cdr x))))
   )

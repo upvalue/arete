@@ -71,6 +71,8 @@ bool State::equals(Value a, Value b) {
     }
     case CHARACTER:
       return a.character() == b.character();
+    case FLONUM:
+      return a.flonum_value() == b.flonum_value();
     default:  {
       return a.bits == b.bits;
     }

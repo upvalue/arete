@@ -38,7 +38,6 @@ State::~State() {
 void State::boot_common() {
   AR_ASSERT(!booted);
 
-
   set_global_value(G_CURRENT_INPUT_PORT, make_input_file_port("stdin", &std::cin));
   set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
   set_global_value(G_STR_MODULE_NAME, make_string("module-name"));

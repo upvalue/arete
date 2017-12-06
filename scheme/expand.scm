@@ -20,13 +20,13 @@
 
 ;; TODO could avoid allocations by renaming special forms up front
 
-(define caar (lambda (x) (car (car x))))
-(define cadr (lambda (x) (car (cdr x))))
-(define cdar (lambda (x) (cdr (car x))))
-(define cddr (lambda (x) (cdr (cdr x))))
+(define (caar x) (car (car x)))
+(define (cadr x) (car (cdr x)))
+(define (cdar x) (cdr (car x)))
+(define (cddr x) (cdr (cdr x)))
 (define (cadar x) (car (cdr (car x))))
 (define (caadr x) (car (car (cdr x))))
-(define cdddr (lambda (x) (cdr (cdr (cdr x)))))
+(define (cdddr x)  (cdr (cdr (cdr x))))
 (define (caddr x) (car (cdr (cdr x))))
 (define (cadddr x) (car (cdr (cdr (cdr x)))))
 
@@ -894,8 +894,7 @@
            condition))
        (gensym))
 
-      ;; Handle => variation
-      (if (env-compare env (car body) (make-rename env '=>))
+      (if (env-compare env (car body) (make-rename #f '=>))
         (begin
           (if (null? (cdr body))
             (raise-source body 'expand "cond expects function after =>" (list x))

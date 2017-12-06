@@ -118,7 +118,6 @@ Value fn_get_output_string(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("get-output-string", fn_get_output_string, 1);
 
-
 Value fn_open_output_file(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "open-output-file";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);

@@ -186,9 +186,12 @@ AR_DEFUN("length", fn_length, 1);
 
 Value fn_listp(State& state, size_t argc, Value* argv) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
+  Value start = argv[0];
   if(argv[0] == C_NIL) return C_TRUE;
   while(argv[0].heap_type_equals(PAIR)) {
     if(argv[0].cdr() == C_NIL) return C_TRUE;
+    // Detect most basic circular list (still will not terminate on more complex shared structure)
+    if(argv[0].cdr() == start) return C_FALSE;
     argv[0] = argv[0].cdr();
   }
   return C_FALSE;

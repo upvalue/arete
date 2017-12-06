@@ -27,6 +27,164 @@ namespace arete {
 
 // Thus we can report errors with a level of granularity generally not provided by Scheme systems.
 
+NumberReader::NumberReader(State& state_, const std::string& string_): state(state_), string(string_),
+    radix(10), radix_set(false), exact(true), exact_set(false), flonum_allowed(true),
+    error_desc("number reader internal error") {
+
+}
+
+bool NumberReader::set_radix(int radix_) {
+  if(radix_set) {
+    error_desc = "radix specified more than once";
+    return false;
+  }
+  if(radix_ != 10) flonum_allowed = false;
+  radix = radix_;
+  radix_set = true;
+  return true;
+}
+
+bool NumberReader::set_radix_param(int radix_) {
+  switch(radix_) {
+    case 10: case 8: case 2: case 16: radix = radix_; return true;
+    default:  {
+      std::ostringstream os;
+      os << "unsupported radix " << radix_;
+      error_desc = os.str();
+      return false;
+    }
+  }
+}
+
+bool NumberReader::set_exact(bool exact_) {
+  if(exact_set) {
+    error_desc = "number exactitude specified more than once";
+    return false;
+  }
+  exact = exact_;
+  exact_set = true;
+  return true;
+}
+
+bool NumberReader::consume_numeric_directive(size_t& i) {
+  if(string.size() > i+1) {
+    if(string[i] == '#') {
+      char c = string[i+1];
+      i += 2;;
+      switch(c) {
+        case 'e': return set_exact(true); break;
+        case 'i': return set_exact(false); break;
+        case 'x': return set_radix(16); break;
+        case 'b': return set_radix(2); break;
+        case 'o': return set_radix(8); break;
+        case 'd': return set_radix(10); break;
+        default:
+          error_desc = "unknown numeric prefix ";
+          error_desc += string[i+1];
+          return false;
+          break;
+      }
+    }
+  }
+  return true;
+}
+
+bool NumberReader::check_radix_gte(int at_least, char offend) {
+  if(radix < at_least) {
+    std::ostringstream os;
+    os << "found higher number " << offend << " in number of radix " << radix;
+    error_desc = os.str();
+    return false;
+  }
+  return true;
+}
+
+/** Read a number. Returns C_FALSE on error. */
+Value NumberReader::read() {
+  size_t i = 0;
+
+  if(!consume_numeric_directive(i)) return C_FALSE;
+  if(!consume_numeric_directive(i)) return C_FALSE;
+
+  if(i == string.size()) {
+    std::ostringstream os;
+    os << "no number found after numeric directives " << string;
+    error_desc = os.str();
+    return C_FALSE;
+  }
+
+  bool is_float = false;
+
+  for(size_t j = i; j != string.size(); j++) {
+    if(string[j] == '.') {
+      if(!flonum_allowed) {
+        error_desc = "floating point numbers must be decimals";
+        return C_FALSE;
+      } 
+      if(exact_set) {
+        error_desc = "implementation error: exact fractions not supported";
+        return C_FALSE;
+      }
+      is_float = true;
+    }
+  }
+
+  if(is_float) {
+    std::stringstream ss;
+    for(; i != string.size(); i++) {
+      if(!isdigit(string[i]) && string[i] != '.') {
+        error_desc = "invalid numeric syntax ";
+        error_desc += string[i];
+        return C_FALSE;
+      }
+      ss << string[i];
+    }
+    double number;
+    ss >> number;
+    return state.make_flonum(number);
+  } else {
+    ptrdiff_t number = 0;
+    ptrdiff_t place = 0;
+    size_t begin = i;
+    for(; i != string.size(); i++) {
+      char c = string[i];
+      switch(c) {
+        case '0': place = 0; break;
+        case '1': place = 1; break;
+        case '2': place = 2; if(!check_radix_gte(8, c)) return false; break;
+        case '3': place = 3; if(!check_radix_gte(8, c)) return false; break; 
+        case '4': place = 4; if(!check_radix_gte(8, c)) return false; break; 
+        case '5': place = 5; if(!check_radix_gte(8, c)) return false; break; 
+        case '6': place = 6; if(!check_radix_gte(8, c)) return false; break; 
+        case '7': place = 7; if(!check_radix_gte(8, c)) return false; break; 
+        case '8': place = 8; if(!check_radix_gte(10, c)) return false; break;
+        case '9': place = 9; if(!check_radix_gte(10, c)) return false; break;
+        case 'A': case 'a': place = 10; if(!check_radix_gte(10, c)) return false; break;
+        case 'B': case 'b': place = 11; if(!check_radix_gte(16, c)) return false; break;
+        case 'C': case 'c': place = 12; if(!check_radix_gte(16, c)) return false; break;
+        case 'D': case 'd': place = 13; if(!check_radix_gte(16, c)) return false; break;
+        case 'E': case 'e': place = 14; if(!check_radix_gte(16, c)) return false; break;
+        case 'F': case 'f': place = 15; if(!check_radix_gte(16, c)) return false; break;
+        default: {
+          std::ostringstream os;
+          os << "number reader encountered unknown character " << c;
+          error_desc = os.str();
+          return false;
+        }
+      }
+
+      if(i == begin) {
+        number = place;
+      } else {
+        number *= radix;
+        number += place;
+      }
+    }
+
+    return exact ? Value::make_fixnum(number) : state.make_flonum((double) number);
+  }
+}
+
 XReader::XReader(State& state_, std::istream& is_, bool slurp_source, const std::string& desc):
     state(state_), is(is_), source(0), position(0),
     line(1), column(1), active_error(C_FALSE) {

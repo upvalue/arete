@@ -23,8 +23,9 @@ Value State::make_flonum(double number) {
 // avoid code duplication, and the need to avoid allocation because there's no good way currently
 // to track variadic arguments
 
-#define OPV(name, cname, operator, sub, nozero) \
+#define OPV(name, cname, operator, sub, nozero, ret0) \
   Value name(State& state, size_t argc, Value* argv) { \
+    if(argc == 0) return Value::make_fixnum(ret0);  \
     static const char* fn_name = cname; \
     ptrdiff_t fxresult = 0; \
     size_t i = 0; \
@@ -55,14 +56,14 @@ Value State::make_flonum(double number) {
     return state.make_flonum(flresult); \
   }
 
-OPV(fn_add, "+", +, false, false)
-OPV(fn_sub, "-", -, true, false)
-OPV(fn_mul, "*", *, false, false)
-OPV(fn_div, "/", /, false, true)
+OPV(fn_add, "+", +, false, false, 0)
+OPV(fn_sub, "-", -, true, false, 0)
+OPV(fn_mul, "*", *, false, false, 1)
+OPV(fn_div, "/", /, false, true, 0)
 
-AR_DEFUN("+", fn_add, 1, 1, true);
+AR_DEFUN("+", fn_add, 0, 0, true);
 AR_DEFUN("-", fn_sub, 1, 1, true);
-AR_DEFUN("*", fn_mul, 1, 1, true);
+AR_DEFUN("*", fn_mul, 0, 0, true);
 AR_DEFUN("/", fn_div, 2, 2, true);
 
 #undef OPV
@@ -228,7 +229,7 @@ Value fn_modulo(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "modulo";
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  return Value::make_fixnum(argv[0].fixnum_value() % argv[1].fixnum_value());
+  return Value::make_fixnum((argv[0].fixnum_value() % argv[1].fixnum_value() + argv[1].fixnum_value()) % argv[1].fixnum_value());
 }
 AR_DEFUN("modulo", fn_modulo, 2);
 
@@ -298,37 +299,29 @@ AR_DEFUN("number->string", fn_number_to_string, 1);
 Value fn_string_to_number(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string->number";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  if(argc == 2) {
+    AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
+  }
 
   const char* data = argv[0].string_data();
   size_t length = argv[0].string_bytes();
 
-  bool flonum = false;
-  std::stringstream os;
-  for(size_t i = 0; i != length; i++) {
-    if(!isdigit(data[i]) && data[i] != '.') {
-      std::ostringstream os;
-      os << "invalid or unsupported number syntax: " << argv[0];
-      return state.type_error(os.str());
-    }
+  std::string string(data);
+  NumberReader reader(state, string);
 
-    if(data[i] == '.') {
-      flonum = true;
+  if(argc == 2) {
+    if(!reader.set_radix_param(argv[1].fixnum_value())) {
+      return state.make_exception("read", reader.error_desc);
     }
-
-    os << data[i];
   }
 
-  if(flonum) { 
-    double x;
-    os >> x;
-    return state.make_flonum(x);
-  } else {
-    ptrdiff_t x;
-    os >> x;
-    return Value::make_fixnum(x);
+  Value v = reader.read();
+  if(v == C_FALSE) {
+    return state.make_exception("read", reader.error_desc);
   }
+  return v;
 }
-AR_DEFUN("string->number", fn_string_to_number, 1);
+AR_DEFUN("string->number", fn_string_to_number, 1, 2);
 
 ///// SRFI 151: Bitwise operations
 
