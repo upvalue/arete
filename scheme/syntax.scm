@@ -405,16 +405,24 @@
 ;; PORTS
 
 (define (call-with-input-file path thunk)
-  (let* ((file (open-input-file path))
-         (result (thunk file)))
-    (close-input-port file)
-    result))
+  (let ((file (open-input-file)))
+    (unwind-protect (lambda () (thunk file))
+                    (lambda () (close-input-port file)))))
 
 (define (call-with-output-file path thunk)
-  (let* ((file (open-output-file path))
-         (result (thunk file)))
-    (close-output-port file)
-    file))
+  (let ((file (open-output-file)))
+    (unwind-protect (lambda () (thunk file))
+                    (lambda () (close-output-port file)))))
+
+(define (call-with-output-string thunk)
+  (let ((file (open-output-string)))
+    (unwind-proect (lambda () (thunk file))
+                   (lambda () (close-output-port file)))))
+
+(define (call-with-input-string thunk)
+  (let ((file (open-input-string)))
+    (unwind-proect (lambda () (thunk file))
+                   (lambda () (close-input-port file)))))
 
 ;; LISTS
 

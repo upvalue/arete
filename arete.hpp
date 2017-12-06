@@ -783,6 +783,7 @@ struct Value {
   static const unsigned FILE_PORT_INPUT_BIT = 1 << 9;
   static const unsigned FILE_PORT_OUTPUT_BIT = 1 << 10;
   static const unsigned FILE_PORT_NEVER_CLOSE_BIT = 1 << 11;
+  static const unsigned FILE_PORT_STRING_BIT = 1 << 12;
 
   // OPERATORS
 

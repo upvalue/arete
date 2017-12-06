@@ -75,6 +75,50 @@ Value State::make_output_file_port(Value path) {
   return res;
 }
 
+// SRFI 6: Basic string ports
+Value fn_open_output_string(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "open-output-string"; (void) fn_name;
+
+  std::ostringstream* os = new std::ostringstream;
+  Value path = state.make_string("<string>");
+  FilePort* port = static_cast<FilePort*>(state.gc.allocate(FILE_PORT, sizeof(FilePort)));
+  port->set_header_bit(Value::FILE_PORT_OUTPUT_BIT);
+  port->set_header_bit(Value::FILE_PORT_STRING_BIT);
+  port->path = path;
+  port->output_handle = os;
+  state.gc.finalizers.push_back(port);
+  return port;
+}
+AR_DEFUN("open-output-string", fn_open_output_string, 0);
+
+Value fn_open_input_string(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "open-input-string"; (void) fn_name;
+
+  std::istringstream* is = new std::istringstream;
+  Value path = state.make_string("<string>");
+  FilePort* port = static_cast<FilePort*>(state.gc.allocate(FILE_PORT, sizeof(FilePort)));
+  port->set_header_bit(Value::FILE_PORT_INPUT_BIT);
+  port->set_header_bit(Value::FILE_PORT_STRING_BIT);
+  port->path = path;
+  port->input_handle = is;
+  state.gc.finalizers.push_back(port);
+  return port;
+}
+AR_DEFUN("open-input-string", fn_open_input_string, 0);
+
+Value fn_get_output_string(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "get-output-string";
+  AR_FN_ASSERT_ARG(state, 0, "to be an output string port",
+    argv[0].type() == FILE_PORT && argv[0].file_port_writable() &&
+    argv[0].heap->get_header_bit(Value::FILE_PORT_STRING_BIT));
+
+  std::ostringstream* os = (std::ostringstream*) argv[0].file_port_output_handle();
+
+  return state.make_string(os->str());
+}
+AR_DEFUN("get-output-string", fn_get_output_string, 1);
+
+
 Value fn_open_output_file(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "open-output-file";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
@@ -90,20 +134,6 @@ Value fn_open_input_file(State& state, size_t argc, Value* argv) {
   return state.make_input_file_port(argv[0]);
 }
 AR_DEFUN("open-input-file", fn_open_input_file, 1);
-
-Value fn_open_output_string(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "open-output-string"; (void) fn_name;
-
-  std::ostringstream* os = new std::ostringstream;
-  std::ostream* os2 = os;
-
-  FilePort* port = static_cast<FilePort*>(state.gc.allocate(FILE_PORT, sizeof(FilePort)));
-  port->set_header_bit(Value::FILE_PORT_INPUT_BIT);
-  port->output_handle = os2;
-  
-  return port;
-}
-AR_DEFUN("open-output-string", fn_open_output_string, 0);
 
 Value fn_close_port(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "close-port";
