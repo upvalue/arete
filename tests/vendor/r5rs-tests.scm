@@ -1,7 +1,7 @@
 ;; r5rs-tests.scm
 ;; originally from: https://raw.githubusercontent.com/ashinn/chibi-scheme/master/tests/r5rs-tests.scm
 
-;; disabled one continuation test
+;; disabled one test that requires real continuations
 
 (define *tests-run* 0)
 (define *tests-passed* 0)

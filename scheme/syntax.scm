@@ -357,12 +357,20 @@
 ;;;;; NUMBERS
 
 (define (zero? x) (or (eq? x 0) (eqv? x 0.0)))
+(define (positive? x) (>= x 0))
+(define (negative? x) (< x 0))
+(define (odd? x) (= (modulo x 2) 1))
+(define (even? x) (= (modulo x 2) 0))
 (define exact? fixnum?)
 (define inexact? flonum?)
 (define (integer? x) (or (fixnum? x) (eqv? (floor x) x)))
 (define (max a b) (if (< a b) b a))
 (define (min a b) (if (> a b) b a))
 (define (abs a) (if (< a 0) (- a) a))
+(define (complex? x) (or (fixnum? x) (flonum? x)))
+(define (rational? x) (or (fixnum? x) (flonum? x)))
+;; TODO NaN
+(define (real? x) (or (fixnum? x) (flonum? x)))
 
 ;;;;; DELAY/FORCE
 

@@ -6,7 +6,6 @@
 ;; a stress test for the GC and reader. actual r4rs compliance
 ;; is not desired
 
-
 ;;;; `test.scm' Test correctness of scheme implementations.
 ;;; Copyright (C) 1991, 1992, 1993, 1994 Aubrey Jaffer.
 
@@ -203,9 +202,9 @@
 
 (test '#(10 5 2 4 3 8) 'quasiquote `#(10 5 ,(sqt 4) ,@(map sqt '(16 9)) 8))
 (test 5 'quasiquote `,(+ 2 3))
-(test '(a `(b ,(+ 1 2) ,(foo 4 d) e) f)
+#;(test '(a `(b ,(+ 1 2) ,(foo 4 d) e) f)
       'quasiquote `(a `(b ,(+ 1 2) ,(foo ,(+ 1 3) d) e) f))
-(test '(a `(b ,x ,'y d) e) 'quasiquote
+#;(test '(a `(b ,x ,'y d) e) 'quasiquote
 	(let ((name1 'x) (name2 'y)) `(a `(b ,,name1 ,',name2 d) e)))
 (test '(list 3 4) 'quasiquote (quasiquote (list (unquote (+ 1 2)) 4)))
 (test '`(list ,(+ 1 2) 4) 'quasiquote '(quasiquote (list (unquote (+ 1 2)) 4)))
@@ -350,6 +349,7 @@
 (test #f symbol? '())
 (test #f symbol? #f)
 ;;; But first, what case are symbols in?  Determine the standard case:
+#|
 (define char-standard-case char-upcase)
 (if (string=? (symbol->string 'A) "a")
     (set! char-standard-case char-downcase))
@@ -358,11 +358,13 @@
 (test #t 'standard-case
       (or (string=? (symbol->string 'a) "A")
 	  (string=? (symbol->string 'A) "a")))
+|#
 (define (str-copy s)
   (let ((v (make-string (string-length s))))
     (do ((i (- (string-length v) 1) (- i 1)))
 	((< i 0) v)
       (string-set! v i (string-ref s i)))))
+#|
 (define (string-standard-case s)
   (set! s (str-copy s))
   (do ((i 0 (+ 1 i))
@@ -373,6 +375,7 @@
 (test (string-standard-case "martin") symbol->string 'Martin)
 (test "Malvina" symbol->string (string->symbol "Malvina"))
 (test #t 'standard-case (eq? 'a 'A))
+|#
 
 (define x (string #\a #\b))
 (define y (string->symbol x))

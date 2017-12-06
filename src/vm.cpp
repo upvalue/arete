@@ -257,6 +257,20 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   AR_LOG_VM("ENTERING FUNCTION " << f.fn->name << " closure: " << (f.closure == 0 ? "#f" : "#t")
      << " free_variables: " << f.fn->free_variables << " stack_max: " << f.fn->stack_max);
 
+  if(argc > f.fn->max_arity && !f.fn->get_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT)) {
+    std::ostringstream os;
+    os << "function " << f.fn << " expected at most " << f.fn->max_arity
+      << " arguments " << "but got " << argc;
+    f.destroyed = true;
+    return eval_error(os.str());
+  } else if(argc < f.fn->min_arity) {
+    std::ostringstream os;
+    os << "function " << f.fn << " expected at least " << f.fn->min_arity
+      << " arguments " << "but got " << argc;
+    f.destroyed = true;
+    return eval_error(os.str());
+  }
+
   // Allocate function's required storage
 #if AR_USE_C_STACK
   size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;
