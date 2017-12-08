@@ -182,7 +182,8 @@
     (< 21)
     (car 22)
     (list-ref 23)
-    (eq? 24)
+    (not 24)
+    (eq? 25)
     ))
 
 (let loop ((pare (car insn-list)) (rest (cdr insn-list)))
@@ -215,7 +216,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set)
-               (0 jump jump-when jump-unless words close-over return car)
+               (0 jump jump-when jump-unless words close-over return car not)
                (1 push-immediate push-constant global-get local-get local-get-0 upvalue-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -290,6 +291,7 @@
     (+ 0 0 #t)
     (- 1 1 #t)
     (car 1 1 #f)
+    (not 1 1 #f)
     (eq? 2 2 #f)
     (list-ref 2 2 #f)
   ))
@@ -307,6 +309,8 @@
   (define kar (if (rename? (car x)) (rename-expr (car x)) (car x)))
 
   (compiler-log fn "compiling application" x)
+
+  ;; If a function is a Thing.
 
   ;; Compiling specific opcodes
   ;; +, -, etc
@@ -432,27 +436,29 @@
       (register-free-variable parent-fn x))))
 
 (define (fn-lookup fn x src)
-  (let loop ((search-fn fn))
-    (if (eq? search-fn #f)
-      (cons 'global x)
-      (if (OpenFn/toplevel? search-fn)
-        (begin
-          #;(unless (or (top-level-bound? x) (table-ref (OpenFn/env search-fn) x) (not (top-level-value 'COMPILER-WARN-UNDEFINED)))
-            (print-source src "Warning: reference to undefined variable" (symbol-dequalify x)))
-          (cons 'global x))
-        (aif (table-ref (OpenFn/env search-fn) x)
-          (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
-            (cons 'local (Var/idx it))
-            ;; This is an upvalue
-            (if (eq? fn search-fn)
-              ;; This upvalue has already been added to the closure
-              (begin
-                (compiler-log fn "found existing upvalue" it)
-                (cons 'upvalue (Var/idx it)))
-              (begin
-                (register-free-variable fn x)
-                (fn-lookup fn x src))))
-          (loop (OpenFn/parent search-fn)))))))
+  (if (symbol-qualified? x)
+    (cons 'global x)
+    (let loop ((search-fn fn))
+      (if (eq? search-fn #f)
+        (cons 'global x)
+        (if (OpenFn/toplevel? search-fn)
+          (begin
+            #;(unless (or (top-level-bound? x) (table-ref (OpenFn/env search-fn) x) (not (top-level-value 'COMPILER-WARN-UNDEFINED)))
+              (print-source src "Warning: reference to undefined variable" (symbol-dequalify x)))
+            (cons 'global x))
+          (aif (table-ref (OpenFn/env search-fn) x)
+            (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
+              (cons 'local (Var/idx it))
+              ;; This is an upvalue
+              (if (eq? fn search-fn)
+                ;; This upvalue has already been added to the closure
+                (begin
+                  (compiler-log fn "found existing upvalue" it)
+                  (cons 'upvalue (Var/idx it)))
+                (begin
+                  (register-free-variable fn x)
+                  (fn-lookup fn x src))))
+            (loop (OpenFn/parent search-fn))))))))
 
 (define (compile-identifier fn x src)
   (if (rename? x)

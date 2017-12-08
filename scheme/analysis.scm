@@ -51,7 +51,7 @@
   (if (eq? env #f)
     name
     (begin
-      (define location (Location/make name (gensym name) (table-entries (Env/bindings env)) #f))
+      (define location (Location/make name name (table-entries (Env/bindings env)) #f))
       (table-set! (Env/bindings env) name location)
       location)))
 
@@ -102,9 +102,7 @@
 
   (AnalyzedFn/body! fn (analyze-expr sub-env (cddr x)))
 
-  #;(cons-source x (car x) (cons-source x new-arguments (map (lambda (x) (analyze-expr sub-env x)) (cddr x))))
   fn
-  
   )
 
 (define (analyze-set env x)
@@ -165,12 +163,6 @@
 ;; TODO: If we want to compile stuff as blocks, how do we inline stuff at the module level?
 
 (begin
-  #|
-  (print (analyze-toplevel '(lambda (a b) a b (set! a #t) ((lambda (b) b) 5) b)))
-  (print (analyze-toplevel '(lambda (a b) a b (set! a #t) ((lambda (b) (if b b b)) 5) b)))
-  (print (analyze-toplevel '(lambda asdf #t)))
-  (pretty-print (analyze-toplevel '(begin (define fart #t) (lambda (a b . c) (define y #t) (lambda () c (set! fart #t))))))
-  |#
-
+  (pretty-print (expand-toplevel qq-list (top-level-value '*core-module*)))
   (pretty-print (analyze-toplevel (expand-toplevel qq-list (top-level-value '*core-module*))))
   )

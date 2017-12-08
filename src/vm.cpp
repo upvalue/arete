@@ -227,7 +227,8 @@ enum {
   OP_LT = 21,
   OP_CAR = 22,
   OP_LIST_REF = 23,
-  OP_EQ = 24,
+  OP_NOT = 24,
+  OP_EQ = 25,
 };
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
@@ -250,6 +251,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     &&LABEL_OP_LT,
     &&LABEL_OP_CAR,
     &&LABEL_OP_LIST_REF,
+    &&LABEL_OP_NOT,
     &&LABEL_OP_EQ,
   };
 #endif
@@ -928,6 +930,11 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           VM_EXCEPTION("type", "vm primitive list-ref asked to get element " << index << " in a list of length " << i);
         }
 
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_NOT): {
+        f.stack[f.stack_i - 1] = f.stack[f.stack_i-1] == C_FALSE ? C_TRUE : C_FALSE;
         VM_DISPATCH();
       }
 
