@@ -131,10 +131,20 @@
 
 ;; Environment machinery
 
-(define (env-make parent)
+(define (env-make parent . syntactic?)
   (define vec (make-vector))
   (vector-append! vec parent)
+  ;; Env first field is #t if an environment is purely syntactic (eg. introduced by let-syntax), #f otherwise
+  (vector-append! vec (not (null? syntactic?)))
   vec)
+
+(define (closest-non-syntactic-env env)
+  (if (vector? env)
+    (if (eq? (vector-ref env 1) #f)
+      env
+      (closest-non-syntactic-env (vector-ref env 0)))
+
+    env))
 
 (define (env-define env name value . toplevel?)
   (cond
@@ -147,12 +157,26 @@
          (table-set! (table-ref env "module-exports") name name))
     ))
     ((vector? env)
-     (begin
+     ((lambda (closest)
+        ;; Here we do some stuff to support the splicing of definitions from let-syntax
+        ;; Consider the expression: (let-syntax () (define x #t))
+        ;; If this happens at the toplevel of a module, x must become qualified normally, so we define it to
+        ;; ##module#x as though it were a toplevel variable. As the let-syntax exits, the definitiosn will be folded
+        ;; into the higher level
        (vector-append! env name)
-       (vector-append! env (if (and (symbol? name) (not (gensym? name)) (eq? value 'variable)) (gensym name) (if (gensym? name) name value)))
-       (vector-ref env (fx- (vector-length env) 1))))
-    (else (begin
-            (raise 'expand "env-define failed" (list name value))))))
+       (vector-append! env
+        (if (table? closest)
+          (if (symbol? value) (module-qualify closest name) value)
+          ;; Normal variables used to be env-defined to 'variable, but now resolve to gensyms
+          ;; However, there is no need to gensym names
+          (if (and (symbol? name) (not (gensym? name)) (eq? value 'variable)) (gensym name) (if (gensym? name) name value))))
+
+       ;(vector-append! env (if (and (symbol? name) (not (gensym? name)) (eq? value 'variable)) (gensym name) (if (gensym? name) name value)))
+       (if (and (eq? (top-level-value 'EXPANDER-PRINT) #t) (table? closest))
+         (pretty-print env))
+       (vector-ref env (fx- (vector-length env) 1)))
+      (closest-non-syntactic-env env)))
+    (else (begin (raise 'expand "env-define failed" (list name value))))))
 
 (define (identifier=? a b)
   (or (eq? a b)
@@ -184,10 +208,6 @@
 ;; (necessary for rename gensyms) the value of the key in the environment, and whether the variable was "found"
 ;; (variables may be referenced before definition)
 (define (env-lookup env name)
-
-  (if (eq? (top-level-value 'dbg) #t)
-    (begin
-      (print name)))
   (define strip (rename-strip name))
   (cond
     ;; toplevel
@@ -225,7 +245,7 @@
        (if res 
          res
          (env-lookup (vector-ref env 0) name)))
-      (env-vec-lookup env (vector-length env) 1 name)))))
+      (env-vec-lookup env (vector-length env) 2 name)))))
 
 ;; For env-compare. This will lookup NAME with rename-env and rename-expr if it is a rename, if not, it will look
 ;; in ENV
@@ -279,7 +299,7 @@
         ((and (rename? key) (rename-gensym key)) (rename-gensym key))
         ((table? env) key)
         (else
-          (if (gensym? value)
+          (if (or (gensym? value) (symbol-qualified? value))
             value
             name))))
     (env-lookup env name)))
@@ -786,7 +806,7 @@
 
 ;; Expander for let-syntax and letrec-syntax
 (define (expand-let-syntax type x env)
-  (define new-env (env-make env))
+  (define new-env (env-make env #t))
   (define bindings #f)
 
   (if (fx< (length x) 3)
