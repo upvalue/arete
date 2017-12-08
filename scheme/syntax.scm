@@ -195,7 +195,7 @@
       (raise-source x 'syntax "case expects a list of clauses" x))
 
     (define code (let loop ((clause (car clauses))
-               (clauses clauses))
+                            (clauses clauses))
       (unless (pair? clause)
         (raise 'syntax "case expects clause to be a datum" x))
 

@@ -27,6 +27,7 @@
 (define (cadar x) (car (cdr (car x))))
 (define (caadr x) (car (car (cdr x))))
 (define (cdddr x)  (cdr (cdr (cdr x))))
+(define (cddar x) (cdr (cdr (car x))))
 (define (caddr x) (car (cdr (cdr x))))
 (define (cadddr x) (car (cdr (cdr (cdr x)))))
 
@@ -803,7 +804,6 @@
   (set! body (caddr x))
 
   (define-transformer! x env env name body))
-
 
 ;; Fold an environment into another environment
 ;; Used for let-syntax and letrec-syntax definition splicing

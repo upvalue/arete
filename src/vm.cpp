@@ -51,12 +51,9 @@
 # define VM_SWITCH() switch(code[code_offset++])
 #endif
 
-#if 0
-  AR_ASSERT("function stack_max is not high enough, probably a compiler bug" && \
-    f.stack_i < f.fn->stack_max); 
-#endif
-
 #define VM_STACK_PUSH(expr) \
+  AR_ASSERT("function stack_max is not high enough, probably a compiler bug" && \
+    f.stack_i < f.fn->stack_max); \
   f.stack[f.stack_i++] = (expr)
 
 #define VM_EXCEPTION(type, msg) \
@@ -491,6 +488,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             } 
 
             // Replace function on stack with its result
+            AR_ASSERT(f.stack_i > fargc);
             f.stack[f.stack_i - fargc - 1] =
               f.stack[f.stack_i - fargc - 1].c_function_apply(*this, fargc, &f.stack[f.stack_i - fargc]);
 
@@ -934,7 +932,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       }
 
       VM_CASE(OP_NOT): {
-        f.stack[f.stack_i - 1] = f.stack[f.stack_i-1] == C_FALSE ? C_TRUE : C_FALSE;
+        f.stack[f.stack_i - 1] = f.stack[f.stack_i - 1] == C_FALSE ? C_TRUE : C_FALSE;
         VM_DISPATCH();
       }
 

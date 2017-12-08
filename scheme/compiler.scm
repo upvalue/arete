@@ -17,6 +17,11 @@
 ;; If true, warn about undefined variables
 (set-top-level-value! 'COMPILER-WARN-UNDEFINED #t)
 
+;; Inline function applications in the CAR position
+(set-top-level-value! 'COMPILER-INLINE-CAR #t)
+
+(define (compiler-inline-car) (eq? (top-level-value 'COMPILER-INLINE-CAR) #t))
+
 (set-top-level-value! 'cd #t)
 
 ;; OpenFn is a record representing a function in the process of being compiled.
@@ -297,6 +302,44 @@
   ))
 )
 
+(define (apply-inlinable? fn x)
+  (and (compiler-inline-car)
+       (not (OpenFn/toplevel? fn))
+       (pair? (car x))
+       (eq? (rename-strip (caar x)) 'lambda)
+       (list? (cadar x))))
+
+(define (compile-inline-call fn x tail?)
+  ;; inlining a function call:
+  ;; subsume all arguments as locals
+  ;; compile all arguments as local-sets
+  ;; compile body
+  (compiler-log fn "inlining function call" x)
+
+  (let ((args (cadar x)) (locals (OpenFn/local-count fn)))
+    (when (not (fx= (length (cdr x)) (length args)))
+      (raise-source x 'compile (print-string "inline procedure application expected" (length args) "arguments but got" (length (cdr x))) (list x)))
+
+    (unless (null? args)
+      ;; TODO check args length
+      (let loop ((i 0) (item (car args)) (rest (cdr args)))
+
+        ;(compiler-log fn "inlining function arg" (car args))
+        (table-set! (OpenFn/env fn) item (Var/make (fx+ locals i) item))
+
+        (compile-expr fn (list-ref x (fx+ i 1)) #f (list-tail x i) #f)
+        (emit fn 'local-set (fx+ locals i))
+
+        (unless (null? rest)
+          (loop (fx+ i 1) (car rest) (cdr rest)))))
+    (OpenFn/local-count! fn (fx+ locals (length (cdr x)))))
+
+  ;(pretty-print fn)
+
+  (let ((body (cons (make-rename #f 'begin) (cddar x))))
+    (scan-local-defines fn body)
+    (compile-expr fn body #f (cdar x) tail?)))
+
 (define (compile-apply fn x tail?)
   (define stack-check #f)
   (define argc (length (cdr x)))
@@ -310,74 +353,76 @@
 
   (compiler-log fn "compiling application" x)
 
-  ;; If a function is a Thing.
-
-  ;; Compiling specific opcodes
-  ;; +, -, etc
-  (aif (and (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
-            (symbol? kar)
-            (eq? (car (fn-lookup fn kar x)) 'global)
-            (table-ref primitive-table kar))
+  (if (apply-inlinable? fn x)
     (begin
-      ;; Check primitive function arguments at compile-time when possible
-      (let ((min-argc (list-ref it 1))
-            (max-argc (list-ref it 2))
-            (var-argc (list-ref it 3))
-            (argc (length (cdr x))))
-        (when (< argc min-argc)
-          (raise-source x 'compile (print-string "function call" (car x) "requires at least" min-argc "arguments but only got" argc) (list x )))
+      (compile-inline-call fn x tail?))
+    (let ()
+      ;; Compiling specific opcodes
+      ;; +, -, etc
+      (aif (and (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
+                (symbol? kar)
+                (eq? (car (fn-lookup fn kar x)) 'global)
+                (table-ref primitive-table kar))
+        (begin
+          ;; Check primitive function arguments at compile-time when possible
+          (let ((min-argc (list-ref it 1))
+                (max-argc (list-ref it 2))
+                (var-argc (list-ref it 3))
+                (argc (length (cdr x))))
+            (when (< argc min-argc)
+              (raise-source x 'compile (print-string "function call" (car x) "requires at least" min-argc "arguments but only got" argc) (list x )))
 
-        (when (and (not var-argc) (> argc max-argc))
-          (raise-source x 'compile (print-string "function call" (car x) "expects at most" min-argc "arguments but got" argc) (list x )))
+            (when (and (not var-argc) (> argc max-argc))
+              (raise-source x 'compile (print-string "function call" (car x) "expects at most" min-argc "arguments but got" argc) (list x )))
 
-        (when var-argc
-          (set! primitive-args #t))
+            (when var-argc
+              (set! primitive-args #t))
 
-      (set! primitive it)))
-    (compile-expr fn (car x) #f x #f))
+          (set! primitive it)))
+        (compile-expr fn (car x) #f x #f))
 
-  (set! stack-check (OpenFn/stack-size fn))
+      (set! stack-check (OpenFn/stack-size fn))
 
-  ;; Extract an argument list 
-  (define argument-list
-    (if (and (pair? (car x)) (eq? (rename-strip (caar x)) 'lambda))
-      (and (pair? (cadar x)) (cadar x))
-      #f))
+      ;; Extract an argument list 
+      (define argument-list
+        (if (and (pair? (car x)) (eq? (rename-strip (caar x)) 'lambda))
+          (and (pair? (cadar x)) (cadar x))
+          #f))
 
-  (define argument-list-length (if (and argument-list (list? argument-list)) (length argument-list) #f))
+      (define argument-list-length (if (and argument-list (list? argument-list)) (length argument-list) #f))
 
-  (for-each-i
-    (lambda (i sub-x)
-      (define result (compile-expr fn sub-x #f (list-tail x (fx+ i 1)) #f))
-      (when (and argument-list argument-list-length)
-        (if (fx= i argument-list-length)
-          (print-source x "Inline function application appears to have too many arguments")
-          (if (vmfunction? result)
-            (set-vmfunction-name! result (list-ref argument-list i)))
+      (for-each-i
+        (lambda (i sub-x)
+          (define result (compile-expr fn sub-x #f (list-tail x (fx+ i 1)) #f))
+          (when (and argument-list argument-list-length)
+            (if (fx= i argument-list-length)
+              (print-source x "Inline function application appears to have too many arguments")
+              (if (vmfunction? result)
+                (set-vmfunction-name! result (list-ref argument-list i)))
 
-          
-          )))
-    (cdr x))
+              
+              )))
+        (cdr x))
 
-  ;; Stack size sanity check
-  ;; Except for toplevel functions
-  (unless (or (OpenFn/toplevel? fn) (eq? (fx- (OpenFn/stack-size fn) argc) stack-check))
-    (raise 'compile-internal (print-string "expected function stack size" (OpenFn/stack-size fn)
-                                           "to match 0 + function arguments" stack-check) (list fn x)))
+      ;; Stack size sanity check
+      ;; Except for toplevel functions
+      (unless (or (OpenFn/toplevel? fn) (eq? (fx- (OpenFn/stack-size fn) argc) stack-check))
+        (raise 'compile-internal (print-string "expected function stack size" (OpenFn/stack-size fn)
+                                               "to match 0 + function arguments" stack-check) (list fn x)))
 
 
-  (if primitive
-    (begin
-      (if primitive-args
-        (if (and (eq? (car primitive) '+) (null? (cdr x)))
-          (compile-constant fn 0)
-          (emit fn (car primitive) (length (cdr x))))
-        (emit fn (car primitive))
-        
-      )
-    )
-    (emit fn (if tail? 'apply-tail 'apply) (length (cdr x))))
-  )
+      (if primitive
+        (begin
+          (if primitive-args
+            (if (and (eq? (car primitive) '+) (null? (cdr x)))
+              (compile-constant fn 0)
+              (emit fn (car primitive) (length (cdr x))))
+            (emit fn (car primitive))
+            
+          )
+        )
+        (emit fn (if tail? 'apply-tail 'apply) (length (cdr x))))
+      )))
 
 ;; This is the free-variable handling, it's necessarily somewhat complex
 
@@ -447,18 +492,21 @@
               (print-source src "Warning: reference to undefined variable" (symbol-dequalify x)))
             (cons 'global x))
           (aif (table-ref (OpenFn/env search-fn) x)
-            (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
-              (cons 'local (Var/idx it))
-              ;; This is an upvalue
-              (if (eq? fn search-fn)
-                ;; This upvalue has already been added to the closure
-                (begin
-                  (compiler-log fn "found existing upvalue" it)
-                  (cons 'upvalue (Var/idx it)))
-                (begin
-                  (register-free-variable fn x)
-                  (fn-lookup fn x src))))
-            (loop (OpenFn/parent search-fn))))))))
+            (begin
+              (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
+                (cons 'local (Var/idx it))
+                ;; This is an upvalue
+                (if (eq? fn search-fn)
+                  ;; This upvalue has already been added to the closure
+                  (begin
+                    (compiler-log fn "found existing upvalue" it)
+                    (cons 'upvalue (Var/idx it)))
+                  (begin
+                    (register-free-variable fn x)
+                    (fn-lookup fn x src))))
+              )
+            (begin
+              (loop (OpenFn/parent search-fn)))))))))
 
 (define (compile-identifier fn x src)
   (if (rename? x)
