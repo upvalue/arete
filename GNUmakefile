@@ -81,7 +81,7 @@ bin/arete32: $(CXXOBJS32) src/main.32.o
 
 heap.boot: bin/arete $(CXXOBJS) $(wildcard scheme/*.scm)
 	$(call colorecho, "IMG $@ ")
-	bin/arete scheme/expand.scm scheme/syntax.scm scheme/compiler.scm --eval "(pull-up-bootstraps)" --save-image $@
+	bin/arete scheme/expand.scm scheme/syntax.scm scheme/rules.scm scheme/compiler.scm --eval "(pull-up-bootstraps)" --save-image $@
 
 heap32.boot: bin/arete32 $(wildcard scheme/*.scm)
 	$(call colorecho, "IMG $@ ")

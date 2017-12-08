@@ -51,8 +51,8 @@
 (define list (lambda lst lst))
 
 ;; Constants
-(define null? (lambda (v) (eq? (value-bits v) 10)))
-(define eof-object? (lambda (v) (eq? (value-bits v) 18)))
+(define (null? v) (eq? (value-bits v) 10))
+(define (eof-object? v) (eq? (value-bits v) 18))
 
 (define input-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 9))))
 (define output-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 10))))
@@ -804,6 +804,19 @@
 
   (define-transformer! x env env name body))
 
+
+;; Fold an environment into another environment
+;; Used for let-syntax and letrec-syntax definition splicing
+(define (env-vec-fold parent env len i)
+  (if (fx= i len)
+    #f
+    (begin
+      (env-define parent (vector-ref env i) (vector-ref env (fx+ i 1)))
+      (env-vec-fold parent env len (fx+ i 2)))))
+
+(define (env-fold env)
+  (env-vec-fold (vector-ref env 0) env (vector-length env) 2))
+
 ;; Expander for let-syntax and letrec-syntax
 (define (expand-let-syntax type x env)
   (define new-env (env-make env #t))
@@ -831,6 +844,10 @@
 
   (define result 
     (cons-source x (make-rename #f 'begin) (expand-map body new-env)))
+
+  ;; fold new-env into old-env
+  ;(pretty-print new-env)
+  (env-fold new-env)
 
   #;(expand result env)
   result)

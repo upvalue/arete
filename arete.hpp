@@ -1785,7 +1785,7 @@ struct State {
     size_t size = sizeof(Pair) - sizeof(SourceLocation));
   Value make_src_pair(Value car, Value cdr, SourceLocation& loc);
   Value make_src_pair(Value car, Value cdr, Value src);
-  Value make_char(char c);
+  Value make_char(int c);
 
   /** Create vector backing storage */
   Value make_vector_storage(size_t capacity);

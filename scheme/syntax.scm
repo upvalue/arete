@@ -111,8 +111,10 @@
 
 (define (qq-element c lst)
   (if (c #'unquote (car lst))
-      (cadr lst)
-      (qq-list c lst)))
+    (cadr lst)
+    (if (c #'quasiquote (car lst))
+      (list #'quote (cadr lst))
+      (qq-list c lst))))
          
 (define (qq-object c object)
   (if (pair? object)
@@ -415,6 +417,61 @@ TODO: Casting
 
 (define (call-with-values producer consumer)
   (apply consumer (cdr (producer))))
+
+;;;;; CHARACTERS
+
+(define (char<? a b)
+  (< (char->integer a) (char->integer b)))
+
+(define (char>? a b)
+  (> (char->integer a) (char->integer b)))
+
+(define (char<=? a b)
+  (not (char>? a b)))
+
+(define (char>=? a b)
+  (not (char<? a b)))
+
+(define (char-ci=? a b)
+  (char=? (char-case-fold a) (char-case-fold b)))
+
+(define (char-ci<? a b)
+  (char<? (char-case-fold a) (char-case-fold b)))
+
+(define (char-ci>? a b)
+  (char>? (char-case-fold a) (char-case-fold b)))
+
+(define (char-ci<=? a b)
+  (char<=? (char-case-fold a) (char-case-fold b)))
+
+(define (char-ci>=? a b)
+  (char>=? (char-case-fold a) (char-case-fold b)))
+
+(define (string-ci=? a b)
+  (string=? (string-map char-case-fold a) (string-map char-case-fold b)))
+
+(define (string-sum s1)
+  (let loop ((i 0)
+             (sum 0))
+    (if (fx= i (string-length s1))
+      sum
+      (loop (fx+ i 1) (fx+ sum (char->integer (string-ref s1 i)))))))
+
+(define (string-sum-ci s1)
+  (let loop ((i 0)
+             (sum 0))
+    (if (fx= i (string-length s1))
+      sum
+      (loop (fx+ i 1) (fx+ sum (char->integer (char-case-fold (string-ref s1 i))))))))
+
+(define (string<? a b) (< (string-sum a) (string-sum b)))
+(define (string>? a b) (> (string-sum a) (string-sum b)))
+(define (string<=? a b) (not (string>? a b)))
+(define (string>=? a b) (not (string<? a b)))
+(define (string-ci<? a b) (< (string-sum-ci a) (string-sum-ci b)))
+(define (string-ci>? a b) (> (string-sum-ci a) (string-sum-ci b)))
+(define (string-ci<=? a b) (<= (string-sum-ci a) (string-sum-ci b)))
+(define (string-ci>=? a b) (>= (string-sum-ci a) (string-sum-ci b)))
 
 ;;;;; STRINGS
 

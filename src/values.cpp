@@ -534,7 +534,7 @@ Value Value::list_ref(size_t n) const {
 }
 
 
-Value State::make_char(char c) {
+Value State::make_char(int c) {
   Char* heap = static_cast<Char*>(gc.allocate(CHARACTER, sizeof(Char)));
   heap->datum = c;
   return heap;

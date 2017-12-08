@@ -137,10 +137,10 @@
 
 (test '(10 5 4 16 9 8)
     `(10 5 ,(expt 2 2) ,@(map (lambda (n) (expt n 2)) '(4 3)) 8))
-#|
 
 (test '(a `(b ,(+ 1 2) ,(foo 4 d) e) f)
     `(a `(b ,(+ 1 2) ,(foo ,(+ 1 3) d) e) f))
+#|
 
 (test '(a `(b ,x ,'y d) e)
     (let ((name1 'x)
@@ -386,7 +386,6 @@
 
 (test #f (string=? "a" (string #\b)))
 
-#|
 (test #t (string<? "a" "aa"))
 
 (test #f (string<? "aa" "a"))
@@ -396,8 +395,6 @@
 (test #t (string<=? "a" "aa"))
 
 (test #t (string<=? "a" "a"))
-
-|#
 
 (test #t (string=? "a" (make-string 1 #\a)))
 
@@ -471,7 +468,6 @@
                         ((_ x ...) 'bad)
                         ((_ . r) 'ok))))
         (s a b c))))
-#|
 
 (test 'ok (let ()
             (let-syntax ()
@@ -482,8 +478,6 @@
             (letrec-syntax ()
               (define internal-def 'ok))
             internal-def))
-
-|#
 
 (test '(2 1)
     ((lambda () (let ((x 1)) (let ((y x)) (set! x 2) (list x y))))))

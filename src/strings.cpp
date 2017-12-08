@@ -64,6 +64,15 @@ Value fn_integer_to_char(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("integer->char", fn_integer_to_char, 1);
 
+Value fn_char_case_fold(State& state, size_t argc, Value* argv) {
+  static const char* fn_name = "char-case-fold";
+  AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
+
+  int c = argv[0].character();
+  return state.make_char(tolower(c));
+}
+AR_DEFUN("char-case-fold", fn_char_case_fold, 1);
+
 Value fn_char_numeric(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "char-numeric?";
   AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
