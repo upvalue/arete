@@ -97,6 +97,8 @@ static Value fn_list_impl(State& state, size_t argc, Value* argv, bool copy_sour
   size_t list_begin = copy_source ? 1 : 0;
   SourceLocation loc;
 
+  AR_ASSERT(state.gc.live(argv[0]));
+
   if(copy_source) {
     if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
       loc = argv[0].pair_src();
@@ -104,7 +106,6 @@ static Value fn_list_impl(State& state, size_t argc, Value* argv, bool copy_sour
       copy_source = false;
     }
   }
-
 
   for(size_t i = list_begin; i < argc; i++) {
     state.temps.push_back(argv[i]);
@@ -124,14 +125,6 @@ static Value fn_list_impl(State& state, size_t argc, Value* argv, bool copy_sour
 
   return lst;
 }
-
-#if 0
-// TODO REMOVE
-Value fn_list(State& state, size_t argc, Value* argv) {
-  return fn_list_impl(state, argc, argv, false);
-}
-AR_DEFUN("list", fn_list, 0, 0, true);
-#endif
 
 Value fn_list_source(State& state, size_t argc, Value* argv) {
   return fn_list_impl(state, argc, argv, true);

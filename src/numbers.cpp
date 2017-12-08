@@ -296,6 +296,65 @@ Value fn_number_to_string(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("number->string", fn_number_to_string, 1);
 
+Value fn_minmax(State& state, size_t argc, Value* argv, bool min) {
+  const char* fn_name = min ? "min" : "max";
+  ptrdiff_t fxacc = 0;
+  bool inexact = false;
+  bool set = false;
+  size_t i = 0;
+  for(; i != argc; i++) {
+    if(argv[i].fixnump()) {
+      if(!set) {
+        fxacc = argv[i].fixnum_value();
+        set = true;
+      } else {
+        fxacc = min ? (fxacc > argv[i].fixnum_value() ? argv[i].fixnum_value() : fxacc) :
+          (fxacc > argv[i].fixnum_value() ? fxacc : argv[i].fixnum_value());
+      }
+    } else if(argv[i].heap_type_equals(FLONUM)) {
+      inexact = true;
+      break;
+    } else {
+      AR_FN_ASSERT_ARG(state, i, "to be numeric", argv[i].numeric());
+    }
+  }
+  if(!inexact) return Value::make_fixnum(fxacc);
+  double flacc = (double) fxacc;
+  for(; i != argc; i++) {
+    if(argv[i].fixnump()) {
+      if(!set) {
+        flacc = argv[i].fixnum_value();
+        set = true;
+      } else {
+        flacc = min ? (flacc > argv[i].fixnum_value() ? argv[i].fixnum_value() : flacc) :
+          (flacc > argv[i].fixnum_value() ? flacc : argv[i].fixnum_value());
+      }
+    } else if(argv[i].heap_type_equals(FLONUM)) {
+      if(!set) {
+        flacc = argv[i].flonum_value();
+        set = true;
+      } else {
+        flacc = min ? (flacc > argv[i].flonum_value() ? argv[i].flonum_value() : flacc) :
+          (flacc > argv[i].flonum_value() ? flacc : argv[i].flonum_value());
+      }
+    } else {
+      AR_FN_ASSERT_ARG(state, i, "to be numeric", argv[i].numeric());
+    }
+  }
+  return state.make_flonum(flacc);
+}
+
+Value fn_min(State& state, size_t argc, Value* argv) {
+  return fn_minmax(state, argc, argv, true);
+}
+AR_DEFUN("min", fn_min, 1, 1, true);
+
+Value fn_max(State& state, size_t argc, Value* argv) {
+  return fn_minmax(state, argc, argv, false);
+}
+AR_DEFUN("max", fn_max, 1, 1, true);
+
+
 Value fn_string_to_number(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string->number";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
@@ -304,7 +363,6 @@ Value fn_string_to_number(State& state, size_t argc, Value* argv) {
   }
 
   const char* data = argv[0].string_data();
-  size_t length = argv[0].string_bytes();
 
   std::string string(data);
   NumberReader reader(state, string);

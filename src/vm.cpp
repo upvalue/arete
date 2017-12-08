@@ -51,6 +51,14 @@
 # define VM_SWITCH() switch(code[code_offset++])
 #endif
 
+#if 0
+  AR_ASSERT("function stack_max is not high enough, probably a compiler bug" && \
+    f.stack_i < f.fn->stack_max); 
+#endif
+
+#define VM_STACK_PUSH(expr) \
+  f.stack[f.stack_i++] = (expr)
+
 #define VM_EXCEPTION(type, msg) \
   { std::ostringstream __os; __os << msg ; f.exception = make_exception(type, __os.str()); \
     goto exception;}
@@ -370,9 +378,10 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       VM_CASE(OP_GLOBAL_GET): {
         size_t idx = VM_NEXT_INSN();
         Value sym = f.fn->constants->data[idx];
+        AR_ASSERT(sym.heap_type_equals(SYMBOL));
         AR_LOG_VM("global-get idx: " << idx << " ;; " << f.fn->constants->data[idx]);
         // AR_ASSERT(sym.type() == SYMBOL && "global-get called against non-symbol");
-        f.stack[f.stack_i++] = sym.symbol_value();
+        VM_STACK_PUSH(sym.symbol_value());
         if(f.stack[f.stack_i - 1] == C_UNDEFINED) {
           std::ostringstream os;
           os << "reference to undefined variable " << sym;//<< symbol_dequalify(sym);
@@ -476,7 +485,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
                   "but got " << fargc;
                 f.exception = eval_error(os.str());
                 goto exception;
-
               }
             } 
 

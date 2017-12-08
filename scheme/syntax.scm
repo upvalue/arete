@@ -364,8 +364,24 @@
 (define exact? fixnum?)
 (define inexact? flonum?)
 (define (integer? x) (or (fixnum? x) (eqv? (floor x) x)))
-(define (max a b) (if (< a b) b a))
-(define (min a b) (if (> a b) b a))
+
+#|
+TODO: Casting
+(define (max1 a b) (if (> a b) a b))
+(define (min1 a b) (if (> a b) b a))
+
+(define (max a b . rest)
+  (if (null? rest)
+    (if (> b a) b a)
+    (max1 (if (> b a) b a) (reduce max1 rest))))
+
+(define (min a b . rest)
+  (if (null? rest)
+    (if (> b a) a b)
+    (min1 (if (> b a) a b) (reduce min1 rest))))
+|#
+
+
 (define (abs a) (if (< a 0) (- a) a))
 (define (complex? x) (or (fixnum? x) (flonum? x)))
 (define (rational? x) (or (fixnum? x) (flonum? x)))

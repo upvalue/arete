@@ -348,10 +348,6 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
         fn->arguments = args;
       }
 
-      //std::cout << "fn body: " << fn->body << std::endl;
-      //std::cout << "fn args: " << fn->arguments << std::endl;
-      //std::cout << "fn rest: " << fn->rest_arguments << std::endl;
-
       return saved_fn;
     }
   }
@@ -410,6 +406,7 @@ Value State::eval_apply_function(Value fn, size_t argc, Value* argv) {
   if(argc > arity) {
     tmp = temps_to_list(arity);
     temps[arity] = tmp;
+    AR_ASSERT(temps.size() > arity);
     actual_args++;
   } else {
     temps.push_back(C_NIL);
@@ -738,7 +735,7 @@ tail_call:
           case VMFUNCTION: {
             Value fn = tmp, args = exp.cdr(), argv, closure;
             ListAppender rest;
-            AR_FRAME(this, fn, args, argv, rest.head, rest.tail,  closure);
+            AR_FRAME(this, fn, args, argv, closure, rest.head, rest.tail);
 
             if(fn.heap_type_equals(CLOSURE)) {
               closure = fn;
@@ -901,6 +898,7 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
 
         unsigned rest_argi = vfn.vm_function_max_arity();
         
+        AR_ASSERT(rest_argi < temps.size());
         temps[rest_argi] = temps_to_list(rest_argi);
         return apply_vm(fn, rest_argi+1, &temps[0]);
       }
