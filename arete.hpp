@@ -602,6 +602,8 @@ struct Value {
   static const unsigned SYMBOL_GENSYM_BIT = 1 << 10;
   static const unsigned SYMBOL_READ_BIT = 1 << 11;
   static const unsigned SYMBOL_QUALIFIED_BIT = 1 << 12;
+  // True if symbol is a GC root 
+  static const unsigned SYMBOL_ROOT_BIT = 1 << 13;
 
   // RENAMES
 
@@ -831,6 +833,8 @@ inline Value Value::symbol_value() const {
 
 inline void Value::set_symbol_value(Value v) {
   as<Symbol>()->value = v;
+  if(!heap->get_header_bit(SYMBOL_ROOT_BIT))
+    heap->set_header_bit(SYMBOL_ROOT_BIT);
 }
 
 struct Rename : HeapValue {

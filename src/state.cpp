@@ -102,6 +102,7 @@ void State::boot() {
       s = make_string(_symbols[i]);
     } else {
       s = get_symbol(_symbols[i]);
+      s.heap->set_header_bit(Value::SYMBOL_ROOT_BIT);
 
       if(i <= S_LETREC_SYNTAX) {
         s.as<Symbol>()->value = C_SYNTAX;

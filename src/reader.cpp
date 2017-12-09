@@ -107,7 +107,7 @@ Value NumberReader::read() {
   size_t i = 0;
   // True if scientific notiation has been seen and an additional
   // number needs to be read
-  bool is_scientific = false;
+  bool is_exponent = false;
   bool negative = false;
 
   if(!consume_numeric_directive(i)) return C_FALSE;
@@ -153,7 +153,7 @@ Value NumberReader::read() {
     std::stringstream ss;
     for(; i != string.size(); i++) {
       if(string[i] == 'e') {
-        is_scientific = true;
+        is_exponent = true;
         i++;
         break;
       }
@@ -188,10 +188,10 @@ Value NumberReader::read() {
         case 'D': case 'd': place = 13; if(!check_radix_gte(16, c)) return C_FALSE; break;
         case 'E': case 'e': {
           if(radix != 16) {
-            // This is scientific notation
+            // This is an exponent
             i++;
-            is_scientific = true;
-            goto scientific;
+            is_exponent = true;
+            goto exponent;
           }
           place = 14;
           if(!check_radix_gte(16, c))
@@ -217,16 +217,16 @@ Value NumberReader::read() {
 
   }
 
-  scientific:
+  exponent:
 
-  // Parse scientific notation
-  if(is_scientific) {
+  // Parse exponent notation
+  if(is_exponent) {
     ptrdiff_t science_amount = 0;
     for(; i != string.size(); i++) {
       bool valid = string[i] >= '0' && string[i] <= '9';
       if(!valid) {
         std::ostringstream os;
-        os << "number reader encountered " << string[i] << " after e in scientific notation but only 0-9 allowed";
+        os << "number reader encountered " << string[i] << " after e in exponent notation but only 0-9 allowed";
         error_desc = os.str();
         return C_FALSE;
       }
@@ -245,7 +245,7 @@ Value NumberReader::read() {
     }
   }
 
-  if(!exact || (!is_float && is_scientific && !exact_set)) {
+  if(!exact || (!is_float && is_exponent && !exact_set)) {
     is_float = true;
     flonum = (double) fixnum;
   } 

@@ -853,43 +853,42 @@
   result)
 
 ;; Expand a macro application
-(define expand-macro 
-  (lambda (x env transformer)
-    ;(define lookup (list-ref (env-lookup env (car x)) 2))
-    (define arity (function-min-arity transformer))
-    (define saved-rename-env (top-level-value '*current-rename-env*))
-    (define identifier-application? (and (not (identifier? x)) (function-identifier-macro? transformer)))
-    (define form (if identifier-application? (car x) x))
+(define (expand-macro x env transformer)
+  ;(define lookup (list-ref (env-lookup env (car x)) 2))
+  (define arity (function-min-arity transformer))
+  (define saved-rename-env (top-level-value '*current-rename-env*))
+  (define identifier-application? (and (not (identifier? x)) (function-identifier-macro? transformer)))
+  (define form (if identifier-application? (car x) x))
 
-    (set-top-level-value! '*current-rename-env* (function-env transformer))
+  (set-top-level-value! '*current-rename-env* (function-env transformer))
 
-    (if identifier-application?
-      (set! form (car x)))
+  (if identifier-application?
+    (set! form (car x)))
 
-    (if (and (identifier? x) (not (function-identifier-macro? transformer)))
-      (raise-source x 'expand (print-string "use of syntax" x "as value") (list x)))
+  (if (and (identifier? x) (not (function-identifier-macro? transformer)))
+    (raise-source x 'expand (print-string "use of syntax" x "as value") (list x)))
 
-    (define result
-      (unwind-protect
-        (lambda ()
-          (if (eq? arity 1)
-            ;; Only pass form
-            (transformer form)
-            (if (eq? arity 2)
-              ;; Only pass form and comparison procedure
-              (transformer form (lambda (a b) (env-compare env a b)))
+  (define result
+    (unwind-protect
+      (lambda ()
+        (if (eq? arity 1)
+          ;; Only pass form
+          (transformer form)
+          (if (eq? arity 2)
+            ;; Only pass form and comparison procedure
+            (transformer form (lambda (a b) (env-compare env a b)))
 
-              (transformer form
-                ;; rename procedure
-                (lambda (name) (make-rename (function-env transformer) name))
-                ;; compare procedure
-                (lambda (a b) (env-compare env a b))))))
-        (lambda ()
-          (set-top-level-value! '*current-rename-env* saved-rename-env))))
+            (transformer form
+              ;; rename procedure
+              (lambda (name) (make-rename (function-env transformer) name))
+              ;; compare procedure
+              (lambda (a b) (env-compare env a b))))))
+      (lambda ()
+        (set-top-level-value! '*current-rename-env* saved-rename-env))))
 
-    (if identifier-application?
-      (cons-source x result (expand-map (cdr x) env)) 
-      (expand result env))))
+  (if identifier-application?
+    (cons-source x result (expand-map (cdr x) env)) 
+    (expand result env)))
 
 ;; cond expander
 (define (expand-cond-full-clause x env clause rest)

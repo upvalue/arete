@@ -187,9 +187,13 @@ void GCCommon::visit_roots(T& walker) {
   for(std::list<Handle*>::iterator i = handles.begin(); i != handles.end(); i++)
     walker.touch(((*i)->ref.heap));
 
+  // variables are program roots
+
   for(auto x = state.symbol_table->begin(); x != state.symbol_table->end(); x++) {
     Symbol* v = x->second;
-    walker.touch((HeapValue**) &v);
+    if(v->get_header_bit(Value::SYMBOL_ROOT_BIT)) {
+      walker.touch((HeapValue**) &v);
+    }
     state.symbol_table->at(x->first) = v;
   }
 
@@ -453,6 +457,27 @@ void GCSemispace::collect(size_t request, bool force) {
   Block* swap = active;
   active = other;
   other = swap;
+
+  // Update symbol table after collection
+  size_t symbols_collected = 0;
+
+  for(auto x = state.symbol_table->begin(); x != state.symbol_table->end();) {
+    Symbol* v = x->second;
+    // Value was collected, thus this needs to be updated
+    if(v->header == RESERVED) {
+      x->second = (Symbol*) v->size;
+      //state.symbol_table->at(x->first) = (Symbol*) v->size;
+      ++x;
+    } else if(v->get_header_bit(Value::SYMBOL_ROOT_BIT)) {
+      ++x;
+    } else {
+      //std::cout << "collting symbol " << Value(x->second).as_unsafe<Symbol>()->name.as_unsafe<String>()->data << std::endl;
+      ++symbols_collected;
+      state.symbol_table->erase(x++);
+    }
+  }
+
+  ARETE_LOG_GC("collects " << symbols_collected << " symbols");
 
   // TODO: Currently, Arete holds onto both semispaces during program execution; it's not clear
   // whether this is the best course of action in terms of performance and memory usage.
