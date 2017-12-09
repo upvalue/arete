@@ -2,10 +2,13 @@
 
 #define ARETE_LOG_READ(msg) ARETE_LOG((ARETE_LOG_TAG_READER), "read", msg)
 
+#include <math.h>
+
 #include "arete.hpp"
 
 // TODO: Table literals
 // TODO: Record literals
+// TODO: Read shared structure
 
 namespace arete {
 
@@ -102,6 +105,10 @@ bool NumberReader::check_radix_gte(int at_least, char offend) {
 /** Read a number. Returns C_FALSE on error. */
 Value NumberReader::read() {
   size_t i = 0;
+  // True if scientific notiation has been seen and an additional
+  // number needs to be read
+  bool is_scientific = false;
+  bool negative = false;
 
   if(!consume_numeric_directive(i)) return C_FALSE;
   if(!consume_numeric_directive(i)) return C_FALSE;
@@ -113,7 +120,20 @@ Value NumberReader::read() {
     return C_FALSE;
   }
 
+  if(string[i] == '-') {
+    negative = true;
+    i++;
+  } else if(string[i] == '+') {
+    i++;
+  }
+
+  // True if a decimal has been seen and thus should be read as a floating
+  // point number (floats can occur in other scenarios, e.g. #i5 becomes 5.0,
+  // but these are not parsed as floats)
   bool is_float = false;
+
+  double flonum = 0.0;
+  ptrdiff_t fixnum = 0;
 
   for(size_t j = i; j != string.size(); j++) {
     if(string[j] == '.') {
@@ -132,6 +152,11 @@ Value NumberReader::read() {
   if(is_float) {
     std::stringstream ss;
     for(; i != string.size(); i++) {
+      if(string[i] == 'e') {
+        is_scientific = true;
+        i++;
+        break;
+      }
       if(!isdigit(string[i]) && string[i] != '.') {
         error_desc = "invalid numeric syntax ";
         error_desc += string[i];
@@ -139,11 +164,9 @@ Value NumberReader::read() {
       }
       ss << string[i];
     }
-    double number;
-    ss >> number;
-    return state.make_flonum(number);
+    ss >> flonum;
+    //return state.make_flonum(number);
   } else {
-    ptrdiff_t number = 0;
     ptrdiff_t place = 0;
     size_t begin = i;
     for(; i != string.size(); i++) {
@@ -151,37 +174,86 @@ Value NumberReader::read() {
       switch(c) {
         case '0': place = 0; break;
         case '1': place = 1; break;
-        case '2': place = 2; if(!check_radix_gte(8, c)) return false; break;
-        case '3': place = 3; if(!check_radix_gte(8, c)) return false; break; 
-        case '4': place = 4; if(!check_radix_gte(8, c)) return false; break; 
-        case '5': place = 5; if(!check_radix_gte(8, c)) return false; break; 
-        case '6': place = 6; if(!check_radix_gte(8, c)) return false; break; 
-        case '7': place = 7; if(!check_radix_gte(8, c)) return false; break; 
-        case '8': place = 8; if(!check_radix_gte(10, c)) return false; break;
-        case '9': place = 9; if(!check_radix_gte(10, c)) return false; break;
-        case 'A': case 'a': place = 10; if(!check_radix_gte(10, c)) return false; break;
-        case 'B': case 'b': place = 11; if(!check_radix_gte(16, c)) return false; break;
-        case 'C': case 'c': place = 12; if(!check_radix_gte(16, c)) return false; break;
-        case 'D': case 'd': place = 13; if(!check_radix_gte(16, c)) return false; break;
-        case 'E': case 'e': place = 14; if(!check_radix_gte(16, c)) return false; break;
+        case '2': place = 2; if(!check_radix_gte(8, c)) return C_FALSE; break;
+        case '3': place = 3; if(!check_radix_gte(8, c)) return C_FALSE; break; 
+        case '4': place = 4; if(!check_radix_gte(8, c)) return C_FALSE; break; 
+        case '5': place = 5; if(!check_radix_gte(8, c)) return C_FALSE; break; 
+        case '6': place = 6; if(!check_radix_gte(8, c)) return C_FALSE; break; 
+        case '7': place = 7; if(!check_radix_gte(8, c)) return C_FALSE; break; 
+        case '8': place = 8; if(!check_radix_gte(10, c)) return C_FALSE; break;
+        case '9': place = 9; if(!check_radix_gte(10, c)) return C_FALSE; break;
+        case 'A': case 'a': place = 10; if(!check_radix_gte(10, c)) return C_FALSE; break;
+        case 'B': case 'b': place = 11; if(!check_radix_gte(16, c)) return C_FALSE; break;
+        case 'C': case 'c': place = 12; if(!check_radix_gte(16, c)) return C_FALSE; break;
+        case 'D': case 'd': place = 13; if(!check_radix_gte(16, c)) return C_FALSE; break;
+        case 'E': case 'e': {
+          if(radix != 16) {
+            // This is scientific notation
+            i++;
+            is_scientific = true;
+            goto scientific;
+          }
+          place = 14;
+          if(!check_radix_gte(16, c))
+            return C_FALSE;
+          break;
+        }
         case 'F': case 'f': place = 15; if(!check_radix_gte(16, c)) return false; break;
         default: {
           std::ostringstream os;
           os << "number reader encountered unknown character " << c;
           error_desc = os.str();
-          return false;
+          return C_FALSE;
         }
       }
 
       if(i == begin) {
-        number = place;
+        fixnum = place;
       } else {
-        number *= radix;
-        number += place;
+        fixnum *= radix;
+        fixnum += place;
       }
     }
 
-    return exact ? Value::make_fixnum(number) : state.make_flonum((double) number);
+  }
+
+  scientific:
+
+  // Parse scientific notation
+  if(is_scientific) {
+    ptrdiff_t science_amount = 0;
+    for(; i != string.size(); i++) {
+      bool valid = string[i] >= '0' && string[i] <= '9';
+      if(!valid) {
+        std::ostringstream os;
+        os << "number reader encountered " << string[i] << " after e in scientific notation but only 0-9 allowed";
+        error_desc = os.str();
+        return C_FALSE;
+      }
+      science_amount *= 10;
+      science_amount += (string[i] - '0');
+    }
+
+    if(is_float) {
+      while(science_amount--) {
+        flonum *= 10;
+      }
+    } else {
+      while(science_amount--) {
+        fixnum *= 10;
+      }
+    }
+  }
+
+  if(!exact || (!is_float && is_scientific && !exact_set)) {
+    is_float = true;
+    flonum = (double) fixnum;
+  } 
+
+  if(is_float) {
+    return state.make_flonum(negative ? -flonum : flonum);
+  } else {
+    return Value::make_fixnum(negative ? -fixnum : fixnum);
   }
 }
 
@@ -271,39 +343,65 @@ Value XReader::unexpected_eof(const std::string& message, unsigned start_line,
   return read_error(os.str(), start_line, start_position, end_position);
 }
 
-XReader::TokenType XReader::tokenize_number(bool negative) {
-  char c;
-  if(negative) buffer += '-';
+static bool is_valid_number(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+}
+
+XReader::TokenType XReader::tokenize_number(bool sharp, char start) {
+  char c = '#';
+
+  // Read numeric directives
+  if(sharp) {
+    do {
+      if(c == '#')  {
+        if(!sharp) {
+          getc(c);
+        } else {
+          sharp = false;
+        }
+        buffer += c;
+        if(!peekc(c)) {
+          unexpected_eof("after # syntax", token_start_line, position, position+1);
+          return TK_ERROR;
+        }
+        switch(c) {
+          case 'e': case 'd': case 'x': case 'o': case 'b': case 'i': {
+            getc(c);
+            buffer += c;
+            break;
+          }
+          default: {
+            read_error("unknown numeric sharp syntax", token_start_line, position - 1, position);
+            return TK_ERROR;
+          }
+        }
+      } else if(!is_valid_number(c) && c != '-' && c != '.') {
+        read_error("expected digits after numeric syntax", token_start_line, token_start_position, position);
+        return TK_ERROR;
+      } else {
+        break;
+      }
+    } while(peekc(c));
+  }
+
+  if(start != '\0') {
+    buffer += start;
+  }
 
   while(peekc(c)) {
-    if(c >= '0' && c <= '9') {
+    //std::cout << c << std::endl;
+    if(is_valid_number(c) || c == '-' || c == '+' || c == '.') {
       getc(c);
       buffer += c;
+      // std::cout << "Buffer += " << c << std::endl;
     } else {
-      break;
+      // std::cout << "Tokenized number" << buffer << std::endl;
+      return TK_NUMBER;
     }
   }
+  // std::cout << "Tokenized number" << buffer << std::endl;
 
-  if(c == '.') {
-    eatc();
-    buffer += '.';
-  } else {
-    return TK_FIXNUM;
-  }
-
-  while(peekc(c)) {
-    if(c >= '0' && c <= '9') {
-      getc(c);
-      buffer += c;
-    } else if(c == '.') {
-      read_error("multiple periods in number", token_start_line, position, position+1);
-      return TK_ERROR;
-    } else {
-      break;
-    }
-  }
-
-  return TK_FLONUM;
+  return TK_NUMBER;
 }
 
 void XReader::tokenize_symbol(bool tokenize_sharp) {
@@ -363,15 +461,14 @@ XReader::TokenType XReader::next_token() {
     token_start_line = line;
     token_start_position = position;
     if(c >= '0' && c <= '9') {
-      return tokenize_number();
+      return tokenize_number(false);
     } else if(c == '+' || c == '-') {
       // These can start a number, but they can also start a symbol
+      char start = c, c2;
       getc(c);
-      AR_ASSERT(c == '+' || c == '-');
-      char c2;
       if(peekc(c2)) {
-        if(c2 >= '0' && c2 <= '9') {
-          return tokenize_number(c == '-');
+        if((c2 >= '0' && c2 <= '9') || c2 == '.') {
+          return tokenize_number(false, start);
         } else {
           buffer += c;
           tokenize_symbol();
@@ -390,70 +487,81 @@ XReader::TokenType XReader::next_token() {
       eatc();
 
       char c2;
-      if(!getc(c2)) {
+      if(!peekc(c2)) {
         unexpected_eof("after # read syntax", line, position - 1);
         return TK_ERROR;
       }
 
-      if(c2 == 't') return TK_TRUE;
-      else if(c2 == 'f') return TK_FALSE;
-      else if(c2 == '\'') return TK_RENAME;
-      else if(c2 == '(') return TK_VECTOR_OPEN;
-      else if(c2 == '\\') {
-        // Character literals
-        if(!peekc(c2)) {
-          unexpected_eof("after #\\ character literal", token_start_line, token_start_position);
-        }
+      // Numeric syntax
+      if(c2 == 'x') return tokenize_number(true);
+      else if(c2 == 'o') return tokenize_number(true);
+      else if(c2 == 'e') return tokenize_number(true);
+      else if(c2 == 'i') return tokenize_number(true);
+      else if(c2 == 'b') return tokenize_number(true);
+      else if(c2 == 'd') return tokenize_number(true);
+      else {
+        eatc();
+        if(c2 == 't') return TK_TRUE;
+        else if(c2 == 'f') return TK_FALSE;
 
-        if(c2 == ' ')  {
-          buffer += "space";
+        else if(c2 == '\'') return TK_RENAME;
+        else if(c2 == '(') return TK_VECTOR_OPEN;
+        else if(c2 == '\\') {
+          // Character literals
+          if(!peekc(c2)) {
+            unexpected_eof("after #\\ character literal", token_start_line, token_start_position);
+          }
+
+          if(c2 == ' ')  {
+            buffer += "space";
+            return TK_CHARACTER;
+          }
+
+          getc(c2);
+          buffer += c2;
+          tokenize_symbol();
+          
           return TK_CHARACTER;
-        }
+        } else if(c2 == '#') {
+          // Fully qualified symbols, e.g. ##arete#car
+          buffer += "##";
+          tokenize_symbol(true);
+          return TK_SYMBOL;
+        } else if(c2 == ';') {
+          // Expression comments
+          if(!peekc(c2)) {
+            unexpected_eof("after #; expression comment", line, position - 2);
+          }
+          return TK_EXPRESSION_COMMENT;
+        } else if(c2 == '|') {
+          // Multiline comments
+          size_t comment_depth = 1;
 
-        getc(c2);
-        buffer += c2;
-        tokenize_symbol();
-        
-        return TK_CHARACTER;
-      } else if(c2 == '#') {
-        // Fully qualified symbols, e.g. ##arete#car
-        buffer += "##";
-        tokenize_symbol(true);
-        return TK_SYMBOL;
-      } else if(c2 == ';') {
-        // Expression comments
-        if(!peekc(c2)) {
-          unexpected_eof("after #; expression comment", line, position - 2);
-        }
-        return TK_EXPRESSION_COMMENT;
-      } else if(c2 == '|') {
-        // Multiline comments
-        size_t comment_depth = 1;
-
-        while(!is.eof()) {
-          getc(c);
-          if(c == '#') {
-            peekc(c);
-            if(c == '|') {
-              eatc();
-              comment_depth++;
-            }
-          } else if(c == '|') {
-            peekc(c);
+          while(!is.eof()) {
+            getc(c);
             if(c == '#') {
-              getc(c);
-              if(--comment_depth == 0) break; 
+              peekc(c);
+              if(c == '|') {
+                eatc();
+                comment_depth++;
+              }
+            } else if(c == '|') {
+              peekc(c);
+              if(c == '#') {
+                getc(c);
+                if(--comment_depth == 0) break; 
+              }
             }
           }
-        }
-        if(comment_depth > 0) {
-          unexpected_eof("in #| multiline comment", token_start_line, token_start_position);
+          if(comment_depth > 0) {
+            unexpected_eof("in #| multiline comment", token_start_line, token_start_position);
+            return TK_ERROR;
+          }
+        } else {
+          eatc();
+          (void) read_error("unknown # syntax", token_start_line, token_start_position, position);
           return TK_ERROR;
         }
-      } else {
-        eatc();
-        (void) read_error("unknown # syntax", token_start_line, token_start_position, position);
-        return TK_ERROR;
       }
     } else if(c == '.') {
       eatc();
@@ -461,21 +569,20 @@ XReader::TokenType XReader::next_token() {
       if(!peekc(c2)) {
         unexpected_eof("after .", token_start_line, token_start_position);
         return TK_ERROR;
-    }
+      }
 
-    if(c2 >= '0' && c2 <= '9') {
-      buffer += '0';
-      buffer += '.';
-      tokenize_number();
-      return TK_FLONUM;
-    }
+      if(c2 >= '0' && c2 <= '9') {
+        tokenize_number(false, '.');
+        return TK_NUMBER;
+      }
 
-    else if(is_symbol(c2)) {
-      buffer += '.';
-      tokenize_symbol();
-      return TK_SYMBOL;
-    }
-    return TK_DOT;
+      else if(is_symbol(c2)) {
+        buffer += '.';
+        tokenize_symbol();
+        return TK_SYMBOL;
+      }
+
+      return TK_DOT;
     } else if (c == ',') {
       eatc();
       char c2;
@@ -581,23 +688,13 @@ Value XReader::read_expr(TokenType tk) {
     }
 
     // Atomic stuff
-    case TK_FIXNUM: {
-      ptrdiff_t n = 0;
-      bool negative = buffer[0] == '-';
-      for(size_t i = (negative ? 1 : 0); i != buffer.size(); i++) {
-        n += buffer[i] - '0';
-        if(i == buffer.size() - 1) break;
-        n *= 10;
+    case TK_NUMBER: {
+      NumberReader nreader(state, buffer); 
+      Value v = nreader.read();
+      if(v == C_FALSE) {
+        return read_error(nreader.error_desc, token_start_line, token_start_position, position);
       }
-      return Value::make_fixnum(negative ? -n : n);
-    }
-
-    case TK_FLONUM: {
-      std::stringstream ss;
-      ss << buffer;
-      double value;
-      ss >> value;
-      return state.make_flonum(value);
+      return v;
     }
 
     case TK_STRING: 
@@ -614,6 +711,10 @@ Value XReader::read_expr(TokenType tk) {
         return state.make_char(' ');
       } else if(buffer.compare("newline") == 0) {
         return state.make_char('\n');
+      } else if(buffer.compare("tab") == 0) {
+        return state.make_char('\t');
+      } else if(buffer.compare("return") == 0) {
+        return state.make_char('\r');
       } else if(buffer.size() > 1) {
         std::ostringstream os;
         os << "unknown character literal " << buffer << std::endl;

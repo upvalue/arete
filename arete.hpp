@@ -2159,6 +2159,7 @@ struct XReader {
     TK_RENAME,
     TK_FLONUM,
     TK_FIXNUM,
+    TK_NUMBER,
     TK_CHARACTER,
     TK_TRUE,
     TK_FALSE,
@@ -2219,8 +2220,7 @@ struct XReader {
   /** Set active_error to a message describing an unexpected end-of-file. Same params as read_error */
   Value unexpected_eof(const std::string& message, unsigned start_line, unsigned start_position, unsigned end_position);
 
-  /** Reads a number into the buffer */
-  TokenType tokenize_number(bool negative = false);
+  TokenType tokenize_number(bool sharp, char start = '\0');
 
   /** Reads a symbol into the buffer */
   void tokenize_symbol(bool tokenize_sharp = false);

@@ -73,13 +73,6 @@ Value fn_char_case_fold(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("char-case-fold", fn_char_case_fold, 1);
 
-Value fn_char_numeric(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "char-numeric?";
-  AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
-  return Value::make_boolean(argv[0].character() >= '0' && argv[0].character() <= '9');
-}
-AR_DEFUN("char-numeric?", fn_char_numeric, 1);
-
 Value fn_char_equals(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "char=?";
   AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);

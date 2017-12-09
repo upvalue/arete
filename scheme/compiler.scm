@@ -18,11 +18,14 @@
 (set-top-level-value! 'COMPILER-WARN-UNDEFINED #t)
 
 ;; Inline function applications in the CAR position
+;; Assumes that the expander has made all variable names unique.
 (set-top-level-value! 'COMPILER-INLINE-CAR #t)
 
-(define (compiler-inline-car) (eq? (top-level-value 'COMPILER-INLINE-CAR) #t))
+;; Use destination-driven code generation to remove jumps-to-jumps and jumps-to-returns
+(set-top-level-value! 'COMPILER-CONTROL-DESTINATION #t)
 
-(set-top-level-value! 'cd #t)
+(define (compiler-inline-car) (eq? (top-level-value 'COMPILER-INLINE-CAR) #t))
+(define (compiler-ddcg) (eq? (top-level-value 'COMPILER-CONTROL-DESTINATION) #t))
 
 ;; OpenFn is a record representing a function in the process of being compiled.
 
@@ -337,6 +340,7 @@
   ;(pretty-print fn)
 
   (let ((body (cons (make-rename #f 'begin) (cddar x))))
+
     (scan-local-defines fn body)
     (compile-expr fn body #f (cdar x) tail?)))
 
@@ -699,7 +703,7 @@
 
 ;; Emit an unconditional jump instruction
 (define (emit-jump fn cd label)
-  (if (top-level-value 'cd)
+  (if (compiler-ddcg)
     (cond 
       ((gensym? cd)
        (emit fn 'jump label))
@@ -711,7 +715,7 @@
     (emit fn 'jump label)))
       
 (define (control-destination cd label)
-  (if (and (top-level-value 'cd) (gensym? cd))
+  (if (and (compiler-ddcg) (gensym? cd))
     (begin
       ;(print "skipping to control destination" cd)
       cd
@@ -730,7 +734,6 @@
   (define check-stack (OpenFn/stack-size fn))
   (compile-expr fn condition #f (list-tail x 1) #f)
 
-  ;(emit fn 'jump-if-false then-branch-end 1)
   (emit fn 'jump-when-pop then-branch-end)
 
   (set! check-stack (OpenFn/stack-size fn))

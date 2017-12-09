@@ -31,21 +31,21 @@
 (define (caddr x) (car (cdr (cdr x))))
 (define (cadddr x) (car (cdr (cdr (cdr x)))))
 
-(define not (lambda (x) (eq? x #f)))
+(define (not x) (eq? x #f))
 
-(define fixnum? (lambda (v) (eq? (value-type v) 1)))
-(define flonum? (lambda (v) (eq? (value-type v) 4)))
+(define (fixnum? v) (eq? (value-type v) 1))
+(define (flonum? v) (eq? (value-type v) 4))
 (define (number? x) (or (fixnum? x) (flonum? x)))
-(define constant? (lambda (v) (eq? (value-type v) 2)))
-(define boolean? (lambda (v) (or (eq? v #t) (eq? v #f))))
-(define char? (lambda (v) (eq? (value-type v) 6)))
-(define pair? (lambda (v) (eq? (value-type v) 11)))
-(define table? (lambda (v) (eq? (value-type v) 15)))
-(define string? (lambda (v) (eq? (value-type v) 5)))
-(define symbol? (lambda (v) (eq? (value-type v) 8)))
-(define vector? (lambda (v) (eq? (value-type v) 9)))
-(define rename? (lambda (v) (eq? (value-type v) 16)))
-(define identifier? (lambda (v) (or (rename? v) (symbol? v))))
+(define (constant? v) (eq? (value-type v) 2))
+(define (boolean? v) (or (eq? v #t) (eq? v #f)))
+(define (char? v) (eq? (value-type v) 6))
+(define (pair? v) (eq? (value-type v) 11))
+(define (table? v) (eq? (value-type v) 15))
+(define (string? v) (eq? (value-type v) 5))
+(define (symbol? v) (eq? (value-type v) 8))
+(define (vector? v) (eq? (value-type v) 9))
+(define (rename? v) (eq? (value-type v) 16))
+(define (identifier? v) (or (rename? v) (symbol? v)))
 (define (function? v) (eq? (value-type v) 13))
 (define (vmfunction? v) (eq? (value-type v) 19))
 
@@ -870,31 +870,22 @@
       (raise-source x 'expand (print-string "use of syntax" x "as value") (list x)))
 
     (define result
-      (if (eq? arity 1)
-        ;; Only pass form
-        (transformer form)
-        (if (eq? arity 2)
-          ;; Only pass form and comparison procedure
-          (transformer form (lambda (a b) (env-compare env a b)))
+      (unwind-protect
+        (lambda ()
+          (if (eq? arity 1)
+            ;; Only pass form
+            (transformer form)
+            (if (eq? arity 2)
+              ;; Only pass form and comparison procedure
+              (transformer form (lambda (a b) (env-compare env a b)))
 
-          (transformer form
-            ;; rename procedure
-            (lambda (name) (make-rename (function-env transformer) name))
-            ;; compare procedure
-            (lambda (a b) (env-compare env a b))))))
-
-    (set-top-level-value! '*current-rename-env* saved-rename-env)
-
-    ;; In a let-syntax, the RESULTS of macro-expansion must be expanded in the parent environment -- right?
-    ;; And how to do that?
-
-    ;; #(asdf syntactic)
-    ;; #(asdf #t)
-    ;; #(asdf #f)
-
-    ;; (define asdf #t)
-    ;;   (let-syntax ((asdf (lambda (x) 'asdf)))
-    ;;     (asdf))
+              (transformer form
+                ;; rename procedure
+                (lambda (name) (make-rename (function-env transformer) name))
+                ;; compare procedure
+                (lambda (a b) (env-compare env a b))))))
+        (lambda ()
+          (set-top-level-value! '*current-rename-env* saved-rename-env))))
 
     (if identifier-application?
       (cons-source x result (expand-map (cdr x) env)) 
@@ -965,17 +956,15 @@
 
   result)
 
-(define expand-cond-clause 
-  (lambda (x env clause rest)
-    (if (null? clause)
-      unspecified
-      (expand-cond-full-clause x env clause rest))))
+(define (expand-cond-clause x env clause rest)
+  (if (null? clause)
+    unspecified
+    (expand-cond-full-clause x env clause rest)))
 
-(define expand-cond
-  (lambda (x env)
-    (if (fx= (length x) 1)
-      unspecified
-      (expand-cond-clause x env (cadr x) (cddr x)))))
+(define (expand-cond x env)
+  (if (fx= (length x) 1)
+    unspecified
+    (expand-cond-clause x env (cadr x) (cddr x))))
 
 ;; Set up module system
 
@@ -1006,16 +995,14 @@
   (table-set! mod "module-stage" 2)
   mod)
 
-(for-each1 make-empty-module (list "scheme#base" "scheme#cxr" "scheme#file" "scheme#inexact" "scheme#write"
-                                   "#scheme#time" "scheme#read"))
+(for-each1 make-empty-module '("scheme#base" "scheme#cxr" "scheme#file" "scheme#inexact" "scheme#write"
+                               "scheme#time" "scheme#read" "scheme#char" "scheme#complex"))
 
 (define *user-module* (module-make "user"))
 
 (table-set! (top-level-value 'module-table) "user" *user-module*)
 (table-set! *user-module* "module-export-all" #t)
 (table-set! *user-module* "module-stage" 2)
-
-;(expand-import *user-module* '(arete))
 
 (set-top-level-value! '*push-module* *user-module*)
 (set-top-level-value! '*current-module* *core-module*)

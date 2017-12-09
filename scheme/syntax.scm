@@ -182,14 +182,11 @@
 ;; case
 (define-syntax case
   (lambda (x c)
-    (define key #f)
-    (define clauses #f)
-
     (if (fx< (length x) 3)
       (raise-source x 'syntax "case expects at least three arguments (a key and a clause)" x))
 
-    (set! key (cadr x))
-    (set! clauses (cddr x))
+    (define key (cadr x))
+    (define clauses (cddr x))
 
     (if (not (list? clauses))
       (raise-source x 'syntax "case expects a list of clauses" x))
@@ -425,6 +422,31 @@ TODO: Casting
 
 (define (char>? a b)
   (> (char->integer a) (char->integer b)))
+
+(define char-downcase char-case-fold)
+
+(define (char-numeric? c)
+  (let ((i (char->integer c)))
+    (and (fx> i 47) (fx< i 58))))
+
+(define (char-upper-case? c)
+  (let ((i (char->integer c)))
+    (and (fx> i 64) (fx< i 91))))
+
+(define (char-lower-case? c)
+  (let ((i (char->integer c)))
+    (and (fx> i 96) (fx< i 122))))
+
+(define (char-alphabetic? c)
+  (or (char-lower-case? c) (char-upper-case? c)))
+
+(define (char-whitespace? c)
+  (and (memq (char->integer c) '(9 10 11 12 13 32)) #t))
+
+(define (char-upcase c)
+  (if (not (and (char-alphabetic? (char>=? char #\A) (char<=? char #\Z))))
+    c
+    (integer->char (fx- (char->integer c) 32))))
 
 (define (char<=? a b)
   (not (char>? a b)))
