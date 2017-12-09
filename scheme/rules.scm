@@ -62,7 +62,7 @@
        ;; Handle (asdf ...) (asdf)
        (if (null? (cdr form))
          ;; Ellipses, but not more form, so we match only one element
-         (if (and (not (null? (cdr pattern))) (ellipses? cmp ellipses (cadr pattern)))
+         (if (and (pair? (cdr pattern)) (ellipses? cmp ellipses (cadr pattern)))
            (list (list (car pattern) 'splat form))
            ;; This is not an ellipses so try to match it normally
            (rules-try cmp ellipses pattern form literals))
@@ -228,22 +228,6 @@
           (else (try-cons a b)))))
     '() lst))
 
-;; (define-syntax thing
-;;   (syntax-rules (literals)
-;;     ((pattern) template) ...))
-
-;(print "fold-template test" (fold-template '((hello single hello)) '(begin #t)))
-;(print "fold-template test" (fold-template '((hello single hello)) '(#t)))
-
-;; We need a way to quote things without stripping them, because identifiers in the form may be renamed
-;; as a result of being introduced by macro invocation
-(define (literal-no-strip x)
-  (if (pair? x)
-    (map-improper literal-no-strip x)
-    (if (symbol? x)
-      (list 'quote x)
-      x)))
-
 (define (syntax-rules-matcher ellipses literals pare rest)
   (if (not (list? pare))
     (raise-source pare 'syntax "syntax-rules argument must be a list (pattern and template)" (list pare)))
@@ -263,7 +247,7 @@
        (if maybe 
          (cons 'begin (fold-template ',ellipses maybe (quote ,template)))
          ,(if (null? rest)
-            `(raise 'syntax "syntax-rules failed to find a match for form" (list form))
+            `(raise 'syntax (print-string "syntax-rules failed to find a match for form" form) (list form))
             (syntax-rules-matcher ',ellipses literals (car rest) (cdr rest)))))))
 
 (define (syntax-rules-make-matcher ellipses literals pare rest)

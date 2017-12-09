@@ -2146,6 +2146,8 @@ struct XReader {
   std::string buffer;
   /** Position where BUFFER has started */
   unsigned token_start_position, token_start_line;
+  /** True when within #` syntax that causes all symbols NOT within unquotes to be renamed. */
+  bool quasiquote_renaming;
 
   enum TokenType {
     TK_ERROR,
@@ -2157,9 +2159,11 @@ struct XReader {
     TK_SYMBOL,
     TK_STRING,
     TK_QUOTE,
+    TK_UNQUOTE_INJECT,
     TK_UNQUOTE,
     TK_UNQUOTE_SPLICING,
     TK_QUASIQUOTE,
+    TK_QUASIQUOTE_RENAMING,
     TK_RENAME,
     TK_FLONUM,
     TK_FIXNUM,
@@ -2174,7 +2178,6 @@ struct XReader {
   XReader(State& state_, std::istream& is_, bool slurp_source, const std::string& desc = 
     "anonymous");
   ~XReader() {}
-
 
   /**
    * Read a character while tracking source code location
@@ -2236,7 +2239,7 @@ struct XReader {
   TokenType next_token();
 
   /** Read auxiliary syntax (e.g. quote, quasiquote, etc) */
-  Value read_aux(const std::string&, unsigned, Value);
+  Value read_aux(const std::string&, unsigned, Value, bool renaming = false);
 
   /** Read rename auxiliary syntax */
   Value read_aux2(const std::string&, unsigned, Value, Value);

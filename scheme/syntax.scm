@@ -668,9 +668,9 @@ TODO: Casting
                  (clauses (cddr x))
                  (results '()))
 
-              (unless (= (length clause) 2)
+              (unless (> (length clause) 2)
                 (begin
-                  (raise 'syntax "cond-expand clause length must be exactly 2 (feature list and command or definition)"))
+                  (raise 'syntax "cond-expand clause length must be at least 2 (feature list and command or definition)"))
               )
 
               (let* ((feature-list (car clause))

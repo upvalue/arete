@@ -259,7 +259,7 @@ Value NumberReader::read() {
 
 XReader::XReader(State& state_, std::istream& is_, bool slurp_source, const std::string& desc):
     state(state_), is(is_), source(0), position(0),
-    line(1), column(1), active_error(C_FALSE) {
+    line(1), column(1), active_error(C_FALSE), quasiquote_renaming(false) {
   
   is >> std::noskipws;
 
@@ -289,6 +289,7 @@ static bool is_symbol_initial(char c) {
   switch(c) {
     case '!': case '$': case '%': case '&': case '*': case '/':  case ':':
     case '<': case '=': case '>': case '?': case '^': case '_': case '~':
+    case '@':
       return true;
     default: return false;
   }
@@ -504,6 +505,7 @@ XReader::TokenType XReader::next_token() {
         if(c2 == 't') return TK_TRUE;
         else if(c2 == 'f') return TK_FALSE;
 
+        else if(c2 == '`') return TK_QUASIQUOTE_RENAMING;
         else if(c2 == '\'') return TK_RENAME;
         else if(c2 == '(') return TK_VECTOR_OPEN;
         else if(c2 == '\\') {
@@ -634,12 +636,19 @@ XReader::TokenType XReader::next_token() {
   return TK_EOF;
 }
 
-Value XReader::read_aux(const std::string& text, unsigned highlight_size, Value symbol) {
+Value XReader::read_aux(const std::string& text, unsigned highlight_size, Value symbol,
+    bool renaming) {
+
   unsigned cline = token_start_line, cposition = token_start_position;
   Value x;
   AR_FRAME(state, x, symbol);
 
+  bool qq_saved = quasiquote_renaming;
+  quasiquote_renaming = renaming;
+
   x = read_expr(TK_READ_NEXT);
+
+  quasiquote_renaming = qq_saved;
   if(x == C_EOF) {
     return unexpected_eof(text, line, position - highlight_size, highlight_size);
   } else if(x.is_active_exception()) {
@@ -657,8 +666,13 @@ Value XReader::read_aux2(const std::string& text, unsigned highlight_size, Value
   Value x;
   
   AR_FRAME(state, x, symbol, symbol2);
+  bool qq_saved = quasiquote_renaming;
+  quasiquote_renaming = false;
   x = read_aux(text, highlight_size, symbol);
-  if(x.is_active_exception()) return x;
+  quasiquote_renaming = qq_saved;
+  if(x.is_active_exception()) {
+    return x;
+  }
 
   x = state.make_pair(x, C_NIL);
   return make_src_pair(symbol2, x, cline, cposition, position - cposition);
@@ -704,6 +718,17 @@ Value XReader::read_expr(TokenType tk) {
       if(!sym.symbol_was_read()) {
         sym.heap->set_header_bit(Value::SYMBOL_READ_BIT);
       }
+      // #`asdf => (quasiquote (rename 'asdf))
+      if(quasiquote_renaming) {
+        AR_FRAME(state, sym);
+        sym = state.make_pair(sym, C_NIL);
+        sym = state.make_pair(state.globals[State::S_QUOTE], sym);
+        sym = state.make_pair(sym, C_NIL);
+        sym = state.make_pair(state.globals[State::S_RENAME], sym);
+        sym = state.make_pair(sym, C_NIL);
+        sym = make_src_pair(state.globals[State::S_UNQUOTE], sym,
+          token_start_line, token_start_position, position);
+      }
       return sym;
     }
     case TK_CHARACTER:
@@ -725,6 +750,14 @@ Value XReader::read_expr(TokenType tk) {
     // Auxiliary syntax
     case TK_UNQUOTE: return read_aux("after ,", 2, state.globals[State::S_UNQUOTE]);
     case TK_QUASIQUOTE: return read_aux("after `", 1, state.globals[State::S_QUASIQUOTE]);
+    case TK_QUASIQUOTE_RENAMING: {
+      bool saved = quasiquote_renaming;
+      quasiquote_renaming = true;
+      Value x = read_aux("after #`", 1, state.globals[State::S_QUASIQUOTE], true);
+      quasiquote_renaming = saved;
+      return x;
+
+    }
     case TK_QUOTE: return read_aux("after '", 1, state.globals[State::S_QUOTE]);
     case TK_RENAME: return read_aux2("after #'", 1, state.globals[State::S_QUOTE],
       state.globals[State::S_RENAME]);
