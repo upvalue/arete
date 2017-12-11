@@ -69,6 +69,10 @@ bool State::equals(Value a, Value b) {
       if(a.string_bytes() != b.string_bytes()) return false;
       return strncmp(a.string_data(), b.string_data(), a.string_bytes()) == 0;
     }
+    case RENAME: {
+      return a.rename_env() == b.rename_env() && a.rename_expr() == b.rename_expr() &&
+        a.rename_gensym() == b.rename_gensym();
+    }
     case CHARACTER:
       return a.character() == b.character();
     case FLONUM:

@@ -786,6 +786,54 @@ TODO: Casting
   (before)
   (unwind-protect thunk after))
 
+;; SRFI 39: parameter objects
+
+(define (make-parameter initial . maybe-converter)
+  (let ((storage initial)
+        (converter (if (null? maybe-converter) #f (car maybe-converter))))
+
+    (lambda value
+      (unless (null? value)
+        (set! storage (if converter (converter (car value)) (car value))))
+      storage)))
+
+;; Extension: Make a parameter that fetches and sets a toplevel value
+;; Conversion is not supported (there's no way to prevent setting a toplevel value to something arbitrary)
+(define (make-top-level-parameter name initial)
+  (set-top-level-value! name initial)
+  (lambda value
+    (unless (null? value)
+      (set-top-level-value! name (car value)))
+    (top-level-value name)))
+
+(define-syntax parameterize
+  (lambda (x)
+    (unless (fx> (length x) 2)
+      (raise-source 'syntax x "parameterize requires at least two arguments (bindings and body)"))
+
+    (define bindings (cadr x))
+    (define body (cddr x))
+
+    (for-each1
+      (lambda (x)
+        (if (not (fx= (length x) 2))
+          (raise-source 'syntax x "parameterize binding must have two elements (parameter object and value)" (list x)))
+      )
+    bindings)
+
+    (if (null? bindings)
+      body
+      ;; Save bindings in a list
+      #`(let ((bindings (list ,@(map1 (lambda (x) #`(cons ,(car x) (,(car x)))) bindings))))
+          ,@(map1 (lambda (x) #`(,(car x) ,(cadr x))) bindings)
+          (unwind-protect
+            (lambda () ,@body)
+            (lambda ()
+              (let loop ((item (car bindings)) (rest (cdr bindings)))
+                ((car item) (cdr item))
+                (unless (null? rest)
+                  (loop (car rest) (cdr rest))))))))))
+
 ;; COMPATIBILITY
 
 (define-syntax er-macro-transformer

@@ -57,13 +57,17 @@
     ((and (identifier? pattern) (pair? form))
      (list (list pattern 'single form)))
     ((and (pair? pattern) (pair? form))
+     ;; No more matching required
      (if (and (null? (cdr pattern)) (null? (cdr form)))
        (rules-match cmp ellipses (car pattern) (car form) literals)
        ;; Handle (asdf ...) (asdf)
        (if (null? (cdr form))
          ;; Ellipses, but not more form, so we match only one element
          (if (and (pair? (cdr pattern)) (ellipses? cmp ellipses (cadr pattern)))
-           (list (list (car pattern) 'splat form))
+           (begin
+             (when (pair? (car pattern))
+               (print "pattern splat" pattern))
+             (list (list (car pattern) 'splat form)))
            ;; This is not an ellipses so try to match it normally
            (rules-try cmp ellipses pattern form literals))
 
@@ -76,6 +80,9 @@
              (if (ellipses? cmp ellipses (cadr pattern))
                ;; There may be elements in the pattern after ...
                (begin
+                 ;; thought, here we match individually and map single to splat... right?
+                 (when (pair? (car pattern))
+                   (print "???" pattern))
                  (if (not (null? (cddr pattern)))
                    (let* ((expect-after (length (cddr pattern)))
                           (to-take (- (length form) expect-after)))
@@ -108,31 +115,13 @@
       #;(print "could not match:" pattern form) #f)
     ))
 
-  #|
-(print (rules-match '... '(hello one ...) '(hello 1) '()))
-(print (rules-match '... '(hello) '(hello) '()))
-(print (rules-match '... '(hello one) '(hello 1) '()))
-(print (rules-match '... '(hello one two) '(hello bug 5) '()))
-(print (rules-match '... '(hello one ...) '(hello bug 5) '()))
-(print (rules-match '... '(hello one ...) '(hello bug) '()))
-(print (rules-match '... '(hello one) '(hello (1)) '()))
-(print (rules-match '... '(hello (one two three ...)) '(hello (1 2 3 4)) '()))
-(print (rules-match '... '(hello (one two three)) '(hello (four five six)) '()))
-(print (rules-match '... '(hello (one two three ...)) '(hello (four five six)) '()))
-(print (rules-match '... '(hello one two three ...) '(hello 1 2) '()))
-(print (rules-match '... '(hello "atoms") '(hello "atoms") '()))
-(print (rules-match '... '(hello one ... two three four) '(hello 1 2 3) '()))
-(print (rules-match '... '(hello one ... two three four five) '(hello 1 2 3) '()))
-
-(print (rules-match '... '(hello name value) '(hello name #t) '(name)))
-|#
-
 (define terminate '##terminate)
 
 (define (try-cons a b)
   (and (not (eq? a terminate)) (cons a b)))
 
 (define (fold-template ellipses matches lst)
+  (print matches)
   (fold-right
     (lambda (a b)
       (and (not (eq? b terminate))
@@ -176,10 +165,8 @@
                        nmatches expected-lengths)
                      (append result (cdr b)))
                    (begin
-                     (let ((attempt (fold-template ellipses nmatches a)))
-                       ;(print attempt)
-                       ;(print result)
-                       (loop attempt (if attempt (append result (list attempt)) result)))))))
+                     (let ((attempt2 (fold-template ellipses nmatches a)))
+                       (loop attempt2 (if attempt (append result (list attempt2)) result)))))))
 
              (try-cons (fold-template ellipses matches a) b)))
           ((symbol? a)
@@ -274,3 +261,28 @@
             (pares (cddr x)))
         (syntax-rules-make-matcher '... literals (car pares) (cdr pares))))))
 
+
+(define (fake-cmp? a b)
+  (eq? a (rename-expr b)))
+
+#|
+(print (rules-match fake-cmp? '... '(hello one ...) '(hello 1) '()))
+(print (rules-match fake-cmp? '... '(hello (one two three ...)) '(hello (1 2 3 4)) '()))
+(print (rules-match fake-cmp? '... '(hello (one . rest) ...) '(hello (1 2 3 4)) '()))
+(print (rules-match fake-cmp? '... '(hello (one . rest) ...) '(hello (1 2 3 4) (5 6 7 8)) '()))
+(print (rules-match fake-cmp? '... '(hello (one two three) ...) '(hello (1 2 3)) '()))
+(print (rules-match fake-cmp? '... '(hello) '(hello) '()))
+(print (rules-match fake-cmp? '... '(hello one) '(hello 1) '()))
+(print (rules-match fake-cmp? '... '(hello one two) '(hello bug 5) '()))
+(print (rules-match fake-cmp? '... '(hello one ...) '(hello bug 5) '()))
+(print (rules-match fake-cmp? '... '(hello one ...) '(hello bug) '()))
+(print (rules-match fake-cmp? '... '(hello one) '(hello (1)) '()))
+(print (rules-match fake-cmp? '... '(hello (one two three ...)) '(hello (1 2 3 4)) '()))
+(print (rules-match fake-cmp? '... '(hello (one two three)) '(hello (four five six)) '()))
+(print (rules-match fake-cmp? '... '(hello (one two three ...)) '(hello (four five six)) '()))
+(print (rules-match fake-cmp? '... '(hello one two three ...) '(hello 1 2) '()))
+(print (rules-match fake-cmp? '... '(hello "atoms") '(hello "atoms") '()))
+(print (rules-match fake-cmp? '... '(hello one ... two three four) '(hello 1 2 3) '()))
+(print (rules-match fake-cmp? '... '(hello one ... two three four five) '(hello 1 2 3 4) '()))
+(print (rules-match fake-cmp? '... '(hello name value) '(hello name #t) '(name)))
+|#
