@@ -139,14 +139,14 @@
 (define (register-source fn cell)
   (aif (list-get-source cell)
     (begin
+      ;; Note the location of the instruction
       (vector-append! (OpenFn/sources fn) (vector-length (OpenFn/insns fn)))
+      ;; Now insert the return value of list-get-source (a vector with four values) into the source vector
       (let loop ((i 0)
                  (sources (OpenFn/sources fn)))
-        (if (fx= i (vector-length it))
-          #t
-          (begin
-            (vector-append! sources (vector-ref it i))
-            (loop (fx+ i 1) sources)))))))
+        (unless (fx= i (vector-length it))
+          (vector-append! sources (vector-ref it i))
+          (loop (fx+ i 1) sources))))))
 
 (define (register-constant fn const)
   ;; Extreme optimization: linear search for duplicate constants
@@ -921,6 +921,7 @@
 (define (recompile-function oldfn)
   (let* ((fn-name (function-name oldfn))
          (fn-body (function-body oldfn))
+         (fn-source (if (list-get-source fn-body) fn-body (car fn-body)))
          (is-macro? (macro? oldfn))
          ;; TODO Could just save the original arguments list in the Function; it doesn't really matter
          ;; if they are oversized as they won't exist during normal execution in any case
@@ -930,15 +931,14 @@
          (fn-args 
            (begin
              (if (and (not (null? fn-proper-args)) fn-rest-arguments)
-               (append-source fn-body fn-proper-args fn-rest-arguments)
+               (append-source fn-source fn-proper-args fn-rest-arguments)
                (if (null? fn-proper-args)
                  (or fn-rest-arguments '())
                  fn-proper-args))))
 
          #;(fn (OpenFn/make fn-name))
-         (fn-expr (append (list-source fn-body 'lambda fn-args) fn-body))
+         (fn-expr (append-source fn-source (list-source fn-body 'lambda fn-args) fn-body))
 
-         
          ;(fn-expr (list-source fn-body 'lambda fn-args (car fn-body)))
          (fn-exxxpr
            ;; Unexpanded boot functions which use COND

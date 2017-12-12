@@ -87,47 +87,25 @@ Value fn_cons_source(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("cons-source", fn_cons_source, 3);
 
-/** Create a list from arguments. Somewhat complex due to the need to GC track
- * variables, and handle the transfer of source code information for the macroexpander. */
-static Value fn_list_impl(State& state, size_t argc, Value* argv, bool copy_source) {
-  Value lst = C_NIL;
-  AR_FRAME(state, lst);
+Value fn_list_source(State& state, size_t argc, Value* argv) {
+  if(argc == 1) return C_NIL;
   state.temps.clear();
-
-  size_t list_begin = copy_source ? 1 : 0;
-  SourceLocation loc;
-
-  AR_ASSERT(state.gc.live(argv[0]));
-
-  if(copy_source) {
-    if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
-      loc = argv[0].pair_src();
-    } else {
-      copy_source = false;
-    }
-  }
-
-  for(size_t i = list_begin; i < argc; i++) {
+  for(size_t i = 1; i != argc; i++) {
     state.temps.push_back(argv[i]);
   }
-
-  while(argc > list_begin) {
-    lst = state.make_pair(state.temps[--argc - list_begin], lst);
+  SourceLocation loc;
+  bool have_source = false;
+  if(argv[0].heap_type_equals(PAIR) && argv[0].pair_has_source()) {
+    loc = argv[0].pair_src();
+    have_source = true;
   }
+  Value lst = state.temps_to_list();
 
-  if(argc > list_begin) {
-    if(copy_source) {
-      lst = state.make_pair(state.temps[0], lst);//, loc);
-    } else {
-      lst = state.make_pair(state.temps[0], lst);
-    }
+  if(have_source) {
+    lst = state.make_src_pair(lst.car(), lst.cdr(), loc);
   }
 
   return lst;
-}
-
-Value fn_list_source(State& state, size_t argc, Value* argv) {
-  return fn_list_impl(state, argc, argv, true);
 }
 AR_DEFUN("list-source", fn_list_source, 1, 1, true);
 

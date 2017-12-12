@@ -318,6 +318,9 @@ Value fn_print_source(State& state, size_t argc, Value* argv) {
     std::cerr << std::endl;
     fn_print_impl(state, argc-1, &argv[1], std::cerr, true, false);
     std::cerr << std::endl;
+  } else {
+    std::cerr << argv[0] << std::endl;
+    fn_print_impl(state, argc-1, &argv[1], std::cerr, true, false);
   }
   return C_UNSPECIFIED;
 }
