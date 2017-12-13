@@ -3,8 +3,7 @@
 ;; This file loads and installs the expander and module system. It sets the default module to (arete), after which
 ;; point the other core files should be loaded, and then the default module should be set to the (user) module.
 
-;; Scheme is so great, you can't program in it!
-;; - A comment in the TinyCLOS source.
+;; Scheme is so great, you can't program in it! - A comment in the TinyCLOS source.
 
 ;; TODO Toplevel renames
 
@@ -102,8 +101,8 @@
     (string-map-i (fx+ i 1) limit src dst fn)))
 
 (define (string-map fn str)
-  (define ret (make-string (string-length str)))
   (define len (string-length str))
+  (define ret (make-string len))
   (if (fx= len 0)
     ret
     (string-map-i 0 len str ret fn))
@@ -138,6 +137,11 @@
   ;; Env first field is #t if an environment is purely syntactic (eg. introduced by let-syntax), #f otherwise
   (vector-append! vec (not (null? syntactic?)))
   vec)
+
+(define (closest-module env)
+  (if (vector? env)
+    (closest-module (vector-ref env 0))
+    env))
 
 (define (closest-non-syntactic-env env)
   (if (vector? env)
@@ -720,16 +724,24 @@
 
 (define (expand-set x env)
   (define len (length x))
-  (define name #f)
 
   (if (not (fx= len 3))
     (raise-source x 'expand "set! expression needs exactly two arguments" (list x)))
 
-  (set! name (cadr x))
+  (define name (cadr x))
 
   (if (not (identifier? name))
     (raise-source (cdr x) 'expand "set! expects an identifier as its first arguments" (list x)))
 
+   ;; TODO: Check for inter-module sets, which are disallowed
+  ((lambda (location)
+     ;; This is corny, but we check inter-module sets by seeing if the set! is on a module-level variable,
+     ;; then qualifying the name and seeing if the names are similar. This is the easiest way to do it as is
+     ;; because env-lookup does not return the module a variable was defined in, just where the definition was found
+     ;; (and imported variables are defined "in" a module by importing them)
+     (if (and (table? (car location)) (not (eq? (module-qualify (car location) (cadr x)) (cadr location))))
+       (raise-source x 'expand "Implementation restriction: set!ing an imported variable not allowed" (list x))))
+   (env-lookup env (cadr x)))
   (list-source x (make-rename #f 'set!) (expand (list-ref x 1) env) (expand (list-ref x 2) env)))
 
 (define (expand x env)
@@ -820,7 +832,6 @@
 ;; Expander for let-syntax and letrec-syntax
 (define (expand-let-syntax type x env)
   (define new-env (env-make env #t))
-  (define bindings #f)
 
   (if (fx< (length x) 3)
     (raise-source x 'expand "let(rec)-syntax expands at least three arguments" (list x)))
@@ -994,6 +1005,7 @@
   (table-set! mod "module-stage" 2)
   mod)
 
+;; This just allows us to run some R7RS benchmarks. 
 (for-each1 make-empty-module '("scheme#base" "scheme#cxr" "scheme#file" "scheme#inexact" "scheme#write"
                                "scheme#time" "scheme#read" "scheme#char" "scheme#complex"))
 

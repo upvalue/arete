@@ -691,6 +691,8 @@ TODO: Casting
 
 ;; While loop
 
+;; TODO: Add break/continue
+
 (define-syntax while
   (lambda (x)
     (unless (> (length x) 2)
@@ -699,6 +701,9 @@ TODO: Casting
         (,#'when ,#'condition
           ,@(cddr x)
           (,#'loop ,(cadr x))))))
+
+;; TODO: Simple for loop
+
 
 ;; Do loop
 

@@ -17,7 +17,7 @@
 ;; If true, warn about undefined variables
 (set-top-level-value! 'COMPILER-WARN-UNDEFINED #t)
 
-;; Inline function applications in the CAR position
+;; Inline applications of functions in the CAR position e.g. ((lambda (a) #t) #t)
 ;; Assumes that the expander has made all variable names unique.
 (set-top-level-value! 'COMPILER-INLINE-CAR #t)
 
@@ -548,6 +548,7 @@
           (table-set! (OpenFn/env fn) (cadr x) var)
           (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))))
       ((eq? (rename-strip (car x)) 'quote) #f)
+      ((eq? (rename-strip (car x)) 'lambda) #f)
       (else
         (for-each-improper (lambda (expr) (scan-local-defines-expr fn expr)) x)))))
 
@@ -879,28 +880,12 @@
       (vector-set! (OpenFn/insns fn) i (insn->byte fn (vector-ref (OpenFn/insns fn) i)))
       (loop (fx+ i 1)))))
 
-(define (scan-defines fn body)
-  (for-each1
-    (lambda (x)
-      ;; It is possible for #<unspecified> 
-      ;; to occur in toplevel bodies because it is returned by the expander.
-      (unless (eq? x unspecified)
-        (if (and (pair? x) (env-compare #f (car x) 'define))
-          (let ((var (Var/make 0 (cadr x))))
-            (compiler-log fn "registering global variable" (cadr x))
-            (table-set! (OpenFn/env fn) (cadr x) var))
-          (if (and (pair? x) (env-compare #f (car x) 'begin))
-            (scan-defines fn (cdr x))))))
-    body))
-
 ;; This is where most expressions will enter the compiler, it creates a function on-the-fly and returns it for
 ;; execution
 (define (compile-toplevel body)
   (define fn (OpenFn/make (aif (source-name body) (string->symbol (string-append "toplevel:" it)) 'vm-toplevel)))
 
   (OpenFn/toplevel?! fn #t)
-
-  ;(scan-defines fn body)
 
   (compile fn (list body))
   (compile-finish fn)
@@ -985,8 +970,12 @@
               (let ((is-macro (env-syntax? #f k)))
                 (set-top-level-value! k (recompile-function v))
                 )
-              
+
               ))))
+
+      ;; Fascinating: moving this table-for-each above the other really changes the speed of bootstrapping
+      ;; There's probably an optimal order in which to recompile the system for bootstrapping speed, getting the 
+      ;; compile functions first
 
       ;; Recompile macros, which have not been defined at the toplevel.
       (table-for-each

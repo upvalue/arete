@@ -1,0 +1,1 @@
+(quasiquote ((unquote (rename (quote hello))) ((unquote (rename (quote renaming)))) (unquote (quote world))))

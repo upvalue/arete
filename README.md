@@ -35,7 +35,9 @@ for details on the various side-effecting things they do in order to bootstrap t
 
 # Dependencies
 
-Arete uses the C++ STL, and optionally: the linenoise-ng library from ArangoDB (included in the repository), SDL2.
+Arete uses the C++ STL, and optionally
+- linenoise-ng from ArangoDB (included in the repository)
+- SDL2
 
 # R?RS/SRFI compliance.
 
