@@ -11,6 +11,9 @@
 // TODO: Multiple return values cannot be implemented efficiently because we cannot grow the stack
 // on-demand.
 
+// Since values is sort of a special form, we could maybe instrument the compiler to increase
+// the stack-max for values storage.
+
 #include "arete.hpp"
 
 // TODO: Non C-stack improvement. There's no need to malloc every function call. Rather we should
@@ -22,6 +25,8 @@
 // TODO: Are there more optimizations that can be done? With a little trouble, for example, we could
 // use variables outside the VMFrame struct. Does putting everything in VMFrame prevent the compiler
 // from storing them in registers?
+
+// TODO: Branch prediction hinting
 
 #ifdef _MSC_VER
 # define AR_USE_C_STACK 0
@@ -264,20 +269,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   AR_LOG_VM("ENTERING FUNCTION " << f.fn->name << " closure: " << (f.closure == 0 ? "#f" : "#t")
      << " free_variables: " << f.fn->free_variables << " stack_max: " << f.fn->stack_max);
 
-  if(argc > f.fn->max_arity && !f.fn->get_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT)) {
-    std::ostringstream os;
-    os << "function " << f.fn << " expected at most " << f.fn->max_arity
-      << " arguments " << "but got " << argc;
-    f.destroyed = true;
-    return eval_error(os.str());
-  } else if(argc < f.fn->min_arity) {
-    std::ostringstream os;
-    os << "function " << f.fn << " expected at least " << f.fn->min_arity
-      << " arguments " << "but got " << argc;
-    f.destroyed = true;
-    return eval_error(os.str());
-  }
-
   // Allocate function's required storage
 #if AR_USE_C_STACK
   size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;
@@ -292,12 +283,16 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   f.upvalues = upvalue_count ? (Value*) upvalues : 0;
   if(upvalue_count)
     f.upvalues = (Value*) upvalues;
-
-
 #endif
+
+  // This has to be done in a somewhat funky order. Because allocations can occur here (if a function
+  // has upvalues, or if a function has rest arguments). We have to take care to make sure everything
+  // is garbage collected at the allocation points here. So we check function arity right before
+  // starting the actual function.
+
   // Initialize local variables
-  memcpy(f.locals, argv, argc * sizeof(Value));
-  memset(f.locals + argc, 0, (f.fn->local_count  - argc) * sizeof(Value));
+  memset(f.locals, 0, f.fn->local_count * sizeof(void*));
+  memcpy(f.locals, argv, (argc > f.fn->max_arity ? f.fn->max_arity : argc) * sizeof(void*));
 
   if(f.fn->free_variables != 0) {
     // Allocate upvalues as needed
@@ -311,6 +306,44 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       AR_LOG_VM("tying free variable " << i << " to local idx " << idx);
       f.upvalues[i].as<Upvalue>()->U.local = &f.locals[idx];
     }
+  }
+
+  if(argc < f.fn->min_arity) {
+    std::ostringstream os;
+    os << "function " << f.fn << " expected at least " << f.fn->min_arity
+      << " arguments " << "but got " << argc;
+    f.destroyed = true;
+    return eval_error(os.str());
+  } else if(argc > f.fn->max_arity) {
+    if(!f.fn->get_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT)) {
+      std::ostringstream os;
+      os << "function " << f.fn << " expected at most " << f.fn->max_arity
+        << " arguments " << "but got " << argc;
+      f.destroyed = true;
+      return eval_error(os.str());
+    } 
+
+    // argv may actually be temps, if this is a tail call
+    if(argv == &temps[0]) {
+      f.locals[f.fn->max_arity] = temps_to_list(f.fn->max_arity);
+    } else {
+      temps.clear();
+      unsigned i;
+      for(i = f.fn->max_arity; i != argc; i++) {
+        //std::cout << "Creating rest with argc i " << i  << ' ' << argv[i] << std::endl;
+        temps.push_back(argv[i]);
+      }
+
+      f.locals[f.fn->max_arity] = temps_to_list();
+      //std::cout << argv[f.fn->max_arity] << std::endl;
+    }
+
+    for(unsigned i = f.fn->max_arity; i != argc; i++) {
+      temps.pop_back();
+    }
+
+    //argc = f.fn->max_arity + 1;
+    //std::cout << "Creating rest arguments from " << i << std::endl;
   }
 
   size_t code_offset = 0;
@@ -516,8 +549,10 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             }
 
             // Check argument arity
+            #if 0
             size_t min_arity = afn.vm_function_min_arity(), max_arity = afn.vm_function_max_arity();
             bool var_arity = afn.vm_function_variable_arity();
+          
 
             if(fargc < min_arity) {
               std::ostringstream os;
@@ -533,6 +568,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               f.exception = eval_error(os.str());
               goto exception;
             } else if(var_arity) {
+              /*
               Value rest = C_NIL;
 
               AR_FRAME(this, to_apply, rest);
@@ -551,7 +587,9 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               f.stack_i = (f.stack_i - fargc - 1) + min_arity + 2;
 
               fargc = min_arity + 1;
+              */
             }
+            #endif
 
             if(tco_enabled && insn == OP_APPLY_TAIL) {
               frames_lost++;

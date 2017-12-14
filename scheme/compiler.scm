@@ -996,7 +996,6 @@
 
       (set! current-output-port (make-top-level-parameter '*current-output-port* (top-level-value '*current-output-port*)))
       (set! current-input-port (make-top-level-parameter '*current-input-port* (top-level-value '*current-input-port*)))
-
 )))
 
 (expand-import (top-level-value '*user-module*) '(arete))

@@ -754,26 +754,12 @@ tail_call:
             argc = 0;
 
             while(args.heap_type_equals(PAIR)) {
-              if(argc == max_arity) {
-                break;
-              }
               tmp = eval_body(frame, args.car(), true);
               EVAL_CHECK(tmp, args);
 
               vector_storage_append(argv, tmp);
               argc++;
               args = args.cdr();
-            }
-
-            if(args.heap_type_equals(PAIR) && var_arity) {
-              while(args.heap_type_equals(PAIR)) {
-                tmp = eval_body(frame, args.car(), true);
-                EVAL_CHECK(tmp, args);
-                rest.append(*this, tmp);
-                args = args.cdr();
-              }
-              vector_storage_append(argv, rest.head);
-              argc++;
             }
 
             tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &argv.vector_storage_data()[0]);
@@ -816,7 +802,6 @@ Value State::eval_list(Value lst, bool expand, Value env) {
   compiler = get_global_value(G_COMPILER);
 
   AR_FRAME(this, lst, elt, lst_top, tmp, compiler, expander, vfn);
-  #if 1
   while(lst.heap_type_equals(PAIR)) {
     tmp = lst.car();
     if(expand) {
@@ -848,35 +833,6 @@ Value State::eval_list(Value lst, bool expand, Value env) {
 
   lst = lst_top;
 
-#if 0
-  if(compiler != C_UNSPECIFIED && compiler != C_UNDEFINED) {
-    Value argv[1] = {lst, get_global_value(G_CURRENT_MODULE)};
-    tmp = apply(compiler, 1, argv);
-    if(tmp.is_active_exception()) return tmp;
-
-    if(get_global_value(G_VM_LOG_REPL) != C_UNDEFINED && get_global_value(G_VM_LOG_REPL) != C_FALSE) {
-      tmp.heap->set_header_bit(Value::VMFUNCTION_LOG_BIT);
-    }
-    return apply(tmp, 0, 0); 
-  }
-  #endif
-
-  //return C_UNSPECIFIED;
-  #endif
-  #if 0
-  if(expander != C_UNSPECIFIED && expander != C_UNDEFINED) {
-    Value argv[2] = {lst, get_global_value(G_CURRENT_MODULE)};
-    tmp = apply(expander, 2, argv);
-    if(tmp.is_active_exception()) return tmp;
-    lst = tmp;
-  }
-
-  if(compiler == C_UNSPECIFIED || compiler == C_UNDEFINED) {
-    tmp = eval_body(frame, lst, false);
-  }
-  #endif
-
-
   return tmp;
 }
 
@@ -888,20 +844,6 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
   switch(fn.type()) {
     case VMFUNCTION: case CLOSURE: {
       Value vfn = fn.closure_unbox();
-
-      // VMFunctions do not create their own rest arguments.
-      if(vfn.vm_function_variable_arity()) {
-        temps.clear();
-        for(size_t i = 0; i != argc; i++) {
-          temps.push_back(argv[i]);
-        }
-
-        unsigned rest_argi = vfn.vm_function_max_arity();
-        
-        AR_ASSERT(rest_argi < temps.size());
-        temps[rest_argi] = temps_to_list(rest_argi);
-        return apply_vm(fn, rest_argi+1, &temps[0]);
-      }
 
       return apply_vm(fn, argc, argv);
     }
