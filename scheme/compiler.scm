@@ -993,6 +993,10 @@
           (if (and (eq? (value-type v) 13))
             (begin
             (set-top-level-value! k (top-level-value (string->symbol (string-append "##arete#" (symbol->string k)))))))))
+
+      (set! current-output-port (make-top-level-parameter '*current-output-port* (top-level-value '*current-output-port*)))
+      (set! current-input-port (make-top-level-parameter '*current-input-port* (top-level-value '*current-input-port*)))
+
 )))
 
 (expand-import (top-level-value '*user-module*) '(arete))

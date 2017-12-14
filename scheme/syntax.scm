@@ -126,6 +126,7 @@
       (qq-element c object)
       (list #'quote object)))
 
+;; TODO: Needs to allow nesting
 (define-syntax quasiquote
   (lambda (x c)
     (qq-object c (cadr x))
@@ -139,6 +140,7 @@
     `(,#'if ,(list-ref x 1)
         (,#'begin ,@(cddr x)))))
 
+
 (define-syntax unless
   (lambda (x)
     (if (fx< (length x) 3)
@@ -149,6 +151,7 @@
 
 
 (define (take lst limit)
+
   (unless (fixnum? limit) (raise 'type "take expected second argument (limit) to be a fixnum"))
   (let loop ((got 0)
              (newlst '())
@@ -183,7 +186,6 @@
       lst
       (memv obj (cdr lst)))))
 
-;; case
 (define-syntax case
   (lambda (x c)
     (if (fx< (length x) 3)
@@ -809,12 +811,17 @@ TODO: Casting
 
 ;; Extension: Make a parameter that fetches and sets a toplevel value
 ;; Conversion is not supported (there's no way to prevent setting a toplevel value to something arbitrary)
-(define (make-top-level-parameter name initial)
-  (set-top-level-value! name initial)
+(define (make-top-level-parameter name . initial)
+  (if (not (null? initial))
+    (set-top-level-value! name (car initial)))
   (lambda value
     (unless (null? value)
       (set-top-level-value! name (car value)))
     (top-level-value name)))
+
+;; We have to set these later because the compiler can't compile an interpreted closure correctly
+(define current-input-port #f)
+(define current-output-port #f)
 
 (define-syntax parameterize
   (lambda (x)

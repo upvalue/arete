@@ -61,8 +61,8 @@
 (define (symbol-qualified? v)
   (and (symbol? v) (value-header-bit? v 12)))
 
-(define current-input-port (lambda () (top-level-value'*current-input-port*)))
-(define current-output-port (lambda () (top-level-value '*current-output-port*)))
+;(define current-input-port (lambda () (top-level-value '*current-input-port*)))
+;(define current-output-port (lambda () (top-level-value '*current-output-port*)))
 
 (define (self-evaluating? v)
   (or (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v)))
