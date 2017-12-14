@@ -371,12 +371,13 @@
 
 ;; Expand an identifier
 (define (expand-identifier x env)
+  ;; Check for identifier-transformers or invalid use of 
   (if (env-syntax? env x)
     (apply
       (lambda (env name value found)
-        (if (or (eq? value 'syntax) (not (function-identifier-macro? x)))
-          (expand-macro x env value)
-          (raise-source x 'expand (print-string "used syntax" x "as value") (list x))))
+        (if (or (eq? value 'syntax) (not (function-identifier-macro? value)))
+          (raise-source x 'expand (print-string "used syntax" x "as identifier") (list x))
+          (expand-macro x env value)))
       (env-lookup env x))
     (if (symbol-qualified? x)
       x
