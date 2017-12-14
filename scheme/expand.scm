@@ -61,9 +61,6 @@
 (define (symbol-qualified? v)
   (and (symbol? v) (value-header-bit? v 12)))
 
-;(define current-input-port (lambda () (top-level-value '*current-input-port*)))
-;(define current-output-port (lambda () (top-level-value '*current-output-port*)))
-
 (define (self-evaluating? v)
   (or (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v)))
 
@@ -707,7 +704,9 @@
         (raise-source (cdr x) 'expand "non-identifier as lambda rest argument" (list x))
         (if (rename? args)
           (begin (rename-gensym! args) (rename-gensym args))
-          (env-define new-env args 'variable)))))
+          (begin
+            (env-define new-env args 'variable)
+            )))))
 
   (cons-source x (make-rename #f 'lambda) (cons-source x bindings (expand-map (cddr x) new-env))))
 

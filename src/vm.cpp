@@ -344,6 +344,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
     //argc = f.fn->max_arity + 1;
     //std::cout << "Creating rest arguments from " << i << std::endl;
+  } else if(f.fn->get_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT)) {
+    f.locals[f.fn->max_arity] = C_NIL;
   }
 
   size_t code_offset = 0;
