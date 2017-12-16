@@ -3,9 +3,9 @@
     Right now, we use argc/argv style, which is convenient for the VM design but probably problematic from a performance
     standpoint and is awkward to use from C++.
 
-* Utilities
+* Projects
   - [ ] A pattern matcher
-  - [ ] A less tedious way of writing macros
+  - [x] A less tedious way of writing macros
     Here's a thought: a reader macro for renames.
     #`(let ((#,injection hello) (var #f)) (cons #,injection var))
     this turns into a quasiquote with all symbols NOT inside unquotes
@@ -23,7 +23,7 @@
   - [ ] SRFI 89: Optional arguments
 
 * Expander
-  - [ ] Chez Scheme identifier-syntax
+  - [x] Chez Scheme identifier-syntax
 
 * Interpreter
   - [x] Tail-call optimization.

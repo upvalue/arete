@@ -2132,6 +2132,10 @@ struct NumberReader {
  * S-expression reader.
  */
 struct XReader {
+  /** A table mapping numbers to shared objects; for reading objects with shared structure.
+   * Created lazily.
+   */
+  Value shared_object_table;
   /** Instance of the Arete runtime */
   State& state;
   /** Open stream */
@@ -2168,6 +2172,8 @@ struct XReader {
     TK_FLONUM,
     TK_FIXNUM,
     TK_NUMBER,
+    TK_LBRACKET,
+    TK_RBRACKET,
     TK_CHARACTER,
     TK_TRUE,
     TK_FALSE,

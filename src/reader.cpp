@@ -614,6 +614,12 @@ XReader::TokenType XReader::next_token() {
     } else if(c == '"') {
       tokenize_string();
       return TK_STRING;
+    } else if(c == '{') {
+      eatc();
+      return TK_LBRACKET;
+    } else if(c == '}') {
+      eatc();
+      return TK_RBRACKET;
     } else if(c == '(') {
       eatc();
       return TK_LPAREN;
@@ -680,7 +686,7 @@ Value XReader::read_aux2(const std::string& text, unsigned highlight_size, Value
 
 Value XReader::read_expr(TokenType tk) {
 #define NEXT_TOKEN(name) \
-    name = next_token(); if(active_error != C_FALSE) { return active_error; }
+    name = next_token(); AR_ASSERT(name <= TK_EOF); if(active_error != C_FALSE) { return active_error; }
 
   if(tk == TK_READ_NEXT) {
     NEXT_TOKEN(tk);
@@ -689,6 +695,8 @@ Value XReader::read_expr(TokenType tk) {
   if(tk == TK_EOF) return C_EOF;
   
   switch(tk) {
+    case TK_RBRACKET: 
+      return read_error("unexpected right bracket", line, position - 1, position);
     case TK_RPAREN:
       return read_error("unexpected right paren", line, position - 1, position);
     case TK_TRUE: return C_TRUE;
@@ -748,6 +756,9 @@ Value XReader::read_expr(TokenType tk) {
       return state.make_char(buffer[0]);
 
     // Auxiliary syntax
+    case TK_DOT:
+      return read_error("unexpected . at toplevel", token_start_line, token_start_position,
+        position);
     case TK_UNQUOTE: return read_aux("after ,", 2, state.globals[State::S_UNQUOTE]);
     case TK_QUASIQUOTE: return read_aux("after `", 1, state.globals[State::S_QUASIQUOTE]);
     case TK_QUASIQUOTE_RENAMING: {
@@ -791,6 +802,69 @@ Value XReader::read_expr(TokenType tk) {
       }
 
       return vec;
+    }
+
+    // Tables
+    case TK_LBRACKET: {
+      unsigned cline = line, cposition = position - 1;
+      TokenType tk2 = TK_READ_NEXT;
+      NEXT_TOKEN(tk2);
+
+      if(tk2 == TK_RBRACKET) {
+        return state.make_table();
+      } else if(tk2 == TK_DOT) {
+        return read_error("unexpected , at beginning of table", line, cposition, position);
+      }
+
+      Value table, key, value;
+      AR_FRAME(state, table, key, value)
+
+      table = state.make_table();
+      
+      // TODO: Should this return some kind of function invocation, like perhaps
+      // (table key value ...)? That would allow quasiquote to work on tables.
+
+      while(tk2 != TK_RBRACKET) {
+        unsigned eline = line, epos = position;
+        key = read_expr(tk2);
+
+        if(key == C_EOF) {
+          unexpected_eof("in table literal", cline, cposition);
+          return active_error;
+        } else if(key.is_active_exception()) {
+          return key;
+        } else if(!key.hashable()) {
+          std::ostringstream os;
+          os << "expected key in table literal to be hashable, but got a " << key.type();
+          return read_error(os.str(), eline, epos, position);
+        } 
+
+        value = read_expr(TK_READ_NEXT);
+
+        if(key == C_EOF) {
+          unexpected_eof("in table literal", cline, cposition);
+          return active_error;
+        } else if(value.is_active_exception()) {
+          return value;
+        }
+
+        state.table_set(table, key, value);
+
+        NEXT_TOKEN(tk2);
+
+        if(tk2 == TK_EOF) { 
+          return unexpected_eof("in table literal", cline, cposition, position);
+        } else if(tk2 == TK_RBRACKET) {
+          break;
+        } else if(tk2 != TK_DOT) {
+          return read_error("expected . after key and value in table", token_start_line,
+            token_start_position, position);
+        }
+
+        NEXT_TOKEN(tk2);
+      }
+      
+      return table;
     }
 
     // Lists
@@ -902,6 +976,7 @@ Value XReader::read_expr(TokenType tk) {
 }
 
 Value XReader::read() {
+  AR_FRAME(state, shared_object_table);
   return read_expr(TK_READ_NEXT);
 }
 

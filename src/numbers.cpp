@@ -287,6 +287,8 @@ DEFUN_TRIG(tan);
 DEFUN_TRIG(asin);
 DEFUN_TRIG(acos);
 
+// TODO: Radix argument
+
 Value fn_number_to_string(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "number->string";
   AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
@@ -353,7 +355,6 @@ Value fn_max(State& state, size_t argc, Value* argv) {
   return fn_minmax(state, argc, argv, false);
 }
 AR_DEFUN("max", fn_max, 1, 1, true);
-
 
 Value fn_string_to_number(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "string->number";

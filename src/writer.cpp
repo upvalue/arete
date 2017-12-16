@@ -257,7 +257,7 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       os << '{';
       TableIterator ti(v);
       while(++ti) {
-        os << ti.key() << ' ' << ti.value() << " , ";
+        os << ti.key() << ' ' << ti.value() << " . ";
       }
       os << '}';
       return os;
@@ -498,7 +498,7 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
           pretty_print_sub(state, os2, ti.key(), ps);
           os2 << ' ';
           pretty_print_sub(state, os2, ti.value(), ps);
-          os2 << " , ";
+          os2 << " . ";
         }
       }
       if(entries != 0) {

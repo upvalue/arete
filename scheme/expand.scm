@@ -739,7 +739,8 @@
      ;; then qualifying the name and seeing if the names are similar. This is the easiest way to do it as is
      ;; because env-lookup does not return the module a variable was defined in, just where the definition was found
      ;; (and imported variables are defined "in" a module by importing them)
-     (if (and (table? (car location)) (not (eq? (module-qualify (car location) (cadr x)) (cadr location))))
+     #t
+     #;(if (and (table? (car location)) (not (eq? (module-qualify (car location) (cadr x)) (cadr location))))
        (raise-source x 'expand "Implementation restriction: set!ing an imported variable not allowed" (list x))))
    (env-lookup env (cadr x)))
   (list-source x (make-rename #f 'set!) (expand (list-ref x 1) env) (expand (list-ref x 2) env)))
