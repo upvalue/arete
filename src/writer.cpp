@@ -603,6 +603,7 @@ static Value pretty_print_clear_mark(State& state, Value v, PrintState& ps) {
   if(!v.print_recursive()) return C_UNSPECIFIED;
 
   if(v.heap->get_header_int() == 0) {
+    return C_UNSPECIFIED;
   }
 
   v.heap->set_header_int(0);
