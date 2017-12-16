@@ -48,4 +48,4 @@ tried to hew to the standards. If you miss something, open an issue :)
 
 - equal? does not handle shared structure
 - Continuations not supported
-
+- eval does not support environment arguments

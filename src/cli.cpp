@@ -374,7 +374,6 @@ int State::enter_cli(int argc_, char* argv[]) {
         return EXIT_FAILURE;
       }
       std::string path(argv[++i]);
-      std::cout << path << std::endl;
       State::save_image(path);
       return EXIT_SUCCESS;
     } else {

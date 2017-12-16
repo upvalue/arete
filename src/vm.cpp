@@ -551,48 +551,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             }
 
             // Check argument arity
-            #if 0
-            size_t min_arity = afn.vm_function_min_arity(), max_arity = afn.vm_function_max_arity();
-            bool var_arity = afn.vm_function_variable_arity();
-          
-
-            if(fargc < min_arity) {
-              std::ostringstream os;
-              os << "function " << afn << " expected at least " << min_arity << " arguments " <<
-                "but only got " << fargc;
-
-              f.exception = eval_error(os.str());
-              goto exception;
-            } else if(fargc > max_arity && !var_arity) {
-              std::ostringstream os;
-              os << "function " << afn << " expected at most " << max_arity << " arguments " <<
-                "but got " << fargc;
-              f.exception = eval_error(os.str());
-              goto exception;
-            } else if(var_arity) {
-              /*
-              Value rest = C_NIL;
-
-              AR_FRAME(this, to_apply, rest);
-
-              for(size_t i = 0; i != fargc - min_arity; i++) {
-                rest = make_pair(f.stack[f.stack_i - i - 1], rest);
-              }
-              
-              // VM ALLOCATION
-
-              // Replace beginning of varargs with list
-              f.stack[(f.stack_i - fargc - 1) + min_arity + 1] = rest;
-
-              // Pop additional arguments off of stack, but leave mandatory arguments plus
-              // new rest list on stack
-              f.stack_i = (f.stack_i - fargc - 1) + min_arity + 2;
-
-              fargc = min_arity + 1;
-              */
-            }
-            #endif
-
             if(tco_enabled && insn == OP_APPLY_TAIL) {
               frames_lost++;
 

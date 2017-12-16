@@ -195,6 +195,10 @@ struct PointerUpdater {
         static_cast<Symbol*>(heap)->value = update_value(static_cast<Symbol*>(heap)->value);
         break;
 
+      case UPVALUE:
+        static_cast<Upvalue*>(heap)->U.converted = update_value(static_cast<Upvalue*>(heap)->U.converted);
+        break;
+
       default:
         std::cerr << "don't know how to update pointers for type " << (Type) heap->get_type() << " " 
           << (size_t) heap->get_type()  << std::endl;
@@ -226,9 +230,6 @@ struct ImageWriter {
 
   void serialize_value(HeapValue* heap) {
     updater.update_pointers(heap);
-    if(heap->header == BYTEVECTOR) {
-      //std::cout << "Writing blob of size " << heap->size << std::endl;
-    }
     fwrite(heap, heap->size, 1, f);
   }
 
@@ -385,11 +386,17 @@ void State::save_image(const std::string& path) {
 
   fwrite(&hdr, sizeof(ImageHeader), 1, f);
 
+  AR_ASSERT(!gc.vm_frames);
+
   ImageWriter writer(*this, f);
   writer.write_globals();
   AR_IMG_LOG("writing heap beginning at " << writer.updater.offset);
   writer.walk_heap();
   writer.write_sources();
+
+  long bytes = ftell(f);
+
+  std::cout << ";; wrote image: " << path << ' ' << (bytes / 1024) << "kb" << std::endl;
 
   fclose(f);
 }
