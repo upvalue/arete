@@ -140,7 +140,6 @@
     `(,#'if ,(list-ref x 1)
         (,#'begin ,@(cddr x)))))
 
-
 (define-syntax unless
   (lambda (x)
     (if (fx< (length x) 3)
@@ -148,7 +147,6 @@
 
     `(,#'if (,#'not ,(list-ref x 1))
         (,#'begin ,@(cddr x)))))
-
 
 (define (take lst limit)
 
@@ -334,11 +332,11 @@
       fields))
 
     (set! constructor
-      `(,#'define (,(string->symbol (string-append name-string "/make")) ,@(map1 rename fields))
+      `(,#'define (,(string->symbol (string-append name-string "/make")) ,@fields)
         (,#'let ((,#'instance (,#'make-record ,name)))
         ,@(map-i
           (lambda (i x)
-            `(,#'record-set! ,name ,#'instance ,i ,(rename (list-ref fields i))))
+            `(,#'record-set! ,name ,#'instance ,i ,(list-ref fields i)))
           fields)
         ,#'instance)))
 
@@ -804,10 +802,15 @@ TODO: Casting
   (let ((storage initial)
         (converter (if (null? maybe-converter) #f (car maybe-converter))))
 
-    (lambda value
-      (unless (null? value)
-        (set! storage (if converter (converter (car value)) (car value))))
-      storage)))
+    (if converter
+      (lambda value
+        (unless (null? value)
+          (set! storage (converter (car value))))
+        storage)
+      (lambda value
+        (unless (null? value)
+          (set! storage (car value)))
+        storage))))
 
 ;; Extension: Make a parameter that fetches and sets a toplevel value
 ;; Conversion is not supported (there's no way to prevent setting a toplevel value to something arbitrary)
@@ -819,9 +822,26 @@ TODO: Casting
       (set-top-level-value! name (car value)))
     (top-level-value name)))
 
+(define-syntax define-top-level-parameter
+  (lambda (x)
+    (unless (fx= (length x) 3)
+      (raise-source x 'syntax "define-top-level-parameter takes exactly two arguments"))
+
+    #`(define ,(cadr x)
+        (lambda value
+          (if (null? value)
+            (top-level-value ,(caddr x))
+            (begin
+              (set-top-level-value! ,(caddr x) value)
+              (top-level-value ,(caddr x))))))))
+
 ;; We have to set these later because the compiler can't compile an interpreted closure correctly
 (define current-input-port #f)
 (define current-output-port #f)
+(define *print-readably* #f)
+;(define *print-table-max* 0)
+
+(define-top-level-parameter *print-table-max* PRINT-TABLE-MAX)
 
 (define-syntax parameterize
   (lambda (x)
@@ -849,7 +869,8 @@ TODO: Casting
               (let loop ((item (car bindings)) (rest (cdr bindings)))
                 ((car item) (cdr item))
                 (unless (null? rest)
-                  (loop (car rest) (cdr rest))))))))))
+                  (begin
+                    (loop (car rest) (cdr rest)))))))))))
 
 ;; COMPATIBILITY
 

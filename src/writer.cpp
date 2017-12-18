@@ -51,7 +51,7 @@ typedef std::unordered_map<unsigned, print_info_t> print_table_t;
 
 struct PrintState {
   PrintState(): try_pretty(true), print_shared(true),
-    shared_objects_begin(1), shared_objects_i(1) {}
+    shared_objects_begin(1), shared_objects_i(1), table_max(0) {}
   ~PrintState() {}
 
   bool try_pretty;
@@ -490,7 +490,7 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
         entries++;
         if(entries == ps.table_max) {
           os2 << '\0';
-          os2 << "#+" << v.table_entries() << "... ";
+          os2 << "#+" << v.table_entries() << "entries... ";
           break;
         } else {
           os2 << '\0';
@@ -704,7 +704,13 @@ Value State::pretty_print(std::ostream& os, Value v) {
   ps.indent_level = 2;
   ps.row_width = 120;
   ps.indent = 0;
-  ps.table_max = 5;
+
+  Value table_max = get_global_value(G_PRINT_TABLE_MAX);
+
+  if(table_max.fixnump() && table_max.fixnum_value() > 0) {
+    ps.table_max = (size_t) table_max.fixnum_value();
+    std::cout << ps.table_max << std::endl;
+  }
 
   ps.printed = printed;
   // Right now printing can't return an exception, but it might if we allow users to extend this

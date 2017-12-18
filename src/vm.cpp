@@ -348,6 +348,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     f.locals[f.fn->max_arity] = C_NIL;
   }
 
+  tail_recur:
   size_t code_offset = 0;
 
   // Forcing this into a register provides a decent speedup for the VM, but as we can't take its
@@ -492,6 +493,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         AR_LOG_VM("upvalue-set " << idx << " = " << val);
         VM_DISPATCH();
       }
+
       VM_CASE(OP_APPLY):
       VM_CASE(OP_APPLY_TAIL): {
         size_t insn = VM_CODE()[code_offset-1];
@@ -553,6 +555,14 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             // Check argument arity
             if(tco_enabled && insn == OP_APPLY_TAIL) {
               frames_lost++;
+
+              // Minor optimization: re-use this frame if this is a recursive tail call that is
+              // trivially reuseable (i.e. same argument count, no closures)
+              if((ptrdiff_t)f.fn == to_apply.bits && fargc == f.fn->min_arity && !f.upvalues) {
+                memcpy(f.locals, &f.stack[f.stack_i - fargc], fargc * sizeof(void*));
+                f.stack_i = 0;
+                goto tail_recur;
+              }
 
               temps.clear();
               for(size_t i = 0; i != fargc; i++) {
@@ -750,6 +760,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
           }
         }
 
+        // Return fixnum result
         if(j == argc) {
           f.stack_i -= argc;
           f.stack_i += 1;

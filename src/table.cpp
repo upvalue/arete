@@ -311,10 +311,7 @@ Value fn_table_copy(State& state, size_t argc, Value* argv) {
   //for(size_t i = 0; )
 
   return C_UNSPECIFIED;
-
-
 }
 AR_DEFUN("table-copy", fn_table_copy, 2);
-
 
 }

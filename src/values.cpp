@@ -17,6 +17,21 @@ std::string Value::type_desc() const {
   return os.str();
 }
 
+bool Value::procedure_arity_equals(size_t argc) const {
+  switch(type()) {
+    case CLOSURE:
+    case VMFUNCTION:
+      return closure_unbox().vm_function_min_arity() == argc &&
+        closure_unbox().vm_function_max_arity() == argc;
+    case CFUNCTION:
+      return c_function_min_arity() == argc && c_function_max_arity() == argc;
+    case FUNCTION:
+      return function_arguments().list_length() == argc && function_rest_arguments() == C_FALSE;
+    default: break;
+  }
+  return false;
+}
+
 Value State::get_symbol(Global sym) {
   Value sym2 = (globals.at((size_t) sym));
   AR_ASSERT(sym2.type() == SYMBOL);

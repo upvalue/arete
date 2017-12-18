@@ -78,6 +78,9 @@ void State::boot() {
     "VM-LOG-REPL",
     "EXPANDER-PRINT",
     "FORBID-INTERPRETER",
+    // Printer flags
+    "PRINT-READABLY",
+    "PRINT-TABLE-MAX",
     // I/O
     "*current-input-port*",
     "*current-output-port*",
@@ -130,6 +133,8 @@ void State::boot() {
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_FEATURES, C_NIL);
   set_global_value(G_TCO_ENABLED, C_TRUE);
+  set_global_value(G_PRINT_READABLY, C_FALSE);
+  set_global_value(G_PRINT_TABLE_MAX, Value::make_fixnum(0));
 
   register_feature("arete");
 

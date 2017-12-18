@@ -996,6 +996,8 @@
 
       (set! current-output-port (make-top-level-parameter '*current-output-port* (top-level-value '*current-output-port*)))
       (set! current-input-port (make-top-level-parameter '*current-input-port* (top-level-value '*current-input-port*)))
+      (set! *print-readably* (make-top-level-parameter 'PRINT-READABLY (top-level-value 'PRINT-TABLE-MAX)))
+      (set! *print-table-max* (make-top-level-parameter 'PRINT-TABLE-MAX (top-level-value 'PRINT-TABLE-MAX)))
 )))
 
 (expand-import (top-level-value '*user-module*) '(arete))

@@ -813,7 +813,7 @@ Value State::eval_list(Value lst, bool expand, Value env) {
     // on the fly and used in the file in which that is done
     if(compiler == C_UNDEFINED) {
       tmp = eval_body(frame, tmp, true);
-      if(tmp.is_active_exception() || lst.cdr() == C_NIL) return tmp;
+      if(lst.cdr() == C_NIL) return tmp;
     } else {
       Value argv[1] = {tmp};
       tmp = apply(compiler, 1, argv);

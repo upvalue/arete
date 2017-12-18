@@ -692,7 +692,7 @@
       (map-improper-i
         (lambda (i arg)
           (if (not (identifier? arg))
-            (raise-source (list-tail bindings i) 'expand "non-identifier in lambda argument list" (list x)))
+            (raise-source (list-tail args i) 'expand (print-string "non-identifier in lambda argument list" arg) (list x)))
 
           (if (rename? arg)
             (begin

@@ -407,6 +407,8 @@ struct Value {
     
   /** Returns true if the object is applicable */
   bool applicable() const;
+  /** Check if a procedure's arity is exactly equal to argc */
+  bool procedure_arity_equals(size_t argc) const;
 
   /** Returns true if the object is an identifier (a rename or a symbol) */
   bool identifierp() const { return type() == RENAME || type() == SYMBOL; }
@@ -1164,7 +1166,7 @@ struct Closure : HeapValue {
 };
 
 inline Value Value::closure_unbox() const {
-  if(type() == CLOSURE) {
+  if(heap_type_equals(CLOSURE)) {
     return as<Closure>()->function;
   }
   return heap;
@@ -1710,6 +1712,9 @@ struct State {
     G_VM_LOG_REPL,
     G_EXPANDER_PRINT,
     G_FORBID_INTERPRETER,
+    // Print parameters
+    G_PRINT_READABLY,
+    G_PRINT_TABLE_MAX,
     // stdin/stdout
     G_CURRENT_INPUT_PORT,
     G_CURRENT_OUTPUT_PORT,
@@ -2445,6 +2450,19 @@ struct TableIterator {
     __os << "function " << (fn_name) << " expected argument " << (i) << ' ' << msg ; \
     AR_FN_STACK_TRACE(state); \
     return (state).type_error(__os.str()); \
+  }
+
+#define AR_FN_EXPECT_APPLICABLE_ARITY(state, argv, arg, arity) \
+  if(!((argv)[(arg)].applicable())) { \
+    std::ostringstream os; \
+    os << fn_name << " expected argument " << (arg) << " to be applicable but got a non-applicable " << (argv)[(arg)].type(); \
+    AR_FN_STACK_TRACE(state); \
+    return state.type_error(os.str()); \
+  } else if(!(argv)[(arg)].procedure_arity_equals((arity))) { \
+    std::ostringstream os; \
+    os << fn_name << " expected argument " << (arg) << " to be an applicable value that takes " << (arity) << " arguments"; \
+    AR_FN_STACK_TRACE(state); \
+    return state.type_error(os.str()); \
   }
 
 #define AR_FN_EXPECT_APPLICABLE(state, argv, arg) \

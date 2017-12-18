@@ -966,8 +966,8 @@ AR_DEFUN("exception-irritants", fn_exception_irritants, 1);
 
 Value fn_try(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "try";
-  AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
-  AR_FN_ASSERT_ARG(state, 1, "to be applicable", argv[1].applicable());
+  AR_FN_EXPECT_APPLICABLE_ARITY(state, argv, 0, 0);
+  AR_FN_EXPECT_APPLICABLE_ARITY(state, argv, 1, 1);
 
   Value body = argv[0], handler = argv[1], ret, exc;
   AR_FRAME(state, ret, handler, body, exc);
@@ -993,8 +993,10 @@ AR_DEFUN("try", fn_try, 2);
 Value fn_unwind_protect(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "unwind-protect";
 
-  AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
-  AR_FN_ASSERT_ARG(state, 1, "to be applicable", argv[1].applicable());
+  AR_FN_ASSERT_ARG(state, 0, "to be an applicable value that takes no arguments",
+    argv[0].applicable() && argv[0].procedure_arity_equals(0));
+  AR_FN_ASSERT_ARG(state, 1, "to be an applicable value that takes no arguments",
+    argv[1].applicable() && argv[1].procedure_arity_equals(0));
 
   Value body = argv[0], protection = argv[1], ret;
   AR_FRAME(state, body, protection, ret);
@@ -1002,7 +1004,9 @@ Value fn_unwind_protect(State& state, size_t argc, Value* argv) {
   ret = state.apply(body, 0, nullptr);
 
   Value ret2 = state.apply(protection, 0, nullptr);
-  if(ret2.is_active_exception()) return ret2;
+  if(ret2.is_active_exception())  {
+    return ret2;
+  }
 
   return ret;
 }
