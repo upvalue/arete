@@ -103,7 +103,6 @@ Value make_native_function(State& state, size_t argc, Value* argv) {
   | stateCallBegin method; stateCall; stateCallEnd
   |.endmacro
 
-
   dasm_State *d;
   dasm_init(&d, DASM_MAXSECTION);
 
@@ -179,9 +178,5 @@ Value make_native_function(State& state, size_t argc, Value* argv) {
 
 }
 AR_DEFUN("make-native-function", make_native_function, 0);
-
-void load_native_compiler(State& state) {
-
-}
 
 }

@@ -165,40 +165,22 @@
 ;(define bytes-to-insns (make-table))
 ;; TODO make this a vector.
 
+;; Note: order is important
 (define insn-list
-  '((bad 0)
-    (push-constant 1)
-    (push-immediate 2)
-    (pop 3)
-    (global-get 4)
-    (global-set 5)
-    (local-get 6)
-    (local-set 7)
-    (upvalue-get 8)
-    (upvalue-set 9)
-    (close-over 10)
-    (apply 11)
-    (apply-tail 12)
-    (return 13)
-    (jump 14)
-    (jump-when 15)
-    (jump-when-pop 16)
-    (jump-unless 17)
-    (local-get-0 18)
-    (+ 19)
-    (- 20)
-    (< 21)
-    (car 22)
-    (list-ref 23)
-    (not 24)
-    (eq? 25)
-    ))
+  '(bad
+    push-constant push-immediate pop
+    global-get global-set local-get local-set upvalue-get upvalue-set
+    close-over
+    apply apply-tail
+    return
+    jump jump-when jump-when-pop jump-unless
+    local-get-0
+    + - < car list-ref not eq? fx< fx+ fx-))
 
-(let loop ((pare (car insn-list)) (rest (cdr insn-list)))
-  (table-set! insns-to-bytes (car pare) (cadr pare))
-  ;(table-set! bytes-to-insns (cadr pare) (car pare))
-  (unless (null? rest)
-    (loop (car rest) (cdr rest))))
+(let loop ((i 0) (lst insn-list))
+  (table-set! insns-to-bytes (car lst) i)
+  (unless (null? (cdr lst))
+    (loop (fx+ i 1) (cdr lst))))
 
 ;; This converts symbols into their equivalent fixnums
 (define (insn->byte fn insn)
@@ -223,7 +205,7 @@
 (define stack-effects
   (let ((table (make-table))
         (lst '(
-               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set)
+               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
                (0 jump jump-when jump-unless words close-over return car not)
                (1 push-immediate push-constant global-get local-get local-get-0 upvalue-get)
                )))
@@ -245,9 +227,9 @@
       it
       (case (car insns)
         ;; Variable microcode: Remove arguments from stack, and re-use one of the argument slots to push results
-        ((+ - <) (fx+ (fx- (cadr insns)) 1))
+        ((+ - <) (fx+ (fx- 0 (cadr insns)) 1))
         ;; Remove arguments from stack, but push a single result in the place of the function on the stack
-        ((apply apply-tail) (fx- (cadr insns)))
+        ((apply apply-tail) (fx- 0 (cadr insns)))
         (else (raise 'compile-internal (print-string "unknown instruction" (car insns)) (list fn (car insns) insns))))
     ))
 
@@ -302,6 +284,9 @@
     (not 1 1 #f)
     (eq? 2 2 #f)
     (list-ref 2 2 #f)
+    (fx+ 2 2 #f)
+    (fx- 2 2 #f)
+    (fx< 2 2 #f)
   ))
 )
 

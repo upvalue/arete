@@ -231,6 +231,9 @@ enum {
   OP_LIST_REF = 23,
   OP_NOT = 24,
   OP_EQ = 25,
+  OP_FX_LT = 26,
+  OP_FX_ADD = 27,
+  OP_FX_SUB = 28,
 };
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
@@ -255,6 +258,9 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     &&LABEL_OP_LIST_REF,
     &&LABEL_OP_NOT,
     &&LABEL_OP_EQ,
+    &&LABEL_OP_FX_LT,
+    &&LABEL_OP_FX_ADD,
+    &&LABEL_OP_FX_SUB,
   };
 #endif
   // Frames lost due to tail call optimization
@@ -947,6 +953,32 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       VM_CASE(OP_EQ): {
         f.stack[f.stack_i - 2] = Value::make_boolean(f.stack[f.stack_i - 2].bits == f.stack[f.stack_i - 1].bits);
+        f.stack_i--;
+        VM_DISPATCH();
+      }
+
+    #define VM_FX_CHECK(name) \
+        if(!f.stack[f.stack_i - 2].fixnump() || !f.stack[f.stack_i - 1].fixnump()) { \
+          VM_EXCEPTION("type", "vm primitive " name " expected a fixnum as its arguments but got " << f.stack[f.stack_i - 2].type() << ' ' << f.stack[f.stack_i - 1].type()) \
+        }
+
+      VM_CASE(OP_FX_LT): {
+        VM_FX_CHECK("fx<");
+        f.stack[f.stack_i-2] = Value::make_boolean(f.stack[f.stack_i-2].bits < f.stack[f.stack_i-1].bits);
+        f.stack_i--;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_FX_ADD): {
+        VM_FX_CHECK("fx+");
+        f.stack[f.stack_i-2] = Value::make_fixnum(f.stack[f.stack_i-1].fixnum_value() + f.stack[f.stack_i-2].fixnum_value());
+        f.stack_i--;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_FX_SUB): {
+        VM_FX_CHECK("fx-");
+        f.stack[f.stack_i-2] = Value::make_fixnum(f.stack[f.stack_i-2].fixnum_value() - f.stack[f.stack_i-1].fixnum_value());
         f.stack_i--;
         VM_DISPATCH();
       }
