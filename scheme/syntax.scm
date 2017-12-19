@@ -260,14 +260,14 @@
 (define-syntax letrec
   (lambda (x)
     (unless (> (length x) 2)
-      (raise-source x 'syntax "let* expects at least two arguments (bindings and body)" (list x)))
+      (raise-source x 'syntax "letrec expects at least two arguments (bindings and body)" (list x)))
 
     (let ((bindings (list-ref x 1))
           (body (cddr x)))
       (for-each-i
         (lambda (i binding)
           (unless (and (list? binding) (fx= (length binding) 2) (identifier? (car binding)))
-            (raise-source (list-tail (cadr x) i) 'syntax "let* binding must be a list with two elements" (list binding))))
+            (raise-source (list-tail (cadr x) i) 'syntax "letrec binding must be a list with two elements" (list binding))))
         bindings)
 
     `(,#'let (,@(map1 (lambda (b) (list-source b (car b) #'unspecified)) bindings))
@@ -836,11 +836,9 @@ TODO: Casting
               (top-level-value ,(caddr x))))))))
 
 ;; We have to set these later because the compiler can't compile an interpreted closure correctly
-(define current-input-port #f)
-(define current-output-port #f)
-(define *print-readably* #f)
-;(define *print-table-max* 0)
-
+(define-top-level-parameter current-output-port *current-output-port*)
+(define-top-level-parameter current-input-port *current-input-port*)
+(define-top-level-parameter *print-readably* PRINT-READABLY)
 (define-top-level-parameter *print-table-max* PRINT-TABLE-MAX)
 
 (define-syntax parameterize

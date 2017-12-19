@@ -960,15 +960,16 @@
       (top-level-for-each
         (lambda (k v)
           ;; This is pretty shoddy, but since the module system currently just creates duplicates of every function
-          ;; defined before it is installed, we'll compile all functions in the module system (as well as the toplevel
-          ;; COMPILER and EXPANDER which do not have a module-level definition)
+          ;; defined before it is installed, we'll compile all functions in the module system.
 
-          (if (and (eq? (value-type v) 13) (or (eq? k 'compiler) (eq? k 'expander) (eqv? (string-ref (symbol->string k) 1) #\#)))
+          (if (and (eq? (value-type v) 13) (eqv? (string-ref (symbol->string k) 1) #\#))
             (begin
-              ;; TODO duplicate compile of qualified-name functionality
-
               (let ((is-macro (env-syntax? #f k)))
-                (set-top-level-value! k (recompile-function v))
+                (let ((vmf (recompile-function v)))
+                  (set-top-level-value! k vmf)
+                  (if (and (symbol-qualified? k) (and (eq? (top-level-value (symbol-dequalify k)) unspecified)))
+                    (set-top-level-value! (symbol-dequalify k) vmf)
+                    #t))
                 )
 
               ))))
@@ -987,17 +988,10 @@
               )))
         (top-level-value '*core-module*))
 
-      ;; After which point we'll just update the bindings.
-      (top-level-for-each
-        (lambda (k v)
-          (if (and (eq? (value-type v) 13))
-            (begin
-            (set-top-level-value! k (top-level-value (string->symbol (string-append "##arete#" (symbol->string k)))))))))
+      ;; update certain functions hw
+      (set-top-level-value! 'expander expand-toplevel)
+      (set-top-level-value! 'compiler compile-toplevel)
 
-      (set! current-output-port (make-top-level-parameter '*current-output-port* (top-level-value '*current-output-port*)))
-      (set! current-input-port (make-top-level-parameter '*current-input-port* (top-level-value '*current-input-port*)))
-      (set! *print-readably* (make-top-level-parameter 'PRINT-READABLY (top-level-value 'PRINT-TABLE-MAX)))
-      (set! *print-table-max* (make-top-level-parameter 'PRINT-TABLE-MAX (top-level-value 'PRINT-TABLE-MAX)))
 )))
 
 (expand-import (top-level-value '*user-module*) '(arete))
