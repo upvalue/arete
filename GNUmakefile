@@ -2,7 +2,7 @@
 
 # Normal compilation flags
 CXX := g++
-CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -I. -Ivendor -Ivendor/linenoise 
+CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-implicit-fallthrough -I. -Ivendor -Ivendor/linenoise -Ivendor/dynasm
 CFLAGS := $(CFLAGS) -g3 -O3 
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
 LDFLAGS := -lm -fno-rtti -fno-exceptions
@@ -14,11 +14,11 @@ ECXXFLAGS := -s ASSERTIONS=1 -s EMULATE_FUNCTION_POINTER_CASTS=1 -Os $(ECPPFLAGS
 ELDFLAGS := -Os -s ASSERTIONS=1 -s EMULATE_FUNCTION_POINTER_CASTS=1
 
 # Retrieve compilation targets
-CXXOBJS := $(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))
+CXXOBJS := $(filter-out src/compile-x64.o,$(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))) src/compile-x64.o
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
 CXXOBJS := $(CXXOBJS) $(patsubst %.cpp,%.o,$(wildcard vendor/linenoise/*.cpp))
 CXXOBJS32 := $(patsubst %.o,%.32.o,$(CXXOBJS))
-DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) $(ECXXOBJS:.o=.d) src/main.d
+DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) $(ECXXOBJS:.o=.d) src/main.d 
 
 # Files to include with Emscripten builds
 EFILES := $(addprefix --preload-file ,$(wildcard heap32.boot *.scm scheme/*.scm examples/*.scm examples/*.ttf))
@@ -72,7 +72,11 @@ all: bin/arete
 
 # Link 
 vendor/dynasm/minilua: vendor/dynasm/minilua.c
-	$(CC) -O2 -o $@ $< 
+	$(CC) -O2 -o $@ $<  -lm
+
+src/compile-x64.cpp: src/compile-x64.cpp.dasc vendor/dynasm/minilua 
+	vendor/dynasm/minilua vendor/dynasm/dynasm.lua -D X64 -o $@ $< 
+
 
 bin/arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
@@ -93,6 +97,7 @@ heap32.boot: bin/arete32 $(wildcard scheme/*.scm)
 web/arete.js: $(ECXXOBJS) src/main.em.o heap32.boot
 	$(call colorecho, "LD $@ ")
 	$(ECXX) $(ELDFLAGS) -o $@ $(ECXXOBJS) src/main.em.o $(EFILES)
+
 
 arete-distilled.cpp: $(wildcard src/*.cpp)
 	$(call colorecho "arete.cpp")

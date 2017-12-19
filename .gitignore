@@ -16,3 +16,4 @@ vgcore*
 /bin/arete32
 /heap.boot
 /heap32.boot
+/src/compile-x64.cpp

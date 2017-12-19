@@ -10,6 +10,7 @@ State* current_state = 0;
 extern void load_string_functions(State&);
 extern void load_platform_functions(State&);
 extern void load_sdl(State&);
+extern void load_native_compiler(State&);
 
 State::State():
   gc(*this, ARETE_HEAP_SIZE),

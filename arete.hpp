@@ -231,6 +231,7 @@ enum Type {
   EXCEPTION = 12,
   FUNCTION = 13,
   CFUNCTION = 14,
+  NATIVE_FUNCTION = 22,
   TABLE = 15,
   RENAME = 16,
   RECORD = 17,
@@ -266,11 +267,11 @@ struct HeapValue {
   // f = object-specific flags
   // m = mark bit for incremental GC
   // t = type
-  size_t header AR_ALIGN;
+  size_t header;
 
   /** Size of the object. In the moving collector, this field is also used to store a pointer to
    * copied objects */
-  size_t size AR_ALIGN;
+  size_t size;
 
   void initialize(unsigned type, unsigned mark_bit, size_t size_) {
     header = (type) + (mark_bit << 8);
@@ -313,14 +314,14 @@ struct HeapValue {
  * A floating point number
  */
 struct Flonum : HeapValue {
-  double number AR_ALIGN; 
+  double number; 
 };
 
 /**
  * A string
  */
 struct String : HeapValue {
-  size_t bytes AR_ALIGN;
+  size_t bytes;
   char data[1];
 
   static const Type CLASS_TYPE = STRING;
@@ -555,6 +556,10 @@ struct Value {
 
   template <class T> T bv_ref(size_t idx) const {
     return ((T*) as<Bytevector>()->data)[idx];
+  }
+
+  template <class T = unsigned char> T* bv_data() const {
+    return (T*)as<Bytevector>()->data;
   }
 
   size_t bv_length() const { return as<Bytevector>()->length; }
@@ -812,7 +817,7 @@ struct Value {
     AR_TYPE_ASSERT(type() == T::CLASS_TYPE);
     return static_cast<T*>(heap);
   }
-} AR_ALIGN;
+};
 
 // Below here: inline definitions of things that need Value to be declared
 struct Symbol : HeapValue {
@@ -860,7 +865,7 @@ struct SourceLocation {
   /** An integer that corresponds to an entry in State::source_names */
   unsigned source;
   unsigned line, begin, length;
-} AR_ALIGN;
+};
 
 
 inline std::ostream& operator<<(std::ostream& os, const SourceLocation& src) {
@@ -874,8 +879,8 @@ inline std::ostream& operator<<(std::ostream& os, const SourceLocation& src) {
 }
 
 struct Pair : HeapValue {
-  Value data_car AR_ALIGN, data_cdr AR_ALIGN;
-  SourceLocation src AR_ALIGN;
+  Value data_car, data_cdr;
+  SourceLocation src;
 
   static const unsigned char CLASS_TYPE = PAIR;
 };
@@ -1022,6 +1027,11 @@ inline bool Value::function_is_macro() const {
   return heap->get_header_bit(FUNCTION_MACRO_BIT);
 }
 
+/** A Scheme function, compiled to native code */
+struct NativeFunction : HeapValue {
+};
+
+
 /**
  * A pointer to a C++ function, callable from
  * Scheme. 
@@ -1031,9 +1041,9 @@ struct CFunction : HeapValue {
   union {
     c_function_t addr;
     c_closure_t closure_addr;
-  } AR_ALIGN;
+  };
 
-  size_t min_arity AR_ALIGN, max_arity AR_ALIGN;
+  size_t min_arity, max_arity;
 
   static const unsigned CLASS_TYPE = CFUNCTION;
 };

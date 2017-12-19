@@ -1,0 +1,50 @@
+// compile-x64.cpp.dasc - Compile bytecode to native amd64 code
+// This is a DynASM file. Must be run through DynASM to produce a C++ file
+
+#include "arete.hpp"
+
+#include "dasm_proto.h"
+#include "dasm_x86.h"
+
+namespace arete {
+
+Value make_native_function(State& state, size_t argc, Value* argv) {
+  | .arch x64
+  |.section code
+  dasm_State *d;
+  dasm_init(&d, DASM_MAXSECTION);
+
+  |.actionlist actions
+
+  dasm_setup(&d, actions);
+
+  dasm_State** Dst = &d;
+
+  // Return #f
+  |.code
+  |mov eax, 3
+  |ret
+
+  size_t size;
+
+  dasm_link(&d, &size);
+
+  Value bv(state.make_bytevector<unsigned char>(size));
+  dasm_encode(&d, bv.bv_data());
+
+  dasm_free(&d);
+
+  ptrdiff_t (*ptr)() = (ptrdiff_t (*)()) bv.bv_data();
+
+  Value v(ptr());
+
+  return v;
+
+}
+AR_DEFUN("make-native-function", make_native_function, 0);
+
+void load_native_compiler(State& state) {
+
+}
+
+}
