@@ -188,6 +188,7 @@ void State::print_gc_stats(std::ostream& os) {
 GCCommon::GCCommon(State& state_, size_t heap_size_):
   state(state_), 
   frames(0),
+  native_frames(0),
   vm_frames(0),
   collect_before_every_allocation(false),
   allocations(0),
@@ -221,6 +222,15 @@ void GCCommon::visit_roots(T& walker) {
       walker.touch((HeapValue**) &v);
     }
     state.symbol_table->at(x->first) = v;
+  }
+
+  NativeFrame* native = native_frames;
+  while(native != nullptr) {
+    for(size_t i = 0; i != native->value_count; i++) {
+      walker.touch((HeapValue**) &native->values[i].bits);
+    }
+    native = native->previous;
+    break;
   }
 
   VMFrame* link = vm_frames;
@@ -320,7 +330,11 @@ extern bool thing;
 
 void GCSemispace::run_finalizers(bool finalize_all) {
   // Finalize objects
-  std::vector<Value> finalizers2;
+
+  // TODO: For some reason, allocating a vector on the stack here does not play well with
+  // natively-compiled Scheme code. STL must do something weird to registers (?)
+
+  finalizers2.clear();
   ARETE_LOG_GC("checking " << finalizers.size() << " finalizable objects");
   for(size_t i = 0; i != finalizers.size(); i++) {
     Value f = finalizers[i];

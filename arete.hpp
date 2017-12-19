@@ -1442,6 +1442,15 @@ struct Frame {
 };
 
 /**
+ * Like frames, but for natively-compiled code.
+ */
+struct NativeFrame {
+  NativeFrame* previous;
+  size_t value_count;
+  Value values[1];
+};
+
+/**
  * Like frames, but specifically for the virtual machine which does complex stack allocation
  */
 struct VMFrame {
@@ -1508,6 +1517,8 @@ struct GCCommon {
 
   /** Vector of obejcts that need to be finalized */
   std::vector<Value> finalizers;
+  std::vector<Value> finalizers2;
+  NativeFrame* native_frames;
   VMFrame* vm_frames;
   /** If true, collect before every allocation. Flushes out GC bugs, incredibly expensive */
   bool collect_before_every_allocation;

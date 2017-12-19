@@ -1,6 +1,25 @@
 // compile-x64.cpp.dasc - Compile bytecode to native amd64 code
 // This is a DynASM file. Must be run through DynASM to produce a C++ file
 
+// TODO: Garbage collection
+// We need a way of inspecting variables with garbage collector
+
+// We have full control over the stack frame, so what this means is (1) making sure variables 
+// are in a predictable location at any point that could cause GC and (2) figuring out how to
+// inspect those stack frames from the GC. We can make a C++ struct like Frame (no need to use
+// pointers-to-pointers here, it can be a simple array) and do a linked-list on the stack like Frame
+
+// TODO: Exception throwing
+// We need a way of handling exceptions and passing them on
+
+// TODO: Unclear on what the ideal way to call C++ functions is. There does not appear to be a 
+// trivial way to call methods on the arete::State instance
+
+// Anatomy of a natively-compiled Scheme function
+
+// Registers:
+// r12 = pointer to arete::State*
+
 #include "arete.hpp"
 
 #include "dasm_proto.h"
@@ -8,9 +27,78 @@
 
 namespace arete {
 
+ptrdiff_t print_int(State& state, ptrdiff_t i) {
+  std::cout << "print_int:" << i << std::endl;
+}
+
+Value state_make_pair(State* state) {
+  Value pare(state->make_pair(C_FALSE, C_FALSE));
+  std::cout << "state_make_pair returning " << (size_t) pare.bits << std::endl;
+  return pare;
+}
+
+Value state_collect(State* state) {
+  std::cout << "COLLECTION BEGINNING" << std::endl;
+  state->gc.collect();
+
+  std::cout << "COLLECTION RETURNING" << std::endl;
+  return C_UNSPECIFIED;
+}
+
+Value state_push_native_gc_frame(State* state, NativeFrame* frame) {
+
+  std::cout << "ptr to native frame" << (ptrdiff_t) frame << std::endl;
+  std::cout << "ptr to previous native frame" << (ptrdiff_t) frame->previous << std::endl;
+  state->gc.native_frames = frame;
+
+  return C_UNSPECIFIED;
+}
+
+Value state_pop_native_gc_frame(State* state) {
+  state->gc.native_frames = state->gc.native_frames->previous;
+  return C_UNSPECIFIED;
+
+}
+
+ptrdiff_t state_gc_frame(State* state) {
+  std::cout << "state_gc_frame" << (ptrdiff_t) state->gc.native_frames << std::endl;
+  return (ptrdiff_t)state->gc.native_frames;
+};
+
+// callee-save
+
+// parameters = rdi, rsi, rdx, rcx, r8, r9, xmm0-7
+// rsp = stack pointer
+// saved = rbx, rbp, rdi, rsi, rsp, r12-15
+// rsp-128 is the red zone; can be used for temp values but destroyed by any called function
+
 Value make_native_function(State& state, size_t argc, Value* argv) {
   | .arch x64
   |.section code
+
+  |.define rState, r12
+  |.define rArg1, rcx
+  |.type state, State, rState
+
+  |.macro stateCallBegin, method
+  | mov rbp, rsp
+  | mov rdi, rState
+  | mov rdx, (ptrdiff_t) method
+  |.endmacro
+
+  |.macro stateCall
+  | call rdx
+  |.endmacro
+
+  |.macro stateCallEnd 
+  | mov rsp, rbp
+  |.endmacro
+
+  |.macro stateCallSimple, method
+  | stateCallBegin method; stateCall; stateCallEnd
+  |.endmacro
+
+
   dasm_State *d;
   dasm_init(&d, DASM_MAXSECTION);
 
@@ -22,8 +110,76 @@ Value make_native_function(State& state, size_t argc, Value* argv) {
 
   // Return #f
   |.code
-  |mov eax, 3
-  |ret
+  // Prologue
+  //| sub rsp, 8
+  | push rbx
+  | push rState
+
+  // Move argument one (State* state) into state register
+  | mov rState, rdi
+
+  // Allocate stack space
+  | sub rsp, 24
+
+  // Set up GC frame
+
+  // Get pointer to previous GC frame
+  | stateCallSimple state_gc_frame
+
+  // Store pointer to previous GC frame
+  | mov [rsp+0], rax
+  // Note count of local pointers
+  | mov qword [rsp+16], 1
+
+  | stateCallSimple state_make_pair
+
+  | mov qword [rsp+8], 1
+  | mov [rsp+16], rax
+
+  | mov rsi, [rsp+16]
+  | stateCallSimple print_int
+  
+  //| mov aword [rsp-16], 12345
+
+  // Second argument = pointer to native frame
+  | mov rsi, rsp
+  | stateCallSimple state_push_native_gc_frame
+
+  // Allocate GC frame on stack
+  // 1) Pointer to previous frame
+
+  // Main code
+
+  | stateCallSimple state_collect
+
+
+  | mov rsi, [rsp+16]
+  | stateCallSimple print_int
+/*
+  // Returns ARGC as fixnum
+
+  | mov rax, rsi
+  // make fixnum
+  | shl rax, 1 
+  | add rax, 1 
+  */
+
+
+  // Return 0
+  | mov rax, 0
+
+  // Epilogue
+
+  // Pop GC frame
+  | stateCallSimple state_pop_native_gc_frame
+
+  // Deallocate stack space
+  | add rsp, 24
+  | pop rState
+  | pop rbx
+
+  // Return
+  | ret
 
   size_t size;
 
@@ -34,11 +190,16 @@ Value make_native_function(State& state, size_t argc, Value* argv) {
 
   dasm_free(&d);
 
-  ptrdiff_t (*ptr)() = (ptrdiff_t (*)()) bv.bv_data();
+  ptrdiff_t (*ptr)(State*, size_t) = (ptrdiff_t (*)(State*, size_t)) bv.bv_data();
 
-  Value v(ptr());
+  ptrdiff_t result = ptr(&state, 123);
 
-  return v;
+  std::cout << (ptrdiff_t) &state << std::endl;
+  std::cout << result << std::endl;
+
+
+
+  return Value(result);
 
 }
 AR_DEFUN("make-native-function", make_native_function, 0);

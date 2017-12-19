@@ -4,7 +4,7 @@
 CXX := g++
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-implicit-fallthrough -I. -Ivendor -Ivendor/linenoise -Ivendor/dynasm
 CFLAGS := $(CFLAGS) -g3 -O3 
-CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) 
+CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) -fpermissive
 LDFLAGS := -lm -fno-rtti -fno-exceptions
 
 # Emscripten
