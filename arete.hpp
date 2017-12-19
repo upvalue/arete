@@ -117,6 +117,7 @@
 #define ARETE_LOG_TAG_VM (1 << 2)
 #define ARETE_LOG_TAG_IMAGE (1 << 3)
 #define ARETE_LOG_TAG_DEFUN (1 << 4)
+#define ARETE_LOG_TAG_JIT (1 << 5)
 
 #define AR_POSIX 0
 #define AR_WINDOWS 1
