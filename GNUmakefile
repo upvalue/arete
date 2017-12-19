@@ -71,6 +71,9 @@ all: bin/arete
 -include $(DEPS)
 
 # Link 
+vendor/dynasm/minilua: vendor/dynasm/minilua.c
+	$(CC) -O2 -o $@ $< 
+
 bin/arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^ 

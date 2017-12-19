@@ -1,4 +1,4 @@
-// platform-posix.cpp - POSIX platform functionality
+// platform-posix.cpp - POSIX platform functionality, both for Scheme and the C++ runtime
 
 // TODO: Clang/gcc compiles on windows.
 
@@ -63,6 +63,7 @@ Value fn_file_exists(State& state, size_t argc, Value* argv) {
 		return C_TRUE;
 	}
 #endif
+
   return C_FALSE;
 }
 AR_DEFUN("file-exists?", fn_file_exists, 1);

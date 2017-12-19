@@ -25,6 +25,10 @@
 // objects (to mark them), but this might improve things. It would, however, increase complexity
 // quite a bit.
 
+#if AR_OS == AR_POSIX
+# include <sys/mman.h>
+#endif
+
 #include <chrono>
 
 #include "arete.hpp"
@@ -32,6 +36,28 @@
 #define ARETE_LOG_GC(msg) ARETE_LOG((ARETE_LOG_TAG_GC), "gc", msg)
 
 namespace arete {
+
+#if AR_OS == AR_POSIX
+
+static void* gc_allocate(size_t size) {
+  return mmap(NULL, size, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+}
+
+static void gc_free(void* ptr, size_t length) {
+  munmap(ptr, length);
+}
+
+#else 
+
+static void* gc_allocate(size_t size) {
+  return calloc(1, size);
+}
+
+static void gc_free(void* ptr) {
+  free(ptr);
+}
+
+#endif
 
 void State::finalize(Type object_type, Value object, bool called_by_gc) {
   bool needed_finalization = false;
@@ -129,12 +155,12 @@ struct GCTimer {
 GCTimer gc_overall_timer_i(gc_overall_timer);
 
 Block::Block(size_t size_, unsigned char mark_bit): size(size_) {
-  data = static_cast<char*>(malloc(size));
+  data = static_cast<char*>(gc_allocate(size));
   ((HeapValue*) data)->initialize(BLOCK, !mark_bit, size_);
 }
 
 Block::~Block() {
-  free(data);
+  gc_free(data, size);
 }
 
 void State::print_gc_stats(std::ostream& os) {
