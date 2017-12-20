@@ -145,7 +145,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |.globals globals
   |.globalnames globalnames
 
-  void* globals[globals_MAX];
+  void* globals[globals_MAX == 0 ? 1 : globals_MAX];
   (void) globalnames; // suppress compiler warning
 
   dasm_setupglobal(&d, globals, globals_MAX);
@@ -157,6 +157,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Prologue
   // Save registers
+#if 0
   | push rbx
   | push rState
   | mov rState, rArg1
@@ -201,6 +202,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Create return value
 
+#endif
   | mov rax, 0
   // Return
   | ret

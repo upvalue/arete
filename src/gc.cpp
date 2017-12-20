@@ -25,13 +25,14 @@
 // objects (to mark them), but this might improve things. It would, however, increase complexity
 // quite a bit.
 
-#if AR_OS == AR_POSIX
-# include <sys/mman.h>
-#endif
-
+#include <algorithm>
 #include <chrono>
 
 #include "arete.hpp"
+
+#if AR_OS == AR_POSIX
+# include <sys/mman.h>
+#endif
 
 #define ARETE_LOG_GC(msg) ARETE_LOG((ARETE_LOG_TAG_GC), "gc", msg)
 
@@ -53,7 +54,7 @@ static void* gc_allocate(size_t size) {
   return calloc(1, size);
 }
 
-static void gc_free(void* ptr) {
+static void gc_free(void* ptr, size_t size) {
   free(ptr);
 }
 
