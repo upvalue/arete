@@ -127,8 +127,10 @@ void State::boot() {
   load_string_functions(*this);
   load_platform_functions(*this);
 
+#if AR_LIB_SDL
   load_sdl(*this);
   register_feature("sdl");
+#endif
 
   set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(1300));
   set_global_value(G_COMMAND_LINE, C_NIL);

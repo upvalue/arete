@@ -1,11 +1,12 @@
 # Variables
 
 # Normal compilation flags
-CXX := g++
+CXX := clang
+CC := clang
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-implicit-fallthrough -I. -Ivendor -Ivendor/linenoise -Ivendor/dynasm
 CFLAGS := $(CFLAGS) -g3 -O3 
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) -fpermissive
-LDFLAGS := -lm -fno-rtti -fno-exceptions
+LDFLAGS := -fno-rtti -fno-exceptions
 
 # Emscripten
 ECXX := em++
@@ -27,10 +28,19 @@ EFILES := $(addprefix --preload-file ,$(wildcard heap32.boot *.scm scheme/*.scm 
 PREFIX = /usr/local/stow/arete
 
 # Libraries to build
-ARETE_LIBS := sdl test
+
+ifeq ($(OS),Windows_NT)
+	ARETE_LIBS := 
+	MATH :=	
+else
+	ARETE_LIBS := sdl
+	MATH := -lm
+endif
 
 # site.mk allows the user to override settings
 -include site.mk
+
+LDFLAGS := $(MATH) $(LDFLAGS)
 
 ifeq ($(findstring sdl,$(ARETE_LIBS)),sdl)
 	CXXFLAGS := $(CXXFLAGS) $(shell pkg-config --cflags sdl2 SDL2_ttf) -DAR_LIB_SDL=1
@@ -43,9 +53,7 @@ endif
 
 # Fancy color compilation
 define colorecho
-      @tput setaf 3
       @echo -n $1
-      @tput sgr0
 endef
 
 # Compile .cpp files
@@ -72,7 +80,7 @@ all: bin/arete
 
 # Link 
 vendor/dynasm/minilua: vendor/dynasm/minilua.c
-	$(CC) -O2 -o $@ $<  -lm
+	$(CC) -O2 -o $@ $<  
 
 src/compile-x64.cpp: src/compile-x64.cpp.dasc vendor/dynasm/minilua 
 	vendor/dynasm/minilua vendor/dynasm/dynasm.lua -D X64 -o $@ $< 
