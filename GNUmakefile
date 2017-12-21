@@ -1,7 +1,7 @@
 # Variables
 
 # Normal compilation flags
-CXX := clang
+CXX := clang++
 CC := clang
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-implicit-fallthrough -I. -Ivendor -Ivendor/linenoise -Ivendor/dynasm
 CFLAGS := $(CFLAGS) -g3 -O3 
@@ -82,7 +82,7 @@ all: bin/arete
 
 # Link 
 vendor/dynasm/minilua: vendor/dynasm/minilua.c
-	$(CC) -O2 -o $@ $<  
+	$(CC) -O2 -o $@ $< $(MATH)
 
 src/compile-x64.cpp: src/compile-x64.cpp.dasc vendor/dynasm/minilua 
 	vendor/dynasm/minilua vendor/dynasm/dynasm.lua $(DASMFLAGS) -D X64 -o $@ $< 

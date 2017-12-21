@@ -357,7 +357,9 @@ void GCSemispace::run_finalizers(bool finalize_all) {
   // TODO: For some reason, allocating a vector on the stack here does not play well with
   // natively-compiled Scheme code. STL must do something weird to registers (?)
 
-  finalizers2.clear();
+  //finalizers2.clear();
+  std::vector<Value> finalizers3;
+
   ARETE_LOG_GC("checking " << finalizers.size() << " finalizable objects");
   for(size_t i = 0; i != finalizers.size(); i++) {
     Value f = finalizers[i];
@@ -367,16 +369,16 @@ void GCSemispace::run_finalizers(bool finalize_all) {
     if(f.heap->get_type() == RESERVED) {
       f.heap = reinterpret_cast<HeapValue*>(f.heap->size);
       if(!finalize_all) {
-        finalizers2.push_back(f);
+        finalizers3.push_back(f);
         continue;
       }
     }
     // This object is dead, finalize it
     state.finalize((Type)f.heap->get_type(), f.heap, true);
   }
-  ARETE_LOG_GC(finalizers2.size() << " finalizable objects survived collection");
+  ARETE_LOG_GC(finalizers3.size() << " finalizable objects survived collection");
 
-  finalizers = finalizers2;
+  finalizers = finalizers3;
 }
 
 // Semispace collector

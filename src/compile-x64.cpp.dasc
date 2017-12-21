@@ -21,6 +21,9 @@
 
 // Registers:
 // r12 = pointer to arete::State*
+// r13 = stack index
+
+// TODO Figure out how to print a string
 
 #include "arete.hpp"
 
@@ -32,7 +35,8 @@
 namespace arete {
 
 ptrdiff_t print_int(State& state, ptrdiff_t i) {
-  std::cout << "print_int:" << i << std::endl;
+  static size_t invocation;
+  std::cout << "print_int(" << invocation++ << "):" << i << std::endl;
   return 0;
 }
 
@@ -118,19 +122,24 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // constants in the compiled code
 
   unsigned total_stack = local_count+stack_max;
+  unsigned kFrameSize = local_count+stack_max;
+  // TODO: Align to 16 bits
   unsigned kTotalStackSize = sizeof(NativeFrame) - sizeof(void*) + ((total_stack) * sizeof(void*));
+  size_t kValueSize = sizeof(void*);
+  unsigned kCompStackOffset = kTotalStackSize - (kValueSize * stack_max);
 
-  // A note on some confusion: in the virtual machine, the stack is a separately allocated data
-  // structure from locals and upvalues. Thus here there's the VM stack which exists only
-  // metaphorically here and is where the values of temporary computation are stored and tracked by
-  // the garbage collector, and the actual stack i.e. rsp.
+  AR_LOG_JIT("function frame info. kTotalStackSize " << kTotalStackSize << " kCompStackoffset " << kCompStackOffset);
 
-  AR_LOG_JIT("function with stack size " << kTotalStackSize);
-  
+  // A note on a possible source of confusion: in the virtual machine, the stack is a separately
+  // allocated data structure from locals and upvalues. Thus there's the computation stack which
+  // exists only metaphorically here and is where the values of temporary computation are stored and
+  // tracked by the garbage collector, and the actual stack i.e. rsp.
+
   | .arch x64
   |.section code
 
   |.define rState, r12
+  |.define rStackI, r13
 	|.if WINDOWS
 	| .define rArg1, rcx
 	| .define rArg2, rdx
@@ -142,6 +151,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   |.macro stateCallBegin, method
   //| mov rbp, rsp
+  | push rbp
 	| push rsp
   | mov rArg1, rState
   | mov64 rax, (ptrdiff_t) method
@@ -153,11 +163,29 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   |.macro stateCallEnd 
 	| pop rsp
+  | pop rbp
   //| mov rsp, rbp
   |.endmacro
 
   |.macro stateCallSimple, method
   | stateCallBegin method; stateCall; stateCallEnd
+  |.endmacro
+
+  // takes rStackI and sets STORE to the rsp offset it needs
+  |.macro getCompStackIndex, store
+  | mov store, rStackI
+  | imul store, kValueSize
+  | add store, kCompStackOffset
+  | mov rArg2, store
+  | add store, rsp
+  //| mov rArg2, rsp
+  //| stateCallSimple print_int
+  //| stateCallSimple print_int
+  |.endmacro
+
+  |.macro getCompStackTop, store
+  | getCompStackIndex store
+  | mov store, [rsp+store]
   |.endmacro
 
   dasm_State *d;
@@ -185,43 +213,70 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rState, rArg1
   | push rArg1
   | push rArg2
-	//
+  | push r13
+
+  | mov rStackI, 0
+
   // Allocate stack space
-  | sub rsp, 24
+  | sub rsp, kTotalStackSize
 
   // NativeFrame::previous
   | mov qword [rsp+0], 0
   // NativeFrame::value_count
-  | mov qword [rsp+8], 0
+  | mov qword [rsp+8], kFrameSize
+  | mov qword [rsp+16], 0
 
-  // push GC root
-  //| stateCallSimple state_push_native_gc_frame
+  // Initialize locals
 
-	/*
-	| mov rArg1, 123
-	| mov rArg2, 456
-	| push rsp
-	| mov64 rax, (ptrdiff_t) return_int
-	| call rax
-	| mov rArg1, rax
-	| mov64 rax, (ptrdiff_t) print_int_simple
-	| call rax
-	| pop rsp
-	*/
-
-  //| mov rax, 5
   | mov rArg2, rsp
   | stateCallSimple state_push_native_gc_frame
-  //| mov [rsp+0], rax
-	//
-	//| stateCallSimple state_collect
+
+	| stateCallSimple state_collect
+
+  // Execute function body
+  size_t code_offset = 0;
+  size_t *code = vmf->code_pointer();
+
+  while(true) {
+    switch(code[code_offset++]) {
+      case OP_PUSH_IMMEDIATE: {
+        size_t value = code[code_offset++];
+        AR_LOG_JIT("push-immediate " << Value(value) << " (" << (ptrdiff_t) value << ")");
+        // Retrieve location of stack value
+        | getCompStackIndex rArg1
+        // Set value
+        | mov qword [rArg1], (size_t) value
+        // Increment stack
+        | add rStackI, 1
+      }
+
+      case OP_RETURN: {
+        AR_LOG_JIT("return");
+        //| getCompStackTop rax
+        //| mov rArg2, [rsp+16]
+        //| mov rArg2, rax
+        //| stateCallSimple print_int
+        //| sub rStackI, 1
+        | sub rStackI, 1
+        | getCompStackIndex rArg1
+        | mov rStackI, [rArg1]
+        //| stateCallSimple print_int
+        //| mov rStackI, [rArg1]
+
+        goto done;
+      }
+    }
+  }
+  done:
 
   | stateCallSimple state_pop_native_gc_frame
 
   // Free stack space
-  | add rsp, 24
+  | add rsp, kTotalStackSize
 
   // Restore registers
+  | mov rax, rStackI
+  | pop r13
   | pop rArg2
   | pop rArg1
 	| pop rState
@@ -230,7 +285,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Create return value
 
-  | mov rax, 0
+  //| mov rax, 0
   // Return
   | ret
 
@@ -252,7 +307,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   ptrdiff_t result = ptr(&state, 555);
 
-  //std::cout << "result: " << result << std::endl;
+  std::cout << "result: " << Value(result) << std::endl;
 
   return C_UNSPECIFIED;
 }

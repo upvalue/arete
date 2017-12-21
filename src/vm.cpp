@@ -193,48 +193,6 @@ void VMFrame::close_over() {
   destroyed = true;
 }
 
-// Note: The value of these instructions must be reflected in the computed-goto array below
-// and in the compiler
-enum {
-  // These instructions are the core of the virtual machine; they are arranged roughly
-  // by their purpose
-  OP_BAD = 0,
-  // Simple stack operations
-  OP_PUSH_CONSTANT = 1,
-  OP_PUSH_IMMEDIATE = 2,
-  OP_POP = 3,
-  // Getters and setters
-  OP_GLOBAL_GET = 4,
-  OP_GLOBAL_SET = 5,
-  OP_LOCAL_GET = 6,
-  OP_LOCAL_SET = 7,
-  OP_UPVALUE_GET = 8,
-  OP_UPVALUE_SET = 9,
-  OP_CLOSE_OVER = 10,
-  // Application
-  OP_APPLY = 11,
-  OP_APPLY_TAIL = 12,
-  // Flow control
-  OP_RETURN = 13,
-  OP_JUMP = 14,
-  OP_JUMP_WHEN = 15,
-  OP_JUMP_WHEN_POP = 16,
-  OP_JUMP_UNLESS = 17,
-  // Instructions below here are exploded variations on existing primitives
-  OP_LOCAL_GET_0 = 18,
-  // Instructions below this point are primitive versions of the builtin C++ routines for speed;
-  // they are not necessary for code to execute correctly.
-  OP_ADD = 19,
-  OP_SUB = 20,
-  OP_LT = 21,
-  OP_CAR = 22,
-  OP_LIST_REF = 23,
-  OP_NOT = 24,
-  OP_EQ = 25,
-  OP_FX_LT = 26,
-  OP_FX_ADD = 27,
-  OP_FX_SUB = 28,
-};
 
 Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 #if AR_COMPUTED_GOTO
