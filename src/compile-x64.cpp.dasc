@@ -31,6 +31,15 @@ namespace arete {
 
 ptrdiff_t print_int(State& state, ptrdiff_t i) {
   std::cout << "print_int:" << i << std::endl;
+  return 0;
+}
+
+void print_int_simple(ptrdiff_t i) {
+  std::cout << "print_int:" << i << std::endl;
+}
+
+void print_something() {
+  std::cout << "something" << std::endl;
 }
 
 Value state_make_pair(State* state) {
@@ -76,18 +85,44 @@ ptrdiff_t state_gc_frame(State* state) {
 // saved = rbx, rbp, rdi, rsi, rsp, r12-15
 // rsp-128 is the red zone; can be used for temp values but destroyed by any called function
 
-Value make_native_function(State& state, size_t argc, Value* argv) {
-  AR_LOG_JIT("make-native-function called");
+Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
+  const char* fn_name = "vmfunction->native";
+  AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
+  Value bv, nfn, vfn;
+
+  vfn = argv[0];
+
+  AR_LOG_JIT("vmfunction_to_native called");
+
+  VMFunction* vmf = vfn.as_unsafe<VMFunction>();
+
+  unsigned local_count = vmf->local_count;
+  unsigned stack_max = vmf->stack_max;
+
+  // Using the otherwise not-used-in-this codebase kBlah style to denote things that will become
+  // constants in the compiled code
+
+  unsigned total_stack = local_count+stack_max;
+  unsigned kTotalStackSize = sizeof(NativeFrame) - sizeof(void*) + ((total_stack) * sizeof(void*));
+
+  // A note on some confusion: in the virtual machine, the stack is a separately allocated data
+  // structure from locals and upvalues. Thus here there's the VM stack which exists only
+  // metaphorically here and is where the values of temporary computation are stored and tracked by
+  // the garbage collector, and the actual stack i.e. rsp.
+
+  AR_LOG_JIT("function with stack size " << kTotalStackSize);
+  
   | .arch x64
   |.section code
 
   |.define rState, r12
-  |.define rArg1, rcx
+  |.define rArg1, rdi
+  |.define rArg2, rsi
   |.type state, State, rState
 
   |.macro stateCallBegin, method
   | mov rbp, rsp
-  | mov rdi, rState
+  | mov rArg1, rState
   | mov64 rax, (ptrdiff_t) method
   |.endmacro
 
@@ -107,53 +142,66 @@ Value make_native_function(State& state, size_t argc, Value* argv) {
   dasm_init(&d, DASM_MAXSECTION);
 
   |.actionlist actions
+  |.globals globals
+  |.globalnames globalnames
 
+  void* globals[globals_MAX];
+  (void) globalnames; // suppress compiler warning
+
+  dasm_setupglobal(&d, globals, globals_MAX);
   dasm_setup(&d, actions);
 
   dasm_State** Dst = &d;
 
   |.code
-/*
-  // Returns ARGC as fixnum
 
-  | mov rax, rsi
-  // make fixnum
-  | shl rax, 1 
-  | add rax, 1 
-  */
+  // Prologue
+  // Save registers
   | push rbx
   | push rState
-  | push rdi
+  | mov rState, rArg1
+  | push rArg1
+  | push rArg2
 
-  // Move first argument (State* state) into state register
-  | mov rState, rdi
+  | mov rArg1, 420
+  | mov64 rax, (ptrdiff_t) print_int_simple
+  | call rax
 
-  | sub rsp, 24
 
-  | stateCallSimple state_gc_frame
-  | mov [rsp+0], rax
-  | mov qword [rsp+8], 1
+  // Allocate stack space
+  //| sub rsp, 24
 
-  | stateCallSimple state_make_pair
-  | mov [rsp+16], rax
+  // NativeFrame::previous
+  | mov qword [rsp+0], 0
+  // NativeFrame::value_count
+  | mov qword [rsp+8], 0
 
-  | mov rsi, rsp
+  // push GC root
+  | mov rArg2, rsp
   | stateCallSimple state_push_native_gc_frame
 
-  | mov rdi, rState
-  | mov64 rax, (ptrdiff_t) state_collect
-  | call rax
+
+  //| mov rax, 5
+  //| mov rArg2, rsp
+  //| stateCallSimple state_push_native_gc_frame
+  //| mov [rsp+0], rax
 
   | stateCallSimple state_pop_native_gc_frame
 
-  // Return #f
-  | mov rax, [rsp+16]
+  
 
-  | add rsp, 24
-  | pop rdi
+  // Free stack space
+  //| add rsp, 24
+
+  // Restore registers
+  | pop rArg2
+  | pop rArg1
   | pop rState
   | pop rbx
 
+  // Create return value
+
+  | mov rax, 0
   // Return
   | ret
 
@@ -161,22 +209,25 @@ Value make_native_function(State& state, size_t argc, Value* argv) {
 
   dasm_link(&d, &size);
 
-  Value bv(state.make_bytevector<unsigned char>(size));
-  AR_FRAME(state, bv);
+  AR_FRAME(state, bv, nfn);
+
+  bv = state.make_bytevector<unsigned char>(size);
+
   dasm_encode(&d, bv.bv_data());
 
   dasm_free(&d);
 
-  AR_LOG_JIT("make-native-function done; calling function");
+  AR_LOG_JIT("vmfunction->native done; calling function");
 
   ptrdiff_t (*ptr)(State*, size_t) = (ptrdiff_t (*)(State*, size_t)) bv.bv_data();
 
   ptrdiff_t result = ptr(&state, 123);
 
+  //std::cout << "result: " << result << std::endl;
 
-  return Value(result);
-
+  return C_UNSPECIFIED;
 }
-AR_DEFUN("make-native-function", make_native_function, 0);
+
+AR_DEFUN("vmfunction->native", vmfunction_to_native, 1);
 
 }

@@ -183,6 +183,7 @@ extern size_t gc_collect_timer;
 extern State* current_state;
 
 typedef Value (*c_function_t)(State&, size_t, Value*);
+typedef Value (*native_function_t)(State&, size_t, Value*);
 // We have to use (void*) here to make Emscripten happy.
 typedef Value (*c_closure_t)(State&, void*, size_t, Value*);
 typedef void (*c_finalizer_t)(State&, Value);
@@ -1030,8 +1031,11 @@ inline bool Value::function_is_macro() const {
 
 /** A Scheme function, compiled to native code */
 struct NativeFunction : HeapValue {
-};
+  Bytevector* code;
+  Value constants;
 
+  size_t min_arity, max_arity;
+};
 
 /**
  * A pointer to a C++ function, callable from
