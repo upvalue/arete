@@ -15,6 +15,8 @@
 // TODO: Unclear on what the ideal way to call C++ functions is. There does not appear to be a 
 // trivial way to call methods on the arete::State instance
 
+// TODO: Cannot return a Value on Windows
+
 // Anatomy of a natively-compiled Scheme function
 
 // Registers:
@@ -38,6 +40,10 @@ void print_int_simple(ptrdiff_t i) {
   std::cout << "print_int:" << i << std::endl;
 }
 
+void print_2int_simple(ptrdiff_t a, ptrdiff_t b) {
+  std::cout << "print_2int:" << a << ' ' << b << std::endl;
+}
+
 void print_something() {
   std::cout << "something" << std::endl;
 }
@@ -56,19 +62,28 @@ Value state_collect(State* state) {
   return C_UNSPECIFIED;
 }
 
-Value state_push_native_gc_frame(State* state, NativeFrame* frame) {
+void state_push_native_gc_frame(State* state, NativeFrame* frame) {
+	void* thing;
+	std::cout << (ptrdiff_t) &thing << std::endl;
 
-  std::cout << "ptr to native frame" << (ptrdiff_t) frame << std::endl;
-  std::cout << "ptr to previous native frame" << (ptrdiff_t) frame->previous << std::endl;
+  //std::cout << "ptr to current_state " << (ptrdiff_t) current_state << std::endl;
+  std::cout << "ptr to state " << (ptrdiff_t) state << std::endl;
+  std::cout << "ptr to native frame " << (ptrdiff_t) frame << std::endl;
+  std::cout << "native frame value_count " << (ptrdiff_t) frame->value_count << std::endl;
+  std::cout << "ptr to previous native frame " << (ptrdiff_t) frame->previous << std::endl;
   state->gc.native_frames = frame;
 
-  return C_UNSPECIFIED;
+  //return C_UNSPECIFIED;
 }
 
-Value state_pop_native_gc_frame(State* state) {
-  state->gc.native_frames = state->gc.native_frames->previous;
-  return C_UNSPECIFIED;
+ptrdiff_t return_int(ptrdiff_t a) {
+	// TODO: Returning a Value from a function causes issues on windows
+	return a;
+}
 
+void state_pop_native_gc_frame(State* state) {
+	std::cout << "popping gc frame " << (ptrdiff_t) state->gc.native_frames << std::endl;
+  state->gc.native_frames = state->gc.native_frames->previous;
 }
 
 ptrdiff_t state_gc_frame(State* state) {
@@ -116,12 +131,18 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |.section code
 
   |.define rState, r12
-  |.define rArg1, rdi
-  |.define rArg2, rsi
+	|.if WINDOWS
+	| .define rArg1, rcx
+	| .define rArg2, rdx
+	|.else
+  | .define rArg1, rdi
+  | .define rArg2, rsi
+	|.endif
   |.type state, State, rState
 
   |.macro stateCallBegin, method
-  | mov rbp, rsp
+  //| mov rbp, rsp
+	| push rsp
   | mov rArg1, rState
   | mov64 rax, (ptrdiff_t) method
   |.endmacro
@@ -131,7 +152,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |.endmacro
 
   |.macro stateCallEnd 
-  | mov rsp, rbp
+	| pop rsp
+  //| mov rsp, rbp
   |.endmacro
 
   |.macro stateCallSimple, method
@@ -157,20 +179,15 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Prologue
   // Save registers
-#if 0
+	| push rbp
   | push rbx
   | push rState
   | mov rState, rArg1
   | push rArg1
   | push rArg2
-
-  | mov rArg1, 420
-  | mov64 rax, (ptrdiff_t) print_int_simple
-  | call rax
-
-
+	//
   // Allocate stack space
-  //| sub rsp, 24
+  | sub rsp, 24
 
   // NativeFrame::previous
   | mov qword [rsp+0], 0
@@ -178,31 +195,41 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov qword [rsp+8], 0
 
   // push GC root
-  | mov rArg2, rsp
-  | stateCallSimple state_push_native_gc_frame
+  //| stateCallSimple state_push_native_gc_frame
 
+	/*
+	| mov rArg1, 123
+	| mov rArg2, 456
+	| push rsp
+	| mov64 rax, (ptrdiff_t) return_int
+	| call rax
+	| mov rArg1, rax
+	| mov64 rax, (ptrdiff_t) print_int_simple
+	| call rax
+	| pop rsp
+	*/
 
   //| mov rax, 5
-  //| mov rArg2, rsp
-  //| stateCallSimple state_push_native_gc_frame
+  | mov rArg2, rsp
+  | stateCallSimple state_push_native_gc_frame
   //| mov [rsp+0], rax
+	//
+	//| stateCallSimple state_collect
 
   | stateCallSimple state_pop_native_gc_frame
 
-  
-
   // Free stack space
-  //| add rsp, 24
+  | add rsp, 24
 
   // Restore registers
   | pop rArg2
   | pop rArg1
-  | pop rState
+	| pop rState
   | pop rbx
+	| pop rbp
 
   // Create return value
 
-#endif
   | mov rax, 0
   // Return
   | ret
@@ -223,7 +250,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   ptrdiff_t (*ptr)(State*, size_t) = (ptrdiff_t (*)(State*, size_t)) bv.bv_data();
 
-  ptrdiff_t result = ptr(&state, 123);
+  ptrdiff_t result = ptr(&state, 555);
 
   //std::cout << "result: " << result << std::endl;
 

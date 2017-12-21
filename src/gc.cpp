@@ -32,6 +32,8 @@
 
 #if AR_OS == AR_POSIX
 # include <sys/mman.h>
+#else
+# include <Windows.h>
 #endif
 
 #define ARETE_LOG_GC(msg) ARETE_LOG((ARETE_LOG_TAG_GC), "gc", msg)
@@ -51,12 +53,29 @@ static void gc_free(void* ptr, size_t length) {
 #else 
 
 static void* gc_allocate(size_t size) {
+	void* mem = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	DWORD w;
+	VirtualProtect(mem, size, PAGE_EXECUTE_READWRITE, &w);
+	// TODO: FlushInstructionCache (?)
+	return mem;
+}
+
+static void gc_free(void* ptr, size_t size) {
+	(void) size;
+	VirtualFree(ptr, size, MEM_DECOMMIT);
+}
+
+#if 0
+
+static void* gc_allocate(size_t size) {
   return calloc(1, size);
 }
 
 static void gc_free(void* ptr, size_t size) {
   free(ptr);
 }
+
+#endif
 
 #endif
 

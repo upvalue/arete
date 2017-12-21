@@ -31,9 +31,11 @@ PREFIX = /usr/local/stow/arete
 
 ifeq ($(OS),Windows_NT)
 	ARETE_LIBS := 
+	DASMFLAGS := -D WINDOWS
 	MATH :=	
 else
 	ARETE_LIBS := sdl
+	DASMFLAGS :=
 	MATH := -lm
 endif
 
@@ -83,7 +85,7 @@ vendor/dynasm/minilua: vendor/dynasm/minilua.c
 	$(CC) -O2 -o $@ $<  
 
 src/compile-x64.cpp: src/compile-x64.cpp.dasc vendor/dynasm/minilua 
-	vendor/dynasm/minilua vendor/dynasm/dynasm.lua -D X64 -o $@ $< 
+	vendor/dynasm/minilua vendor/dynasm/dynasm.lua $(DASMFLAGS) -D X64 -o $@ $< 
 
 
 bin/arete: $(CXXOBJS) src/main.o
