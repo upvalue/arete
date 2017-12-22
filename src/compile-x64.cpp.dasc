@@ -27,7 +27,8 @@
 
 // Registers:
 // r12 = pointer to arete::State*
-// r13 = stack index
+// r13 = during execution, stores stack index.
+// after control ends (due to exception or return), stores return value
 
 // Stack:
 // 0-8 = pointer to previous native stack frame (if any)
@@ -38,6 +39,9 @@
 
 // TODO: Use offsetof and other stuff instead of calling functions to retrieve information
 // about a particular State
+
+// TODO Write an error handling function
+// Probably
 
 // TODO Figure out how to print a string
 
@@ -79,6 +83,49 @@ void state_collect(State* state) {
   state->gc.collect();
 
   std::cout << "COLLECTION RETURNING" << std::endl;
+}
+
+// Exception tag codes
+enum {
+  E_TYPE
+};
+
+// Exception source codes
+enum {
+  E_FX_ADD
+};
+
+// Exception message codes
+enum {
+  E_EXPECTED_FIXNUM_1,
+  E_EXPECTED_FIXNUM_2
+};
+
+Value native_exception(State* state, unsigned tag, unsigned src, unsigned code) {
+  AR_LOG_JIT("native_exception called with arguments " << tag << " " << src << " " << code);
+  std::ostringstream os;
+
+  Value tag_s;
+  if(tag_s == E_TYPE) {
+    tag_s = state->globals[State::S_TYPE_ERROR];
+  } else {
+    tag_s = state->globals[State::S_EVAL_ERROR];
+  }
+
+  switch(src) {
+    case E_FX_ADD: {
+      os << "primitive fx+ ";
+      break;
+    }
+    default: break;
+  }
+
+  switch(code) {
+    case E_EXPECTED_FIXNUM_1: os << "expected argument 1 to be a fixnum"; break;
+    case E_EXPECTED_FIXNUM_2: os << "expected argument 2 to be a fixnum"; break;
+  }
+
+  return state->make_exception(tag_s, os.str(), C_FALSE);
 }
 
 void state_push_native_gc_frame(State* state, NativeFrame* frame) {
@@ -132,6 +179,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   unsigned local_count = vmf->local_count;
   unsigned stack_max = vmf->stack_max;
+  unsigned label = 0;
 
   // Using the otherwise not-used-in-this codebase kBlah style to denote things that will become
   // constants in the compiled code
@@ -149,7 +197,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     kTotalStackSizeAligned += 8;
   }
 #endif
-
 
   AR_LOG_JIT("function frame info. kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset);
@@ -172,17 +219,43 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	|.else
   | .define rArg1, rdi
   | .define rArg2, rsi
+  | .define rArg3, rdx
+  | .define rArg4, rcx
 	|.endif
   |.type state, State, rState
 
   |.macro stateCall, method
-  | push rbp
-	| mov rbp, rsp
-  | mov rArg1, rState
-  | mov64 rax, (ptrdiff_t) method
-  | call rax
-	| mov rsp, rbp
-  | pop rbp
+  | .if WINDOWS
+  |  push rbp
+  |  mov rbp, rsp
+  |  mov rArg1, rState
+  |  mov64 rax, (ptrdiff_t) method
+  |  call rax
+	|  mov rsp, rbp
+  |  pop rbp
+  | .else
+  |  push rbp
+  |  push rsp
+  |  mov rArg1, rState
+  |  mov64 rax, (ptrdiff_t) method
+  |  call rax
+  |  pop rsp
+  |  pop rbp
+  | .endif
+  |.endmacro
+
+  // Check that value in STORE is a valid fixnum, if not, generate a type error with SRC and CODE
+  // Generates 2 labels
+  |.macro checkFixnumP, store, src, code
+  | mov rax, store
+  | and rax, 1
+  | cmp rax, 1
+  | jz =>label++
+  // Test failed
+  | mov rArg2, E_TYPE; mov rArg3, code; mov rArg4, code
+  | stateCall native_exception
+  | jmp ->exception
+  |=>label-1:
   |.endmacro
 
   // takes rStackI and sets STORE to the rsp offset it needs
@@ -275,8 +348,14 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Initialize locals
 
   | mov rArg2, rsp; stateCall state_push_native_gc_frame
-	| stateCall state_collect
 
+/*
+  | mov rax, 1
+  | test rax, 2
+  | jnz =>label++
+  | ret
+  |=>label-1:
+  */
 
 	/*
 	| push rax
@@ -295,23 +374,14 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	| mov64 rax, (size_t) print_int_simple
 	| call rax
 	*/
-	/*
 
   //| mov rArg2, r14
   //| stateCall print_int
   //| mov rArg2, r14
 
   // stack use grows from 64 to 72
-  | mov rArg2, rbp
-  | sub rArg2, rsp
 
-  | stateCall print_int
-
-  | push rbp; mov rbp, rsp; 
-  | mov rArg1, rState
-  | mov64 rax, (ptrdiff_t) state_collect
-  | call rax
-  | pop rbp;
+	| stateCall state_collect
 
   // Execute function body
   size_t code_offset = 0;
@@ -333,28 +403,38 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       }
 
       case OP_FX_ADD: {
-        | getCompStackIndex rArg1
-        | sub rArg1, 8
-        | shr qword [rArg1], 1
-
         | getCompStackIndex rArg2
-        | sub rArg2, 16
+        AR_LOG_JIT("fx+");
+        | sub rArg2, 8
+
+        // 2 labels: two for each type test
+        dasm_growpc(&d, 2);
+        | checkFixnumP [rArg2], E_FX_ADD, E_EXPECTED_FIXNUM_2
+
+        // Extract fixnum argument 1 value
         | shr qword [rArg2], 1
+
+        | getCompStackIndex rArg1
+        | sub rArg1, 16
+        | checkFixnumP [rArg1], E_FX_ADD, E_EXPECTED_FIXNUM_1
+        // extract fixnum argument 2 value
+        | shr qword [rArg1], 1
 
         | push rax; push rArg1; push rArg2; mov rArg2, [rArg1]; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
         | push rax; push rArg1; push rArg2; mov rArg2, [rArg2]; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
 
-        | mov rax, [rArg2]
+        | mov rax, [rArg1]
         | push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
-        | add rax, [rArg1]
+        | add rax, [rArg2]
         | push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
 
         | shl rax, 1
         | add rax, 1
         | push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
 
-        | mov [rArg2], rax
+        | mov [rArg1], rax
         | sub rStackI, 1
+        break;
       }
 
       case OP_RETURN:
@@ -383,21 +463,20 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     }
   }
   done:
-	*/
 
   | stateCall state_pop_native_gc_frame
 
   | jmp ->unwind
   |->exception:
 
+  | mov rStackI, rax
 
   |->unwind:
   // Free stack space
   | add rsp, kTotalStackSizeAligned
 
   // Retrieve return value from rStackI
-  //| mov rax, rStackI
-	| mov rax, 0
+  | mov rax, rStackI
   // Restore registers
   | pop rFx
   | pop rStackI
@@ -409,6 +488,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	| pop rbp
 
   // Create return value
+
 
 /*
   | push rbp
