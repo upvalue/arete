@@ -50,14 +50,14 @@
 
 namespace arete {
 
+static size_t invocation = 0;
 ptrdiff_t print_int(State& state, ptrdiff_t i) {
-  static size_t invocation;
   std::cout << "print_int(" << invocation++ << "):" << i << std::endl;
   return 0;
 }
 
 void print_int_simple(ptrdiff_t i) {
-  std::cout << "print_int:" << i << std::endl;
+  std::cout << "print_int_simple(" << invocation++ << "):" << i << std::endl;
 }
 
 void print_2int_simple(ptrdiff_t a, ptrdiff_t b) {
@@ -143,8 +143,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   unsigned kTotalStackSize = sizeof(NativeFrame) - sizeof(void*) + ((total_stack) * sizeof(void*));
   size_t kValueSize = sizeof(void*);
   unsigned kCompStackOffset = kTotalStackSize - (kValueSize * stack_max);
+  unsigned kTotalStackSizeAligned = kTotalStackSize;
 
-  AR_LOG_JIT("function frame info. kTotalStackSize " << kTotalStackSize << " kCompStackoffset " << kCompStackOffset);
+  if((kTotalStackSize % 16) == 0) {
+    kTotalStackSizeAligned += 8;
+  }
+
+  AR_ASSERT((kTotalStackSizeAligned + 56) % 16 == 0);
+
+  AR_LOG_JIT("function frame info. kTotalStackSize " << kTotalStackSize << \
+    " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset);
 
   // A note on a possible source of confusion: in the virtual machine, the stack is a separately
   // allocated data structure from locals and upvalues. Thus there's the computation stack which
@@ -237,17 +245,43 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | push rArg1
   | push rArg2
   | push rStackI
+  | push r15
+
+  // NOTE: At the boundary of any CALL, stack size must be a multiple of 16!
+  // PUSHing grows it by only 8.
+
+  // Currently we push 7 * 8 = 56 at the start
+  // This means that 56 + kTotalStackSizeAligned must be a multiple of 16 somehow
 
   | mov rStackI, 0
 
   // Allocate stack space
-  | sub rsp, kTotalStackSize
+  | sub rsp, kTotalStackSizeAligned
 
   // NativeFrame::previous
   | mov qword [rsp+0], 0
   // NativeFrame::value_count
   | mov qword [rsp+8], kFrameSize
-  | mov qword [rsp+16], 0
+
+  // Zero out GC frame
+  // Assumes function has a stack size of at least one.
+
+  // rArg2 = loop limit, kFrameSize + rsp
+  | mov rArg2, rsp
+  | add rArg2, ((kFrameSize*8)+8)
+
+  // Set RAX to NativeFrame::value_count
+  | mov rArg1, rsp
+  | add rArg1, 8
+
+  |->gc_zero:
+  // Now add 8 to rax at top of loop so it points at NativeFrame::values[0]
+  | add rArg1, 8
+  // Set value to zero
+  | mov qword [rArg1], 0
+  | cmp rArg1, rArg2
+  | jne ->gc_zero
+  //| mov qword [rsp+16], 0
 
   // Initialize locals
 
@@ -264,14 +298,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   | stateCallSimple print_int
 
-
-
-  // Why does RAX have to be pushed here?
-  | push rbp; mov rbp, rsp; push rax
+  | push rbp; mov rbp, rsp; 
   | mov rArg1, rState
   | mov64 rax, (ptrdiff_t) state_collect
   | call rax
-  | pop rax; pop rbp
+  | pop rbp;
 
   // Execute function body
   size_t code_offset = 0;
@@ -328,11 +359,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   |->unwind:
   // Free stack space
-  | add rsp, kTotalStackSize
+  | add rsp, kTotalStackSizeAligned
 
   // Retrieve return value from rStackI
   | mov rax, rStackI
   // Restore registers
+  | pop r15
   | pop rStackI
   | pop rArg2
   | pop rArg1
@@ -363,15 +395,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | leave
   */
 
-  | mov rax, 0
 
   //| add rsp, 8
 
   | ret
 
   size_t size;
-
-  //std::cout << "OFFSETOF" << offsetof(State, gc) + offsetof(GCCommon, native_frames) << std::endl;
 
   dasm_link(&d, &size);
 
