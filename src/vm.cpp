@@ -205,7 +205,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     
     &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
 
-    &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
+    &&LABEL_OP_RETURN, &&LABEL_OP_RETURN_END, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
 
     &&LABEL_OP_LOCAL_GET_0,
 
@@ -645,7 +645,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       ///// FLOW CONTROL
 
-      VM_CASE(OP_RETURN): {
+      VM_CASE(OP_RETURN):
+      VM_CASE(OP_RETURN_END): {
         AR_LOG_VM("return " << f.stack_i);
         AR_PRINT_STACK();
         Value ret = f.stack_i == 0 ? C_UNSPECIFIED : f.stack[f.stack_i - 1];

@@ -2318,24 +2318,25 @@ enum {
   OP_APPLY_TAIL = 12,
   // Flow control
   OP_RETURN = 13,
-  OP_JUMP = 14,
-  OP_JUMP_WHEN = 15,
-  OP_JUMP_WHEN_POP = 16,
-  OP_JUMP_UNLESS = 17,
+  OP_RETURN_END = 14,
+  OP_JUMP = 15,
+  OP_JUMP_WHEN = 16,
+  OP_JUMP_WHEN_POP = 17,
+  OP_JUMP_UNLESS = 18,
   // Instructions below here are exploded variations on existing primitives
-  OP_LOCAL_GET_0 = 18,
+  OP_LOCAL_GET_0 = 19,
   // Instructions below this point are primitive versions of the builtin C++ routines for speed;
   // they are not necessary for code to execute correctly.
-  OP_ADD = 19,
-  OP_SUB = 20,
-  OP_LT = 21,
-  OP_CAR = 22,
-  OP_LIST_REF = 23,
-  OP_NOT = 24,
-  OP_EQ = 25,
-  OP_FX_LT = 26,
-  OP_FX_ADD = 27,
-  OP_FX_SUB = 28,
+  OP_ADD = 20,
+  OP_SUB = 21,
+  OP_LT = 22,
+  OP_CAR = 23,
+  OP_LIST_REF = 24,
+  OP_NOT = 25,
+  OP_EQ = 26,
+  OP_FX_LT = 27,
+  OP_FX_ADD = 28,
+  OP_FX_SUB = 29,
 };
 inline Type Value::type() const {
 #if ARETE_DEV

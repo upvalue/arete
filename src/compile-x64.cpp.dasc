@@ -12,6 +12,12 @@
 // TODO: Exception throwing
 // We need a way of handling exceptions and passing them on
 
+// TODO: A no-store variant of VM instructions. Specifically APPLY and TAIL_APPLY. Might avoid
+// generating unnecessary stuff.
+
+// We also may need to deal with exceptions. Although we don't use them, we want to handle
+// user code correctly
+
 // TODO: Unclear on what the ideal way to call C++ functions is. There does not appear to be a 
 // trivial way to call methods on the arete::State instance
 
@@ -22,6 +28,16 @@
 // Registers:
 // r12 = pointer to arete::State*
 // r13 = stack index
+
+// Stack:
+// 0-8 = pointer to previous native stack frame (if any)
+// 8-16 = count of gc'd values
+// 16-a = local variables
+// a-b = stack variales
+// b-c = upvalues
+
+// TODO: Use offsetof and other stuff instead of calling functions to retrieve information
+// about a particular State
 
 // TODO Figure out how to print a string
 
@@ -176,16 +192,22 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov store, rStackI
   | imul store, kValueSize
   | add store, kCompStackOffset
-  | mov rArg2, store
   | add store, rsp
   //| mov rArg2, rsp
   //| stateCallSimple print_int
   //| stateCallSimple print_int
   |.endmacro
 
-  |.macro getCompStackTop, store
+  |.macro getCompStackTopValue, store
   | getCompStackIndex store
-  | mov store, [rsp+store]
+  | mov store, [store]
+  |.endmacro
+
+  |.macro getCompStackIndexAt, i, store
+  | mov store, i
+  | imul store, kValueSize
+  | add store, kCompStackOffset
+  | add store, rsp
   |.endmacro
 
   dasm_State *d;
@@ -208,12 +230,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Prologue
   // Save registers
 	| push rbp
+  | mov rbp, rsp
   | push rbx
   | push rState
   | mov rState, rArg1
   | push rArg1
   | push rArg2
-  | push r13
+  | push rStackI
 
   | mov rStackI, 0
 
@@ -231,13 +254,31 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rArg2, rsp
   | stateCallSimple state_push_native_gc_frame
 
-	| stateCallSimple state_collect
+  //| mov rArg2, r14
+  //| stateCallSimple print_int
+  //| mov rArg2, r14
+
+  // stack use grows from 64 to 72
+  | mov rArg2, rbp
+  | sub rArg2, rsp
+
+  | stateCallSimple print_int
+
+
+
+  // Why does RAX have to be pushed here?
+  | push rbp; mov rbp, rsp; push rax
+  | mov rArg1, rState
+  | mov64 rax, (ptrdiff_t) state_collect
+  | call rax
+  | pop rax; pop rbp
 
   // Execute function body
   size_t code_offset = 0;
   size_t *code = vmf->code_pointer();
+  bool done = false;
 
-  while(true) {
+  while(!done) {
     switch(code[code_offset++]) {
       case OP_PUSH_IMMEDIATE: {
         size_t value = code[code_offset++];
@@ -248,22 +289,36 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | mov qword [rArg1], (size_t) value
         // Increment stack
         | add rStackI, 1
+        break;
       }
 
-      case OP_RETURN: {
+      case OP_FX_ADD: {
+
+        return state.eval_error("fx-add not implemented");
+      }
+
+      case OP_RETURN:
+      case OP_RETURN_END: {
         AR_LOG_JIT("return");
         //| getCompStackTop rax
         //| mov rArg2, [rsp+16]
         //| mov rArg2, rax
         //| stateCallSimple print_int
         //| sub rStackI, 1
+
         | sub rStackI, 1
         | getCompStackIndex rArg1
         | mov rStackI, [rArg1]
-        //| stateCallSimple print_int
-        //| mov rStackI, [rArg1]
+        | jmp ->unwind
 
-        goto done;
+        if(code[code_offset-1] == OP_RETURN_END)
+          done = true;
+
+        break;
+      }
+
+      default: {
+        return state.eval_error("unknown bytecode");
       }
     }
   }
@@ -271,25 +326,52 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   | stateCallSimple state_pop_native_gc_frame
 
+  |->unwind:
   // Free stack space
   | add rsp, kTotalStackSize
 
-  // Restore registers
+  // Retrieve return value from rStackI
   | mov rax, rStackI
-  | pop r13
+  // Restore registers
+  | pop rStackI
   | pop rArg2
   | pop rArg1
 	| pop rState
   | pop rbx
+  | mov rsp, rbp
 	| pop rbp
 
   // Create return value
 
-  //| mov rax, 0
+/*
+  | push rbp
+  | push rState
+  | mov rState, rArg1
+  | stateCallSimple state_collect
+  | mov rax, 0
+  | pop rState
+  | pop rbp
+  */
   // Return
+
+  // i don't understand why RAX has to be saved, when it is immediately overwritten.
+  /*
+  | push rbp; mov rbp, rsp; push rbx; push rax
+  //| sub rsp, 8
+  | mov64 rax, (ptrdiff_t) state_collect
+  | call rax
+  | leave
+  */
+
+  | mov rax, 0
+
+  //| add rsp, 8
+
   | ret
 
   size_t size;
+
+  //std::cout << "OFFSETOF" << offsetof(State, gc) + offsetof(GCCommon, native_frames) << std::endl;
 
   dasm_link(&d, &size);
 
