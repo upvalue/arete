@@ -1,19 +1,14 @@
 // compile-x64.cpp.dasc - Compile bytecode to native amd64 code
 // This is a DynASM file. Must be run through DynASM to produce a C++ file
 
-// TODO: Garbage collection
-// We need a way of inspecting variables with garbage collector
+// TODO: Exception checking
 
-// We have full control over the stack frame, so what this means is (1) making sure variables 
-// are in a predictable location at any point that could cause GC and (2) figuring out how to
-// inspect those stack frames from the GC. We can make a C++ struct like Frame (no need to use
-// pointers-to-pointers here, it can be a simple array) and do a linked-list on the stack like Frame
+// TODO: Function application
+// TODO: Constants
 
-// TODO: Exception throwing
-// We need a way of handling exceptions and passing them on
-
-// TODO: A no-store variant of VM instructions. Specifically APPLY and TAIL_APPLY. Might avoid
-// generating unnecessary stuff.
+// TODO: Cannot return a Value on Windows (!!!)
+// Calling a Value-returning function causes the program to crash, seemingly under any
+// circumstance
 
 // We also may need to deal with exceptions. Although we don't use them, we want to handle
 // user code correctly
@@ -21,7 +16,6 @@
 // TODO: Unclear on what the ideal way to call C++ functions is. There does not appear to be a 
 // trivial way to call methods on the arete::State instance
 
-// TODO: Cannot return a Value on Windows
 
 // Anatomy of a natively-compiled Scheme function
 
@@ -33,8 +27,8 @@
 // Stack:
 // 0-8 = pointer to previous native stack frame (if any)
 // 8-16 = count of gc'd values
-// 16-a = local variables
-// a-b = stack variales
+// 16-a = computation stack
+// a-b = local values
 // b-c = upvalues
 
 // TODO: Use offsetof and other stuff instead of calling functions to retrieve information
@@ -60,8 +54,16 @@ ptrdiff_t print_int(State& state, ptrdiff_t i) {
   return 0;
 }
 
-void print_int_simple(ptrdiff_t i) {
+/*void print_int_simple(ptrdiff_t i) {
   std::cout << "print_int_simple(" << invocation++ << "):" << i << std::endl;
+}*/
+
+void debug_middle(ptrdiff_t idx, ptrdiff_t i) {
+  switch(idx) { 
+    case 0: std::cout << "constant ptr: " << i << std::endl;
+  }
+
+
 }
 
 void print_2int_simple(ptrdiff_t a, ptrdiff_t b) {
@@ -83,6 +85,17 @@ void state_collect(State* state) {
   state->gc.collect();
 
   std::cout << "COLLECTION RETURNING" << std::endl;
+}
+
+static ptrdiff_t rsp = 0;
+
+void sanity_log_1(ptrdiff_t rsp_) {
+  rsp = rsp_;
+  std::cout << "sanity_log_1: rsp after stack allocation: " << rsp << std::endl;
+}
+
+void sanity_log_2(ptrdiff_t compstack) {
+  std::cout << "sanity_log_1: location of computation stack[0]: " << compstack << "(" << (rsp - compstack) << " from rsp)" << std::endl;
 }
 
 // Exception tag codes
@@ -185,11 +198,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // constants in the compiled code
 
   unsigned total_stack = local_count+stack_max;
-  unsigned kFrameSize = local_count+stack_max;
-  // TODO: Align to 16 bits
+  unsigned kFrameSize = local_count + stack_max + 1;
   unsigned kTotalStackSize = sizeof(NativeFrame) - sizeof(void*) + ((total_stack) * sizeof(void*));
   size_t kValueSize = sizeof(void*);
-  unsigned kCompStackOffset = kTotalStackSize - (kValueSize * stack_max);
+  unsigned kCompStackOffset = 24;//kTotalStackSize - (kValueSize * stack_max);
   unsigned kTotalStackSizeAligned = kTotalStackSize;
 
 #if AR_OS != AR_WINDOWS
@@ -198,7 +210,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   }
 #endif
 
-  AR_LOG_JIT("function frame info. kTotalStackSize " << kTotalStackSize << \
+
+  AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset);
   //AR_ASSERT(((kTotalStackSizeAligned + 56) % 16) == 0);
 
@@ -216,13 +229,21 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	|.if WINDOWS
 	| .define rArg1, rcx
 	| .define rArg2, rdx
+  | .define rArg3, r8
+  | .define rArg4, r9
 	|.else
   | .define rArg1, rdi
   | .define rArg2, rsi
   | .define rArg3, rdx
   | .define rArg4, rcx
+  | .define rArg5, r8
 	|.endif
   |.type state, State, rState
+
+
+  |.macro simpCall, fun
+  | push rbp; push rsp; mov64 rax, (ptrdiff_t) fun; call rax; pop rsp; pop rbp;
+  |.endmacro
 
   |.macro stateCall, method
   | .if WINDOWS
@@ -245,7 +266,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |.endmacro
 
   // Check that value in STORE is a valid fixnum, if not, generate a type error with SRC and CODE
-  // Generates 2 labels
+  // Generates a label
   |.macro checkFixnumP, store, src, code
   | mov rax, store
   | and rax, 1
@@ -264,9 +285,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | imul store, kValueSize
   | add store, kCompStackOffset
   | add store, rsp
-  //| mov rArg2, rsp
-  //| stateCall print_int
-  //| stateCall print_int
   |.endmacro
 
   |.macro getCompStackTopValue, store
@@ -274,6 +292,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov store, [store]
   |.endmacro
 
+
+  // Put a pointer to stack[I] in STORE
   |.macro getCompStackIndexAt, i, store
   | mov store, i
   | imul store, kValueSize
@@ -316,6 +336,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Currently we push 7 * 8 = 56 at the start
   // This means that 56 + kTotalStackSizeAligned must be a multiple of 16 somehow
 
+  // But not on Windows?
+
   | mov rStackI, 0
 
   // Allocate stack space
@@ -325,6 +347,18 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov qword [rsp+0], 0
   // NativeFrame::value_count
   | mov qword [rsp+8], kFrameSize
+  // NativeFrame::values[0] = argument 2
+  | mov qword [rsp+16], rArg2
+
+  | mov rArg1, rsp
+  | simpCall sanity_log_1
+  | getCompStackIndex rArg1
+  | simpCall sanity_log_2
+/*
+  | add rStackI, 1
+  | getCompStackIndex rArg1
+  | simpCall sanity_log_2
+  */
 
   // Zero out GC frame
   // Assumes function has a stack size of at least one.
@@ -333,9 +367,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rArg2, rsp
   | add rArg2, ((kFrameSize*8)+8)
 
-  // Set rArg1 to NativeFrame::value_count
+  // Set rArg1 to NativeFrame::values[0]
   | mov rArg1, rsp
-  | add rArg1, 8
+  | add rArg1, 16
 
   |->gc_zero:
   // Now add 8 to rArg1 at top of loop so it points at NativeFrame::values[0]
@@ -349,39 +383,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   | mov rArg2, rsp; stateCall state_push_native_gc_frame
 
-/*
-  | mov rax, 1
-  | test rax, 2
-  | jnz =>label++
-  | ret
-  |=>label-1:
-  */
-
-	/*
-	| push rax
-  | stateCall state_collect
-	| pop rax
-	*/
-	/*
-	| mov rArg1, rState
-	| push rbp; mov rbp, rsp;
-	| mov64 rax, (ptrdiff_t) state_collect
-	| call rax
-	| mov rsp, rbp; pop rbp
-	*/
-	/*
-	| mov rArg1, 420
-	| mov64 rax, (size_t) print_int_simple
-	| call rax
-	*/
-
-  //| mov rArg2, r14
-  //| stateCall print_int
-  //| mov rArg2, r14
-
-  // stack use grows from 64 to 72
-
-	| stateCall state_collect
+  //| stateCall state_collect
 
   // Execute function body
   size_t code_offset = 0;
@@ -398,6 +400,41 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         // Set value
         | mov qword [rArg1], (size_t) value
         // Increment stack
+        | add rStackI, 1
+        break;
+      }
+
+      case OP_PUSH_CONSTANT: {
+        size_t idx = code[code_offset++];
+        AR_LOG_JIT("push-constant " << idx);
+
+        // Retrieve constants array by 
+        // Get function pointer
+        | mov rArg2, [rsp+16]
+        | stateCall print_int
+        | mov rArg2, [rsp+16]
+        // Get &VMFunction::constants
+        | add rArg2, (ptrdiff_t)(&((VMFunction*)0)->constants)
+        // Get &VMFunction->constants->data[idx]
+        | mov rArg2, [rArg2]
+        | add rArg2, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
+
+        // Get VMFunction->constants->data[idx]
+        | mov rArg2, [rArg2]
+
+
+        | push rArg1; push rArg2; mov rArg1, 0; simpCall debug_middle; pop rArg2; pop rArg1;
+
+        /*
+        // Add to top of stack
+        // Get VMFunction->constants->data[idx]
+        | mov rArg2, [rArg2]
+        */
+
+        | getCompStackIndex rArg1
+        | mov [rArg1], rArg2
+        //| mov qword [rArg1], 821
+
         | add rStackI, 1
         break;
       }
@@ -420,13 +457,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         // extract fixnum argument 2 value
         | shr qword [rArg1], 1
 
-        | push rax; push rArg1; push rArg2; mov rArg2, [rArg1]; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
-        | push rax; push rArg1; push rArg2; mov rArg2, [rArg2]; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
+        //| push rax; push rArg1; push rArg2; mov rArg2, [rArg1]; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
+        //| push rax; push rArg1; push rArg2; mov rArg2, [rArg2]; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
 
         | mov rax, [rArg1]
-        | push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
+        //| push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
         | add rax, [rArg2]
-        | push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
+        //| push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
 
         | shl rax, 1
         | add rax, 1
@@ -501,13 +538,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   */
   // Return
 
-  // i don't understand why RAX has to be saved, when it is immediately overwritten.
-	/*
-  | push rbp; push rArg1; mov rbp, rsp; sub rsp, 8
-  | mov64 rax, (ptrdiff_t) state_collect
-  | call rax
-	| add rsp, 8; mov rsp, rbp; pop rArg1; pop rbp;
-	*/
   | ret
 
   size_t size;
@@ -524,10 +554,21 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   AR_LOG_JIT("vmfunction->native done; calling function");
 
-  ptrdiff_t (*ptr)(State*, size_t) = (ptrdiff_t (*)(State*, size_t)) bv.bv_data();
+  ptrdiff_t (*ptr)(State*, size_t, size_t) = (ptrdiff_t (*)(State*, size_t, size_t)) bv.bv_data();
 
+  std::cout << "VMFunction ptr: " << (ptrdiff_t)vfn.bits << std::endl;
+  std::cout << "Constants ref: " << (ptrdiff_t)&vfn.as<VMFunction>()->constants << std::endl;
+  std::cout << "Constants ptr: " << (ptrdiff_t)vfn.as<VMFunction>()->constants << std::endl;
+  std::cout << "Constants ptr[0]: " << (ptrdiff_t)&vfn.as<VMFunction>()->constants->data[0] << std::endl;
+
+  std::cout << "#(";
+  for(size_t i = 0; i != vfn.as<VMFunction>()->constants->length; i++) {
+    std::cout << (ptrdiff_t)vfn.as<VMFunction>()->constants->data[i].bits;
+    std::cout << ' ';
+  }
+  std::cout << ')' << std::endl;
 	std::cout << "Calling against state: " << (ptrdiff_t) &state << std::endl;
-  ptrdiff_t result = ptr(&state, 555);
+  ptrdiff_t result = ptr(&state, (size_t)vfn.bits, 0);
 
   std::cout << "result int: " << (result) << std::endl;
   std::cout << "result: " << Value(result) << std::endl;
