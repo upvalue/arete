@@ -74,12 +74,11 @@ Value state_make_pair(State* state) {
   return pare;
 }
 
-Value state_collect(State* state) {
-  std::cout << "COLLECTION BEGINNING" << std::endl;
+void state_collect(State* state) {
+  std::cout << "COLLECTION BEGINNING " << (ptrdiff_t) state << std::endl;
   state->gc.collect();
 
   std::cout << "COLLECTION RETURNING" << std::endl;
-  return C_UNSPECIFIED;
 }
 
 void state_push_native_gc_frame(State* state, NativeFrame* frame) {
@@ -145,14 +144,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   unsigned kCompStackOffset = kTotalStackSize - (kValueSize * stack_max);
   unsigned kTotalStackSizeAligned = kTotalStackSize;
 
-  if((kTotalStackSize % 16) == 0) {
+#if AR_OS != AR_WINDOWS
+  if((kTotalStackSize % 16) != 0) {
     kTotalStackSizeAligned += 8;
   }
+#endif
 
-  AR_ASSERT((kTotalStackSizeAligned + 56) % 16 == 0);
 
   AR_LOG_JIT("function frame info. kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset);
+  //AR_ASSERT(((kTotalStackSizeAligned + 56) % 16) == 0);
 
   // A note on a possible source of confusion: in the virtual machine, the stack is a separately
   // allocated data structure from locals and upvalues. Thus there's the computation stack which
@@ -174,26 +175,14 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	|.endif
   |.type state, State, rState
 
-  |.macro stateCallBegin, method
-  //| mov rbp, rsp
+  |.macro stateCall, method
   | push rbp
-	| push rsp
+	| mov rbp, rsp
   | mov rArg1, rState
   | mov64 rax, (ptrdiff_t) method
-  |.endmacro
-
-  |.macro stateCall
   | call rax
-  |.endmacro
-
-  |.macro stateCallEnd 
-	| pop rsp
+	| mov rsp, rbp
   | pop rbp
-  //| mov rsp, rbp
-  |.endmacro
-
-  |.macro stateCallSimple, method
-  | stateCallBegin method; stateCall; stateCallEnd
   |.endmacro
 
   // takes rStackI and sets STORE to the rsp offset it needs
@@ -203,8 +192,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | add store, kCompStackOffset
   | add store, rsp
   //| mov rArg2, rsp
-  //| stateCallSimple print_int
-  //| stateCallSimple print_int
+  //| stateCall print_int
+  //| stateCall print_int
   |.endmacro
 
   |.macro getCompStackTopValue, store
@@ -285,18 +274,38 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Initialize locals
 
-  | mov rArg2, rsp
-  | stateCallSimple state_push_native_gc_frame
+  | mov rArg2, rsp; stateCall state_push_native_gc_frame
+	| stateCall state_collect
+
+
+	/*
+	| push rax
+  | stateCall state_collect
+	| pop rax
+	*/
+	/*
+	| mov rArg1, rState
+	| push rbp; mov rbp, rsp;
+	| mov64 rax, (ptrdiff_t) state_collect
+	| call rax
+	| mov rsp, rbp; pop rbp
+	*/
+	/*
+	| mov rArg1, 420
+	| mov64 rax, (size_t) print_int_simple
+	| call rax
+	*/
+	/*
 
   //| mov rArg2, r14
-  //| stateCallSimple print_int
+  //| stateCall print_int
   //| mov rArg2, r14
 
   // stack use grows from 64 to 72
   | mov rArg2, rbp
   | sub rArg2, rsp
 
-  | stateCallSimple print_int
+  | stateCall print_int
 
   | push rbp; mov rbp, rsp; 
   | mov rArg1, rState
@@ -326,7 +335,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       case OP_FX_ADD: {
         | getCompStackIndex rArg1
         | sub rArg1, 8
-        | mov rArg1
         | shr qword [rArg1], 1
 
         | getCompStackIndex rArg2
@@ -355,7 +363,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         //| getCompStackTop rax
         //| mov rArg2, [rsp+16]
         //| mov rArg2, rax
-        //| stateCallSimple print_int
+        //| stateCall print_int
         //| sub rStackI, 1
 
         | sub rStackI, 1
@@ -375,8 +383,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     }
   }
   done:
+	*/
 
-  | stateCallSimple state_pop_native_gc_frame
+  | stateCall state_pop_native_gc_frame
 
   | jmp ->unwind
   |->exception:
@@ -387,7 +396,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | add rsp, kTotalStackSizeAligned
 
   // Retrieve return value from rStackI
-  | mov rax, rStackI
+  //| mov rax, rStackI
+	| mov rax, 0
   // Restore registers
   | pop rFx
   | pop rStackI
@@ -404,7 +414,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | push rbp
   | push rState
   | mov rState, rArg1
-  | stateCallSimple state_collect
+  | stateCall state_collect
   | mov rax, 0
   | pop rState
   | pop rbp
@@ -412,17 +422,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Return
 
   // i don't understand why RAX has to be saved, when it is immediately overwritten.
-  /*
-  | push rbp; mov rbp, rsp; push rbx; push rax
-  //| sub rsp, 8
+	/*
+  | push rbp; push rArg1; mov rbp, rsp; sub rsp, 8
   | mov64 rax, (ptrdiff_t) state_collect
   | call rax
-  | leave
-  */
-
-
-  //| add rsp, 8
-
+	| add rsp, 8; mov rsp, rbp; pop rArg1; pop rbp;
+	*/
   | ret
 
   size_t size;
@@ -441,6 +446,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   ptrdiff_t (*ptr)(State*, size_t) = (ptrdiff_t (*)(State*, size_t)) bv.bv_data();
 
+	std::cout << "Calling against state: " << (ptrdiff_t) &state << std::endl;
   ptrdiff_t result = ptr(&state, 555);
 
   std::cout << "result int: " << (result) << std::endl;

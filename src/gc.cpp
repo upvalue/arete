@@ -25,6 +25,8 @@
 // objects (to mark them), but this might improve things. It would, however, increase complexity
 // quite a bit.
 
+#define NOMINMAX // MSVC helpfully defines min and max as macros
+
 #include <algorithm>
 #include <chrono>
 
@@ -151,6 +153,7 @@ struct GCTimer {
     size_t elapsed = 
       (std::chrono::duration_cast<std::chrono::microseconds>((
         std::chrono::high_resolution_clock::now() - t1))).count();
+
     gc_longest_pause = std::max(elapsed, gc_longest_pause);
     timer += elapsed;
   }
