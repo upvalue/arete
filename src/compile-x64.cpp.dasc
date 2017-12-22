@@ -326,6 +326,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       case OP_FX_ADD: {
         | getCompStackIndex rArg1
         | sub rArg1, 8
+        | mov rArg1
         | shr qword [rArg1], 1
 
         | getCompStackIndex rArg2
@@ -345,6 +346,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
 
         | mov [rArg2], rax
+        | sub rStackI, 1
       }
 
       case OP_RETURN:
@@ -375,6 +377,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   done:
 
   | stateCallSimple state_pop_native_gc_frame
+
+  | jmp ->unwind
+  |->exception:
+
 
   |->unwind:
   // Free stack space
