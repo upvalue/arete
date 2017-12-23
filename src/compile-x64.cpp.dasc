@@ -5,6 +5,8 @@
 
 // TODO: Function application
 // TODO: Constants
+// TODO: Type checking
+// TODO: Conditionals
 
 // TODO: Cannot return a Value on Windows (!!!)
 // Calling a Value-returning function causes the program to crash, seemingly under any
@@ -15,7 +17,6 @@
 
 // TODO: Unclear on what the ideal way to call C++ functions is. There does not appear to be a 
 // trivial way to call methods on the arete::State instance
-
 
 // Anatomy of a natively-compiled Scheme function
 
@@ -201,7 +202,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   unsigned kFrameSize = local_count + stack_max + 1;
   unsigned kTotalStackSize = sizeof(NativeFrame) - sizeof(void*) + ((total_stack) * sizeof(void*));
   size_t kValueSize = sizeof(void*);
-  unsigned kCompStackOffset = 24;//kTotalStackSize - (kValueSize * stack_max);
+  unsigned kCompStackOffset = 24; //kTotalStackSize - (kValueSize * stack_max);
   unsigned kTotalStackSizeAligned = kTotalStackSize;
 
 #if AR_OS != AR_WINDOWS
@@ -271,12 +272,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rax, store
   | and rax, 1
   | cmp rax, 1
-  | jz =>label++
+  | jz >1
   // Test failed
   | mov rArg2, E_TYPE; mov rArg3, code; mov rArg4, code
   | stateCall native_exception
   | jmp ->exception
-  |=>label-1:
+  |1:
   |.endmacro
 
   // takes rStackI and sets STORE to the rsp offset it needs
@@ -391,6 +392,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   bool done = false;
 
   while(!done) {
+    // Generate labels here
+
     switch(code[code_offset++]) {
       case OP_PUSH_IMMEDIATE: {
         size_t value = code[code_offset++];
@@ -400,7 +403,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         // Set value
         | mov qword [rArg1], (size_t) value
         // Increment stack
-        | add rStackI, 1
+        | inc rStackI
         break;
       }
 
@@ -435,7 +438,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | mov [rArg1], rArg2
         //| mov qword [rArg1], 821
 
-        | add rStackI, 1
+        | inc rStackI
+        | stateCall state_collect
         break;
       }
 
@@ -445,7 +449,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | sub rArg2, 8
 
         // 2 labels: two for each type test
-        dasm_growpc(&d, 2);
         | checkFixnumP [rArg2], E_FX_ADD, E_EXPECTED_FIXNUM_2
 
         // Extract fixnum argument 1 value
@@ -466,11 +469,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         //| push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
 
         | shl rax, 1
-        | add rax, 1
+        | inc rax
         | push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
 
         | mov [rArg1], rax
-        | sub rStackI, 1
+        | dec rStackI
         break;
       }
 

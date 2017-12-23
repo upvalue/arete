@@ -1,7 +1,7 @@
 (print
   (try
     (lambda () #t)
-    (lambda () #t)))
+    (lambda (a) #t)))
 
 (print
   (try
