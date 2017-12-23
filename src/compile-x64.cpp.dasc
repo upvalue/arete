@@ -59,9 +59,9 @@ ptrdiff_t print_int(State& state, ptrdiff_t i) {
   return 0;
 }
 
-/*void print_int_simple(ptrdiff_t i) {
+void print_int_simple(ptrdiff_t i) {
   std::cout << "print_int_simple(" << invocation++ << "):" << i << std::endl;
-}*/
+}
 
 void debug_middle(ptrdiff_t idx, ptrdiff_t i) {
   switch(idx) { 
@@ -87,6 +87,7 @@ Value state_make_pair(State* state) {
 
 void state_collect(State* state) {
   std::cout << "COLLECTION BEGINNING " << (ptrdiff_t) state << std::endl;
+
   state->gc.collect();
 
   std::cout << "COLLECTION RETURNING" << std::endl;
@@ -136,8 +137,13 @@ enum {
   E_EXPECTED_FIXNUM_2
 };
 
+void native_exception2(State* state, unsigned tag, unsigned src, unsigned code) {
+  AR_LOG_JIT("native_exception2 called " << (ptrdiff_t) state << " with arguments " << tag << " " << src << " " << code);
+}
+
+
 Value native_exception(State* state, unsigned tag, unsigned src, unsigned code) {
-  AR_LOG_JIT("native_exception called with arguments " << tag << " " << src << " " << code);
+  AR_LOG_JIT("native_exception called " << (ptrdiff_t) state << " with arguments " << tag << " " << src << " " << code);
   std::ostringstream os;
 
   Value tag_s;
@@ -161,6 +167,10 @@ Value native_exception(State* state, unsigned tag, unsigned src, unsigned code) 
   }
 
   return state->make_exception(tag_s, os.str(), C_FALSE);
+}
+
+void state_simple(State* state) {
+
 }
 
 void state_push_native_gc_frame(State* state, NativeFrame* frame) {
@@ -226,16 +236,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   unsigned kCompStackOffset = 24; //kTotalStackSize - (kValueSize * stack_max);
   unsigned kTotalStackSizeAligned = kTotalStackSize;
 
-#if AR_OS != AR_WINDOWS
-  if((kTotalStackSize % 16) != 0) {
+	std::cout << kTotalStackSizeAligned << std::endl;
+  if(((kTotalStackSizeAligned + 56) % 16) != 0) {
     kTotalStackSizeAligned += 8;
+		std::cout << kTotalStackSizeAligned << std::endl;
   }
-#endif
 
+  //AR_ASSERT(((kTotalStackSizeAligned + 56) % 16) == 0);
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset);
-  AR_ASSERT(((kTotalStackSizeAligned + 56) % 16) == 0);
 
   // A note on a possible source of confusion: in the virtual machine, the stack is a separately
   // allocated data structure from locals and upvalues. Thus there's the computation stack which
@@ -274,7 +284,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	// On Windows, a Value is returned as a pointer to a stack value. Can't find
 	// documentation for this anywhere, but both Clang and MSVC do it; which
 	// means a little dance is needed to get it into rax.
-	|.macro stateCallValue, method
+	|.macro stateCallRetValue, method
   | .if WINDOWS
   |  push rbp
   |  mov rbp, rsp
@@ -302,7 +312,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |  mov rbp, rsp
   |  mov rArg1, rState
   |  mov64 rax, (ptrdiff_t) method
+	|  sub rsp, 32
   |  call rax
+	|  add rsp, 32
+	|  mov rsp, rbp
   |  pop rbp
   | .else
   |  push rbp
@@ -323,8 +336,15 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | cmp rax, 1
   | jz >1
   // Test failed
-  | mov rArg2, E_TYPE; mov rArg3, code; mov rArg4, code
-  | stateCall native_exception
+	/*
+  | mov rArg2, E_TYPE; mov rArg3, src; mov rArg4, code
+	//| mov rdx, 420
+	| sub rsp, 32
+  | stateCallRetValue native_exception2
+	| mov rax, 0
+	| add rsp, 32
+	*/
+
   | jmp ->exception
   |1:
   |.endmacro
@@ -399,17 +419,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov qword [rsp+8], kFrameSize
   // NativeFrame::values[0] = argument 2
   | mov qword [rsp+16], rArg2
+	| mov qword [rsp+24], 0
 
   | mov rArg1, rsp
   | simpCall sanity_log_1
 
   | getCompStackIndex rArg1
-  | simpCall sanity_log_2
-/*
-  | add rStackI, 1
-  | getCompStackIndex rArg1
-  | simpCall sanity_log_2
-  */
+  | simpCall sanity_log_1
 
   // Zero out GC frame
   // Assumes function has a stack size of at least one.
@@ -432,15 +448,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Initialize locals
 
-  | mov rArg2, rsp; stateCall state_push_native_gc_frame
-
-	/*
-	| sub rsp, 32
-	| add rsp, 32
-	*/
-
-  | stateCall state_collect
-	| simpCall print_something
+  | mov rArg2, rsp; 
+	|  stateCall state_push_native_gc_frame;
+	|  stateCall state_collect;
 #if 0
 
   // Execute function body
