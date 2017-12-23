@@ -17,7 +17,7 @@ CFLAGS = /Ivendor\linenoise /Ivendor\dynasm /I$(SDL_IMG_PATH)\include /I$(SDL_TT
 all: src/compile-x64.cpp arete.exe
 
 src/compile-x64.cpp: src/compile-x64.cpp.dasc
-	minilua.exe vendor/dynasm/dynasm.lua -o src/compile-x64.cpp  -D X64 src/compile-x64.cpp.dasc
+	minilua.exe vendor/dynasm/dynasm.lua -o src/compile-x64.cpp -D WINDOWS -D X64 src/compile-x64.cpp.dasc
 
 arete.exe: $(OBJS)
 	link $(LDFLAGS) /out:$@ $**
