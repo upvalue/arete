@@ -137,8 +137,8 @@ enum {
   E_EXPECTED_FIXNUM_2
 };
 
-void native_exception2(State* state, unsigned tag, unsigned src, unsigned code) {
-  AR_LOG_JIT("native_exception2 called " << (ptrdiff_t) state << " with arguments " << tag << " " << src << " " << code);
+void native_exception2(State* state, unsigned tag, unsigned src, unsigned code ) {
+  AR_LOG_JIT("native_exception2 called " << (ptrdiff_t) state << " with arguments " << tag << " " << src << " " << code);//<< " with arguments " << tag << " " << src << " " << code);
 }
 
 
@@ -245,7 +245,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   //AR_ASSERT(((kTotalStackSizeAligned + 56) % 16) == 0);
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
-    " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset);
+    " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset \
+		<< " kFrameSize " << kFrameSize);
 
   // A note on a possible source of confusion: in the virtual machine, the stack is a separately
   // allocated data structure from locals and upvalues. Thus there's the computation stack which
@@ -290,7 +291,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |  mov rbp, rsp
   |  mov rArg1, rState
   |  mov64 rax, (ptrdiff_t) method
+	|  sub rsp, 32
   |  call rax
+	|  add rsp, 32
 	|  mov rArg1, [rax]
 	|  mov rax, rArg1
 	|  mov rsp, rbp
@@ -335,16 +338,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | and rax, 1
   | cmp rax, 1
   | jz >1
-  // Test failed
-	/*
-  | mov rArg2, E_TYPE; mov rArg3, src; mov rArg4, code
-	//| mov rdx, 420
-	| sub rsp, 32
-  | stateCallRetValue native_exception2
-	| mov rax, 0
-	| add rsp, 32
-	*/
-
+  // Test failed. Set up registers for exception
+	| mov rArg2, E_TYPE;
+	| mov rArg3, src; mov rArg4, code;
   | jmp ->exception
   |1:
   |.endmacro
@@ -451,7 +447,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rArg2, rsp; 
 	|  stateCall state_push_native_gc_frame;
 	|  stateCall state_collect;
-#if 0
 
   // Execute function body
   size_t code_offset = 0;
@@ -571,13 +566,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   }
   done:
 
-#endif
   | stateCall state_pop_native_gc_frame
 
   | jmp ->unwind
   |->exception:
 
-  | mov rStackI, rax
+	//| mov rArg2, 123; mov rArg3, 456; mov rArg4, 789;
+	| stateCallRetValue native_exception
+	//| mov rStackI, rax
+	| mov rStackI, rax
+	//| mov rax, 0
 
   |->unwind:
 	//
@@ -586,6 +584,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Retrieve return value from rStackI
   | mov rax, rStackI
+
   // Restore registers
   | pop rFx
   | pop rStackI

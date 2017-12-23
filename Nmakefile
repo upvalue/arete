@@ -9,7 +9,7 @@ OBJS=src/builtins.obj src/files.obj src/lib-sdl.obj src/platform.obj src/strings
 
 # Note: Stack size has to be massively increased for bootstrap to work.
 LDFLAGS = /nologo /LIBpath:$(SDL_PATH)\lib\x64 /LIBpath:$(SDL_IMG_PATH)\lib\x64 /LIBpath:$(SDL_TTF_PATH)\lib\x64 SDL2.lib SDL2_image.lib SDL2_ttf.lib
-CFLAGS = /Ivendor\linenoise /Ivendor\dynasm /I$(SDL_IMG_PATH)\include /I$(SDL_TTF_PATH)/include /I$(SDL_PATH)\include /nologo /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /DARETE_DEV  /DARETE_GC_STRATEGY="(ARETE_GC_SEMISPACE)" /DARETE_LOG_TAGS="(ARETE_LOG_TAG_VM)"  /DAR_LIB_SDL=1 /EHsc
+CFLAGS = /Ivendor\linenoise /Ivendor\dynasm /I$(SDL_IMG_PATH)\include /I$(SDL_TTF_PATH)/include /I$(SDL_PATH)\include /nologo /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /DARETE_DEV  /DARETE_GC_STRATEGY="(ARETE_GC_SEMISPACE)" /DARETE_LOG_TAGS="(ARETE_LOG_TAG_JIT)"  /DAR_LIB_SDL=1 /EHsc
 
 .cpp.obj:
 	cl $(CFLAGS) /I . /Fo$@ /c $<
