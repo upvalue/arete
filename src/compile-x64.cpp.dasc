@@ -10,27 +10,33 @@
 // seem to use a different calling convention
 // https://msdn.microsoft.com/en-us/library/7572ztz4.aspx
 
-// TODO: Currently we're GC tracking the whole stack
-// We could fix this, but not sure if it really matters that much.
+// TODO: Currently variables are GC-tracked much in the way we track them C++-side. But in assembly
+// we have full control over the stack. Rather than using the NativeFrame structure, for example,
+// we could just guarantee that everything from rsp to rsp+whatever is a pointer. One issue with the
+// current approach vs VMFrames is that all stack values will be tracked while a function is live, 
+// which means some garbage will remain. Imagine something like this being a memory leak:
+// (let ()
+//   ;; really complex computation that makes a big list
+//   ;; main loop of a program that doesn't clear the stack
+// )
+// In practice, probably not a big deal. But worth changing if possible
 
 // TODO: Exception checking
 
 // TODO: Function application
 // TODO: Type checking
 // TODO: Conditionals
+
 // TODO: Serializability. Currently we're encoding function pointers directly in compiled code.
 
-// TODO: We also may need to deal with C++ exceptions. Although we don't use them, we want to handle
-// user code correctly. 
-
-// TODO: Unclear on what the ideal way to call C++ functions is. There does not appear to be a 
-// trivial way to call methods on the arete::State instance
+// TODO: We also may need to deal with C++ exceptions. Although we don't use them, we want to be
+// able to call out to C++ code that may
 
 // Anatomy of a natively-compiled Scheme function
 
 // Registers:
-// r12 = pointer to arete::State*
-// r13 = during execution, stores stack index.
+// rState = r12 = pointer to arete::State*
+// rStackI = r13 = during execution, stores stack index.
 // after control ends (due to exception or return), stores return value
 
 // Stack:
@@ -42,11 +48,6 @@
 
 // TODO: Use offsetof and other stuff instead of calling functions to retrieve information
 // about a particular State
-
-// TODO Write an error handling function
-// Probably
-
-// TODO Figure out how to print a string
 
 #include <algorithm>
 
@@ -184,6 +185,7 @@ void state_push_native_gc_frame(State* state, NativeFrame* frame) {
 	std::cout << (ptrdiff_t) &thing << std::endl;
 
   //std::cout << "ptr to current_state " << (ptrdiff_t) current_state << std::endl;
+  std::cout << "state->gc.native_frames" << state->gc.native_frames << std::endl;
   std::cout << "ptr to state " << (ptrdiff_t) state << std::endl;
   std::cout << "ptr to native frame " << (ptrdiff_t) frame << std::endl;
   std::cout << "native frame value_count " << (ptrdiff_t) frame->value_count << std::endl;
@@ -217,6 +219,10 @@ ptrdiff_t state_gc_frame(State* state) {
 // saved = rbx, rbp, rdi, rsi, rsp, r12-15
 // rsp-128 is the red zone; can be used for temp values but destroyed by any called function
 
+Value generic_apply(State* state, Value fn, size_t argc, Value* argv) {
+  return C_UNSPECIFIED;
+}
+
 Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   const char* fn_name = "vmfunction->native";
   AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
@@ -237,7 +243,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   unsigned total_stack = local_count+stack_max;
   unsigned kFrameSize = local_count + stack_max + 1;
-  unsigned kTotalStackSize = sizeof(NativeFrame) - sizeof(void*) + ((total_stack) * sizeof(void*));
+  unsigned kTotalStackSize = (sizeof(NativeFrame) - sizeof(void*)) + ((total_stack) * sizeof(void*));
   size_t kValueSize = sizeof(void*);
   unsigned kCompStackOffset = 24; //kTotalStackSize - (kValueSize * stack_max);
   unsigned kTotalStackSizeAligned = kTotalStackSize;
@@ -352,10 +358,18 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |1:
   |.endmacro
 
+  // Check that value in STORE matches TYPE, if not, generate a type error with SRC and CODE
+  |.macro checkHeapType, store, type, src, code
+  | mov rax, store
+  | and rax, 1
+  | cmp rax, 0
+  |.endmacro
+
   // takes rStackI and sets STORE to the rsp offset it needs
   |.macro getCompStackIndex, store
   | mov store, rStackI
   | imul store, kValueSize
+  | add store, kCompStackOffset
   | add store, rsp
   |.endmacro
 
@@ -363,6 +377,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov store, rStackI
   | dec store
   | imul store, kValueSize
+  | add store, kCompStackOffset
   | add store, rsp
   | mov store, [store]
   |.endmacro
@@ -375,20 +390,22 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | add store, rsp
   |.endmacro
 
-  |.macro pushConstant, idx
-  // Push a value from the constants array onto the stack
-  // Get function pointer
-  
+  // store a constant in a register
+  |.macro storeConstant, reg, idx
   | mov rArg2, [rsp+16]
   // Get &VMFunction::constants
   | add rArg2, (ptrdiff_t)(&((VMFunction*)0)->constants)
   // Get &VMFunction->constants->data[idx]
   | mov rArg2, [rArg2]
   | add rArg2, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
+  | mov reg, [rArg2]
+  |.endmacro
 
   // Get VMFunction->constants->data[idx]
-  | mov rArg2, [rArg2]
 
+  |.macro pushConstant, idx
+  | storeConstant rArg2, idx
+  // Push a value from the constants array onto the stack
   | getCompStackIndex rArg1
   | mov [rArg1], rArg2
   //| mov qword [rArg1], 821
@@ -437,12 +454,19 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Allocate stack space
   | sub rsp, kTotalStackSizeAligned
 
-  // NativeFrame::previous
-  | mov qword [rsp+0], 0
-  // NativeFrame::value_count
-  | mov qword [rsp+8], kFrameSize
-  // NativeFrame::values[0] = argument 2
+  // NativeFrame.values[0] = vfn
   | mov qword [rsp+16], rArg2
+
+  // NativeFrame.previous = state->gc.native_frames
+  | mov rArg1, rState
+  | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
+  | mov rArg2, [rArg1]
+  | mov [rsp+0], rArg2
+  | mov [rArg1], rsp
+
+  // NativeFrame.value_count
+  | mov qword [rsp+8], kFrameSize
+  //| mov qword [rsp+16], rArg2
 	| mov qword [rsp+24], 0
 
   | mov rArg1, rsp
@@ -473,8 +497,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Initialize locals
 
   | mov rArg2, rsp; 
-	| stateCall state_push_native_gc_frame;
-	|  stateCall state_collect;
+	| stateCall state_collect;
 
   // Execute function body
   size_t code_offset = 0;
@@ -491,13 +514,18 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   while(!done) {
     size_t loc = 0;
 
-    std::cout << code_offset << std::endl;
-    std::cout << code[code_offset] << std::endl;
+    //std::cout << code_offset << std::endl;
+    //std::cout << code[code_offset] << std::endl;
     switch(code[code_offset++]) {
 
+      case OP_FX_ADD: 
       case OP_POP: continue;
+
+      case OP_APPLY:
+      case OP_APPLY_TAIL:
       case OP_PUSH_IMMEDIATE:
       case OP_PUSH_CONSTANT: code_offset++; continue;
+
 
       case OP_RETURN: continue;
       case OP_RETURN_END: {
@@ -589,7 +617,21 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       // TODO undefined
       case OP_GLOBAL_GET: {
         size_t idx = code[code_offset++];
-        | pushConstant idx
+
+
+        | storeConstant rArg1
+
+
+        break;
+      }
+
+      case OP_APPLY: {
+        size_t argc = code[code_offset++];
+
+        // Get function pointer
+        | mov rArg1, rStackI
+        | sub rArg1, argc
+
         break;
       }
 
@@ -615,15 +657,15 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         auto it = offsets_to_labels.find(loc);
         AR_ASSERT(it != offsets_to_labels.end() && "jump label was not generated correctly");
         unsigned lbl = it->second;
-        AR_LOG_JIT("jump-when-pop " << loc << " (label " << lbl << ")");
+        AR_LOG_JIT("jump-" << ((code[code_offset-2] == OP_JUMP_UNLESS) ? "unless" : "when") << loc << " (label " << lbl << ")");
 
         | getCompStackTopValue rArg1
-        if(code[code_offset-1] == OP_JUMP_WHEN_POP) {
+        if(code[code_offset-2] == OP_JUMP_WHEN_POP) {
           | dec rStackI
         }
-        | cmp rArg1, 0
-        if(code[code_offset-1] == OP_JUMP_UNLESS) {
-          | jne =>label
+        | cmp rArg1, C_FALSE
+        if(code[code_offset-2] == OP_JUMP_UNLESS) {
+          | jne =>lbl
         } else {
           | je =>lbl
         }
@@ -657,7 +699,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
         | shl rax, 1
         | inc rax
-        | push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
+        //| push rax; push rArg1; push rArg2; mov rArg2, rax; mov64 rax, (size_t) print_int; call rax; pop rArg2; pop rArg1; pop rax;
 
         | mov [rArg1], rax
         | dec rStackI
@@ -692,8 +734,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   }
   done:
 
-  | stateCall state_pop_native_gc_frame
-
   | jmp ->unwind
   |->exception:
 
@@ -703,7 +743,21 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	| mov rStackI, rax
 	//| mov rax, 0
 
-  |->unwind:
+  |->unwind: 
+
+  | push rax; push rax
+	| stateCall state_collect;
+  | pop rax; pop rax
+
+  // state->gc.native_frames = NativeFrame.previous
+  | mov rArg1, rState
+  | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
+  | mov rArg2, [rsp]
+  | mov [rArg1], rArg2
+  
+  | push rax; push rax
+	| stateCall state_collect;
+  | pop rax; pop rax
 	//
   // Free stack space
   | add rsp, kTotalStackSizeAligned
@@ -822,6 +876,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   std::cout << "result int: " << (result) << std::endl;
   std::cout << "result: " << Value(result) << std::endl;
+
+  std::cout << "native_Frames: " << (ptrdiff_t)state.gc.native_frames << std::endl;
+  AR_ASSERT(state.gc.native_frames == 0);
 
   return C_UNSPECIFIED;
 }
