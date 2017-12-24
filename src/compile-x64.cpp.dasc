@@ -5,19 +5,23 @@
 // Agner Fog, Calling Conventions
 // http://www.agner.org/optimize/calling_conventions.pdf
 
+// This discusses the Windows struct return issue, but doesn't
+// seem to indicate why functions returning Value (only 64 bits) 
+// seem to use a different calling convention
+// https://msdn.microsoft.com/en-us/library/7572ztz4.aspx
+
+// TODO: Currently we're GC tracking the whole stack
+// We could fix this, but not sure if it really matters that much.
+
 // TODO: Exception checking
 
 // TODO: Function application
-// TODO: Constants
 // TODO: Type checking
 // TODO: Conditionals
+// TODO: Serializability. Currently we're encoding function pointers directly in compiled code.
 
-// TODO: Cannot return a Value on Windows (!!!)
-// Calling a Value-returning function causes the program to crash, seemingly under any
-// circumstance
-
-// We also may need to deal with exceptions. Although we don't use them, we want to handle
-// user code correctly
+// TODO: We also may need to deal with C++ exceptions. Although we don't use them, we want to handle
+// user code correctly. 
 
 // TODO: Unclear on what the ideal way to call C++ functions is. There does not appear to be a 
 // trivial way to call methods on the arete::State instance
@@ -43,6 +47,8 @@
 // Probably
 
 // TODO Figure out how to print a string
+
+#include <algorithm>
 
 #include "arete.hpp"
 
@@ -236,13 +242,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   unsigned kCompStackOffset = 24; //kTotalStackSize - (kValueSize * stack_max);
   unsigned kTotalStackSizeAligned = kTotalStackSize;
 
-	std::cout << kTotalStackSizeAligned << std::endl;
-  if(((kTotalStackSizeAligned + 56) % 16) != 0) {
+  if((kFrameSize % 2) == 0) {
+    // TODO this may need to be different on Windows
     kTotalStackSizeAligned += 8;
-		std::cout << kTotalStackSizeAligned << std::endl;
   }
-
-  //AR_ASSERT(((kTotalStackSizeAligned + 56) % 16) == 0);
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset \
@@ -274,6 +277,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |.type state, State, rState
 
 
+  // Call a simple FUN, for debugging only.
   |.macro simpCall, fun
 	| .if WINDOWS
 	| push rbp; mov rbp, rsp; mov64 rax, (ptrdiff_t) fun; call rax; mov rsp, rbp; pop rbp
@@ -282,10 +286,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	| .endif
   |.endmacro
 
+  // Call a function which takes arete::State as its first argument
+  // and returns a Value
+	|.macro stateCallRetValue, method
 	// On Windows, a Value is returned as a pointer to a stack value. Can't find
 	// documentation for this anywhere, but both Clang and MSVC do it; which
 	// means a little dance is needed to get it into rax.
-	|.macro stateCallRetValue, method
   | .if WINDOWS
   |  push rbp
   |  mov rbp, rsp
@@ -309,6 +315,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | .endif
 	|.endmacro
 
+  // Call a function which takes arete::State as its first argument
   |.macro stateCall, method
   | .if WINDOWS
   |  push rbp
@@ -349,15 +356,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |.macro getCompStackIndex, store
   | mov store, rStackI
   | imul store, kValueSize
-  | add store, kCompStackOffset
   | add store, rsp
   |.endmacro
 
   |.macro getCompStackTopValue, store
-  | getCompStackIndex store
+  | mov store, rStackI
+  | dec store
+  | imul store, kValueSize
+  | add store, rsp
   | mov store, [store]
   |.endmacro
-
 
   // Put a pointer to stack[I] in STORE
   |.macro getCompStackIndexAt, i, store
@@ -367,6 +375,26 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | add store, rsp
   |.endmacro
 
+  |.macro pushConstant, idx
+  // Push a value from the constants array onto the stack
+  // Get function pointer
+  
+  | mov rArg2, [rsp+16]
+  // Get &VMFunction::constants
+  | add rArg2, (ptrdiff_t)(&((VMFunction*)0)->constants)
+  // Get &VMFunction->constants->data[idx]
+  | mov rArg2, [rArg2]
+  | add rArg2, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
+
+  // Get VMFunction->constants->data[idx]
+  | mov rArg2, [rArg2]
+
+  | getCompStackIndex rArg1
+  | mov [rArg1], rArg2
+  //| mov qword [rArg1], 821
+
+  | inc rStackI
+  |.endmacro
   dasm_State *d;
   dasm_init(&d, DASM_MAXSECTION);
 
@@ -445,7 +473,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Initialize locals
 
   | mov rArg2, rsp; 
-	|  stateCall state_push_native_gc_frame;
+	| stateCall state_push_native_gc_frame;
 	|  stateCall state_collect;
 
   // Execute function body
@@ -453,7 +481,82 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   size_t *code = vmf->code_pointer();
   bool done = false;
 
+  std::unordered_map<size_t, unsigned> offsets_to_labels;
+
+  // Generate all labels
+
+  unsigned label_count = 0;
+
+  // Generate labels
   while(!done) {
+    size_t loc = 0;
+
+    std::cout << code_offset << std::endl;
+    std::cout << code[code_offset] << std::endl;
+    switch(code[code_offset++]) {
+
+      case OP_POP: continue;
+      case OP_PUSH_IMMEDIATE:
+      case OP_PUSH_CONSTANT: code_offset++; continue;
+
+      case OP_RETURN: continue;
+      case OP_RETURN_END: {
+        done = true;
+        continue;
+      }
+      case OP_JUMP:
+      case OP_JUMP_WHEN:
+      case OP_JUMP_UNLESS:
+      case OP_JUMP_WHEN_POP: {
+        loc = code[code_offset++];
+        break;
+      }
+      default: {
+        AR_LOG_JIT("label generation unknown bytecode " << code[code_offset-1]);
+        return state.eval_error("unknown bytecode");
+      }
+    }
+
+    if(loc > 0){
+      auto it = offsets_to_labels.find(loc);
+      if(it == offsets_to_labels.end()) {
+        unsigned lbl = label++;
+        AR_LOG_JIT("code offset " << loc << " => label " << lbl);
+        offsets_to_labels.insert(std::make_pair(loc, lbl));
+      } else {
+        AR_LOG_JIT("code offset " << loc << " == label " << it->second);
+      }
+    }
+  }
+
+  std::vector<size_t> offsets;
+  for(auto it : offsets_to_labels) {
+    offsets.push_back(it.first);
+  }
+
+  std::sort(offsets.begin(), offsets.end(), std::greater<size_t>());
+
+  dasm_growpc(&d, label);
+
+  done = false;
+  code_offset = 0;
+
+  while(!done) {
+    if(offsets.size() > 0 && code_offset == offsets[offsets.size() - 1]) {
+      auto i = offsets_to_labels.find(code_offset);
+      unsigned lbl = i->second;
+      offsets.pop_back();
+      AR_LOG_JIT("generating label " << lbl << " for code offset " << code_offset);
+      |=>lbl:
+    }
+
+    // Implementation of conditionals
+
+    // JUMP jumps to an offset in the bytecode. So, we'll store all the bytecode offsets to jump
+    // to in some kind of data structure,
+    
+    // and regen them.
+
     // Generate labels here
 
     switch(code[code_offset++]) {
@@ -473,35 +576,57 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         size_t idx = code[code_offset++];
         AR_LOG_JIT("push-constant " << idx);
 
-        // Retrieve constants array by 
-        // Get function pointer
-        | mov rArg2, [rsp+16]
-        | stateCall print_int
-        | mov rArg2, [rsp+16]
-        // Get &VMFunction::constants
-        | add rArg2, (ptrdiff_t)(&((VMFunction*)0)->constants)
-        // Get &VMFunction->constants->data[idx]
-        | mov rArg2, [rArg2]
-        | add rArg2, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
+        | pushConstant idx
+        // taking rArg1
+        break;
+      }
 
-        // Get VMFunction->constants->data[idx]
-        | mov rArg2, [rArg2]
+      case OP_POP: {
+        | dec rStackI
+        break;
+      }
 
+      // TODO undefined
+      case OP_GLOBAL_GET: {
+        size_t idx = code[code_offset++];
+        | pushConstant idx
+        break;
+      }
 
-        | push rArg1; push rArg2; mov rArg1, 0; simpCall debug_middle; pop rArg2; pop rArg1;
+      case OP_JUMP: {
+        size_t loc = code[code_offset++];
+        AR_LOG_JIT("jump-when-pop " << loc);
 
-        /*
-        // Add to top of stack
-        // Get VMFunction->constants->data[idx]
-        | mov rArg2, [rArg2]
-        */
+        auto it = offsets_to_labels.find(loc);
+        AR_ASSERT(it != offsets_to_labels.end() && "jump label was not generated correctly");
+        unsigned lbl = it->second;
 
-        | getCompStackIndex rArg1
-        | mov [rArg1], rArg2
-        //| mov qword [rArg1], 821
+        | jmp =>lbl
+        break;
+      }
 
-        | inc rStackI
-        | stateCall state_collect
+      case OP_JUMP_WHEN:
+      case OP_JUMP_UNLESS:
+      case OP_JUMP_WHEN_POP: {
+        size_t loc = code[code_offset++];
+        // Get top of stack
+        // If it is false, 
+
+        auto it = offsets_to_labels.find(loc);
+        AR_ASSERT(it != offsets_to_labels.end() && "jump label was not generated correctly");
+        unsigned lbl = it->second;
+        AR_LOG_JIT("jump-when-pop " << loc << " (label " << lbl << ")");
+
+        | getCompStackTopValue rArg1
+        if(code[code_offset-1] == OP_JUMP_WHEN_POP) {
+          | dec rStackI
+        }
+        | cmp rArg1, 0
+        if(code[code_offset-1] == OP_JUMP_UNLESS) {
+          | jne =>label
+        } else {
+          | je =>lbl
+        }
         break;
       }
 
@@ -560,6 +685,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       }
 
       default: {
+        AR_LOG_JIT("unknown bytecode " << code[code_offset-1]);
         return state.eval_error("unknown bytecode");
       }
     }
@@ -669,6 +795,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   AR_FRAME(state, bv, nfn);
 
   bv = state.make_bytevector<unsigned char>(size);
+
+  std::cout << "function size: " << size << " vs " << (code_offset * 8) << std::endl;
 
   dasm_encode(&d, bv.bv_data());
 
