@@ -67,6 +67,12 @@
 # endif
 #endif
 
+#ifdef __GNUC__
+# define AR_FORCE_INLINE __attribute__((always_inline))
+#else
+# define AR_FORCE_INLINE
+#endif
+
 #define _AR_FRAME2_(state, counter, ...)  \
   arete::FrameHack __arete_frame_ptrs##counter[] = { __VA_ARGS__ };  \
   arete::Frame __arete_frame##counter((state), sizeof(__arete_frame_ptrs##counter) / sizeof(FrameHack), (HeapValue***) __arete_frame_ptrs##counter); 
@@ -442,11 +448,7 @@ struct Value {
   }
 
   /** Safely retrieve the type of an object */
-  Type type() const 
-#ifdef __GNUC__
-  __attribute__((always_inline))
-#endif
-  ;
+  Type type() const AR_FORCE_INLINE;
   Type type_unsafe() const {
     if((bits & 3) == 0) {
       if(bits == 0) return CONSTANT;

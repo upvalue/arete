@@ -246,7 +246,7 @@
     insns))
 
 (define (compile-constant fn x)
-  (if (or (fixnum? x) (boolean? x))
+  (if (or (fixnum? x) (boolean? x) (eq? x unspecified))
     (emit fn 'push-immediate (value-bits x))
     (emit fn 'push-constant (register-constant fn x)))
 )
