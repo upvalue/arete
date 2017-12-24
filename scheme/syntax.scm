@@ -682,11 +682,6 @@ TODO: Casting
 
 ;; Do loop
 
-;; (do 1: ((var init step)) 
-;;     2: (test expression)
-;;    body)
-;; (let loop ((lambda 
-
 (define-syntax do
   (lambda (x)
     (unless (> (length x) 2)

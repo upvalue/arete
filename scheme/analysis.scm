@@ -1,5 +1,43 @@
 ;; analyze.scm - Analysis pass
 
+;; simple table-based analysis is possible now that we perform alpha-conversion in the expander
+
+;; for example
+#;(define (thing)
+  (define closure-var-1 #t)
+  (define closure-var-2 #t)
+  (list
+    (lambda ()
+      closure-var-1)
+    (lambda (n)
+      (set! closure-var-2 n)
+
+      (lambda () 
+        closure-var-2))))
+
+;; okay, say we go through this
+;; we can have a table that contains something like
+
+;; closure-var-1-depth 0
+;; closure-var-1-modified #f
+;; closure-var-2-depth 0
+;; closure-var-2-modified #t
+
+;; closure conversion
+
+#;(define (thing)
+  (define closure-var-1 #t)
+  (list
+    ($make-closure
+      (lambda () closure-var-1)
+      ($local closure-var-1))
+    ($make-closure
+      (lambda ()
+
+        
+        closure-var-2)
+      ($local-upvalue closure-var-2))))
+
 ;; TODO Can we do closure generation here without too much trouble?
 
 ;; closure sharing

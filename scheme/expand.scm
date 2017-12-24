@@ -318,66 +318,77 @@
     (env-lookup env name)))
 
 ;; Shorthand for mapping expand because it's so common
-(define expand-map
-  (lambda (x env)
-    (map1 (lambda (sub-x) (expand sub-x env)) x)))
+(define (expand-map x env params)
+  (map1 (lambda (sub-x) (expand sub-x env params)) x))
 
-(define expand-define
-  (lambda (x env)
-    (define name #f)
-    (define value #f)
-    (define kar #f)
-    (define len (length x))
+;; Expander parameters
 
-    (if (fx< len 2)
-      (raise-source x 'expand "define is missing first argument (name)" (list x)))
+;; (disallow-defines #t)
+;; If #t, defines are an expansion-time error (for example, (if #t (define x #t) #t #f)
 
-    (if (fx< len 3)
-      (raise-source x 'expand "define is missing second argument (value)" (list x)))
+;; (procedure-name <symbol>)
+;; The name of the currently expanding procedure (if any)
 
-    (set! kar (cadr x))
+;; Params are cleared upon entering a module or function
 
-    (if (not (or (identifier? kar) (pair? kar)))
-      (raise-source (cdr x) 'expand "define first argument must be a name or a list" (list x)))
+(define (expand-define x env params)
+  (define name #f)
+  (define value #f)
+  (define kar #f)
+  (define len (length x))
 
-    (if (identifier? kar)
-      (if (not (fx= len 3))
-        (raise-source x 'expand "define expects exactly two arguments (name and value)" (list x))
-        (begin
-          (set! name kar)
-          (set! value (caddr x))))
+  (if (assq 'disallow-defines params)
+    (raise-source x 'expand "define is not allowed here" (list x)))
+
+  (if (fx< len 2)
+    (raise-source x 'expand "define is missing first argument (name)" (list x)))
+
+  (if (fx< len 3)
+    (raise-source x 'expand "define is missing second argument (value)" (list x)))
+
+  (set! kar (cadr x))
+
+  (if (not (or (identifier? kar) (pair? kar)))
+    (raise-source (cdr x) 'expand "define first argument must be a name or a list" (list x)))
+
+  (if (identifier? kar)
+    (if (not (fx= len 3))
+      (raise-source x 'expand "define expects exactly two arguments (name and value)" (list x))
       (begin
-        ;; Take apart the more complex (define (function) ...) case
-        (set! name (car kar))
-        (set! value
-          (list-source x (make-rename #f 'lambda) (cdr kar)
-            (cons-source x (make-rename #f 'begin) (cddr x))))))
+        (set! name kar)
+        (set! value (caddr x))))
+    (begin
+      ;; Take apart the more complex (define (function) ...) case
+      (set! name (car kar))
+      (set! value
+        (list-source x (make-rename #f 'lambda) (cdr kar)
+          (cons-source x (make-rename #f 'begin) (cddr x))))))
 
-    (if (env-syntax? env name)
-      (raise-source x 'expand (print-string "definition of" name "shadows syntax") (list x)))
+  (if (env-syntax? env name)
+    (raise-source x 'expand (print-string "definition of" name "shadows syntax") (list x)))
 
-    (if (rename? name)
-      (rename-gensym! name))
+  (if (rename? name)
+    (rename-gensym! name))
 
-    ;; Handle module stuff
-    (env-define env name 'variable)
+  ;; Handle module stuff
+  (env-define env name 'variable)
 
-    (define result (list-source x (make-rename #f 'define)
-                              ;; We'll replace name with the actual gensym here if there is one
-                              (env-resolve env name)
-                              (expand value env)))
+  (define result (list-source x (make-rename #f 'define)
+                            ;; We'll replace name with the actual gensym here if there is one
+                            (env-resolve env name)
+                            (expand value env params)))
 
-    result))
+  result)
 
 ;; Expand an identifier
-(define (expand-identifier x env)
+(define (expand-identifier x env params)
   ;; Check for identifier-transformers or invalid use of 
   (if (env-syntax? env x)
     (apply
       (lambda (env name value found)
         (if (or (eq? value 'syntax) (not (function-identifier-macro? value)))
           (raise-source x 'expand (print-string "used syntax" x "as identifier") (list x))
-          (expand-macro x env value)))
+          (expand-macro x env value params)))
       (env-lookup env x))
     (if (symbol-qualified? x)
       x
@@ -389,9 +400,8 @@
         (env-lookup env x))))))
 
 ;; Expand and/or
-(define expand-and-or
-  (lambda (x env)
-    (cons-source x (car x) (expand-map (cdr x) env))))
+(define (expand-and-or x env params)
+  (cons-source x (car x) (expand-map (cdr x) env params)))
 
 ;;;;; Module machinery
 (define (module-spec->string src lst . str)
@@ -488,13 +498,14 @@
          (raise-source (cddr spec) 'expand "module prefix must be a symbol" (list spec)))
        (if (not (fx= (length spec) 3))
          (raise-source (cdddr spec) 'expand "prefix specifier must have exactly three elements" (list spec)))
-       (define pfx-str (symbol->string (caddr spec)))
-       (map1
-         (lambda (cell)
-           (if (pair? cell)
-             (cons (string->symbol (string-append pfx-str (symbol->string (car cell)))) (cdr cell))
-             #f))
-         (module-import-eval (cadr spec))))
+       ((lambda (pfx-str)
+         (map1
+           (lambda (cell)
+             (if (pair? cell)
+               (cons (string->symbol (string-append pfx-str (symbol->string (car cell)))) (cdr cell))
+               #f))
+           (module-import-eval (cadr spec))))
+        (symbol->string (caddr spec))))
     )
     ((eq? kar 'only)
      (module-import-filter spec 'only (lambda (cell allowed) (and cell (memq (car cell) allowed)))))
@@ -557,7 +568,7 @@
        (cdr x)))
 
     ((eq? kar 'begin)
-     (cons-source x (make-rename #f 'begin) (expand-map (cdr x) mod)))
+     (cons-source x (make-rename #f 'begin) (expand-map (cdr x) mod '())))
 
     ((eq? kar 'export)
      (for-each-i
@@ -622,65 +633,50 @@
       (map-improper strip-renames x)
       x)))
 
-(define (expand-quote x env)
+(define (expand-quote x env params)
   (if (fx> (length x) 3)
     (raise-source x 'expand "quote only takes one argument" (list x)))
 
-  #|
-  (if (eq? (cadr x) (string->symbol "##no-strip"))
-    (begin
-      (print x)
-      (list-source x (make-rename #f 'quote) (list-ref x 2)))
-    (if (fx> (length x) 2)
-      (raise-source x 'expand "quote only takes one argument" (list x))
-      (list-source x (make-rename #f 'quote) (strip-renames (cadr x))))))
-|#
   (list-source x (make-rename #f 'quote) (strip-renames (cadr x))))
-  ;(list-source x 
-
-  ;(cons-source x (make-rename #f 'quote) (cdr x)))
 
 ;; Expand an application. Could be a special form, a macro, or a normal function application
-(define expand-apply
-  (lambda (x env)
-    (define kar (car x))
-    (define len (length x))
-    (define syntax? (and (identifier? kar) (env-syntax? env kar)))
+(define (expand-apply x env params)
+  (define kar (car x))
+  (define len (length x))
+  (define syntax? (and (identifier? kar) (env-syntax? env kar)))
 
-    ;; Extract names from renames
-    ;; TODO: (let ((begin (lambda () (print "hello")))) (begin)) ?
-    (if (and syntax? (rename? kar))
-      (set! kar (rename-expr kar)))
+  ;; Extract names from renames
+  ;; TODO: (let ((begin (lambda () (print "hello")))) (begin)) ?
+  (if (and syntax? (rename? kar))
+    (set! kar (rename-expr kar)))
 
-    ;; Check for special syntactic forms
-    (if syntax?
-      (cond
-        ((eq? syntax? 'macro)
-                (expand-macro x env (list-ref (env-lookup env (car x)) 2)))
-        ((or (eq? kar 'define-library) (eq? kar 'module)) (expand-module x env))
-        ((eq? kar 'import)
-         (if (not (table? env))
-           (raise-source x "import must be part of module statement or be at toplevel"))
-         (expand-toplevel-import x env))
-        ((eq? kar 'define) (expand-define x env))
-        ((eq? kar 'define-syntax) (expand-define-syntax x env))
-        ((eq? kar 'let-syntax) (expand-let-syntax 'let-syntax x env))
-        ((eq? kar 'letrec-syntax) (expand-let-syntax 'letrec-syntax x env))
-        ((or (eq? kar 'and) (eq? kar 'or)) (expand-and-or x env))
-        ((eq? kar 'lambda) (lambda () (expand-lambda x env)))
-        ((eq? kar 'begin) (cons-source x (make-rename #f 'begin) (expand-map (cdr x) env)))
-        ((eq? kar 'if) (expand-if x env))
-        ((eq? kar 'set!) (expand-set x env))
-        ((eq? kar 'cond) (expand-cond x env))
-        #;((eq? kar 'quote)  (cons-source x (make-rename #f 'quote) (cdr x)))
-        ((eq? kar 'quote) (expand-quote x env))
-        (else (raise-source x 'expand (print-string "unknown special form" (car x)) (list x))))
-      ;; Normal function application
-      ;; Needs to be annotated with src info, right?
-      ;; map-source?
-      (expand-map x env))))
+  ;; Check for special syntactic forms
+  (if syntax?
+    (cond
+      ((eq? syntax? 'macro) (expand-macro x env (list-ref (env-lookup env (car x)) 2) params))
+      ((or (eq? kar 'define-library) (eq? kar 'module)) (expand-module x env))
+      ((eq? kar 'import)
+       (if (not (table? env))
+         (raise-source x "import must be part of module statement or be at toplevel"))
+       (expand-toplevel-import x env))
+      ((eq? kar 'define) (expand-define x env params))
+      ((eq? kar 'define-syntax) (expand-define-syntax x env params))
+      ((eq? kar 'let-syntax) (expand-let-syntax 'let-syntax x env params))
+      ((eq? kar 'letrec-syntax) (expand-let-syntax 'letrec-syntax x env params))
+      ((or (eq? kar 'and) (eq? kar 'or)) (expand-and-or x env params))
+      ((eq? kar 'lambda) (lambda () (expand-lambda x env params)))
+      ((eq? kar 'begin) (cons-source x (make-rename #f 'begin) (expand-map (cdr x) env params)))
+      ((eq? kar 'if) (expand-if x env params))
+      ((eq? kar 'set!) (expand-set x env params))
+      ((eq? kar 'cond) (expand-cond x env params))
+      ((eq? kar 'quote) (expand-quote x env params))
+      (else (raise-source x 'expand (print-string "unknown special form" (car x)) (list x))))
+    ;; Normal function application
+    ;; Needs to be annotated with src info, right?
+    ;; map-source?
+    (expand-map x env params)))
 
-(define (expand-lambda x env)
+(define (expand-lambda x env params)
   (if (fx< (length x) 3)
     (raise-source x 'expand "lambda has no body" (list x)))
 
@@ -709,9 +705,9 @@
             (env-define new-env args 'variable)
             )))))
 
-  (cons-source x (make-rename #f 'lambda) (cons-source x bindings (expand-map (cddr x) new-env))))
+  (cons-source x (make-rename #f 'lambda) (cons-source x bindings (expand-map (cddr x) new-env '()))))
 
-(define (expand-if x env)
+(define (expand-if x env params)
   (define len (length x))
   (define else-branch unspecified)
 
@@ -720,9 +716,15 @@
     (if (fx= len 4)
       (set! else-branch (list-ref x 3))))
 
-  (list-source x (make-rename #f 'if) (expand (list-ref x 1) env) (expand (list-ref x 2) env) (expand else-branch env)))
+  (define new-params (cons '(disallow-defines #t) params))
 
-(define (expand-set x env)
+  (list-source x
+    (make-rename #f 'if)
+    (expand (list-ref x 1) env new-params)
+    (expand (list-ref x 2) env new-params)
+    (expand else-branch env params)))
+
+(define (expand-set x env params)
   (define len (length x))
 
   (if (not (fx= len 3))
@@ -743,13 +745,13 @@
      #;(if (and (table? (car location)) (not (eq? (module-qualify (car location) (cadr x)) (cadr location))))
        (raise-source x 'expand "Implementation restriction: set!ing an imported variable not allowed" (list x))))
    (env-lookup env (cadr x)))
-  (list-source x (make-rename #f 'set!) (expand (list-ref x 1) env) (expand (list-ref x 2) env)))
+  (list-source x (make-rename #f 'set!) (expand (list-ref x 1) env params) (expand (list-ref x 2) env params)))
 
-(define (expand x env)
+(define (expand x env params)
   (cond
     ((self-evaluating? x) x)
-    ((identifier? x) (expand-identifier x env))
-    (else (expand-apply x env))))
+    ((identifier? x) (expand-identifier x env params))
+    (else (expand-apply x env params))))
 
 (define (expand-delayed x)
   (if (pair? x)
@@ -760,52 +762,51 @@
 
 ;; Expander entry point
 (define (expand-toplevel x env)
-  (expand-delayed (expand x env)))
+  (expand-delayed (expand x env '())))
 
-(define define-transformer!
-  (lambda (x env trans-env name body)
-    (define expanded-body #f)
-    (define fn #f)
-    (define fn-arity #f)
-    (define identifier-transformer #f)
+(define (define-transformer! x env trans-env params name body)
+  (define expanded-body #f)
+  (define fn #f)
+  (define fn-arity #f)
+  (define identifier-transformer #f)
 
-    (if (not (identifier? name))
-      (raise-source (cdr x) 'expand "define-syntax first argument (macro name) must be an identifier" (list x (cdr x))))
+  (if (not (identifier? name))
+    (raise-source (cdr x) 'expand "define-syntax first argument (macro name) must be an identifier" (list x (cdr x))))
 
-    (if (table? env)
-      (if (table-ref env "module-export-all")
-        (table-set! (table-ref env "module-exports") name #t)))
+  (if (table? env)
+    (if (table-ref env "module-export-all")
+      (table-set! (table-ref env "module-exports") name #t)))
 
-    (if (eq? (car body) 'identifier)
-      (begin
-        (set! body (cadr body))
-        (set! identifier-transformer #t)
-        #;(print "found identifier transformer" body)))
+  (if (eq? (car body) 'identifier)
+    (begin
+      (set! body (cadr body))
+      (set! identifier-transformer #t)
+      #;(print "found identifier transformer" body)))
 
-    (set! expanded-body (expand-delayed (expand body env)))
+  (set! expanded-body (expand-delayed (expand body env params)))
 
-    (set! fn (eval expanded-body env))
+  (set! fn (eval expanded-body env))
 
-    (if (not (procedure? fn))
-      (raise-source (cddr x) 'expand "define-syntax body did not evaluate to a function" (list x)))
+  (if (not (procedure? fn))
+    (raise-source (cddr x) 'expand "define-syntax body did not evaluate to a function" (list x)))
 
-    (set-function-macro-env! fn trans-env)
+  (set-function-macro-env! fn trans-env)
 
-    (set! fn-arity (function-min-arity fn))
+  (set! fn-arity (function-min-arity fn))
 
-    (if (fx< fn-arity 1)
-      (raise-source (caddr x) 'expand "define-syntax body must evaluate to a function that takes one argument" (list x)))
+  (if (fx< fn-arity 1)
+    (raise-source (caddr x) 'expand "define-syntax body must evaluate to a function that takes one argument" (list x)))
 
-    (set-function-name! fn (rename-strip name))
-    (set-function-macro-bit! fn)
-    (if identifier-transformer
-      (set-function-identifier-macro-bit! fn))
+  (set-function-name! fn (rename-strip name))
+  (set-function-macro-bit! fn)
+  (if identifier-transformer
+    (set-function-identifier-macro-bit! fn))
 
-    (env-define env name fn #t)
+  (env-define env name fn #t)
 
-    unspecified))
+  unspecified)
 
-(define (expand-define-syntax x env)
+(define (expand-define-syntax x env params)
   (define len (length x))
   (define name #f)
   (define body #f)
@@ -816,7 +817,7 @@
   (set! name (cadr x))
   (set! body (caddr x))
 
-  (define-transformer! x env env name body))
+  (define-transformer! x env env params name body))
 
 ;; Fold an environment into another environment
 ;; Used for let-syntax and letrec-syntax definition splicing
@@ -831,7 +832,7 @@
   (env-vec-fold (vector-ref env 0) env (vector-length env) 2))
 
 ;; Expander for let-syntax and letrec-syntax
-(define (expand-let-syntax type x env)
+(define (expand-let-syntax type x env params)
   (define new-env (env-make env #t))
 
   (if (fx< (length x) 3)
@@ -851,11 +852,11 @@
       (define name (car x))
       (define body (cadr x))
 
-      (define-transformer! x new-env (if (eq? type 'let-syntax) env new-env) name body))
+      (define-transformer! x new-env (if (eq? type 'let-syntax) env new-env) params name body));
     bindings)
 
   (define result 
-    (cons-source x (make-rename #f 'begin) (expand-map body new-env)))
+    (cons-source x (make-rename #f 'begin) (expand-map body new-env params)))
 
   ;; fold new-env into old-env
   ;(pretty-print new-env)
@@ -865,7 +866,7 @@
   result)
 
 ;; Expand a macro application
-(define (expand-macro x env transformer)
+(define (expand-macro x env transformer params)
   ;(define lookup (list-ref (env-lookup env (car x)) 2))
   (define arity (function-min-arity transformer))
   (define saved-rename-env (top-level-value '*current-rename-env*))
@@ -899,11 +900,11 @@
         (set-top-level-value! '*current-rename-env* saved-rename-env))))
 
   (if identifier-application?
-    (cons-source x result (expand-map (cdr x) env)) 
-    (expand result env)))
+    (cons-source x result (expand-map (cdr x) env params)) 
+    (expand result env params)))
 
 ;; cond expander
-(define (expand-cond-full-clause x env clause rest)
+(define (expand-cond-full-clause x env params clause rest)
   (if (or (null? clause) (not (list? clause)))
     (raise-source clause 'expand "cond clause should be a list" (list clause)))
 
@@ -912,10 +913,12 @@
   (define condition (car clause))
   (define body (cdr clause))
 
+  (define new-params (cons '(disallow-defines #t) params))
+
   ;; Handle else clause
   (if (env-compare env condition (make-rename env 'else))
     (set! condition #t)
-    (set! condition (expand condition env)))
+    (set! condition (expand condition env params)))
 
   (define result
     (if (null? body)
@@ -929,7 +932,7 @@
                 (make-rename #f 'if)
                 name
                 name
-                (if (null? rest) unspecified (expand-cond-full-clause x env (car rest) (cdr rest)))))
+                (if (null? rest) unspecified (expand-cond-full-clause x env new-params (car rest) (cdr rest)))))
            condition))
        (gensym))
 
@@ -951,7 +954,7 @@
                                             (list-source x (cadr body) name)
                                             (if (null? rest)
                                               unspecified
-                                              (expand-cond-full-clause x env (car rest) (cdr rest))))
+                                              (expand-cond-full-clause x env new-params (car rest) (cdr rest))))
                                 )
                    condition))
                (gensym 'result)))))
@@ -959,23 +962,23 @@
         (list-source x
           (make-rename #f 'if)
           condition
-          (expand (cons-source x (make-rename #f 'begin) body) env)
+          (expand (cons-source x (make-rename #f 'begin) body) env new-params)
           (if (null? rest)
             unspecified
-            (expand-cond-full-clause x env (car rest) (cdr rest))))))
+            (expand-cond-full-clause x env new-params (car rest) (cdr rest))))))
   )
 
   result)
 
-(define (expand-cond-clause x env clause rest)
+(define (expand-cond-clause x env params clause rest)
   (if (null? clause)
     unspecified
-    (expand-cond-full-clause x env clause rest)))
+    (expand-cond-full-clause x env params clause rest)))
 
-(define (expand-cond x env)
+(define (expand-cond x env params)
   (if (fx= (length x) 1)
     unspecified
-    (expand-cond-clause x env (cadr x) (cddr x))))
+    (expand-cond-clause x env params (cadr x) (cddr x))))
 
 ;; Set up module system
 
