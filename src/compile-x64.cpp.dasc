@@ -5,6 +5,9 @@
 // Agner Fog, Calling Conventions
 // http://www.agner.org/optimize/calling_conventions.pdf
 
+// Hint: If it's crashing for no reason, it's probably because the stack
+// size is screwed up
+
 // This discusses the Windows struct return issue, but doesn't
 // seem to indicate why functions returning Value (only 64 bits) 
 // seem to use a different calling convention
@@ -146,11 +149,6 @@ enum {
   E_EXPECTED_FIXNUM_2
 };
 
-void native_exception2(State* state, unsigned tag, unsigned src, unsigned code ) {
-  AR_LOG_JIT("native_exception2 called " << (ptrdiff_t) state << " with arguments " << tag << " " << src << " " << code);//<< " with arguments " << tag << " " << src << " " << code);
-}
-
-
 Value native_exception(State* state, unsigned tag, unsigned src, unsigned code) {
   AR_LOG_JIT("native_exception called " << (ptrdiff_t) state << " with arguments " << tag << " " << src << " " << code);
   std::ostringstream os;
@@ -178,42 +176,6 @@ Value native_exception(State* state, unsigned tag, unsigned src, unsigned code) 
   return state->make_exception(tag_s, os.str(), C_FALSE);
 }
 
-void state_simple(State* state) {
-
-}
-
-void state_push_native_gc_frame(State* state, NativeFrame* frame) {
-	void* thing;
-	std::cout << (ptrdiff_t) &thing << std::endl;
-
-  //std::cout << "ptr to current_state " << (ptrdiff_t) current_state << std::endl;
-  std::cout << "state->gc.native_frames" << state->gc.native_frames << std::endl;
-  std::cout << "ptr to state " << (ptrdiff_t) state << std::endl;
-  std::cout << "ptr to native frame " << (ptrdiff_t) frame << std::endl;
-  std::cout << "native frame value_count " << (ptrdiff_t) frame->value_count << std::endl;
-  std::cout << "ptr to previous native frame " << (ptrdiff_t) frame->previous << std::endl;
-  state->gc.native_frames = frame;
-
-  //return C_UNSPECIFIED;
-}
-
-ptrdiff_t return_int(ptrdiff_t a) {
-	// TODO: Returning a Value from a function causes issues on windows
-	return a;
-}
-
-void state_pop_native_gc_frame(State* state) {
-	std::cout << "popping gc frame " << (ptrdiff_t) state->gc.native_frames << std::endl;
-  state->gc.native_frames = state->gc.native_frames->previous;
-}
-
-ptrdiff_t state_gc_frame(State* state) {
-  std::cout << "state_gc_frame" << (ptrdiff_t) state->gc.native_frames << std::endl;
-
-  return (ptrdiff_t)state->gc.native_frames;
-
-};
-
 // callee-save
 
 // parameters = rdi, rsi, rdx, rcx, r8, r9, xmm0-7
@@ -222,10 +184,23 @@ ptrdiff_t state_gc_frame(State* state) {
 // rsp-128 is the red zone; can be used for temp values but destroyed by any called function
 
 Value generic_apply(State* state, Value fn, size_t argc, Value* argv) {
-  return C_UNSPECIFIED;
+  std::cout << "Generic_apply: " << (ptrdiff_t)state << ' ' << (ptrdiff_t) fn.bits <<
+    ' ' << (ptrdiff_t) argc << ' ' << (ptrdiff_t) argv << std::endl;
+
+
+  if(argc > 0) {
+    std::cout << "argv[0] " << (ptrdiff_t) argv[0].bits << std::endl;
+  }
+
+  Value result(state->apply(fn, argc, argv));
+
+  std::cout << state->get_symbol("print").symbol_value().bits << std::endl;
+
+  return result;
 }
 
 Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
+  static const bool sanity_log = true;
   const char* fn_name = "vmfunction->native";
   AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
   Value bv, nfn, vfn;
@@ -252,8 +227,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   if((kFrameSize % 2) == 0) {
     // TODO this may need to be different on Windows
+    std::cout << "Adjusting stack size to be multiple of 16" << std::endl;
     kTotalStackSizeAligned += 8;
   }
+  kTotalStackSizeAligned += 16;
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset \
@@ -375,9 +352,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | add store, rsp
   |.endmacro
 
-  // Put a pointer to stack[I] in STORE
-  |.macro getCompStackIndexAt, i, store
-  | mov store, i
+  // Put a pointer to stack[STORE] in store, assuming STORE
+  |.macro getCompStackIndexAt, store
   | imul store, kValueSize
   | add store, kCompStackOffset
   | add store, rsp
@@ -438,8 +414,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | push rbx
   | push rState
   | mov rState, rArg1
-  | push rArg1
-  | push rArg2
   | push rStackI
   | push rFx
 
@@ -471,11 +445,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   //| mov qword [rsp+16], rArg2
 	| mov qword [rsp+24], 0
 
-  | mov rArg1, rsp
-  | simpCall sanity_log_1
+  if(sanity_log) {
+    | mov rArg1, rsp
+    | simpCall sanity_log_1
 
-  | getCompStackIndex rArg1
-  | simpCall sanity_log_1
+    | getCompStackIndex rArg1
+    | simpCall sanity_log_2
+  }
 
   // Zero out GC frame
   // Assumes function has a stack size of at least one.
@@ -618,6 +594,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       }
 
       case OP_POP: {
+        AR_LOG_JIT("pop");
         | dec rStackI
         break;
       }
@@ -625,6 +602,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       // TODO undefined
       case OP_GLOBAL_GET: {
         size_t idx = code[code_offset++];
+
+        AR_LOG_JIT("global-get " << idx);
 
         | storeConstant rArg1, idx
         | add rArg1, (ptrdiff_t)(&(((Symbol*)0)->value))
@@ -653,12 +632,38 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
+      // TODO: Can we tail-apply C++ functions?
+      case OP_APPLY_TAIL: 
       case OP_APPLY: {
         size_t argc = code[code_offset++];
 
-        // Get function pointer
-        | mov rArg1, rStackI
-        | sub rArg1, argc
+        AR_LOG_JIT("apply " << argc);
+
+        // Get pointer to beginning of what we need on the stack (function)
+        | mov rArg2, rStackI
+        | sub rArg2, (argc + 1)
+        | getCompStackIndexAt rArg2
+
+        // Get pointer to argv (after function on stack)
+        | mov rArg4, rArg2
+        | add rArg4, 8
+        // Load function pointer
+        | mov rArg2, [rArg2]
+
+        | mov rArg1, rState
+        | mov rArg3, (size_t) argc
+
+        | mov64 rax, (size_t) generic_apply
+        | call rax
+
+        // TODO: Check exception
+
+        // Place result on stack
+        | sub rStackI, argc
+
+        | getCompStackIndex rArg1
+        | mov [rArg1], rax
+        | inc rStackI
 
         break;
       }
@@ -777,7 +782,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rArg2, [rsp]
   | mov [rArg1], rArg2
   
-	//
   // Free stack space
   | add rsp, kTotalStackSizeAligned
 
@@ -787,8 +791,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Restore registers
   | pop rFx
   | pop rStackI
-  | pop rArg2
-  | pop rArg1
 	| pop rState
   | pop rbx
   | mov rsp, rbp
