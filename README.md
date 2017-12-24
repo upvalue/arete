@@ -36,13 +36,13 @@ for details on the various side-effecting things they do in order to bootstrap t
 # Dependencies
 
 Arete uses the C++ STL, and optionally
-- linenoise-ng from ArangoDB (included in the repository)
+- linenoise-ng from ArangoDB (for nice cross-platform REPL, included in the repository)
+- DynASM (for native compilation, included in the repository)
 - SDL2
 
 # R?RS/SRFI compliance.
 
-Arete currently supports some features of R5RS and R7RS. Full compliance is not the primary goal at present, but I have
-tried to hew to the standards. If you miss something, open an issue :)
+Arete currently supports some features of R5RS and R7RS. Full compliance is not the primary goal at present, but I have tried to hew to the standards. If you miss something, open an issue :)
 
 ## Noted issues
 

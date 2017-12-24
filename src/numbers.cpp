@@ -147,6 +147,20 @@ Value fn_fx_add(State& state, size_t argc, Value* argv) {
 
 AR_DEFUN("fx+", fn_fx_add, 2, 2, true);
 
+#define FX_COMPARISON(cname, name, op) \
+  Value name (State& state, size_t argc, Value* argv) { \
+    static const char* fn_name = cname; \
+    AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM); \
+    AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM); \
+    return Value::make_boolean(argv[0].fixnum_value() op argv[1].fixnum_value()); \
+  } \
+  AR_DEFUN(cname, name, 2, 2);
+
+FX_COMPARISON("fx<=", fn_fx_lte, <=)
+FX_COMPARISON("fx<", fn_fx_lt, <)
+FX_COMPARISON("fx>", fn_fx_gt, >)
+FX_COMPARISON("fx>=", fn_fx_gte, >=)
+
 Value fn_fx_equals(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx=";
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -154,23 +168,6 @@ Value fn_fx_equals(State& state, size_t argc, Value* argv) {
   return Value::make_boolean(argv[0].bits == argv[1].bits);
 }
 AR_DEFUN("fx=", fn_fx_equals, 2, 2);
-
-
-Value fn_fx_lt(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "fx<";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  return Value::make_boolean(argv[0].fixnum_value() < argv[1].fixnum_value());
-}
-AR_DEFUN("fx<", fn_fx_lt, 2, 2);
-
-Value fn_fx_gt(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "fx>";
-  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
-  AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  return Value::make_boolean(argv[0].fixnum_value() > argv[1].fixnum_value());
-}
-AR_DEFUN("fx>", fn_fx_gt, 2, 2);
 
 Value fn_fx_div(State& state, size_t argc, Value* argv) {
   static const char* fn_name = "fx/";

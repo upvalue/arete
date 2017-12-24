@@ -13,6 +13,13 @@
 // seem to use a different calling convention
 // https://msdn.microsoft.com/en-us/library/7572ztz4.aspx
 
+// TODO: GC frames can be trivially omitted in certain cases; if a function
+// does not have upvalues, never calls other functions or allocation primitives
+
+// A function like say, memv or assq might benefit heavily from this, but we'd probably need to
+// inline recursive calls in the Scheme compiler in order to make it easy to determine whether this
+// is possible here.
+
 // TODO: Currently variables are GC-tracked much in the way we track them C++-side. But in assembly
 // we have full control over the stack. Rather than using the NativeFrame structure, for example,
 // we could just guarantee that everything from rsp to rsp+whatever is a pointer. One issue with the
@@ -36,6 +43,10 @@
 
 // TODO: We also may need to deal with C++ exceptions. Although we don't use them, we want to be
 // able to call out to C++ code that may
+
+// TODO: How to get stack traces out of this?
+// Well, we know where the code_offset is at any given time, so we could store that in a register
+// or on the stack and use it along with the VM source information to add stack trace info.
 
 // Anatomy of a natively-compiled Scheme function
 
@@ -79,8 +90,6 @@ void debug_middle(ptrdiff_t idx, ptrdiff_t i) {
   switch(idx) { 
     case 0: std::cout << "constant ptr: " << i << std::endl;
   }
-
-
 }
 
 void print_2int_simple(ptrdiff_t a, ptrdiff_t b) {
@@ -131,6 +140,10 @@ void sanity_log_1(ptrdiff_t rsp_) {
 
 void sanity_log_2(ptrdiff_t compstack) {
   std::cout << "sanity_log_2: location of computation stack[0]: " << compstack << "(" << (rsp - compstack) << " from rsp)" << std::endl;
+}
+
+void sanity_log_end(ptrdiff_t rStackI) {
+  std::cout << "sanity_log_end: rStackI = " << rStackI << std::endl;
 }
 
 // Exception tag codes
@@ -230,7 +243,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     std::cout << "Adjusting stack size to be multiple of 16" << std::endl;
     kTotalStackSizeAligned += 8;
   }
-  kTotalStackSizeAligned += 16;
+  kTotalStackSizeAligned += 8;
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset \
@@ -246,7 +259,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   |.define rState, r12
   |.define rStackI, r13
-  |.define rFx, r15
 	|.if WINDOWS
 	| .define rArg1, rcx
 	| .define rArg2, rdx
@@ -415,7 +427,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | push rState
   | mov rState, rArg1
   | push rStackI
-  | push rFx
 
   // NOTE: At the boundary of any CALL, stack size must be a multiple of 16!
   // PUSHing grows it by only 8.
@@ -475,7 +486,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Initialize locals
 
   | mov rArg2, rsp; 
-	//| stateCall state_collect;
+	| stateCall state_collect;
 
   // Execute function body
   size_t code_offset = 0;
@@ -485,8 +496,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   std::unordered_map<size_t, unsigned> offsets_to_labels;
 
   // Generate all labels
-
-  unsigned label_count = 0;
 
   // Generate labels
   while(!done) {
@@ -632,7 +641,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
-      // TODO: Can we tail-apply C++ functions?
+      // TODO: Can we tail-apply C++ functions now that we control
+      // the stack?
       case OP_APPLY_TAIL: 
       case OP_APPLY: {
         size_t argc = code[code_offset++];
@@ -653,6 +663,17 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | mov rArg1, rState
         | mov rArg3, (size_t) argc
 
+        // TODO: Heap Type Checking
+        // getHeapType
+
+        // check for native
+        // check for VM
+        // check for CFunction
+
+        // OR: Collapse the calling conventions and structures
+        // so that applying them is always the same and you 
+        // only have to check types
+
         | mov64 rax, (size_t) generic_apply
         | call rax
 
@@ -670,7 +691,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
       case OP_JUMP: {
         size_t loc = code[code_offset++];
-        AR_LOG_JIT("jump-when-pop " << loc);
+        AR_LOG_JIT("jump " << loc);
 
         auto it = offsets_to_labels.find(loc);
         AR_ASSERT(it != offsets_to_labels.end() && "jump label was not generated correctly");
@@ -759,22 +780,23 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       }
     }
   }
-  done:
 
   | jmp ->unwind
   |->exception:
 
-	//| mov rArg2, 123; mov rArg3, 456; mov rArg4, 789;
 	| stateCallRetValue native_exception
-	//| mov rStackI, rax
 	| mov rStackI, rax
-	//| mov rax, 0
 
   |->unwind: 
 
   | mov [rsp+24], rStackI
 	| stateCall state_collect;
   | mov rStackI, [rsp+24]
+
+  if(sanity_log_end) {
+    | mov rArg1, rStackI
+    | simpCall sanity_log_end
+  }
 
   // state->gc.native_frames = NativeFrame.previous
   | mov rArg1, rState
@@ -789,7 +811,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rax, rStackI
 
   // Restore registers
-  | pop rFx
   | pop rStackI
 	| pop rState
   | pop rbx

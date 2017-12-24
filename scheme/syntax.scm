@@ -603,31 +603,6 @@ TODO: Casting
       (filter fn (cdr lst)))))
 
 ;; Redefine map
-
-
-;; VECTORS
-
-(define (vector->list vec)
-  (if (fx= (vector-length vec) 0)
-    '()
-    (let loop ((i (vector-length vec)) (lst '()))
-      (if (fx= i 0)
-        lst
-        (loop (fx- i 1) (cons (vector-ref vec (fx- i 1)) lst))))))
-
-
-(define (list->vector lst)
-  (if (null? lst)
-    (make-vector)
-    (let ((vec (make-vector (length lst))))
-      (let loop ((elt (car lst))
-                 (rest (cdr lst))
-                 (i 0))
-        (vector-set! vec i elt)
-        (if (null? rest) vec (loop (car rest) (cdr rest) (+ i 1)))))))
-
-(define (vector . lst) (list->vector lst))
-
 ;; SRFI-0
 
 ;; TODO: This needs to be rewritten in the style of module-imports, to allow recursion.
@@ -730,14 +705,14 @@ TODO: Casting
             (list (list-ref v 0) (list-ref v 1) (if (eq? (length v) 2) (list-ref v 0) (list-ref v 2))))
           varb))
 
-      `(,#'let ,#'loop (,@(map (lambda (v) (list (list-ref v 0) (list-ref v 1))) vars))
-         (,#'if ,(list-ref test 0)
-           (,#'begin ,@(cdr test))
-           (,#'begin
-             ,@body
-             (,#'loop ,@(map (lambda (v) (list-ref v 2)) vars)))))))
+      #`(let loop (,@(map (lambda (v) (list (list-ref v 0) (list-ref v 1))) vars))
+          (if ,(list-ref test 0)
+            (begin ,@(cdr test))
+            (begin
+              ,@body
+              (loop ,@(map (lambda (v) (list-ref v 2)) vars)))))
 
-  );;do
+      )))
 
 ;; SRFI 1
 
@@ -869,6 +844,40 @@ TODO: Casting
                 (unless (null? rest)
                   (begin
                     (loop (car rest) (cdr rest)))))))))))
+
+;; VECTORS
+
+(define (vector-copy vec)
+  (define copy (make-vector (vector-length vec)))
+  (define limit (vector-length vec))
+  (do ((i 0 (fx+ i 1)))
+       ((fx>= i limit))
+    (begin
+      (vector-set! copy i (vector-ref vec i))))
+  copy)
+
+
+(define (vector->list vec)
+  (if (fx= (vector-length vec) 0)
+    '()
+    (let loop ((i (vector-length vec)) (lst '()))
+      (if (fx= i 0)
+        lst
+        (loop (fx- i 1) (cons (vector-ref vec (fx- i 1)) lst))))))
+
+
+(define (list->vector lst)
+  (if (null? lst)
+    (make-vector)
+    (let ((vec (make-vector (length lst))))
+      (let loop ((elt (car lst))
+                 (rest (cdr lst))
+                 (i 0))
+        (vector-set! vec i elt)
+        (if (null? rest) vec (loop (car rest) (cdr rest) (+ i 1)))))))
+
+(define (vector . lst) (list->vector lst))
+
 
 ;; COMPATIBILITY
 

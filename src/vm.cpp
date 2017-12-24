@@ -11,6 +11,9 @@
 // TODO: Multiple return values cannot be implemented efficiently because we cannot grow the stack
 // on-demand.
 
+
+// Does add some runtime cost
+
 // Since values is sort of a special form, we could maybe instrument the compiler to increase
 // the stack-max for values storage.
 
