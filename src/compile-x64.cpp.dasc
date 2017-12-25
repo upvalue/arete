@@ -20,6 +20,9 @@
 // inline recursive calls in the Scheme compiler in order to make it easy to determine whether this
 // is possible here.
 
+// TODO: Why use rStackI? Why not just use the RSP and decrement/increment by 8? Would probably
+// reduce code quite a bit
+
 // TODO: Currently variables are GC-tracked much in the way we track them C++-side. But in assembly
 // we have full control over the stack. Rather than using the NativeFrame structure, for example,
 // we could just guarantee that everything from rsp to rsp+whatever is a pointer. One issue with the

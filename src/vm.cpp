@@ -261,18 +261,9 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   memset(f.locals, 0, f.fn->local_count * sizeof(void*));
   memcpy(f.locals, argv, (argc > f.fn->max_arity ? f.fn->max_arity : argc) * sizeof(void*));
 
+  // Clear upvalues array in case creation of rest arguments causes allocation
   if(f.fn->free_variables != 0) {
-    // Allocate upvalues as needed
-    AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
-
     memset(f.upvalues, 0, f.fn->free_variables->length * sizeof(Value));
-
-    for(size_t i = 0; i != f.fn->free_variables->length; i++) {
-      f.upvalues[i] = gc.allocate(UPVALUE, sizeof(Upvalue));
-      size_t idx = ((size_t*) f.fn->free_variables->data)[i];
-      AR_LOG_VM("tying free variable " << i << " to local idx " << idx);
-      f.upvalues[i].as<Upvalue>()->U.local = &f.locals[idx];
-    }
   }
 
   if(argc < f.fn->min_arity) {
@@ -289,6 +280,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       f.destroyed = true;
       return eval_error(os.str());
     } 
+
+    // Allocate REST arguments
 
     // argv may actually be temps, if this is a tail call
     if(argv == &temps[0]) {
@@ -315,8 +308,22 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     f.locals[f.fn->max_arity] = C_NIL;
   }
 
+  if(f.fn->free_variables != 0) {
+    // Allocate upvalues as needed
+    AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
+
+    for(size_t i = 0; i != f.fn->free_variables->length; i++) {
+      f.upvalues[i] = gc.allocate(UPVALUE, sizeof(Upvalue));
+      size_t idx = ((size_t*) f.fn->free_variables->data)[i];
+      AR_LOG_VM("tying free variable " << i << " to local idx " << idx);
+      f.upvalues[i].as<Upvalue>()->U.local = &f.locals[idx];
+    }
+  }
+
   tail_recur:
   size_t code_offset = 0;
+
+
 
   // Forcing this into a register provides a decent speedup for the VM, but as we can't take its
   // address in that case, it is necessary to update the pointer manually after every potential
@@ -465,7 +472,9 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
       VM_CASE(OP_APPLY_TAIL): {
         size_t insn = VM_CODE()[code_offset-1];
         size_t fargc = VM_NEXT_INSN();
+
         Value afn = f.stack[f.stack_i - fargc - 1];
+
 
         AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " " << f.stack_i);
         AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " fargc: " << fargc << " fn: " << afn);
@@ -492,7 +501,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             } 
 
             // Replace function on stack with its result
-            AR_ASSERT(f.stack_i > fargc);
+            AR_ASSERT(f.stack_i >= (fargc + 1));
             f.stack[f.stack_i - fargc - 1] =
               f.stack[f.stack_i - fargc - 1].c_function_apply(*this, fargc, &f.stack[f.stack_i - fargc]);
 
@@ -585,7 +594,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             }
 
             break;
-
           }
           default:
             std::ostringstream os;

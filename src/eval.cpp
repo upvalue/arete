@@ -296,8 +296,8 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
       return tmp;
     }
     case S_LAMBDA: {
-      Value fn_env, args, saved_fn;
-      AR_FRAME(this, fn_env, args, saved_fn);
+      Value fn_env, args, saved_fn, argi, arg;
+      AR_FRAME(this, fn_env, args, argi, saved_fn, arg);
       Function* fn = static_cast<Function*>(gc.allocate(FUNCTION, sizeof(Function)));
       saved_fn = fn;
 
@@ -319,11 +319,11 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
       } else {
         // Third case: normal arguments list
         // Build a copy of the list and extract the REST arguments
-        Value argi = args;
+        argi = args;
 
         temps.clear();
         while(argi.heap_type_equals(PAIR)) {
-          Value arg = argi.car();
+          arg = argi.car();
 
           if(!arg.identifierp()) {
             EVAL_TRACE(argi);
@@ -341,7 +341,7 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
           }
           fn->rest_arguments = argi;
         }
-        
+
         args = temps_to_list();
 
         fn = saved_fn.as_unsafe<Function>();
@@ -431,7 +431,6 @@ Value State::eval_apply_function(Value fn, size_t argc, Value* argv) {
   tmp = eval_body(frame, fn.function_body());
 
   return tmp;
-
 }
 
 Value State::eval_body(EvalFrame frame, Value body, bool single) {
@@ -762,7 +761,8 @@ tail_call:
               args = args.cdr();
             }
 
-            tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &argv.vector_storage_data()[0]);
+            //tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &argv.vector_storage_data()[0]);
+            tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, argv.vector_storage_data());
 
             EVAL_CHECK(tmp, exp);
             
@@ -843,8 +843,6 @@ Value State::eval_list(Value lst, bool expand, Value env) {
 Value State::apply(Value fn, size_t argc, Value* argv) {
   switch(fn.type()) {
     case VMFUNCTION: case CLOSURE: {
-      Value vfn = fn.closure_unbox();
-
       return apply_vm(fn, argc, argv);
     }
     case CFUNCTION:

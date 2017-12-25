@@ -229,7 +229,7 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
 
   Value tmp, lst = argv[1], fn = argv[0], arg;
   ListAppender nlst;
-  AR_FRAME(state, nlst.head, nlst.tail,  lst, fn, arg, tmp);
+  AR_FRAME(state, nlst.head, nlst.tail, lst, fn, arg, tmp);
   
   size_t i = 0;
 

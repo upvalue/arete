@@ -118,7 +118,9 @@
   (if (c #'unquote (car lst))
     (cadr lst)
     (if (c #'quasiquote (car lst))
-      (list #'quote (cadr lst))
+      (begin 
+        (print "sub-quasiquote" lst)
+        (qq-list c lst))
       (qq-list c lst))))
          
 (define (qq-object c object)
