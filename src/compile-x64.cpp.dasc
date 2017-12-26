@@ -51,6 +51,9 @@
 // Well, we know where the code_offset is at any given time, so we could store that in a register
 // or on the stack and use it along with the VM source information to add stack trace info.
 
+// Also, we only really need to store it at spots that can cause errors. Something like
+// PUSH_IMMEDIATE will never fail.
+
 // Anatomy of a natively-compiled Scheme function
 
 // Registers:

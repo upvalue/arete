@@ -2327,18 +2327,22 @@ enum {
   OP_JUMP_UNLESS = 18,
   // Instructions below here are exploded variations on existing primitives
   OP_LOCAL_GET_0 = 19,
+  // Prologue instructions
+  OP_ARGC_EQ = 20,
+  OP_ARGC_GTE = 21,
+  OP_ARGV_REST = 22,
   // Instructions below this point are primitive versions of the builtin C++ routines for speed;
   // they are not necessary for code to execute correctly.
-  OP_ADD = 20,
-  OP_SUB = 21,
-  OP_LT = 22,
-  OP_CAR = 23,
-  OP_LIST_REF = 24,
-  OP_NOT = 25,
-  OP_EQ = 26,
-  OP_FX_LT = 27,
-  OP_FX_ADD = 28,
-  OP_FX_SUB = 29,
+  OP_ADD = 23,
+  OP_SUB = 24,
+  OP_LT = 25,
+  OP_CAR = 26,
+  OP_LIST_REF = 27,
+  OP_NOT = 28,
+  OP_EQ = 29,
+  OP_FX_LT = 30,
+  OP_FX_ADD = 31,
+  OP_FX_SUB = 32,
 };
 inline Type Value::type() const {
 #if ARETE_DEV

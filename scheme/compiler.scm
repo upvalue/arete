@@ -175,6 +175,7 @@
     return return-end
     jump jump-when jump-when-pop jump-unless
     local-get-0
+    argc-eq argc-gte argv-rest
     + - < car list-ref not eq? fx< fx+ fx-))
 
 (let loop ((i 0) (lst insn-list))
@@ -206,7 +207,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
-               (0 jump jump-when jump-unless words close-over return return-end car not)
+               (0 jump jump-when jump-unless words close-over return return-end car not argc-eq argc-gte argv-rest)
                (1 push-immediate push-constant global-get local-get local-get-0 upvalue-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -570,6 +571,13 @@
   (OpenFn/min-arity! sub-fn arg-len)
   (OpenFn/max-arity! sub-fn arg-len)
   (OpenFn/var-arity! sub-fn varargs)
+
+  ;; Emit argument checking / rest argument creation instructions
+  (if varargs
+    (begin
+      (emit sub-fn 'argc-gte arg-len)
+      (emit sub-fn 'argv-rest))
+    (emit sub-fn 'argc-eq arg-len))
 
   ;; Calculate argument count
   (OpenFn/local-count! sub-fn (if (identifier? args) 1 (fx+ arg-len (if (OpenFn/var-arity sub-fn) 1 0))))

@@ -212,6 +212,10 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
     &&LABEL_OP_LOCAL_GET_0,
 
+    &&LABEL_OP_ARGC_EQ,
+    &&LABEL_OP_ARGC_GTE,
+    &&LABEL_OP_ARGV_REST,
+
     // Primitives implemented directly in the VM
     &&LABEL_OP_ADD, &&LABEL_OP_SUB,
     &&LABEL_OP_LT,
@@ -244,6 +248,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   void* locals[f.fn->local_count];
   void* upvalues[upvalue_count];
 
+  // TODO: Try using a stack pointer instead of stack_i. It can be forced into assembly, maybe.
+
   f.stack = (Value*) stack;
   f.locals = (Value*) locals;
 
@@ -266,48 +272,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
     memset(f.upvalues, 0, f.fn->free_variables->length * sizeof(Value));
   }
 
-  if(argc < f.fn->min_arity) {
-    std::ostringstream os;
-    os << "function " << f.fn << " expected at least " << f.fn->min_arity
-      << " arguments " << "but got " << argc;
-    f.destroyed = true;
-    return eval_error(os.str());
-  } else if(argc > f.fn->max_arity) {
-    if(!f.fn->get_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT)) {
-      std::ostringstream os;
-      os << "function " << f.fn << " expected at most " << f.fn->max_arity
-        << " arguments " << "but got " << argc;
-      f.destroyed = true;
-      return eval_error(os.str());
-    } 
-
-    // Allocate REST arguments
-
-    // argv may actually be temps, if this is a tail call
-    if(argv == &temps[0]) {
-      f.locals[f.fn->max_arity] = temps_to_list(f.fn->max_arity);
-    } else {
-      temps.clear();
-      unsigned i;
-      for(i = f.fn->max_arity; i != argc; i++) {
-        //std::cout << "Creating rest with argc i " << i  << ' ' << argv[i] << std::endl;
-        temps.push_back(argv[i]);
-      }
-
-      f.locals[f.fn->max_arity] = temps_to_list();
-      //std::cout << argv[f.fn->max_arity] << std::endl;
-    }
-
-    for(unsigned i = f.fn->max_arity; i != argc; i++) {
-      temps.pop_back();
-    }
-
-    //argc = f.fn->max_arity + 1;
-    //std::cout << "Creating rest arguments from " << i << std::endl;
-  } else if(f.fn->get_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT)) {
-    f.locals[f.fn->max_arity] = C_NIL;
-  }
-
   if(f.fn->free_variables != 0) {
     // Allocate upvalues as needed
     AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
@@ -322,8 +286,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   tail_recur:
   size_t code_offset = 0;
-
-
 
   // Forcing this into a register provides a decent speedup for the VM, but as we can't take its
   // address in that case, it is necessary to update the pointer manually after every potential
@@ -343,6 +305,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
 #if AR_USE_REGISTER
   register size_t *code asm ("r15") = (size_t*) f.fn->code_pointer();
+  //register Value *stackp asm ("r14") = ()
 #else
   size_t * code = (size_t*) f.fn->code_pointer();
 #endif
@@ -715,6 +678,56 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
       VM_CASE(OP_LOCAL_GET_0): {
         f.stack[f.stack_i++] = f.locals[0];
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ARGC_EQ): {
+        // Check that argc equals a specific number
+        size_t eargc = code[code_offset++];
+
+        AR_LOG_VM("argc-eq " << eargc);
+
+        if(argc != eargc) {
+          std::ostringstream os;
+          os << "function " << f.fn << " expected exactly " << f.fn->min_arity
+            << " arguments but got " << argc << std::endl;
+          f.exception = eval_error(os.str());
+          goto exception;
+        }
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ARGC_GTE): {
+        size_t eargc = code[code_offset++];
+
+        if(argc < eargc) {
+          std::ostringstream os;
+          os << "function " << f.fn << " expected at least " << f.fn->min_arity << 
+            " arguments but got " << argc << std::endl;
+          f.exception = eval_error(os.str());
+          goto exception;
+        }
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ARGV_REST): {
+        if(argv == &temps[0]) {
+          f.locals[f.fn->max_arity] = temps_to_list(f.fn->max_arity);
+        } else {
+          temps.clear();
+          unsigned i;
+          for(i = f.fn->max_arity; i != argc; i++) {
+            //std::cout << "Creating rest with argc i " << i  << ' ' << argv[i] << std::endl;
+            temps.push_back(argv[i]);
+          }
+
+          f.locals[f.fn->max_arity] = temps_to_list();
+
+          //std::cout << argv[f.fn->max_arity] << std::endl;
+        }
+        VM_RESTORE();
         VM_DISPATCH();
       }
 
