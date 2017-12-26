@@ -564,7 +564,6 @@
   (OpenFn/parent! sub-fn fn)
 
   ;; Note the depth of the function
-  
   (OpenFn/depth! sub-fn (if fn (fx+ (OpenFn/depth fn) 1) 0))
 
   ;; Calculate arity

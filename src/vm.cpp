@@ -248,8 +248,6 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
   void* locals[f.fn->local_count];
   void* upvalues[upvalue_count];
 
-  // TODO: Try using a stack pointer instead of stack_i. It can be forced into assembly, maybe.
-
   f.stack = (Value*) stack;
   f.locals = (Value*) locals;
 
@@ -286,6 +284,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
 
   tail_recur:
   size_t code_offset = 0;
+
+  // TODO: Try using a stack pointer instead of stack_i for perf
 
   // Forcing this into a register provides a decent speedup for the VM, but as we can't take its
   // address in that case, it is necessary to update the pointer manually after every potential
@@ -381,12 +381,7 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             goto exception;
           }
         }
-        if(key.symbol_immutable()) {
-          std::ostringstream os;
-          os << "attempt to set! immutable symbol " << key;
-          f.exception = eval_error(os.str());
-          goto exception;
-        }
+
         f.stack_i -= 1;
         key.set_symbol_value(val);
         VM_DISPATCH();

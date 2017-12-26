@@ -90,8 +90,8 @@ suites = (
     ('modules', ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', 
         '--eval', "(set-top-level-value! '*module-paths* (append (top-level-value '*module-paths*) (list \"tests/modules\")))",
         '{}']),
-    ('syntax-rules', 
-        ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', 'scheme/rules.scm', '{}'])
+    #('syntax-rules', 
+        #['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', 'scheme/rules.scm', '{}'])
 )
 
 if __name__ == '__main__':

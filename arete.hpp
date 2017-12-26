@@ -372,6 +372,8 @@ struct Bytevector : HeapValue {
  * the generational garbage collector needs to keep track of pointer stores.
  */
 struct Value {
+  static const unsigned VALUE_PROCEDURE_BIT = 1 << 9;
+
   union {
     HeapValue* heap;
     ptrdiff_t bits;
@@ -585,11 +587,6 @@ struct Value {
     return heap->get_header_bit(SYMBOL_GENSYM_BIT);
   }
 
-  bool symbol_immutable() const {
-    AR_TYPE_ASSERT(type() == SYMBOL);
-    return heap->get_header_bit(SYMBOL_IMMUTABLE_BIT);
-  } 
-  
   /**
    * @return true if a symbol has been seen by the reader
    */
@@ -609,7 +606,6 @@ struct Value {
     return heap->get_header_bit(SYMBOL_QUALIFIED_BIT);
   }
 
-  static const unsigned SYMBOL_IMMUTABLE_BIT = 1 << 9;
   static const unsigned SYMBOL_GENSYM_BIT = 1 << 10;
   static const unsigned SYMBOL_READ_BIT = 1 << 11;
   static const unsigned SYMBOL_QUALIFIED_BIT = 1 << 12;
@@ -642,9 +638,9 @@ struct Value {
   void set_cdr(Value);
 
   // True if a pair has been allocated with source code information
-  static const unsigned PAIR_SOURCE_BIT = 1 << 9; 
+  static const unsigned PAIR_SOURCE_BIT = 1 << 10; 
   // True if a pair is immutable
-  static const unsigned PAIR_IMMUTABLE_BIT = 1 << 10;
+  static const unsigned PAIR_IMMUTABLE_BIT = 1 << 11;
 
   /* Check whether a pair has source code information attached to it */
   bool pair_has_source() const {
@@ -663,10 +659,10 @@ struct Value {
   void set_pair_src(const SourceLocation&);
 
   // EXCEPTION
-  static const unsigned EXCEPTION_ACTIVE_BIT = 1 << 9;
+  static const unsigned EXCEPTION_ACTIVE_BIT = 1 << 10;
   // If not set, no stack trace will be generated. Used to implement 
   // one-shot continuations
-  static const unsigned EXCEPTION_TRACE_BIT = 1 << 10;
+  static const unsigned EXCEPTION_TRACE_BIT = 1 << 11;
 
   void exception_deactivate();
   void exception_activate();
@@ -688,8 +684,8 @@ struct Value {
   bool function_is_macro() const;
 
   // C FUNCTIONS
-  static const unsigned CFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
-  static const unsigned CFUNCTION_CLOSURE_BIT = 1 << 10;
+  static const unsigned CFUNCTION_VARIABLE_ARITY_BIT = 1 << 10;
+  static const unsigned CFUNCTION_CLOSURE_BIT = 1 << 11;
 
   c_function_t c_function_addr() const;
 
@@ -707,10 +703,10 @@ struct Value {
   Value c_function_apply(State&, size_t, Value*);
 
   // VM FUNCTIONS
-  static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 9;
-  static const unsigned VMFUNCTION_LOG_BIT = 1 << 10;
-  static const unsigned VMFUNCTION_MACRO_BIT = 1 << 11;
-  static const unsigned VMFUNCTION_IDENTIFIER_MACRO_BIT = 1 << 12;
+  static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 10;
+  static const unsigned VMFUNCTION_LOG_BIT = 1 << 11;
+  static const unsigned VMFUNCTION_MACRO_BIT = 1 << 12;
+  static const unsigned VMFUNCTION_IDENTIFIER_MACRO_BIT = 1 << 13;
 
   unsigned vm_function_min_arity() const;
   unsigned vm_function_max_arity() const;
@@ -746,7 +742,7 @@ struct Value {
   /** If a type is a closure, return its function */
   Value closure_unbox() const;
 
-  static const unsigned UPVALUE_CLOSED_BIT = 1 << 9;
+  static const unsigned UPVALUE_CLOSED_BIT = 1 << 10;
 
   // RECORD
   Value record_type() const;
@@ -766,7 +762,7 @@ struct Value {
 
   template <class T> T* record_data();
 
-  static const unsigned RECORD_FINALIZED_BIT = 1 << 9;
+  static const unsigned RECORD_FINALIZED_BIT = 1 << 10;
 
   // RECORD TYPES
 
@@ -793,10 +789,10 @@ struct Value {
     return heap->get_header_bit(FILE_PORT_OUTPUT_BIT);
   }
 
-  static const unsigned FILE_PORT_INPUT_BIT = 1 << 9;
-  static const unsigned FILE_PORT_OUTPUT_BIT = 1 << 10;
-  static const unsigned FILE_PORT_NEVER_CLOSE_BIT = 1 << 11;
-  static const unsigned FILE_PORT_STRING_BIT = 1 << 12;
+  static const unsigned FILE_PORT_INPUT_BIT = 1 << 10;
+  static const unsigned FILE_PORT_OUTPUT_BIT = 1 << 11;
+  static const unsigned FILE_PORT_NEVER_CLOSE_BIT = 1 << 12;
+  static const unsigned FILE_PORT_STRING_BIT = 1 << 13;
 
   // OPERATORS
 
