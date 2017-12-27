@@ -24,7 +24,7 @@ Value State::make_flonum(double number) {
 // to track variadic arguments
 
 #define OPV(name, cname, operator, sub, nozero, ret0) \
-  Value name(State& state, size_t argc, Value* argv) { \
+  Value name(State& state, size_t argc, Value* argv, void* v) { \
     if(argc == 0) return Value::make_fixnum(ret0);  \
     static const char* fn_name = cname; \
     ptrdiff_t fxresult = 0; \
@@ -71,6 +71,7 @@ AR_DEFUN("/", fn_div, 2, 2, true);
 #define OPV_BOOL(name, cname, operator) \
   Value name(State& state, size_t argc, Value* argv) { \
     static const char* fn_name = cname; \
+    AR_FN_ARGC_GTE(state, argc, 2); \
     AR_FN_ASSERT_ARG(state, 0, "to be numeric", argv[0].numeric()); \
     for(size_t i = 0; i != argc - 1; i++) { \
       AR_FN_ASSERT_ARG(state, (i+1), "to be numeric", argv[i+1].numeric()); \
@@ -113,9 +114,10 @@ OPV_BOOL(fn_gt, ">", >)
 #undef OPV_BOOL
 // Fixnum arithmetic
 
-Value fn_fx_sub(State& state, size_t argc, Value* argv) {
+Value fn_fx_sub(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "fx-";
 
+  AR_FN_ARGC_GTE(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
 
   if(argc == 1) {
@@ -133,9 +135,11 @@ Value fn_fx_sub(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("fx-", fn_fx_sub, 1, 1, true);
 
-Value fn_fx_add(State& state, size_t argc, Value* argv) {
+Value fn_fx_add(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "fx+";
   ptrdiff_t result = 0;
+
+  AR_FN_ARGC_EQ(state, argc, 2);
 
   for(size_t i = 0; i != argc; i++) {
     AR_FN_EXPECT_TYPE(state, argv, i, FIXNUM);
@@ -150,6 +154,7 @@ AR_DEFUN("fx+", fn_fx_add, 2, 2, true);
 #define FX_COMPARISON(cname, name, op) \
   Value name (State& state, size_t argc, Value* argv) { \
     static const char* fn_name = cname; \
+    AR_FN_ARGC_EQ(state, argc, 2); \
     AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM); \
     AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM); \
     return Value::make_boolean(argv[0].fixnum_value() op argv[1].fixnum_value()); \
@@ -161,16 +166,18 @@ FX_COMPARISON("fx<", fn_fx_lt, <)
 FX_COMPARISON("fx>", fn_fx_gt, >)
 FX_COMPARISON("fx>=", fn_fx_gte, >=)
 
-Value fn_fx_equals(State& state, size_t argc, Value* argv) {
+Value fn_fx_equals(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "fx=";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   return Value::make_boolean(argv[0].bits == argv[1].bits);
 }
 AR_DEFUN("fx=", fn_fx_equals, 2, 2);
 
-Value fn_fx_div(State& state, size_t argc, Value* argv) {
+Value fn_fx_div(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "fx/";
+  AR_FN_ARGC_EQ(state, argc, 2);
 
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
@@ -181,8 +188,9 @@ Value fn_fx_div(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("fx/", fn_fx_div, 2, 2);
 
-Value fn_expt(State& state, size_t argc, Value* argv) {
+Value fn_expt(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "expt";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_ASSERT_ARG(state, 0, "to be numeric", argv[0].numeric());
   AR_FN_ASSERT_ARG(state, 1, "to be numeric", argv[1].numeric());
 
@@ -195,8 +203,9 @@ Value fn_expt(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("expt", fn_expt, 2, 2);
 
-Value fn_floor(State& state, size_t argc, Value* argv) {
+Value fn_floor(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "floor";
+  AR_FN_ARGC_EQ(state, argc, 1);
   if(argv[0].fixnump()) return argv[0];
   AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].heap_type_equals(FLONUM));
 
@@ -204,16 +213,18 @@ Value fn_floor(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("floor", fn_floor, 1);
 
-Value fn_round(State& state, size_t argc, Value* argv) {
+Value fn_round(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "round";
+  AR_FN_ARGC_EQ(state, argc, 1);
   if(argv[0].fixnump()) return argv[0];
   AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].heap_type_equals(FLONUM));
   return state.make_flonum(trunc(argv[0].flonum_value()));
 }
 AR_DEFUN("round", fn_round, 1);
 
-Value fn_ceiling(State& state, size_t argc, Value* argv) {
+Value fn_ceiling(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "ceiling";
+  AR_FN_ARGC_EQ(state, argc, 1);
 
   if(argv[0].fixnump()) return argv[0];
 
@@ -222,16 +233,18 @@ Value fn_ceiling(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("ceiling", fn_ceiling, 1);
 
-Value fn_modulo(State& state, size_t argc, Value* argv) {
+Value fn_modulo(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "modulo";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   return Value::make_fixnum((argv[0].fixnum_value() % argv[1].fixnum_value() + argv[1].fixnum_value()) % argv[1].fixnum_value());
 }
 AR_DEFUN("modulo", fn_modulo, 2);
 
-Value fn_quotient(State& state, size_t argc, Value* argv) {
+Value fn_quotient(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "quotient";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   ldiv_t div = ldiv(argv[0].fixnum_value(), argv[1].fixnum_value());
@@ -239,8 +252,9 @@ Value fn_quotient(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("quotient", fn_quotient, 2);
 
-Value fn_remainder(State& state, size_t argc, Value* argv) {
+Value fn_remainder(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "remainder";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   ldiv_t div = ldiv(argv[0].fixnum_value(), argv[1].fixnum_value());
@@ -248,8 +262,9 @@ Value fn_remainder(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("remainder", fn_remainder, 2);
 
-Value fn_atan(State& state, size_t argc, Value* argv) {
+Value fn_atan(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "atan";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
 
   double y = argv[0].fixnump() ? (double) argv[0].fixnum_value() : argv[0].flonum_value();
@@ -269,8 +284,9 @@ AR_DEFUN("atan", fn_atan, 1, 2);
 // and have the same name as their math.h equivalent
 
 #define DEFUN_TRIG(name) \
-  Value fn_ ## name (State& state, size_t argc, Value* argv) { \
+  Value fn_ ## name (State& state, size_t argc, Value* argv, void* v) { \
     static const char* fn_name = #name; \
+    AR_FN_ARGC_EQ(state, argc, 1); \
     AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric()); \
     return state.make_flonum(name (argv[0].fixnump() ? (double) argv[0].fixnum_value() : argv[0].flonum_value())); \
   }  \
@@ -286,8 +302,9 @@ DEFUN_TRIG(acos);
 
 // TODO: Radix argument
 
-Value fn_number_to_string(State& state, size_t argc, Value* argv) {
+Value fn_number_to_string(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "number->string";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
   std::ostringstream os;
   os << argv[0];
@@ -297,6 +314,7 @@ AR_DEFUN("number->string", fn_number_to_string, 1);
 
 Value fn_minmax(State& state, size_t argc, Value* argv, bool min) {
   const char* fn_name = min ? "min" : "max";
+  AR_FN_ARGC_GTE(state, argc, 1);
   ptrdiff_t fxacc = 0;
   bool inexact = false;
   bool set = false;
@@ -343,18 +361,19 @@ Value fn_minmax(State& state, size_t argc, Value* argv, bool min) {
   return state.make_flonum(flacc);
 }
 
-Value fn_min(State& state, size_t argc, Value* argv) {
+Value fn_min(State& state, size_t argc, Value* argv, void* v) {
   return fn_minmax(state, argc, argv, true);
 }
 AR_DEFUN("min", fn_min, 1, 1, true);
 
-Value fn_max(State& state, size_t argc, Value* argv) {
+Value fn_max(State& state, size_t argc, Value* argv, void* v) {
   return fn_minmax(state, argc, argv, false);
 }
 AR_DEFUN("max", fn_max, 1, 1, true);
 
-Value fn_string_to_number(State& state, size_t argc, Value* argv) {
+Value fn_string_to_number(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "string->number";
+  AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   if(argc == 2) {
     AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
@@ -381,8 +400,9 @@ AR_DEFUN("string->number", fn_string_to_number, 1, 2);
 
 ///// SRFI 151: Bitwise operations
 
-Value fn_bitwise_and(State& state, size_t argc, Value* argv) {
+Value fn_bitwise_and(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "bitwise-and";
+  AR_FN_ARGC_GTE(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
 
   ptrdiff_t fx = argv[0].fixnum_value();
@@ -395,8 +415,9 @@ Value fn_bitwise_and(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("bitwise-and", fn_bitwise_and, 2, 2, true);
 
-Value fn_bitwise_or(State& state, size_t argc, Value* argv) {
+Value fn_bitwise_or(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "bitwise-or";
+  AR_FN_ARGC_GTE(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
 
   ptrdiff_t fx = argv[0].fixnum_value();
@@ -409,8 +430,9 @@ Value fn_bitwise_or(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("bitwise-ior", fn_bitwise_or, 2, 2, true);
 
-Value fn_bitwise_xor(State& state, size_t argc, Value* argv) {
+Value fn_bitwise_xor(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "bitwise-xor";
+  AR_FN_ARGC_GTE(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
 
   ptrdiff_t fx = argv[0].fixnum_value();
@@ -423,8 +445,9 @@ Value fn_bitwise_xor(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("bitwise-xor", fn_bitwise_xor, 2, 2, true);
 
-Value fn_bitwise_not(State& state, size_t argc, Value* argv) {
+Value fn_bitwise_not(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "bitwise-not";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
 
   return Value::make_fixnum(~argv[0].fixnum_value());

@@ -202,14 +202,17 @@ Value State::make_table(size_t size_log2 ) {
 
 ///// SCHEME FUNCTIONS
 
-Value fn_make_table(State& state, size_t argc, Value* argv) {
+Value fn_make_table(State& state, size_t argc, Value* argv, void* v) {
+  const char *fn_name = "make-table";
+  AR_FN_ARGC_EQ(state, argc, 0);
   return state.make_table();
 }
 AR_DEFUN("make-table", fn_make_table, 0);
 
-Value fn_table_ref(State& state, size_t argc, Value* argv) {
+Value fn_table_ref(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "table-ref";
 
+  AR_FN_ARGC_BETWEEN(state, argc, 2, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
   AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
 
@@ -220,9 +223,10 @@ Value fn_table_ref(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("table-ref", fn_table_ref, 2, 3);
 
-Value fn_table_set(State& state, size_t argc, Value* argv) {
+Value fn_table_set(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "table-set!";
 
+  AR_FN_ARGC_EQ(state, argc, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
   AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
 
@@ -230,9 +234,10 @@ Value fn_table_set(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("table-set!", fn_table_set, 3);
 
-Value fn_table_delete(State& state, size_t argc, Value* argv) {
+Value fn_table_delete(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "table-delete!";
 
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
   AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
 
@@ -261,14 +266,16 @@ Value fn_table_delete(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("table-delete!", fn_table_delete, 2);
 
-Value fn_table_entries(State& state, size_t argc, Value* argv) {
+Value fn_table_entries(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "table-entries";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
   return Value::make_fixnum(argv[0].table_entries());
 }
 AR_DEFUN("table-entries", fn_table_entries, 1);
 
 static Value fn_table_map_impl(const char* fn_name, bool map, State& state, size_t argc, Value* argv) {
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
   AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
 
@@ -287,18 +294,19 @@ static Value fn_table_map_impl(const char* fn_name, bool map, State& state, size
   return map ? lst : C_UNSPECIFIED;
 }
 
-Value fn_table_map(State& state, size_t argc, Value* argv) {
+Value fn_table_map(State& state, size_t argc, Value* argv, void* v) {
   return fn_table_map_impl("table-map", true, state, argc, argv);
 }
 AR_DEFUN("table-map", fn_table_map, 2);
 
-Value fn_table_for_each(State& state, size_t argc, Value* argv) {
+Value fn_table_for_each(State& state, size_t argc, Value* argv, void* v) {
   return fn_table_map_impl("table-for-each", false, state, argc, argv);
 }
 AR_DEFUN("table-for-each", fn_table_for_each, 2);
 
-Value fn_table_copy(State& state, size_t argc, Value* argv) {
+Value fn_table_copy(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "table-copy";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
 
   Value table = argv[0];

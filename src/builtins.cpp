@@ -14,13 +14,18 @@ DefunGroup builtins("builtins");
 
 // Equality
 
-Value fn_eq(State& state, size_t argc, Value* argv) {
-  // static const char* fn_name = "eq?";
+Value fn_eq(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "eq?";
+  AR_FN_ARGC_EQ(state, argc, 2);
+  
   return Value::make_boolean(argv[0].bits == argv[1].bits);
 }
 AR_DEFUN("eq?", fn_eq, 2);
 
-Value fn_eqv(State& state, size_t argc, Value* argv) {
+Value fn_eqv(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "eqv?";
+  AR_FN_ARGC_EQ(state, argc, 2);
+
   if(argv[0].type() == FLONUM && argv[1].type() == FLONUM) {
     return Value::make_boolean(argv[0].flonum_value() == argv[1].flonum_value());
   }
@@ -29,28 +34,37 @@ Value fn_eqv(State& state, size_t argc, Value* argv) {
     return Value::make_boolean(argv[0].character() == argv[1].character());
   }
 
-  return fn_eq(state, argc, argv);
+  return fn_eq(state, argc, argv, 0);
 }
 AR_DEFUN("eqv?", fn_eqv, 2);
 
-Value fn_equal(State& state, size_t argc, Value* argv) {
+Value fn_equal(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "equal?";
+  AR_FN_ARGC_EQ(state, argc, 2);
+
   return Value::make_boolean(state.equals(argv[0], argv[1]));
 }
 AR_DEFUN("equal?", fn_equal, 2);
 
 ///// PREDICATES
 
-Value fn_procedurep(State& state, size_t argc, Value* argv) {
+Value fn_procedurep(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "procedure?";
+  AR_FN_ARGC_EQ(state, argc, 1);
   return Value::make_boolean(argv[0].procedurep());
 }
 AR_DEFUN("procedure?", fn_procedurep, 1);
 
-Value fn_value_type(State& state, size_t argc, Value* argv) {
+Value fn_value_type(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "value-type";
+  AR_FN_ARGC_EQ(state, argc, 1);
   return Value::make_fixnum(argv[0].type());
 }
 AR_DEFUN("value-type", fn_value_type, 1);
 
-Value fn_macrop(State& state, size_t argc, Value* argv) {
+Value fn_macrop(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "macro?";
+  AR_FN_ARGC_EQ(state, argc, 1);
   return Value::make_boolean(argv[0].type() == FUNCTION && argv[0].function_is_macro());
 }
 AR_DEFUN("macro?", fn_macrop, 1);
@@ -59,14 +73,17 @@ AR_DEFUN("macro?", fn_macrop, 1);
 ///// LISTS
 //
 
-Value fn_cons(State& state, size_t argc, Value* argv) {
+Value fn_cons(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "cons";
+  AR_FN_ARGC_EQ(state, argc, 2);
   return state.make_pair(argv[0], argv[1]);
 }
 AR_DEFUN("cons", fn_cons, 2);
 
 /** cons that copies source information from a given expression */
-Value fn_cons_source(State& state, size_t argc, Value* argv) {
+Value fn_cons_source(State& state, size_t argc, Value* argv, void* v) {
   const char* fn_name = "cons-source";
+  AR_FN_ARGC_EQ(state, argc, 3);
   Value pare, src;
   src = argv[0];
   Type type = src.type();
@@ -87,7 +104,9 @@ Value fn_cons_source(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("cons-source", fn_cons_source, 3);
 
-Value fn_list_source(State& state, size_t argc, Value* argv) {
+Value fn_list_source(State& state, size_t argc, Value* argv, void* v) {
+  static const char *fn_name = "list-source";
+  AR_FN_ARGC_GTE(state, argc, 1);
   if(argc == 1) return C_NIL;
   state.temps.clear();
   for(size_t i = 1; i != argc; i++) {
@@ -109,31 +128,10 @@ Value fn_list_source(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("list-source", fn_list_source, 1, 1, true);
 
-// (cons* 1) => 1
-// (cons* 1 2 3) => (1 2 . 3)
-Value fn_cons_star(State& state, size_t argc, Value* argv) {
-  //static const char* fn_name = "cons*";
-  if(argc == 1) return argv[0];
-
-  state.temps.clear();
-  for(size_t i = 0; i != argc - 1; i++) {
-    state.temps.push_back(argv[i]);
-  }
-
-  Value lst, elt;
-  AR_FRAME(state, lst, elt);
-  elt = argv[argc-1];
-  for(size_t i = state.temps.size(); i != 0; i--) {
-    lst = state.make_pair(state.temps[i-1], elt);
-    elt = lst;
-  }
-  return lst;
-}
-AR_DEFUN("cons*", fn_cons_star, 1, 1, true);
-
 /** Returns the length of a list */
-Value fn_length(State& state, size_t argc, Value* argv) {
+Value fn_length(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "length";
+  AR_FN_ARGC_EQ(state, argc, 1);
   if(argv[0] == C_NIL)
     return Value::make_fixnum(0);
 
@@ -155,8 +153,10 @@ Value fn_length(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("length", fn_length, 1);
 
-Value fn_listp(State& state, size_t argc, Value* argv) {
+Value fn_listp(State& state, size_t argc, Value* argv, void* v) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
+  static const char* fn_name = "list?";
+  AR_FN_ARGC_EQ(state, argc, 1);
   Value start = argv[0];
   if(argv[0] == C_NIL) return C_TRUE;
   while(argv[0].heap_type_equals(PAIR)) {
@@ -169,7 +169,7 @@ Value fn_listp(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("list?", fn_listp, 1);
 
-Value fn_list_ref(State& state, size_t argc, Value* argv) {
+Value fn_list_ref(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "list-ref";
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
@@ -189,8 +189,10 @@ Value fn_list_ref(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("list-ref", fn_list_ref, 2);
 
-Value fn_list_join(State& state, size_t argc, Value* argv) {
+Value fn_list_join(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "list-join";
+
+  AR_FN_ARGC_EQ(state, argc, 2);
 
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
@@ -216,6 +218,7 @@ AR_DEFUN("list-join", fn_list_join, 2);
  * if ret is true it will allocate and return a list of the results of function application.
  */
 Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, bool improper, bool ret, bool indice) {
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
 
   if(argv[1] == C_NIL) return ret ? C_NIL : C_UNSPECIFIED;
@@ -283,48 +286,49 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
   return ret ? nlst.head : C_UNSPECIFIED;
 }
 
-Value fn_map_proper(State& state, size_t argc, Value* argv) {
+Value fn_map_proper(State& state, size_t argc, Value* argv, void* v) {
   return fn_map_impl(state, argc, argv, "map1", false, true, false);
 }
 AR_DEFUN("map1", fn_map_proper, 2);
 
-Value fn_map_improper(State& state, size_t argc, Value* argv) {
+Value fn_map_improper(State& state, size_t argc, Value* argv, void* v) {
   return fn_map_impl(state, argc, argv, "map-improper", true, true, false);
 }
 AR_DEFUN("map-improper", fn_map_improper, 2);
 
-Value fn_map_improper_i(State& state, size_t argc, Value* argv) {
+Value fn_map_improper_i(State& state, size_t argc, Value* argv, void* v) {
   return fn_map_impl(state, argc, argv, "map-improper", true, true, true);
 }
 AR_DEFUN("map-improper-i", fn_map_improper_i, 2);
 
-Value fn_foreach_proper(State& state, size_t argc, Value* argv) {
+Value fn_foreach_proper(State& state, size_t argc, Value* argv, void* v) {
   return fn_map_impl(state, argc, argv, "for-each1", true, false, false);
 }
 AR_DEFUN("for-each1", fn_foreach_proper, 2);
 
-Value fn_foreach_improper(State& state, size_t argc, Value* argv) {
+Value fn_foreach_improper(State& state, size_t argc, Value* argv, void* v) {
   return fn_map_impl(state, argc, argv, "for-each-improper", true, false, false);
 }
 AR_DEFUN("for-each-improper", fn_foreach_improper, 2);
 
-Value fn_foreach_improper_i(State& state, size_t argc, Value* argv) {
+Value fn_foreach_improper_i(State& state, size_t argc, Value* argv, void* v) {
   return fn_map_impl(state, argc, argv, "for-each-improper", true, false, true);
 }
 AR_DEFUN("for-each-improper-i", fn_foreach_improper_i, 2);
 
-Value fn_map_proper_i(State& state, size_t argc, Value* argv) {
+Value fn_map_proper_i(State& state, size_t argc, Value* argv, void* v) {
   return fn_map_impl(state, argc, argv, "map-i", false, true, true);
 }
 AR_DEFUN("map-i", fn_map_proper_i, 2);
 
-Value fn_for_each_proper_i(State& state, size_t argc, Value* argv) {
+Value fn_for_each_proper_i(State& state, size_t argc, Value* argv, void* v) {
   return fn_map_impl(state, argc, argv, "for-each-i", false, false, true);
 }
 AR_DEFUN("for-each-i", fn_for_each_proper_i, 2);
 
-Value fn_filter(State& state, size_t argc, Value* argv) {
+Value fn_filter(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "filter";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_ASSERT_ARG(state, 0, "to be applicable", (argv[0].applicable()));
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
   
@@ -354,6 +358,7 @@ AR_DEFUN("filter", fn_filter, 2);
 enum Mem { MEMQ, MEMV, MEMBER };
 
 Value fn_mem_impl(const char* fn_name, Mem method, State& state, size_t argc, Value* argv) {
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
 
   if(argv[1] == C_NIL) {
@@ -379,12 +384,12 @@ Value fn_mem_impl(const char* fn_name, Mem method, State& state, size_t argc, Va
   return C_FALSE;
 }
 
-Value fn_memq(State& state, size_t argc, Value* argv) {
+Value fn_memq(State& state, size_t argc, Value* argv, void* v) {
   return fn_mem_impl("memq", MEMQ, state, argc, argv);
 }
 AR_DEFUN("memq", fn_memq, 2);
 
-Value fn_memv(State& state, size_t argc, Value* argv) {
+Value fn_memv(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "memv";
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
 
@@ -398,13 +403,14 @@ Value fn_memv(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("memv", fn_memv, 2);
 
-Value fn_member(State& state, size_t argc, Value* argv) {
+Value fn_member(State& state, size_t argc, Value* argv, void* v) {
   return fn_mem_impl("member", MEMBER, state, argc, argv);
 }
 AR_DEFUN("member", fn_member, 2);
 
-Value fn_reverse(State& state, size_t argc, Value* argv) {
+Value fn_reverse(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "reverse";
+  AR_FN_ARGC_EQ(state, argc, 1);
   if(argv[0] == C_NIL) return C_NIL;
   size_t length = argv[0].list_length();
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (length > 0));
@@ -419,9 +425,10 @@ Value fn_reverse(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("reverse", fn_reverse, 1);
 
-Value fn_apply(State& state, size_t argc, Value* argv) {
+Value fn_apply(State& state, size_t argc, Value* argv, void* v) {
   const char* fn_name = "apply";
 
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
 
@@ -445,30 +452,34 @@ AR_DEFUN("apply", fn_apply, 2);
 
 ///// PAIRS
 
-Value fn_car(State& state, size_t argc, Value* argv) {
+Value fn_car(State& state, size_t argc, Value* argv, void* v) {
   static const char *fn_name = "car";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   return argv[0].car();
 }
 AR_DEFUN("car", fn_car, 1);
 
-Value fn_cdr(State& state, size_t argc, Value* argv) {
+Value fn_cdr(State& state, size_t argc, Value* argv, void* v) {
   static const char *fn_name = "cdr";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   return argv[0].cdr();
 }
 AR_DEFUN("cdr", fn_cdr, 1);
 
-Value fn_set_car(State& state, size_t argc, Value* argv) {
+Value fn_set_car(State& state, size_t argc, Value* argv, void* v) {
   static const char *fn_name = "set-car!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   argv[0].set_car(argv[1]);
   return C_UNSPECIFIED;
 }
 AR_DEFUN("set-car!", fn_set_car, 2);
 
-Value fn_set_cdr(State& state, size_t argc, Value* argv) {
+Value fn_set_cdr(State& state, size_t argc, Value* argv, void* v) {
   static const char *fn_name = "set-cdr!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   argv[0].set_cdr(argv[1]);
   return C_UNSPECIFIED;
@@ -477,9 +488,10 @@ AR_DEFUN("set-cdr!", fn_set_cdr, 2);
 
 ///// VECTORS
 
-Value fn_make_vector(State& state, size_t argc, Value* argv) {
+Value fn_make_vector(State& state, size_t argc, Value* argv, void* v) {
   const char* fn_name = "make-vector";
-  size_t size= 0, capacity = 2;
+  AR_FN_ARGC_LTE(state, argc, 2);
+  size_t size = 0, capacity = 2;
   Value vec, fill = C_FALSE;
   AR_FRAME(state, vec, fill);
   if(argc > 0) {
@@ -501,8 +513,9 @@ Value fn_make_vector(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("make-vector", fn_make_vector, 0, 2);
 
-Value fn_vector_set(State& state, size_t argc, Value* argv) {
+Value fn_vector_set(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "vector-set!";
+  AR_FN_ARGC_EQ(state, argc, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, VECTOR);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_EXPECT_POSITIVE(state, argv, 1);
@@ -516,8 +529,9 @@ Value fn_vector_set(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("vector-set!", fn_vector_set, 3);
 
-Value fn_vector_append(State& state, size_t argc, Value* argv) {
+Value fn_vector_append(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "vector-append!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, VECTOR);
 
   state.vector_append(argv[0], argv[1]);
@@ -525,8 +539,9 @@ Value fn_vector_append(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("vector-append!", fn_vector_append, 2)
 
-Value fn_vector_ref(State& state, size_t argc, Value* argv) {
+Value fn_vector_ref(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "vector-ref";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, VECTOR);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_EXPECT_POSITIVE(state, argv, 1);
@@ -537,8 +552,9 @@ Value fn_vector_ref(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("vector-ref", fn_vector_ref, 2);
 
-Value fn_vector_length(State& state, size_t argc, Value* argv) {
+Value fn_vector_length(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "vector-length";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, VECTOR);
 
   return Value::make_fixnum(argv[0].vector_length());
@@ -548,8 +564,9 @@ AR_DEFUN("vector-length", fn_vector_length, 1);
 ///// MACROEXPANSION SUPPORT
 
 /** Generate a unique, unused symbol */
-Value fn_gensym(State& state, size_t argc, Value* argv) {
+Value fn_gensym(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "gensym";
+  AR_FN_ARGC_LTE(state, argc, 1);
 
   std::string prefix("g");
 
@@ -562,8 +579,9 @@ Value fn_gensym(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("gensym", fn_gensym, 0, 1);
 
-Value fn_gensymp(State& state, size_t argc, Value* argv) {
-  // static const char* fn_name = "gensym?";
+Value fn_gensymp(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "gensym?";
+  AR_FN_ARGC_EQ(state, argc, 1);
 
   return Value::make_boolean(argv[0].type() == SYMBOL &&
     argv[0].heap->get_header_bit(Value::SYMBOL_GENSYM_BIT));
@@ -571,8 +589,9 @@ Value fn_gensymp(State& state, size_t argc, Value* argv) {
 AR_DEFUN("gensym?", fn_gensymp, 1);
 
 // Strip qualifications from a symbol e.g. ##user#x becomes x, mainly for error messages
-Value fn_symbol_dequalify(State& state, size_t argc, Value* argv) {
+Value fn_symbol_dequalify(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "symbol-dequalify";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
 
   return state.symbol_dequalify(argv[0]);
@@ -586,12 +605,15 @@ AR_DEFUN("symbol-dequalify", fn_symbol_dequalify, 1);
 #define AR_FN_EXPECT_IDENT(state, n) \
   AR_FN_ASSERT_ARG((state), (n), "to be a valid identifier (symbol or rename)", argv[(n)].identifierp())
 
-Value fn_set_function_name(State& state, size_t argc, Value* argv) {
+Value fn_set_function_name(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "set-function-name!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
 
   switch(argv[0].type()) {
-    case FUNCTION: argv[0].as_unsafe<Function>()->name = argv[1]; break;
+    case FUNCTION: {
+      argv[0].as_unsafe<Function>()->name = argv[1]; break;
+    }
     case VMFUNCTION: argv[0].as_unsafe<VMFunction>()->name = argv[1]; break;
     default: break;
   }
@@ -599,8 +621,9 @@ Value fn_set_function_name(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("set-function-name!", fn_set_function_name, 2);
 
-Value fn_set_vmfunction_name(State& state, size_t argc, Value* argv) {
+Value fn_set_vmfunction_name(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "set-vmfunction-name!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
 
   VMFunction* fn = argv[0].as<VMFunction>();
@@ -610,8 +633,9 @@ Value fn_set_vmfunction_name(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("set-vmfunction-name!", fn_set_vmfunction_name, 2);
 
-Value fn_set_function_macro_env(State& state, size_t argc, Value* argv) {
+Value fn_set_function_macro_env(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "set-function-macro-env!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_ENV(state, 1);
 
   switch(argv[0].type()) {
@@ -622,6 +646,7 @@ Value fn_set_function_macro_env(State& state, size_t argc, Value* argv) {
     }
     case FUNCTION: {
       Function* fn = argv[0].as<Function>();
+      AR_ASSERT(fn->procedure_addr);
       fn->parent_env = argv[1];
       break;
     }
@@ -632,8 +657,9 @@ Value fn_set_function_macro_env(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("set-function-macro-env!", fn_set_function_macro_env, 2);
 
-Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
+Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "set-vmfunction-log!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 1, CONSTANT);
 
   Value fn = argv[0];
@@ -655,8 +681,9 @@ Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("set-vmfunction-log!", fn_set_vmfunction_log, 2);
 
-Value fn_function_env(State& state, size_t argc, Value* argv) {
-  // static const char* fn_name = "function-env";
+Value fn_function_env(State& state, size_t argc, Value* argv, void* _) {
+  static const char* fn_name = "function-env";
+  AR_FN_ARGC_EQ(state, argc, 1);
   switch(argv[0].type()) {
     case FUNCTION: return argv[0].function_parent_env();
     case CLOSURE:
@@ -666,7 +693,10 @@ Value fn_function_env(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("function-env", fn_function_env, 1);
 
-Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
+Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv, void* _) {
+  static const char* fn_name = "set-function-macro-bit!";
+  AR_FN_ARGC_EQ(state, argc, 1);
+
   switch(argv[0].type()) {
     case FUNCTION:
       argv[0].heap->set_header_bit(Value::FUNCTION_MACRO_BIT);
@@ -684,7 +714,9 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("set-function-macro-bit!", fn_set_function_macro_bit, 1);
 
-Value fn_function_is_macro(State& state, size_t argc, Value* argv) {
+Value fn_function_is_macro(State& state, size_t argc, Value* argv, void* _) {
+  static const char* fn_name = "function-macro?";
+  AR_FN_ARGC_EQ(state, argc, 1);
   switch(argv[0].type()) {
     case FUNCTION:
       return Value::make_boolean(argv[0].heap->get_header_bit(Value::FUNCTION_MACRO_BIT));
@@ -698,7 +730,9 @@ Value fn_function_is_macro(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("function-macro?", fn_function_is_macro, 1);
 
-Value fn_function_is_identifier_macro(State& state, size_t argc, Value* argv) {
+Value fn_function_is_identifier_macro(State& state, size_t argc, Value* argv, void* _) {
+  static const char* fn_name = "function-identifier-macro?";
+  AR_FN_ARGC_EQ(state, argc, 1);
   switch(argv[0].type()) {
     case FUNCTION:
       return Value::make_boolean(argv[0].heap->get_header_bit(Value::FUNCTION_IDENTIFIER_MACRO_BIT));
@@ -714,7 +748,9 @@ Value fn_function_is_identifier_macro(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("function-identifier-macro?", fn_function_is_identifier_macro, 1);
 
-Value fn_set_function_identifier_macro_bit(State& state, size_t argc, Value* argv) {
+Value fn_set_function_identifier_macro_bit(State& state, size_t argc, Value* argv, void* _) {
+  static const char* fn_name = "set-function-identifier-macro-bit!";
+  AR_FN_ARGC_EQ(state, argc, 1);
   switch(argv[0].type()) {
     case FUNCTION:
       if(argv[0].heap->get_header_bit(Value::FUNCTION_IDENTIFIER_MACRO_BIT)) return argv[0];
@@ -733,7 +769,9 @@ Value fn_set_function_identifier_macro_bit(State& state, size_t argc, Value* arg
 }
 AR_DEFUN("set-function-identifier-macro-bit!", fn_set_function_identifier_macro_bit, 1);
 
-Value fn_function_min_arity(State& state, size_t argc, Value* argv) {
+Value fn_function_min_arity(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "function-min-arity";
+  AR_FN_ARGC_EQ(state, argc, 1);
   switch(argv[0].type()) {
     case FUNCTION: {
       return Value::make_fixnum(argv[0].function_arguments().list_length());
@@ -750,40 +788,45 @@ Value fn_function_min_arity(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("function-min-arity", fn_function_min_arity, 1);
 
-Value fn_function_body(State& state, size_t argc, Value* argv) {
+Value fn_function_body(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "function-body";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_HEAP_TYPE(state, argv, 0, FUNCTION);
 
   return argv[0].as<Function>()->body;
 }
 AR_DEFUN("function-body", fn_function_body, 1);
 
-Value fn_function_name(State& state, size_t argc, Value* argv) {
+Value fn_function_name(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "function-name";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
 
   return argv[0].as<Function>()->name;
 }
 AR_DEFUN("function-name", fn_function_name, 1);
 
-Value fn_function_arguments(State& state, size_t argc, Value* argv) {
+Value fn_function_arguments(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "function-arguments";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
 
   return argv[0].as<Function>()->arguments;
 }
 AR_DEFUN("function-arguments", fn_function_arguments, 1);
 
-Value fn_function_rest_arguments(State& state, size_t argc, Value* argv) {
+Value fn_function_rest_arguments(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "function-rest-arguments";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
   
   return argv[0].as<Function>()->rest_arguments;
 }
 AR_DEFUN("function-rest-arguments", fn_function_rest_arguments, 1);
 
-Value fn_top_level_value(State& state, size_t argc, Value* argv) {
+Value fn_top_level_value(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "top-level-value";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
 
   Value r = argv[0].symbol_value();
@@ -792,8 +835,9 @@ Value fn_top_level_value(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("top-level-value", fn_top_level_value, 1);
 
-Value fn_top_level_bound(State& state, size_t argc, Value* argv) {
+Value fn_top_level_bound(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "top-level-bound?";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
 
   return Value::make_boolean(argv[0].symbol_value() != C_UNDEFINED);
@@ -801,8 +845,9 @@ Value fn_top_level_bound(State& state, size_t argc, Value* argv) {
 AR_DEFUN("top-level-bound?", fn_top_level_bound, 1);
 
 /** Iterate over everything that might be a toplevel function. */
-Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
+Value fn_top_level_for_each(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "top-level-for-each";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_APPLICABLE(state, argv, 0);
   size_t count = 0;
 
@@ -836,16 +881,18 @@ Value fn_top_level_for_each(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("top-level-for-each", fn_top_level_for_each, 1);
 
-Value fn_set_top_level_value(State& state, size_t argc, Value* argv) {
+Value fn_set_top_level_value(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "set-top-level-value!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
   argv[0].set_symbol_value(argv[1]);
   return C_UNSPECIFIED;
 }
 AR_DEFUN("set-top-level-value!", fn_set_top_level_value, 2);
 
-Value fn_make_rename(State& state, size_t argc, Value* argv) {
+Value fn_make_rename(State& state, size_t argc, Value* argv, void* v) {
   static const char *fn_name = "make-rename";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_ENV(state, 0);
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
 
@@ -853,8 +900,9 @@ Value fn_make_rename(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("make-rename", fn_make_rename, 2);
 
-Value fn_rename_set_gensym(State& state, size_t argc, Value* argv) {
+Value fn_rename_set_gensym(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "rename-gensym!";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
 
   Value renam = argv[0], sym;
@@ -867,28 +915,33 @@ Value fn_rename_set_gensym(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("rename-gensym!", fn_rename_set_gensym, 1);
 
-Value fn_rename_env(State& state, size_t argc, Value* argv) {
+Value fn_rename_env(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "rename-env";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
   return argv[0].rename_env();
 }
 AR_DEFUN("rename-env", fn_rename_env, 1);
 
-Value fn_rename_expr(State& state, size_t argc, Value* argv) {
+Value fn_rename_expr(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "rename-env";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
   return argv[0].rename_expr();
 }
 AR_DEFUN("rename-expr", fn_rename_expr, 1);
 
-Value fn_rename_gensym(State& state, size_t argc, Value* argv) {
+Value fn_rename_gensym(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "rename-gensym";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
   return argv[0].rename_gensym();
 }
 AR_DEFUN("rename-gensym", fn_rename_gensym, 1);
 
-Value fn_eval(State& state, size_t argc, Value* argv) {
+Value fn_eval(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "eval";
+  AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   Value env = argc == 2 ? argv[1] : C_FALSE, exp = argv[0];
   if(argv[0].applicable()) return argv[0];
   AR_FRAME(state, env, exp);
@@ -899,8 +952,9 @@ AR_DEFUN("eval", fn_eval, 1, 2);
 
 ///// MISC
 
-Value fn_raise(State& state, size_t argc, Value* argv) {
+Value fn_raise(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "raise";
+  AR_FN_ARGC_BETWEEN(state, argc, 2, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
   Value tag = argv[0], message = argv[1], irritants = argc == 3 ? argv[2] : C_FALSE, exc;
@@ -911,8 +965,9 @@ Value fn_raise(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("raise", fn_raise, 2, 3);
 
-Value fn_raise_continuation(State& state, size_t argc, Value* argv) {
+Value fn_raise_continuation(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "raise-continuation";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
   Value exc = state.make_exception(state.globals[State::S_CONTINUATION], argv[0], argv[1]);
   exc.heap->unset_header_bit(Value::EXCEPTION_TRACE_BIT);
@@ -920,8 +975,9 @@ Value fn_raise_continuation(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("raise-continuation", fn_raise_continuation, 2);
 
-Value fn_raise_source(State& state, size_t argc, Value* argv) {
+Value fn_raise_source(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "raise-source";
+  AR_FN_ARGC_EQ(state, argc, 4);
 
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
   AR_FN_EXPECT_TYPE(state, argv, 2, STRING);
@@ -942,30 +998,34 @@ Value fn_raise_source(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("raise-source", fn_raise_source, 4);
 
-Value fn_exception_tag(State& state, size_t argc, Value* argv) {
+Value fn_exception_tag(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "exception-tag";
+  AR_FN_ARGC_EQ(state, argc, 1);
 
   AR_FN_EXPECT_TYPE(state, argv, 0, EXCEPTION);
   return argv[0].exception_tag();
 }
 AR_DEFUN("exception-tag", fn_exception_tag, 1);
 
-Value fn_exception_message(State& state, size_t argc, Value* argv) {
+Value fn_exception_message(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "exception-message";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, EXCEPTION);
   return argv[0].exception_message();
 }
 AR_DEFUN("exception-message", fn_exception_message, 1);
 
-Value fn_exception_irritants(State& state, size_t argc, Value* argv) {
+Value fn_exception_irritants(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "exception-irritants";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, EXCEPTION);
   return argv[0].exception_irritants();
 }
 AR_DEFUN("exception-irritants", fn_exception_irritants, 1);
 
-Value fn_try(State& state, size_t argc, Value* argv) {
+Value fn_try(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "try";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_APPLICABLE_ARITY(state, argv, 0, 0);
   AR_FN_EXPECT_APPLICABLE_ARITY(state, argv, 1, 1);
 
@@ -990,8 +1050,10 @@ Value fn_try(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("try", fn_try, 2);
 
-Value fn_unwind_protect(State& state, size_t argc, Value* argv) {
+Value fn_unwind_protect(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "unwind-protect";
+
+  AR_FN_ARGC_EQ(state, argc, 2);
 
   AR_FN_ASSERT_ARG(state, 0, "to be an applicable value that takes no arguments",
     argv[0].applicable() && argv[0].procedure_arity_equals(0));
@@ -1013,8 +1075,9 @@ Value fn_unwind_protect(State& state, size_t argc, Value* argv) {
 AR_DEFUN("unwind-protect", fn_unwind_protect, 2);
 
 ///// RECORDS
-Value fn_register_record_type(State& state, size_t argc, Value* argv) {
+Value fn_register_record_type(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "register-record-type";
+  AR_FN_ARGC_EQ(state, argc, 5);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_EXPECT_POSITIVE(state, argv, 1);
@@ -1037,9 +1100,9 @@ Value fn_register_record_type(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("register-record-type", fn_register_record_type, 5);
 
-
-Value fn_set_record_type_printer(State& state, size_t argc, Value* argv) {
+Value fn_set_record_type_printer(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "set-record-type-printer!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
   AR_FN_EXPECT_APPLICABLE(state, argv, 1);
   RecordType* rt = argv[0].as<RecordType>();
@@ -1048,8 +1111,9 @@ Value fn_set_record_type_printer(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("set-record-type-printer!", fn_set_record_type_printer, 2);
 
-Value fn_set_record_type_apply(State& state, size_t argc, Value* argv) {
+Value fn_set_record_type_apply(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "set-record-type-apply!";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
   AR_FN_EXPECT_APPLICABLE(state, argv, 1);
   RecordType* rt = argv[0].as<RecordType>();
@@ -1070,8 +1134,9 @@ AR_DEFUN("set-record-type-apply", fn_set_record_type_apply, 2);
     return (state).type_error(msg.str()); \
   }
 
-Value fn_record_set(State& state, size_t argc, Value* argv) {
+Value fn_record_set(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "record-set!";
+  AR_FN_ARGC_EQ(state, argc, 4);
 
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
   AR_FN_EXPECT_TYPE(state, argv, 1, RECORD);
@@ -1085,8 +1150,9 @@ Value fn_record_set(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("record-set!", fn_record_set, 4);
 
-Value fn_record_ref(State& state, size_t argc, Value* argv) {
+Value fn_record_ref(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "record-ref";
+  AR_FN_ARGC_EQ(state, argc, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
   AR_FN_EXPECT_TYPE(state, argv, 1, RECORD);
   AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
@@ -1097,23 +1163,26 @@ Value fn_record_ref(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("record-ref", fn_record_ref, 3);
 
-Value fn_make_record(State& state, size_t argc, Value* argv) {
+Value fn_make_record(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "make-record";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD_TYPE);
 
   return state.make_record(argv[0].as<RecordType>());
 }
 AR_DEFUN("make-record", fn_make_record, 1);
 
-Value fn_record_type_descriptor(State& state, size_t argc, Value* argv) {
+Value fn_record_type_descriptor(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "record-type-descriptor";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
   return argv[0].as<Record>()->type;
 }
 AR_DEFUN("record-type-descriptor", fn_record_type_descriptor, 1);
 
-Value fn_record_isa(State& state, size_t argc, Value* argv) {
-  // static const char* fn_name = "record-isa?";
+Value fn_record_isa(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "record-isa?";
+  AR_FN_ARGC_EQ(state, argc, 2);
   if(argv[0].type() != RECORD)
     return C_FALSE;
   Value rec = argv[0], rtd = argv[1];
@@ -1123,7 +1192,9 @@ Value fn_record_isa(State& state, size_t argc, Value* argv) {
 AR_DEFUN("record-isa?", fn_record_isa, 2);
 
 // Compiler
-Value fn_list_get_source(State& state, size_t argc, Value* argv) {
+Value fn_list_get_source(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "list-get-source";
+  AR_FN_ARGC_EQ(state, argc, 1);
   if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
     Value storage;
     AR_FRAME(state, storage);
@@ -1143,8 +1214,9 @@ Value fn_list_get_source(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("list-get-source", fn_list_get_source, 1);
 
-Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
+Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "OpenFn->procedure";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
   // TODO: Could type check more thoroughly here.
 
@@ -1192,6 +1264,15 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
 
   VMFunction* vfn = static_cast<VMFunction*>(state.gc.allocate(VMFUNCTION, size));
 
+  vfn->set_header_bit(Value::VALUE_PROCEDURE_BIT);
+
+  // Some wacky casting is necessary in order to get a pointer to State::apply_vm in the format
+  // we want it to be
+
+  Value (State::* member)(size_t, Value*, Value) = &State::apply_vm;
+  void* member2 = (void*&) member;
+  vfn->procedure_addr = (c_closure_t) member2;
+
   vfn->min_arity = (unsigned)rec.record_ref(9).fixnum_value();
   vfn->max_arity = (unsigned)rec.record_ref(10).fixnum_value();
   vfn->bytecode_size = (unsigned)bytecode_size;
@@ -1227,13 +1308,16 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("OpenFn->procedure", fn_openfn_to_procedure, 1);
 
-Value fn_value_bits(State& state, size_t argc, Value* argv) {
+Value fn_value_bits(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "value-bits";
+  AR_FN_ARGC_EQ(state, argc, 1);
   return Value::make_fixnum(argv[0].bits);
 }
 AR_DEFUN("value-bits", fn_value_bits, 1);
 
-Value fn_value_make(State& state, size_t argc, Value* argv) {
+Value fn_value_make(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "value-make";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   Value v;
   v.bits = argv[0].fixnum_value();
@@ -1244,7 +1328,9 @@ Value fn_value_make(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("value-make", fn_value_make, 1);
 
-Value fn_value_copy(State& state, size_t argc, Value* argv) {
+Value fn_value_copy(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "value-copy";
+  AR_FN_ARGC_EQ(state, argc, 1);
   Value v1 = argv[0], v2;
   if(v1.immediatep()) return v1;
   AR_FRAME(state, v1, v2);
@@ -1254,8 +1340,9 @@ Value fn_value_copy(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("value-copy", fn_value_copy, 1);
 
-Value fn_value_header_bit(State& state, size_t argc, Value* argv) {
+Value fn_value_header_bit(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "value-header-bit?";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   if(argv[0].immediatep()) {
     return state.eval_error("value-header bit got immediate object");
@@ -1266,13 +1353,13 @@ AR_DEFUN("value-header-bit?", fn_value_header_bit, 2)
 
 // Garbage collector
 
-Value fn_gc_collect(State& state, size_t argc, Value* argv) {
+Value fn_gc_collect(State& state, size_t argc, Value* argv, void* v) {
   state.gc.collect();
   return C_UNSPECIFIED;
 }
 AR_DEFUN("gc:collect", fn_gc_collect, 0);
 
-Value fn_exit(State& state, size_t argc, Value* argv) {
+Value fn_exit(State& state, size_t argc, Value* argv, void* v) {
   if(argv[1] == C_TRUE) {
     exit(EXIT_SUCCESS);
   } else {
@@ -1282,8 +1369,9 @@ Value fn_exit(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("exit", fn_exit, 1);
 
-Value fn_save_image(State& state, size_t argc, Value* argv) {
+Value fn_save_image(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "save-image";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
 
   state.save_image(argv[0].string_data());
@@ -1293,7 +1381,9 @@ Value fn_save_image(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("save-image", fn_save_image, 1);
 
-Value fn_repl(State& state, size_t argc, Value* argv) {
+Value fn_repl(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "repl";
+  AR_FN_ARGC_EQ(state, argc, 0);
   return Value::make_boolean(state.enter_repl());
 }
 AR_DEFUN("repl", fn_repl, 0);

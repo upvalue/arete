@@ -35,37 +35,42 @@ Value State::string_copy(Value x) {
 DefunGroup strings("strings");
 
 // Conversions
-Value fn_string_to_symbol(State& state, size_t argc, Value* argv) {
+Value fn_string_to_symbol(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "string->symbol";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   return state.get_symbol(argv[0]);
 }
 AR_DEFUN("string->symbol", fn_string_to_symbol, 1);
 
-Value fn_symbol_to_string(State& state, size_t argc, Value* argv) {
+Value fn_symbol_to_string(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "symbol->string";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
   std::string str(argv[0].symbol_name_data());
   return state.make_string(str);
 }
 AR_DEFUN("symbol->string", fn_symbol_to_string, 1);
 
-Value fn_char_to_integer(State& state, size_t argc, Value* argv) {
+Value fn_char_to_integer(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "char->integer";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
   return Value::make_fixnum(argv[0].character());
 }
 AR_DEFUN("char->integer", fn_char_to_integer, 1);
 
-Value fn_integer_to_char(State& state, size_t argc, Value* argv) {
+Value fn_integer_to_char(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "integer->char";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, 0, argv, FIXNUM);
   return state.make_char((char)argv[0].fixnum_value());
 }
 AR_DEFUN("integer->char", fn_integer_to_char, 1);
 
-Value fn_char_case_fold(State& state, size_t argc, Value* argv) {
+Value fn_char_case_fold(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "char-case-fold";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
 
   int c = argv[0].character();
@@ -73,15 +78,16 @@ Value fn_char_case_fold(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("char-case-fold", fn_char_case_fold, 1);
 
-Value fn_char_equals(State& state, size_t argc, Value* argv) {
+Value fn_char_equals(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "char=?";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
   AR_FN_EXPECT_TYPE(state, 1, argv, CHARACTER);
   return Value::make_boolean(argv[0].character() == argv[1].character());
 }
 AR_DEFUN("char=?", fn_char_equals, 2);
 
-Value fn_string_append(State& state, size_t argc, Value* argv) {
+Value fn_string_append(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "string-append";
   std::ostringstream os;
   for(size_t i = 0; i != argc; i++) {
@@ -93,16 +99,18 @@ Value fn_string_append(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("string-append", fn_string_append, 0, 0, true);
 
-Value fn_string_copy(State& state, size_t argc, Value* argv) {
+Value fn_string_copy(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "string-copy";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
 
   return state.string_copy(argv[0]);
 }
 AR_DEFUN("string-copy", fn_string_copy, 1);
 
-Value fn_make_string(State& state, size_t argc, Value* argv) {
+Value fn_make_string(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "make-string";
+  AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   char fill = '$';
   if(argc == 2) {
@@ -117,8 +125,9 @@ Value fn_make_string(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("make-string", fn_make_string, 1, 2);
 
-Value fn_string_set(State& state, size_t argc, Value* argv) {
+Value fn_string_set(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "string-set!";
+  AR_FN_ARGC_EQ(state, argc, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 2, CHARACTER);
@@ -130,8 +139,9 @@ Value fn_string_set(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("string-set!", fn_string_set, 3);
 
-Value fn_string_ref(State& state, size_t argc, Value* argv) {
+Value fn_string_ref(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "string-ref";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_CHECK_BOUNDS(state, "string", argv[0].string_bytes(), argv[1].fixnum_value());
@@ -140,8 +150,9 @@ Value fn_string_ref(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("string-ref", fn_string_ref, 2);
 
-Value fn_substring(State& state, size_t argc, Value* argv) {
+Value fn_substring(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "substring";
+  AR_FN_ARGC_EQ(state, argc, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_POSITIVE(state, argv, 1);
   AR_FN_EXPECT_POSITIVE(state, argv, 2);
@@ -162,8 +173,9 @@ Value fn_substring(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("substring", fn_substring, 3);
 
-Value fn_string_equals(State& state, size_t argc, Value* argv) {
+Value fn_string_equals(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "string=?";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
   if(argv[0].string_bytes() != argv[1].string_bytes()) return C_FALSE;
@@ -172,15 +184,17 @@ Value fn_string_equals(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("string=?", fn_string_equals, 2);
 
-Value fn_string_length(State& state, size_t argc, Value* argv) {
+Value fn_string_length(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "string-length";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   return Value::make_fixnum((ptrdiff_t) argv[0].string_bytes());
 }
 AR_DEFUN("string-length", fn_string_length, 1);
 
-Value fn_make_bytevector(State& state, size_t argc, Value* argv) {
+Value fn_make_bytevector(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "make-bytevector";
+  AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
 
   size_t sz = static_cast<size_t>(argv[0].fixnum_value());
@@ -199,15 +213,17 @@ Value fn_make_bytevector(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("make-bytevector", fn_make_bytevector, 1, 2);
 
-Value fn_bytevector_length(State& state, size_t argc, Value* argv) {
+Value fn_bytevector_length(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "bytevector-length";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, BYTEVECTOR);
   return argv[0].bv_length();
 }
 AR_DEFUN("bytevector-length", fn_bytevector_length, 1);
 
-Value fn_bytevector_u8_ref(State& state, size_t argc, Value* argv) {
+Value fn_bytevector_u8_ref(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "bytevector-u8-ref";
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, BYTEVECTOR);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_CHECK_BOUNDS(state, "bytevector", argv[0].bv_length(), argv[1].fixnum_value());
@@ -215,8 +231,9 @@ Value fn_bytevector_u8_ref(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("bytevector-u8-ref", fn_bytevector_u8_ref, 2);
 
-Value fn_bytevector_u8_set(State& state, size_t argc, Value* argv) {
+Value fn_bytevector_u8_set(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "bytevector-u8-set!";
+  AR_FN_ARGC_EQ(state, argc, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, BYTEVECTOR);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);

@@ -88,6 +88,9 @@ struct PointerUpdater {
   }
   
   void update_pointers(HeapValue* heap) {
+      Value (State::* member)(size_t, Value*, Value) = &State::apply_vm;
+      c_closure_t apply_vm = (c_closure_t)(void*&) member;
+
     switch(heap->get_type()) {
       case FLONUM: case STRING: case CHARACTER: case BYTEVECTOR: 
         break;
@@ -136,6 +139,7 @@ struct PointerUpdater {
         break;
 
       case VMFUNCTION: {
+        static_cast<VMFunction*>(heap)->procedure_addr = apply_vm;
         static_cast<VMFunction*>(heap)->name = update_value(static_cast<VMFunction*>(heap)->name);
         static_cast<VMFunction*>(heap)->constants = (VectorStorage*)update_heapvalue(static_cast<VMFunction*>(heap)->constants);
         static_cast<VMFunction*>(heap)->macro_env = update_value(static_cast<VMFunction*>(heap)->macro_env);
@@ -145,6 +149,7 @@ struct PointerUpdater {
       }
 
       case CLOSURE: {
+        static_cast<VMFunction*>(heap)->procedure_addr = apply_vm;
         static_cast<Closure*>(heap)->function = update_value(static_cast<Closure*>(heap)->function);
         static_cast<Closure*>(heap)->upvalues = (VectorStorage*)update_heapvalue(static_cast<Closure*>(heap)->upvalues);
         break;
@@ -177,7 +182,7 @@ struct PointerUpdater {
         break;
 
       case CFUNCTION:  {
-        static_cast<CFunction*>(heap)->addr = update_function_pointer(static_cast<CFunction*>(heap)->addr);
+        static_cast<CFunction*>(heap)->procedure_addr = update_function_pointer(static_cast<CFunction*>(heap)->procedure_addr);
         static_cast<CFunction*>(heap)->name = update_value(static_cast<CFunction*>(heap)->name);
         static_cast<CFunction*>(heap)->closure = update_value(static_cast<CFunction*>(heap)->closure);
         break;
@@ -223,10 +228,6 @@ struct ImageWriter {
   }
 
   ~ImageWriter() {}
-
-  void write_header() {
-
-  }
 
   void serialize_value(HeapValue* heap) {
     updater.update_pointers(heap);

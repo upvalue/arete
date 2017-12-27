@@ -283,16 +283,16 @@ Value State::make_record(size_t tag) {
 
 #define AR_DEFUN_LOG(expr) ARETE_LOG(ARETE_LOG_TAG_DEFUN, "defun", expr)
 
-std::vector<c_function_t>* id_to_function = 0;
+std::vector<c_closure_t>* id_to_function = 0;
 std::unordered_map<ptrdiff_t, size_t> *function_to_id = 0;
 DefunGroup* defun_group = 0;
 
-c_function_t function_id_to_ptr(size_t id) {
+c_closure_t function_id_to_ptr(size_t id) {
   AR_ASSERT(id < id_to_function->size());
   return id_to_function->at(id);
 }
 
-c_function_t function_ptr_to_id(ptrdiff_t addr) {
+c_closure_t function_ptr_to_id(ptrdiff_t addr) {
   auto i = function_to_id->find(addr);
   if(i == function_to_id->end()) {
     std::cerr << "arete: function_ptr_to_id failed to find ID for function " << (ptrdiff_t) addr <<
@@ -300,12 +300,12 @@ c_function_t function_ptr_to_id(ptrdiff_t addr) {
 
     return nullptr;
   }
-  return (c_function_t) i->second;
+  return (c_closure_t) i->second;
 }
 
-static void register_defun(const char* fn_name, c_function_t fn, Defun* push_back) {
+static void register_defun(const char* fn_name, c_closure_t fn, Defun* push_back) {
   if(!function_to_id) {
-    id_to_function = new std::vector<c_function_t>();
+    id_to_function = new std::vector<c_closure_t>();
     function_to_id = new std::unordered_map<ptrdiff_t, size_t>;
   }
 
@@ -329,15 +329,15 @@ static void register_defun(const char* fn_name, c_function_t fn, Defun* push_bac
   id_to_function->push_back(fn);
 }
 
-Defun::Defun(const char* fn_name_, c_function_t fn_, size_t min_arity_, size_t max_arity_, bool var_arity_):
+Defun::Defun(const char* fn_name_, c_closure_t fn_, size_t min_arity_, size_t max_arity_, bool var_arity_):
     fn_name(fn_name_), fn(fn_), min_arity(min_arity_), max_arity(max_arity_), var_arity(var_arity_) {
 
   register_defun(fn_name, fn_, this);
   
 }
 
-Defun::Defun(void* fn_): fn((c_function_t)fn_) {
-  register_defun("finalizer", (c_function_t) fn_, nullptr);
+Defun::Defun(void* fn_): fn((c_closure_t)fn_) {
+  register_defun("finalizer", (c_closure_t) fn_, nullptr);
 }
 
 void arete_free_function_tables() {
@@ -419,7 +419,7 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
 
     name = state.make_string(defun->fn_name);
     AR_ASSERT(defun->fn);
-    cfn = state.make_c_function(name, closure, (c_function_t) defun->fn, defun->min_arity,
+    cfn = state.make_c_function(name, closure, (c_closure_t) defun->fn, defun->min_arity,
       defun->max_arity, defun->var_arity);
 
     name = state.get_symbol(name);
@@ -432,26 +432,35 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
     state.table_set(module, name, sym);
     state.table_set(exports, name, name);
   }
-  //state.pretty_print(std::cout, module);
 }
 
- Value State::make_c_function(Value name, Value closure, c_function_t addr, size_t min_arity,
+ Value State::make_c_function(Value name, Value closure, c_closure_t addr, size_t min_arity,
     size_t max_arity, bool variable_arity) {
   if(max_arity == 0)
     max_arity = min_arity;
   AR_FRAME(this, name, closure);
   CFunction *cfn = static_cast<CFunction*>(gc.allocate(CFUNCTION, sizeof(CFunction)));
+
+  //cfn->set_header_bit(Value::VALUE_PROCEDURE_BIT);
+  //cfn->procedure_addr = (c_closure_t)addr;
+
+
   cfn->name = name;
+
   if(closure != C_FALSE) {
     cfn->closure = closure;
     cfn->set_header_bit(Value::CFUNCTION_CLOSURE_BIT);
   }
-  cfn->addr = addr;
-  AR_ASSERT(cfn->addr);
+
+  //AR_ASSERT(cfn->procedure_addr);
   cfn->min_arity = min_arity;
   cfn->max_arity = max_arity;
   if(variable_arity)
     cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
+
+  Value v(cfn);
+  v.procedure_install(addr);
+
   return cfn;
 }
 
@@ -461,13 +470,13 @@ void State::defun_core_closure(const std::string& cname, Value closure, c_closur
   AR_FRAME(this, cfn, sym, name, closure);
   name = make_string(cname);
   AR_ASSERT(addr);
-  cfn = make_c_function(name, closure, (c_function_t)addr, min_arity, max_arity, variable_arity);
+  cfn = make_c_function(name, closure, (c_closure_t)addr, min_arity, max_arity, variable_arity);
 
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);
 }
 
-void State::defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
+void State::defun_core(const std::string& cname, c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
   Value cfn, sym, name;
 
   AR_FRAME(this, cfn, sym, name);
@@ -480,12 +489,22 @@ void State::defun_core(const std::string& cname, c_function_t addr, size_t min_a
 }
 
 Value Value::c_function_apply(State& state, size_t argc, Value* argv) {
-  AR_TYPE_ASSERT(type() == CFUNCTION);
+  AR_TYPE_ASSERT(heap_type_equals(CFUNCTION));
+  // Emscripten puts all function pointers into a table depending on their type, so it's necessary
+  // to call them using the parameters they were defined with. Otherwise we avoid an if-check
+  // at an important point by doing this.
+
+#ifdef __EMSCRIPTEN__
+/*
   if(c_function_is_closure()) {
-    return c_function_closure_addr()(state, (void*) c_function_closure_data().bits, argc, argv);
+    return (state, argc, argv, (void*) c_function_closure_data().bits);
   } else {
     return c_function_addr()(state, argc, argv);
   }
+  */
+#else
+  return as_unsafe<CFunction>()->procedure_addr(state, argc, argv, (void*) as_unsafe<CFunction>()->closure.bits);
+#endif
 }
 
 ///// PAIRS

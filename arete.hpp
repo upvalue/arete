@@ -69,7 +69,11 @@
 
 #ifdef __GNUC__
 # define AR_FORCE_INLINE __attribute__((always_inline))
+# define AR_LIKELY(x) (__builtin_expect((x), 1))
+# define AR_UNLIKELY(x) (__builtin_expect((x), 0))
 #else
+# define AR_LIKELY(x)
+# define AR_UNLIKELY(x)
 # define AR_FORCE_INLINE
 #endif
 
@@ -191,7 +195,7 @@ extern State* current_state;
 typedef Value (*c_function_t)(State&, size_t, Value*);
 typedef Value (*native_function_t)(State&, size_t, Value*);
 // We have to use (void*) here to make Emscripten happy.
-typedef Value (*c_closure_t)(State&, void*, size_t, Value*);
+typedef Value (*c_closure_t)(State&, size_t, Value*, void*);
 typedef void (*c_finalizer_t)(State&, Value);
 
 std::ostream& operator<<(std::ostream& os,  Value);
@@ -415,6 +419,9 @@ struct Value {
       default: return false;
     }
   }
+
+  void procedure_install(Value (State::* member)(size_t, Value*, Value));
+  void procedure_install(c_closure_t addr);
     
   /** Returns true if the object is applicable */
   bool applicable() const;
@@ -970,7 +977,7 @@ inline void Value::exception_deactivate() {
 }
 
 inline bool Value::is_active_exception() const {
-  return heap_type_equals(EXCEPTION) && heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT);
+  return AR_UNLIKELY(heap_type_equals(EXCEPTION) && heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT));
 }
 
 inline bool Value::exception_trace() const {
@@ -995,8 +1002,34 @@ inline Value Value::exception_irritants() const {
 
 /// FUNCTIONS
 
+/**
+ * For ease of use and performance, all Procedures have a pointer to a native function at their
+ * beginning. For VM functions and closures, this always points to State::apply_vm.
+ */
+
+struct Procedure : HeapValue {
+  c_closure_t procedure_addr;
+};
+
+inline void Value::procedure_install(Value (State::* member)(size_t, Value*, Value)) {
+  AR_TYPE_ASSERT(!immediatep());
+  void* member2 = (void*&) member;
+  heap->set_header_bit(Value::VALUE_PROCEDURE_BIT);
+  as_unsafe<Procedure>()->procedure_addr = (c_closure_t) member2;
+  AR_ASSERT(procedurep());
+  AR_ASSERT(as_unsafe<Procedure>()->procedure_addr);
+}
+
+inline void Value::procedure_install(c_closure_t addr) {
+  AR_TYPE_ASSERT(!immediatep());
+  heap->set_header_bit(Value::VALUE_PROCEDURE_BIT);
+  as_unsafe<Procedure>()->procedure_addr = addr;
+  AR_ASSERT(procedurep());
+  AR_ASSERT(as_unsafe<Procedure>()->procedure_addr);
+}
+
 /** An interpreted Scheme function */
-struct Function : HeapValue {
+struct Function : Procedure {
   Value name, parent_env, arguments, rest_arguments, body;
 
   static const unsigned CLASS_TYPE = FUNCTION;
@@ -1039,12 +1072,14 @@ struct NativeFunction : HeapValue {
  * A pointer to a C++ function, callable from
  * Scheme. 
  */
-struct CFunction : HeapValue {
+struct CFunction : Procedure {
   Value name, closure;
+  /*
   union {
     c_function_t addr;
     c_closure_t closure_addr;
   };
+  */
 
   size_t min_arity, max_arity;
 
@@ -1059,16 +1094,6 @@ inline Value Value::c_function_name() const {
 inline Value Value::c_function_closure_data() const {
   AR_TYPE_ASSERT(type() == CFUNCTION);
   return as<CFunction>()->closure;
-}
-
-inline c_function_t Value::c_function_addr() const {
-  AR_TYPE_ASSERT(type() == CFUNCTION && !c_function_is_closure());
-  return as<CFunction>()->addr;
-}
-
-inline c_closure_t Value::c_function_closure_addr() const {
-  AR_TYPE_ASSERT(type() == CFUNCTION && c_function_is_closure());
-  return as<CFunction>()->closure_addr;
 }
 
 inline size_t Value::c_function_min_arity() const {
@@ -1086,7 +1111,7 @@ inline bool Value::c_function_variable_arity() const {
   return heap->get_header_bit(CFUNCTION_VARIABLE_ARITY_BIT);
 }
 
-struct VMFunction : HeapValue {
+struct VMFunction : Procedure {
   Value name;
   VectorStorage* constants;
   Bytevector* free_variables;
@@ -1171,7 +1196,7 @@ inline void Value::upvalue_close() {
   AR_ASSERT(upvalue_closed());
 }
 
-struct Closure : HeapValue {
+struct Closure : Procedure {
   Value function;
   VectorStorage* upvalues;
 
@@ -1180,7 +1205,7 @@ struct Closure : HeapValue {
 
 inline Value Value::closure_unbox() const {
   if(heap_type_equals(CLOSURE)) {
-    return as<Closure>()->function;
+    return as_unsafe<Closure>()->function;
   }
   return heap;
 }
@@ -1929,7 +1954,7 @@ struct State {
   Value make_record(size_t tag);
 
   Value make_c_function(Value name, Value closure,
-    c_function_t addr, size_t min_arity, size_t max_arity, bool variable_arity);
+    c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity);
 
   Value make_input_file_port(Value path);
   Value make_input_file_port(const char* cpath, std::istream* is);
@@ -2019,7 +2044,7 @@ struct State {
   void load_file_functions();
 
   /** Defines a built-in function */
-  void defun_core(const std::string& cname, c_function_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
+  void defun_core(const std::string& cname, c_closure_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
   void defun_core_closure(const std::string& cname, Value closure, c_closure_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
 
   std::ostream& warn(Value src = C_FALSE);
@@ -2069,15 +2094,12 @@ struct State {
   Value eval_form(EvalFrame frame, Value exp, unsigned);
   Value eval_body(EvalFrame frame, Value exp, bool single = false);
   Value eval_exp(Value exp);
-  Value eval_apply_function(Value fn, size_t argc, Value* argv);
+  Value apply_interpreter(size_t argc, Value* argv, Value fn);
   /** The primary application function */
   Value eval_list(Value lst, bool expand = true, Value env = C_FALSE);
 
   // Build a list of out of temps
   Value temps_to_list(size_t limit = 0);
-
-  /** Apply a Scheme function against a list of already-evaluated arguments */
-  Value eval_apply_function(Value fn, Value args);
 
   Value expand_expr(Value exp);
 
@@ -2086,7 +2108,7 @@ struct State {
    * functions. Argv can be evaluated on the stack or a pointer to the temps vector.
    *
    * NOTE: This should never be called against State::temps, as it is used to construct a list when
-   * interpreter functions are called.
+   * interpreted functions are called.
    */
   Value apply(Value fn, size_t argc, Value* argv);
 
@@ -2102,7 +2124,7 @@ struct State {
   Value load_file(const std::string&);
 
   ///// Virtual machine
-  Value apply_vm(Value fn, size_t argc, Value* argv);
+  Value apply_vm(size_t argc, Value* argv, Value fn);
 
   // Command line interface
 
@@ -2385,8 +2407,8 @@ struct DefunGroup;
 struct Defun;
 
 extern DefunGroup* defun_group;
-c_function_t function_id_to_ptr(size_t id);
-c_function_t function_ptr_to_id(ptrdiff_t addr);
+c_closure_t function_id_to_ptr(size_t id);
+c_closure_t function_ptr_to_id(ptrdiff_t addr);
 
 /** Free some dynamic memory allocations that may be done on program startup. States
  * cannot be created after this is called.
@@ -2409,19 +2431,19 @@ struct DefunGroup {
 };
 
 struct Defun {
-  Defun(const char*, c_function_t, size_t, size_t = 0, bool = false);
+  Defun(const char*, c_closure_t, size_t, size_t = 0, bool = false);
   Defun(void*);
   ~Defun() {}
 
   const char* fn_name;
-  c_function_t fn;
+  c_closure_t fn;
   size_t min_arity, max_arity;
   bool var_arity;
   bool install;
 };
 
 #define AR_DEFUN(name, addr, ...) \
-  static Defun _AR_UNIQUE(defun) ((name), (c_function_t) addr, __VA_ARGS__);
+  static Defun _AR_UNIQUE(defun) ((name), (c_closure_t) addr, __VA_ARGS__);
 
 // Various convenience objects. Note that their fields must be registered in an AR_FRAME
 // manually.
@@ -2471,6 +2493,46 @@ struct TableIterator {
 } // namespace arete
 
 // Handy macros for writing CFunctions
+
+#define AR_FN_CLOSURE(state, fn_pointer, kast, name) \
+  kast name = (kast) Value((ptrdiff_t)(fn_pointer)).c_function_closure_data().bits;
+
+#define AR_FN_ARGC_EQ(state, argc, expect) \
+  if((argc) != (expect)) { \
+    std::ostringstream __os; \
+    __os << " function " << (fn_name) << " expected exactly " << (expect) << " arguments but got " << (argc); \
+    AR_FN_STACK_TRACE(state); \
+    return (state).eval_error(__os.str()); \
+  }
+
+#define AR_FN_ARGC_GTE(state, argc, expect) \
+  if((argc) < (expect)) { \
+    std::ostringstream __os; \
+    __os << " function" << (fn_name) << " expected at least " << (expect) << " arguments but got " << (argc); \
+    AR_FN_STACK_TRACE(state); \
+    return (state).eval_error(__os.str()); \
+  }
+
+#define AR_FN_ARGC_LTE(state, argc, expect) \
+  if((argc) > (expect)) { \
+    std::ostringstream __os; \
+    __os << " function" << (fn_name) << " expected at least " << (expect) << " arguments but got " << (argc); \
+    AR_FN_STACK_TRACE(state); \
+    return (state).eval_error(__os.str()); \
+  }
+
+#define AR_FN_ARGC_BETWEEN(state, argc, e1, e2) \
+  if((argc) < e1) { \
+    std::ostringstream __os; \
+    __os << " function" << (fn_name) << " expected at least " << (e1) << " arguments but got " << (argc); \
+    AR_FN_STACK_TRACE(state); \
+    return (state).eval_error(__os.str()); \
+  } else if ((argc) > e2) { \
+    std::ostringstream __os; \
+    __os << " function" << (fn_name) << " expected at most " << (e2) << " arguments but got " << (argc); \
+    AR_FN_STACK_TRACE(state); \
+    return (state).eval_error(__os.str()); \
+  }
 
 #define AR_FN_STACK_TRACE(state) \
   std::ostringstream __stackinfo; \

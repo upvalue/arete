@@ -447,8 +447,7 @@ void GCSemispace::collect(size_t request, bool force) {
         AR_COPY(Vector, storage);
         break;
       // Two pointers 
-      case CFUNCTION:
-      case CLOSURE:
+
       case SYMBOL:
       case PAIR:
         AR_COPY(Symbol, name);
@@ -462,13 +461,6 @@ void GCSemispace::collect(size_t request, bool force) {
         AR_COPY(Exception, irritants);
         break;
       // Four pointers
-      case VMFUNCTION:
-        AR_COPY(VMFunction, name);
-        AR_COPY(VMFunction, constants);
-        AR_COPY(VMFunction, free_variables);
-        AR_COPY(VMFunction, sources);
-        AR_COPY(VMFunction, macro_env);
-        break;
       case RECORD_TYPE:
         AR_COPY(RecordType, apply);
         AR_COPY(RecordType, print);
@@ -476,7 +468,23 @@ void GCSemispace::collect(size_t request, bool force) {
         AR_COPY(RecordType, parent);
         AR_COPY(RecordType, field_names);
         break;
-      // Five pointers
+      
+      // In these values, pointers are offset by the procedure address
+      case CFUNCTION:
+        AR_COPY(CFunction, name);
+        AR_COPY(CFunction, closure);
+        break;
+      case CLOSURE:
+        AR_COPY(Closure, function);
+        AR_COPY(Closure, upvalues);
+        break;
+      case VMFUNCTION:
+        AR_COPY(VMFunction, name);
+        AR_COPY(VMFunction, constants);
+        AR_COPY(VMFunction, free_variables);
+        AR_COPY(VMFunction, sources);
+        AR_COPY(VMFunction, macro_env);
+        break;
       case FUNCTION:
         AR_COPY(Function, name);
         AR_COPY(Function, parent_env);

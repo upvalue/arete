@@ -954,7 +954,7 @@
           ;; This is pretty shoddy, but since the module system currently just creates duplicates of every function
           ;; defined before it is installed, we'll compile all functions in the module system.
 
-          (if (and (eq? (value-type v) 13) (eqv? (string-ref (symbol->string k) 1) #\#))
+          (if (and (eq? (value-type v) 13))
             (begin
               (let ((is-macro (env-syntax? #f k)))
                 (let ((vmf (recompile-function v)))

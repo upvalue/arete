@@ -76,8 +76,9 @@ Value State::make_output_file_port(Value path) {
 }
 
 // SRFI 6: Basic string ports
-Value fn_open_output_string(State& state, size_t argc, Value* argv) {
+Value fn_open_output_string(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "open-output-string"; (void) fn_name;
+  AR_FN_ARGC_EQ(state, argc, 0);
 
   std::ostringstream* os = new std::ostringstream;
   Value path = state.make_string("<string>");
@@ -91,8 +92,10 @@ Value fn_open_output_string(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("open-output-string", fn_open_output_string, 0);
 
-Value fn_open_input_string(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "open-input-string"; (void) fn_name;
+Value fn_open_input_string(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "open-input-string"; 
+  AR_FN_ARGC_EQ(state, argc, 0);
+
 
   std::istringstream* is = new std::istringstream;
   Value path = state.make_string("<string>");
@@ -106,8 +109,9 @@ Value fn_open_input_string(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("open-input-string", fn_open_input_string, 0);
 
-Value fn_get_output_string(State& state, size_t argc, Value* argv) {
+Value fn_get_output_string(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "get-output-string";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_ASSERT_ARG(state, 0, "to be an output string port",
     argv[0].type() == FILE_PORT && argv[0].file_port_writable() &&
     argv[0].heap->get_header_bit(Value::FILE_PORT_STRING_BIT));
@@ -118,24 +122,27 @@ Value fn_get_output_string(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("get-output-string", fn_get_output_string, 1);
 
-Value fn_open_output_file(State& state, size_t argc, Value* argv) {
+Value fn_open_output_file(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "open-output-file";
+  AR_FN_ARGC_EQ(state, argc, 0);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
 
   return state.make_output_file_port(argv[0]);
 }
 AR_DEFUN("open-output-file", fn_open_output_file, 1);
 
-Value fn_open_input_file(State& state, size_t argc, Value* argv) {
+Value fn_open_input_file(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "open-input-file";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
 
   return state.make_input_file_port(argv[0]);
 }
 AR_DEFUN("open-input-file", fn_open_input_file, 1);
 
-Value fn_close_port(State& state, size_t argc, Value* argv) {
+Value fn_close_port(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "close-port";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FILE_PORT);
 
   state.finalize(FILE_PORT, argv[0], false);
@@ -145,8 +152,9 @@ Value fn_close_port(State& state, size_t argc, Value* argv) {
 AR_DEFUN("close-output-port", fn_close_port, 1);
 AR_DEFUN("close-input-port", fn_close_port, 1);
 
-Value fn_flush_port(State& state, size_t argc, Value* argv) {
+Value fn_flush_port(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "flush-port";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FILE_PORT);
 
   if(argv[0].file_port_writable()) {
@@ -171,8 +179,9 @@ AR_DEFUN("flush-output-port", fn_flush_port, 1);
     name = state.get_global_value(State::G_CURRENT_INPUT_PORT); \
   }
 
-Value fn_read_char(State& state, size_t argc, Value* argv) {
+Value fn_read_char(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "read-char";
+  AR_FN_ARGC_LTE(state, argc, 1);
 
   AR_MAYBE_INPUT_PORT(state, argv, argc, 0, port);
 
@@ -185,9 +194,10 @@ Value fn_read_char(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("read-char", fn_read_char, 0, 1);
 
-Value fn_peek_char(State& state, size_t argc, Value* argv) {
+Value fn_peek_char(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "peek-char";
 
+  AR_FN_ARGC_LTE(state, argc, 1);
   AR_MAYBE_INPUT_PORT(state, argv, argc, 0, port);
 
   std::istream* is = port.file_port_input_handle();
@@ -198,9 +208,10 @@ Value fn_peek_char(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("peek-char", fn_peek_char, 0, 1);
 
-Value fn_read(State& state, size_t argc, Value* argv) {
+Value fn_read(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "read";
 
+  AR_FN_ARGC_LTE(state, argc, 1);
   AR_MAYBE_INPUT_PORT(state, argv, argc, 0, port);
 
   std::istream* is = port.file_port_input_handle();
@@ -235,9 +246,10 @@ AR_DEFUN("read", fn_read, 0, 1);
     return state.file_error(os.str()); \
   }
 
-Value fn_write_char(State& state, size_t argc, Value* argv) {
+Value fn_write_char(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "write-char";
 
+  AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, CHARACTER);
   AR_MAYBE_OUTPUT_PORT(state, argv, argc, 1, port);
 
@@ -254,8 +266,9 @@ Value fn_write_char(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("write-char", fn_write_char, 1, 2);
 
-Value fn_write(State& state, size_t argc, Value* argv) {
+Value fn_write(State& state, size_t argc, Value* argv, void* v) {
   static const char *fn_name = "write";
+  AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   AR_MAYBE_OUTPUT_PORT(state, argv, argc, 1, port);
   AR_CHECK_OUTPUT_PORT_OPEN(state, port);
   std::ostream& os = *port.file_port_output_handle();
@@ -265,8 +278,9 @@ Value fn_write(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("write", fn_write, 1, 2);
 
-Value fn_display(State& state, size_t argc, Value* argv) {
+Value fn_display(State& state, size_t argc, Value* argv, void* v) {
   static const char *fn_name = "display";
+  AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   AR_MAYBE_OUTPUT_PORT(state, argv, argc, 1, port);
   AR_CHECK_OUTPUT_PORT_OPEN(state, port);
   std::ostream& os = *port.file_port_output_handle();
@@ -278,7 +292,7 @@ Value fn_display(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("display", fn_display, 1, 2);
 
-Value fn_newline(State& state, size_t argc, Value* argv) {
+Value fn_newline(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "newline";
   AR_MAYBE_OUTPUT_PORT(state, argv, argc, 0, port);
   AR_CHECK_OUTPUT_PORT_OPEN(state, port);
@@ -312,7 +326,9 @@ Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bo
   return C_UNSPECIFIED;
 }
 
-Value fn_print_source(State& state, size_t argc, Value* argv) {
+Value fn_print_source(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "print-source";
+  AR_FN_ARGC_EQ(state, argc, 1);
   if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
     state.print_src_pair(std::cerr, argv[0]);
     std::cerr << std::endl;
@@ -326,7 +342,9 @@ Value fn_print_source(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("print-source", fn_print_source, 1, 1, true);
 
-Value fn_source_name(State& state, size_t argc, Value* argv) {
+Value fn_source_name(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "source-name";
+  AR_FN_ARGC_EQ(state, argc, 1);
   if(argv[0].heap_type_equals(PAIR) && argv[0].pair_has_source()) {
     SourceLocation loc = argv[0].pair_src();
     if(state.source_names.size() > loc.source) {
@@ -337,14 +355,14 @@ Value fn_source_name(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("source-name", fn_source_name, 1);
 
-Value fn_print(State& state, size_t argc, Value* argv) {
+Value fn_print(State& state, size_t argc, Value* argv, void* v) {
   Value chk = fn_print_impl(state, argc, argv, std::cout, true, false);
   std::cout << std::endl;
   return chk;
 }
 AR_DEFUN("print", fn_print, 0, 0, true);
 
-Value fn_print_string(State& state, size_t argc, Value* argv) {
+Value fn_print_string(State& state, size_t argc, Value* argv, void* v) {
   std::ostringstream os;
   Value chk = fn_print_impl(state, argc, argv, os, true, false);
   if(chk.is_active_exception()) return chk;
@@ -352,7 +370,7 @@ Value fn_print_string(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("print-string", fn_print_string, 0, 0, true);
 
-static Value fn_pretty_print(State& state, size_t argc, Value* argv) {
+static Value fn_pretty_print(State& state, size_t argc, Value* argv, void* v) {
   Value chk = fn_print_impl(state, argc, argv, std::cout, true, true);
   std::cout << std::endl;
   return chk;
@@ -397,7 +415,7 @@ Value State::slurp_file(const std::string& path) {
   return lst;
 }
 
-Value fn_slurp_file(State& state, size_t argc, Value* argv) {
+Value fn_slurp_file(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "slurp-file";
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
 
@@ -407,8 +425,9 @@ Value fn_slurp_file(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("slurp-file", fn_slurp_file, 1);
 
-Value fn_print_table_verbose(State& state, size_t argc, Value* argv) {
+Value fn_print_table_verbose(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "print-table-verbose";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
 
   state.print_table_verbose(argv[0]);
@@ -417,8 +436,9 @@ Value fn_print_table_verbose(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("print-table-verbose", fn_print_table_verbose, 1);
 
-Value fn_load_file(State& state, size_t argc, Value* argv) {
+Value fn_load_file(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "load";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   
   std::string path(argv[0].string_data());
@@ -438,19 +458,6 @@ Value fn_load_file(State& state, size_t argc, Value* argv) {
   return res;
 }
 AR_DEFUN("load", fn_load_file, 1);
-
-Value fn_load_module(State& state, size_t argc, Value* argv) {
-  static const char* fn_name = "load-module";
-  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
-
-  // auto => auto.sld, auto.scm
-  // 
-
-  //return state.load_file(path);
-
-  return C_UNSPECIFIED;
-}
-AR_DEFUN("load-module", fn_load_module, 1);
 
 void State::load_file_functions() {
   files.install(*this);

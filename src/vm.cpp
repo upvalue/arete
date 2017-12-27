@@ -197,7 +197,7 @@ void VMFrame::close_over() {
 }
 
 
-Value State::apply_vm(Value fn, size_t argc, Value* argv) {
+Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 #if AR_COMPUTED_GOTO
   static void* dispatch_table[] = {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,
@@ -426,78 +426,25 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
         VM_DISPATCH();
       }
 
-      VM_CASE(OP_APPLY):
       VM_CASE(OP_APPLY_TAIL): {
-        size_t insn = VM_CODE()[code_offset-1];
         size_t fargc = VM_NEXT_INSN();
 
         Value afn = f.stack[f.stack_i - fargc - 1];
+        Value to_apply = afn;
+        AR_LOG_VM("apply-tail fargc " << fargc << " fn: " << afn);
 
+        if(AR_LIKELY(afn.procedurep())) {
+          // Stack frame is trivially reusable (same function, same argument count, no closures)
+          if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
+            frames_lost++;
 
-        AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " " << f.stack_i);
-        AR_LOG_VM((insn == OP_APPLY ? "apply" : "apply-tail") << " fargc: " << fargc << " fn: " << afn);
+            afn = afn.closure_unbox();
 
-        switch(afn.heap_type()) {
-          case CFUNCTION: {
-            size_t min_arity = afn.as<CFunction>()->min_arity;
-            size_t max_arity = afn.as<CFunction>()->max_arity;
-
-            if(fargc < min_arity) {
-              std::ostringstream os;
-              os << "function " << afn << " expected at least " << min_arity << " arguments " <<
-                "but only got " << fargc;
-              f.exception = eval_error(os.str());
-              goto exception;
-            } else if(fargc > max_arity) {
-              if(!afn.c_function_variable_arity()) {
-                std::ostringstream os;
-                os << "function " << afn << " expected at most " << max_arity << " arguments " <<
-                  "but got " << fargc;
-                f.exception = eval_error(os.str());
-                goto exception;
-              }
-            } 
-
-            // Replace function on stack with its result
-            AR_ASSERT(f.stack_i >= (fargc + 1));
-            f.stack[f.stack_i - fargc - 1] =
-              f.stack[f.stack_i - fargc - 1].c_function_apply(*this, fargc, &f.stack[f.stack_i - fargc]);
-
-            // VM ALLOCATION
-            VM_RESTORE();
-
-            f.stack_i -= (fargc);
-            
-            if(f.stack[f.stack_i - 1].is_active_exception()) {
-              f.exception = f.stack[f.stack_i - 1];
-              goto exception;
-            }
-
-            break;
-          }
-
-          case VMFUNCTION:
-          case CLOSURE: {
-            // Check for a closure and extract function from it if necessary,
-            // so we can inspect the actual function
-            Value to_apply = afn;
-
-            if(afn.heap_type_equals(CLOSURE)) {
-              afn = afn.closure_function();
-            }
-
-            // Check argument arity
-            if(tco_enabled && insn == OP_APPLY_TAIL) {
-              frames_lost++;
-
-              // Minor optimization: re-use this frame if this is a recursive tail call that is
-              // trivially reuseable (i.e. same argument count, no closures)
-              if((ptrdiff_t)f.fn == to_apply.bits && fargc == f.fn->min_arity && !f.upvalues) {
-                memcpy(f.locals, &f.stack[f.stack_i - fargc], fargc * sizeof(void*));
-                f.stack_i = 0;
-                goto tail_recur;
-              }
-
+            if((ptrdiff_t)f.fn == afn.bits && fargc == f.fn->min_arity && !f.upvalues) {
+              memcpy(f.locals, &f.stack[f.stack_i - fargc], fargc * sizeof(void*));
+              f.stack_i = 0;
+              goto tail_recur;
+            } else {
               temps.clear();
               for(size_t i = 0; i != fargc; i++) {
                 temps.push_back(f.stack[f.stack_i - fargc + i]);
@@ -514,35 +461,14 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               AR_ASSERT(!f.destroyed);
 
               goto tail;
-            } else {
-              // Replace function on stack with result of function
-              AR_ASSERT(((ptrdiff_t) (f.stack_i - fargc - 1)) >= 0);
-              f.stack[f.stack_i - fargc - 1] =
-                apply_vm(to_apply, fargc, &f.stack[f.stack_i - fargc]);
-
-              // VM ALLOCATION
-
-              VM_RESTORE();
-
-              // Pop arguments
-              f.stack_i -= (fargc);
-              AR_ASSERT("stack underflow" && f.stack_i > 0);
-
-              // Finally, check for an exception
-              if(f.stack[f.stack_i - 1].is_active_exception()) {
-                f.exception = f.stack[f.stack_i - 1];
-                goto exception;
-              }
             }
-            break;
-          }
-          case FUNCTION: {
+          } else {
             f.stack[f.stack_i - fargc - 1] =
-              eval_apply_function(f.stack[f.stack_i - fargc - 1], fargc, &f.stack[f.stack_i - fargc]);
-
-            VM_RESTORE();
+              f.stack[f.stack_i - fargc - 1].as_unsafe<Procedure>()->procedure_addr(*this, fargc, &f.stack[f.stack_i - fargc], (void*) f.stack[f.stack_i - fargc - 1].bits);
 
             f.stack_i -= (fargc);
+
+            VM_RESTORE();
 
             AR_ASSERT("stack underflow" && f.stack_i > 0);
 
@@ -550,16 +476,48 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
               f.exception = f.stack[f.stack_i - 1];
               goto exception;
             }
-
-            break;
           }
-          default:
-            std::ostringstream os;
-            AR_PRINT_STACK();
-            os << "vm: attempt to apply non-applicable value " << afn;
-            f.exception = eval_error(os.str());
-            goto exception;
         }
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_APPLY): {
+        size_t fargc = VM_NEXT_INSN();
+
+        Value afn = f.stack[f.stack_i - fargc - 1];
+
+        AR_LOG_VM("apply fargc: " << fargc << " fn: " << afn);
+
+        if(AR_LIKELY(afn.procedurep())) {
+          if(f.stack[f.stack_i - fargc - 1].as_unsafe<Procedure>()->procedure_addr == 0) {
+            std::cout << f.stack[f.stack_i - fargc - 1] << std::endl;
+            std::cout << f.stack[f.stack_i - fargc - 1].as<Function>()->name << std::endl;
+            std::cout << f.stack[f.stack_i - fargc - 1].as<Function>()->rest_arguments << std::endl;
+            AR_ASSERT(!":(");
+          }
+
+          f.stack[f.stack_i - fargc - 1] =
+            f.stack[f.stack_i - fargc - 1].as_unsafe<Procedure>()->procedure_addr(*this, fargc, &f.stack[f.stack_i - fargc], (void*) f.stack[f.stack_i - fargc - 1].bits);
+
+          f.stack_i -= (fargc);
+
+          VM_RESTORE();
+
+          AR_ASSERT("stack underflow" && f.stack_i > 0);
+
+          if(f.stack[f.stack_i - 1].is_active_exception()) {
+            f.exception = f.stack[f.stack_i - 1];
+            goto exception;
+          }
+        } else {
+          std::ostringstream os;
+          AR_PRINT_STACK();
+          os << "vm: attempt to apply non-applicable value " << afn;
+          f.exception = eval_error(os.str());
+          goto exception;
+        }
+
         VM_DISPATCH();
       }
 
@@ -600,6 +558,8 @@ Value State::apply_vm(Value fn, size_t argc, Value* argv) {
             AR_LOG_VM("upvalue " << i << " = " << storage.as_unsafe<VectorStorage>()->data[i] << " " << storage.as_unsafe<VectorStorage>()->data[i].upvalue())
           }
           closure = gc.allocate(CLOSURE, sizeof(Closure));
+
+          closure.procedure_install(&State::apply_vm);
 
           closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
           closure.as_unsafe<Closure>()->function = f.stack[f.stack_i-1];

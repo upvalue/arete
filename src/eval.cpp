@@ -299,6 +299,7 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
       Value fn_env, args, saved_fn, argi, arg;
       AR_FRAME(this, fn_env, args, argi, saved_fn, arg);
       Function* fn = static_cast<Function*>(gc.allocate(FUNCTION, sizeof(Function)));
+
       saved_fn = fn;
 
       fn->parent_env = frame.env;
@@ -348,6 +349,9 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
         fn->arguments = args;
       }
 
+      saved_fn.procedure_install(&State::apply_interpreter);
+      AR_ASSERT(saved_fn.procedurep());
+      AR_ASSERT(saved_fn.as_unsafe<Function>()->procedure_addr);
       return saved_fn;
     }
   }
@@ -378,7 +382,7 @@ static Value eval_check_arity(State& state, Value fn, Value exp,
 
 // Apply a function. Not used by the interpreter itself but used for generic apply and calls from
 // C/VM functions
-Value State::eval_apply_function(Value fn, size_t argc, Value* argv) {
+Value State::apply_interpreter(size_t argc, Value* argv, Value fn) {
   AR_TYPE_ASSERT(fn.heap_type_equals(FUNCTION));
   EvalFrame frame;
   Value fn_args, fn_rest_args, tmp, new_env;
@@ -625,156 +629,98 @@ tail_call:
           // This is a normal function application 
           tmp = eval_body(frame, exp.car(), true);
           EVAL_CHECK(tmp, exp);
-          kar_type = tmp.type();
 
-          // Ok. With CFUNCTION and VMFUNCTION, we have no hope of 
-          // tail calls so we can do them elsewhere
-          // With FUNCTION, we'll have to evaluate the arguments in the given env.
-          // If this is a tail call, we'll then modify the EvalFrame and goto. If not, we create
-          // a new one. easy peasy.
-          switch(kar_type) {
-          case CFUNCTION: {
-            Value fn = tmp, fn_args, args = exp.cdr();
-            AR_FRAME(this, fn, fn_args,  args);
+          //if(!tmp.immediatep() && tmp.heap->get_header_bit(Value::VALUE_PROCEDURE_BIT))
 
-            size_t argc = args.list_length();
+          if(AR_LIKELY(tmp.procedurep())) {
+            if(tmp.heap_type_equals(FUNCTION)) {
+              EvalFrame frame2;
+              Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body;
+              AR_ASSERT(fn.as_unsafe<Function>()->procedure_addr);
+              ListAppender rest;
+              frame2.fn_name = tmp.function_name();
+              AR_FRAME(this, frame2.fn_name, frame2.env, fn, args, fn_args, rest_args_name, new_body,
+                rest.head, rest.tail);
+              
+              fn_args = fn.function_arguments();
+              size_t argc = args.list_length();
+              size_t arity = fn_args.list_length();
+              rest_args_name = fn.function_rest_arguments();
 
-            tmp = eval_check_arity(*this, fn, exp, argc,
-              fn.c_function_min_arity(), fn.c_function_max_arity(), fn.c_function_variable_arity());
-            
-            EVAL_CHECK(tmp, exp);
+              //std::cout << "tmp: " << tmp << std::endl;
 
-            //std::cout << "frame.env" << frame.env << std::endl;
-
-            fn_args = make_vector_storage(argc);
-
-            while(args.heap_type_equals(PAIR)) {
-              tmp = eval_body(frame, args.car(), true);
+              tmp = eval_check_arity(*this, fn, exp, argc, arity, arity, rest_args_name != C_FALSE);
               EVAL_CHECK(tmp, exp);
-              vector_storage_append(fn_args, tmp);
-              args = args.cdr();
-            }
 
-            tmp = fn.c_function_apply(*this, argc, fn_args.vector_storage_data());
-            EVAL_CHECK(tmp, exp);
-            exp = tmp;
+              frame2.env = make_env(fn.function_parent_env(), argc + 1);
 
-            continue;
-          }
-          case FUNCTION: {
-            EvalFrame frame2;
-            Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body;
-            ListAppender rest;
-            frame2.fn_name = tmp.function_name();
-            AR_FRAME(this, frame2.fn_name, frame2.env, fn, args, fn_args, rest_args_name, new_body,
-              rest.head, rest.tail);
-            
-            fn_args = fn.function_arguments();
-            size_t argc = args.list_length();
-            size_t arity = fn_args.list_length();
-            rest_args_name = fn.function_rest_arguments();
-
-            //std::cout << "tmp: " << tmp << std::endl;
-
-            tmp = eval_check_arity(*this, fn, exp, argc, arity, arity, rest_args_name != C_FALSE);
-            EVAL_CHECK(tmp, exp);
-
-            frame2.env = make_env(fn.function_parent_env(), argc + 1);
-
-            // Evaluate arguemnts, left to right
-            while(args.heap_type_equals(PAIR) && fn_args.heap_type_equals(PAIR)) {
-              tmp = eval_body(frame, args.car(), true);
-              EVAL_CHECK(tmp, args);
-              vector_append(frame2.env, fn_args.car());
-              vector_append(frame2.env, tmp);
-              args = args.cdr();
-              fn_args = fn_args.cdr();
-            }
-
-            if(rest_args_name != C_FALSE) {
-              while(args.heap_type_equals(PAIR)) {
+              // Evaluate arguemnts, left to right
+              while(args.heap_type_equals(PAIR) && fn_args.heap_type_equals(PAIR)) {
                 tmp = eval_body(frame, args.car(), true);
                 EVAL_CHECK(tmp, args);
+                vector_append(frame2.env, fn_args.car());
+                vector_append(frame2.env, tmp);
+                args = args.cdr();
+                fn_args = fn_args.cdr();
+              }
 
-                rest.append(*this, tmp);
+              if(rest_args_name != C_FALSE) {
+                while(args.heap_type_equals(PAIR)) {
+                  tmp = eval_body(frame, args.car(), true);
+                  EVAL_CHECK(tmp, args);
+
+                  rest.append(*this, tmp);
+                  args = args.cdr();
+                }
+
+                vector_append(frame2.env, rest_args_name);
+                vector_append(frame2.env, rest.head);
+              }
+
+              new_body = fn.function_body();
+
+              if(tail) {
+                // tail call
+                frame2.tco_lost = frame.tco_lost + 1;
+                frame = frame2;
+                body = new_body;
+                goto tail_call;
+              } else {
+                // Have to loop here to get accurate source code information out of this
+                while(new_body.heap_type_equals(PAIR)) {
+                  tmp = eval_body(frame2, new_body.car(), true);
+                  EVAL_CHECK_FRAME(frame2, tmp,
+                    new_body.car().heap_type_equals(PAIR) ? new_body.car() : new_body);
+                  new_body = new_body.cdr();
+                }
+
+                EVAL_CHECK(tmp, exp);
+
+                exp = tmp;
+                continue;
+              }
+            } else {
+              Value fn = tmp, fn_args, args = exp.cdr();
+              AR_FRAME(this, fn, fn_args, args);
+
+              size_t argc = args.list_length();
+
+              // TODO maybe allocate this on stack if possible
+              fn_args = make_vector_storage(argc);
+
+              while(args.heap_type_equals(PAIR)) {
+                tmp = eval_body(frame, args.car(), true);
+                EVAL_CHECK(tmp, exp);
+                vector_storage_append(fn_args, tmp);
                 args = args.cdr();
               }
 
-              vector_append(frame2.env, rest_args_name);
-              vector_append(frame2.env, rest.head);
-            }
-
-            new_body = fn.function_body();
-
-            if(tail) {
-              // tail call
-              frame2.tco_lost = frame.tco_lost + 1;
-              frame = frame2;
-              body = new_body;
-              goto tail_call;
-            } else {
-              // Have to loop here to get accurate source code information out of this
-              while(new_body.heap_type_equals(PAIR)) {
-                tmp = eval_body(frame2, new_body.car(), true);
-                EVAL_CHECK_FRAME(frame2, tmp,
-                  new_body.car().heap_type_equals(PAIR) ? new_body.car() : new_body);
-                new_body = new_body.cdr();
-              }
-
+              tmp = fn.as_unsafe<Procedure>()->procedure_addr(*this, argc,
+                fn_args.vector_storage_data(), fn.heap);
               EVAL_CHECK(tmp, exp);
-
               exp = tmp;
+
               continue;
-            }
-
-            AR_ASSERT(!"should never reach this point");
-            return C_FALSE;
-          }
-          case CLOSURE:
-          case VMFUNCTION: {
-            Value fn = tmp, args = exp.cdr(), argv, closure;
-            ListAppender rest;
-            AR_FRAME(this, fn, args, argv, closure, rest.head, rest.tail);
-
-            if(fn.heap_type_equals(CLOSURE)) {
-              closure = fn;
-              fn = fn.closure_function();
-            }
-
-            size_t argc = args.list_length();
-
-            size_t min_arity = fn.vm_function_min_arity(), max_arity = fn.vm_function_max_arity();
-            bool var_arity = fn.vm_function_variable_arity();
-
-            tmp = eval_check_arity(*this, fn, exp, argc, min_arity, max_arity, var_arity);
-            EVAL_CHECK(tmp, exp);
-
-            argv = make_vector_storage(argc+(var_arity ? 1:0));
-            argc = 0;
-
-            while(args.heap_type_equals(PAIR)) {
-              tmp = eval_body(frame, args.car(), true);
-              EVAL_CHECK(tmp, args);
-
-              vector_storage_append(argv, tmp);
-              argc++;
-              args = args.cdr();
-            }
-
-            //tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, &argv.vector_storage_data()[0]);
-            tmp = apply_vm(closure != C_FALSE ? closure : fn, argc, argv.vector_storage_data());
-
-            EVAL_CHECK(tmp, exp);
-            
-            exp = tmp;
-            continue;
-          }
-          default: {
-            std::ostringstream os;
-            std::cout << get_global_value(G_FORBID_INTERPRETER) << std::endl;
-            os << "attempt to apply non-applicable value of type " << (Type) kar_type << ": " <<
-              kar;
-            return eval_error(os.str(), exp);
           }
         }
         break;
@@ -841,17 +787,10 @@ Value State::eval_list(Value lst, bool expand, Value env) {
 //
 
 Value State::apply(Value fn, size_t argc, Value* argv) {
-  switch(fn.type()) {
-    case VMFUNCTION: case CLOSURE: {
-      return apply_vm(fn, argc, argv);
-    }
-    case CFUNCTION:
-      return fn.c_function_apply(*this, argc, argv);
-    case FUNCTION: {
-      return eval_apply_function(fn, argc, argv);
-    }
-    default:
-      return eval_error("cannot apply type", fn);
+  if(fn.procedurep()) {
+    return fn.as_unsafe<Procedure>()->procedure_addr(*this, argc, argv, (void*) fn.bits);
+  } else {
+    return eval_error("cannot apply type", fn);
   }
 
   return C_UNSPECIFIED;
