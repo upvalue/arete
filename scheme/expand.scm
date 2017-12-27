@@ -700,7 +700,10 @@
       (if (not (identifier? args))
         (raise-source (cdr x) 'expand "non-identifier as lambda rest argument" (list x))
         (if (rename? args)
-          (begin (rename-gensym! args) (rename-gensym args))
+          (begin
+            (rename-gensym! args)
+            (env-define new-env args 'variable)
+            (rename-gensym args))
           (begin
             (env-define new-env args 'variable)
             )))))

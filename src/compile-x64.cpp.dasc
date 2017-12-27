@@ -218,6 +218,8 @@ Value generic_apply(State* state, Value fn, size_t argc, Value* argv) {
   return result;
 }
 
+#if 0
+
 Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   static const bool sanity_log = true;
   const char* fn_name = "vmfunction->native";
@@ -870,5 +872,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 }
 
 AR_DEFUN("vmfunction->native", vmfunction_to_native, 1);
+
+#endif
 
 }
