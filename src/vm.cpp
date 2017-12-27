@@ -49,14 +49,21 @@
 # define AR_COMPUTED_GOTO 1
 #endif
 
+#define VM_CODE() (AR_ASSERT(gc.live((HeapValue*)code)), code)
+
+//#define VM_NEXT_INSN() (VM_CODE()[code_offset++], (*cp++))
+#define VM_NEXT_INSN() (*cp++)
+#define VM_JUMP(offset) \
+    cp = (size_t*)((((code + ((size_t) offset))))); \
+
 #if AR_COMPUTED_GOTO
 # define VM_CASE(label) LABEL_##label 
-# define VM_DISPATCH() goto *dispatch_table[code[code_offset++]]
+# define VM_DISPATCH() goto *dispatch_table[*cp++];
 # define VM_SWITCH()
 #else 
 # define VM_CASE(label) case label 
 # define VM_DISPATCH() break ;
-# define VM_SWITCH() switch(code[code_offset++])
+# define VM_SWITCH() switch(*cp++)
 #endif
 
 #define VM_STACK_PUSH(expr) \
@@ -70,14 +77,14 @@
 
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
 //#define VM_CODE() (f.code)
-#define VM_CODE() (AR_ASSERT(gc.live((HeapValue*)code)), code)
 
-#define VM_NEXT_INSN() (VM_CODE()[code_offset++])
 
 // Restore pointers after any potential garbage collection
 //#define VM_RESTORE() (code = (size_t*)((((char*)f.fn->code_pointer() + (size_t)((char*)code - (size_t)code_begin)))))
 #define VM_RESTORE() \
-    code = f.fn->code_pointer();
+    cp = (size_t*)((((size_t) f.fn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
+    code = f.fn->code_pointer(); 
+    //code = f.fn->code_pointer();
 
 #define AR_VM_LOG_ALWAYS false
 
@@ -304,11 +311,13 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 #endif
 
 #if AR_USE_REGISTER
-  register size_t *code asm ("r15") = (size_t*) f.fn->code_pointer();
-  //register Value *stackp asm ("r14") = ()
+  register size_t *cp asm ("r15") = (size_t*) f.fn->code_pointer();
 #else
-  size_t * code = (size_t*) f.fn->code_pointer();
+  size_t * cp = (size_t*) f.fn->code_pointer();
 #endif
+
+  // Always points to the beginning of the code array. Used to restore the code pointer.
+  size_t * code = cp;
 
   if(f.depth > (size_t)get_global_value(G_RECURSION_LIMIT).fixnum_value_or_zero()) {
     std::ostringstream os;
@@ -318,6 +327,9 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
   }
 
   //AR_ASSERT(gc.live((HeapValue*) f.code));
+
+  //std::cout << "first insn: " << (*cp) << std::endl;
+  //std::cout << "first insn: " << *(cp + 1) << std::endl;
 
   while(true) {
 #if AR_COMPUTED_GOTO
@@ -583,13 +595,12 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
         AR_ASSERT(f.destroyed);
         return ret;
       }
-      // Application logic.
-
 
       VM_CASE(OP_JUMP): {
         size_t jmp = VM_NEXT_INSN();
         AR_LOG_VM("jump " << jmp);
-        code_offset = jmp;
+
+        VM_JUMP(jmp);
 
         VM_DISPATCH();
       }
@@ -600,7 +611,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 
         if(val == C_FALSE) {
           AR_LOG_VM("jump-if-false jumping " << jmp_offset);
-          code_offset = jmp_offset;
+          VM_JUMP(jmp_offset);
         } else {
           AR_LOG_VM("jump-if-false not jumping" << jmp_offset);
         }
@@ -611,7 +622,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
       VM_CASE(OP_JUMP_WHEN_POP): {
         size_t jmp_offset = VM_NEXT_INSN();
         if(f.stack[--f.stack_i] == C_FALSE) {
-          code_offset = jmp_offset;
+          VM_JUMP(jmp_offset);
         }
 
         VM_DISPATCH();
@@ -625,7 +636,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
           AR_LOG_VM("jump-if-true not jumping " << jmp_offset);
         } else {
           AR_LOG_VM("jump-if-true jumping " << jmp_offset);
-          code_offset = jmp_offset;
+          VM_JUMP(jmp_offset);
         }
 
         VM_DISPATCH();
@@ -638,7 +649,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 
       VM_CASE(OP_ARGC_EQ): {
         // Check that argc equals a specific number
-        size_t eargc = code[code_offset++];
+        size_t eargc = VM_NEXT_INSN();
 
         AR_LOG_VM("argc-eq " << eargc);
 
@@ -654,7 +665,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
       }
 
       VM_CASE(OP_ARGC_GTE): {
-        size_t eargc = code[code_offset++];
+        size_t eargc = VM_NEXT_INSN();
 
         if(argc < eargc) {
           std::ostringstream os;
@@ -925,7 +936,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 #ifndef AR_COMPUTED_GOTO
       default:
 #endif
-        warn() << "encountered bad opcode: " << VM_CODE()[code_offset-1] << std::endl;
+        //warn() << "encountered bad opcode: " << VM_CODE()[code_offset-1] << std::endl;
         AR_ASSERT(!"bad opcode");
         break;
       }
