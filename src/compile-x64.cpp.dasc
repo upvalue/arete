@@ -150,9 +150,26 @@ void sanity_log_2(ptrdiff_t compstack) {
   std::cout << "sanity_log_2: location of computation stack[0]: " << compstack << "(" << (rsp - compstack) << " from rsp)" << std::endl;
 }
 
+void sanity_log_3(ptrdiff_t locals) {
+  std::cout << "sanity_log_3: location of locals[0]: " << locals << "(" << (rsp - locals) << " from rsp)" << std::endl;
+}
+
+void sanity_log_4(ptrdiff_t argc) {
+  std::cout << "sanity_log_4: argc: " << argc << std::endl;
+}
+
+void sanity_log_5(ptrdiff_t argv) {
+  std::cout << "sanity_log_5: argv ptr: " << argv << std::endl;
+}
+
 void sanity_log_end(ptrdiff_t rStackI) {
   std::cout << "sanity_log_end: rStackI = " << rStackI << std::endl;
 }
+
+// Exception handling
+
+// Because string munging in assembly is painful, exceptions are described by the NativeException
+// struct and generated through an external C++ procedure
 
 // Exception tag codes
 enum {
@@ -183,16 +200,19 @@ struct NativeException {
   ptrdiff_t arg2;
 };
 
+/**
+ * Function for generating an exception with a trace from a native function.
+ */
 Value native_throw_exception(NativeException* exc) {
   std::cout << (ptrdiff_t) exc << std::endl;
   if(!exc) return C_FALSE;
-
-  //AR_ASSERT(exc->function.type() == VMFUNCTION);
 
   AR_LOG_JIT("!native_exception called with state " << (ptrdiff_t) exc->state <<
     " VMFunction: " << exc->function.bits << " code_offset: " << exc->code_offset
     << " tag: " << exc->tag << " src: " << exc->src << " arg1: " << exc->arg1
     << " arg2: " << exc->arg2);
+
+  AR_ASSERT(exc->function.type() == VMFUNCTION);
 
   std::ostringstream os;
 
@@ -215,51 +235,22 @@ Value native_throw_exception(NativeException* exc) {
       os << "primitive fx+ ";
       break;
     }
+    default: break;
+  }
+
+  if(check_code) {
+    switch(exc->arg1) {
+      case E_EXPECTED_FIXNUM_1: os << "expected argument 1 to be a fixnum"; break;
+      case E_EXPECTED_FIXNUM_2: os << "expected argument 2 to be a fixnum"; break;
+      default: break;
+    }
   }
 
   exc->state->trace_function(exc->function, 0, exc->code_offset);
   
   return exc->state->make_exception(stag, os.str());
-  //return exc->state->eval_error(
 }
 
-/**
- * Exception generated native code; generate a helpful error messages from integer-based codes
- */
-Value native_exception(State* state, unsigned tag, unsigned src, unsigned code) {
-  AR_LOG_JIT("native_exception called " << (ptrdiff_t) state << " with arguments " << tag << " " << src << " " << code);
-  std::ostringstream os;
-
-  Value tag_s;
-  if(tag_s == E_TYPE) {
-    tag_s = state->globals[State::S_TYPE_ERROR];
-  } else {
-    tag_s = state->globals[State::S_EVAL_ERROR];
-  }
-
-  switch(src) {
-    case E_FX_ADD: {
-      os << "primitive fx+ ";
-      break;
-    }
-    case E_ARITY_CHECK: {
-      os << "expected exactly ";
-      break;
-    }
-    default: break;
-  }
-
-  if(src == E_ARITY_CHECK) {
-    os << code << " arguments "; 
-  } else {
-    switch(code) {
-      case E_EXPECTED_FIXNUM_1: os << "expected argument 1 to be a fixnum"; break;
-      case E_EXPECTED_FIXNUM_2: os << "expected argument 2 to be a fixnum"; break;
-    }
-  }
-
-  return state->make_exception(tag_s, os.str(), C_FALSE);
-}
 
 // callee-save
 
@@ -309,7 +300,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Locals + computation stack + pointer to VMFunction
   unsigned kTotalStackSize = (sizeof(NativeFrame) - sizeof(void*)) + ((total_stack) * sizeof(void*));
   size_t kValueSize = sizeof(void*);
-  unsigned kCompStackOffset = (sizeof(NativeFrame) - sizeof(void*)) + (local_count * sizeof(void*));
+  unsigned kLocalsOffset = sizeof(NativeFrame);
+  unsigned kCompStackOffset = sizeof(NativeFrame) + (local_count * sizeof(void*));
   //unsigned kCompStackOffset = 24; //kTotalStackSize - (kValueSize * stack_max);
   unsigned kTotalStackSizeAligned = kTotalStackSize;
 
@@ -321,7 +313,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   kTotalStackSizeAligned += 8;
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
-    " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kCompStackOffset " << kCompStackOffset \
+    " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kLocalsOffset " << kLocalsOffset << 
+    " kCompStackOffset " << kCompStackOffset \
 		<< " kFrameSize " << kFrameSize);
 
   // A note on a possible source of confusion: in the virtual machine, the stack is a separately
@@ -356,7 +349,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   |.define sFramePrev, [rsp]
   |.define sFrameCount, [rsp+8]
-
 
   // Call a simple FUN, for debugging only.
   |.macro simpCall, fun
@@ -427,9 +419,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | cmp rax, 1
   | jz >1
   // Test failed. Set up registers for exception
-	| mov rArg2, E_TYPE;
-	| mov rArg3, src; mov rArg4, code;
-  | jmp ->exception
+  | throwNativeException (code_offset-1), E_TYPE, src, code, 0
   |1:
   |.endmacro
 
@@ -472,7 +462,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov qword [rsp+24], src
   | mov qword [rsp+32], arg1
   | mov qword [rsp+40], arg2
-  | jmp ->exception2
+  | jmp ->exception
   |.endmacro
 
   // store a constant in a register
@@ -529,6 +519,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // PUSHing grows it by only 8.
 
   | mov r14, rArgArgc
+  | mov r15, rArgArgv
 
   | mov rStackI, 0
 
@@ -554,6 +545,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
     | getCompStackIndex rArg1
     | simpCall sanity_log_2
+
+    | mov rArg1, rsp
+    | add rArg1, kLocalsOffset
+    | simpCall sanity_log_3
+
+    | mov rArg1, r14
+    | simpCall sanity_log_4
+
+    | mov rArg1, r15
+    | simpCall sanity_log_5
   }
 
   // Zero out GC frame
@@ -575,11 +576,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | cmp rArg1, rArg2
   | jne ->gc_zero
 
-  // Initialize locals
-
+/*
   | mov rArg2, rsp; 
 	| stateCall state_collect;
-
+  */
 
   // Execute function body
   size_t code_offset = 0;
@@ -598,6 +598,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     //std::cout << code[code_offset] << std::endl;
     switch(code[code_offset++]) {
 
+      case OP_LOCAL_GET_0:
       case OP_FX_ADD: 
       case OP_POP:
       case OP_ARGV_REST: continue;
@@ -718,6 +719,21 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | mov [rArg2], rArg1
         | inc rStackI
 
+        break;
+      }
+
+      case OP_LOCAL_GET_0: {
+        AR_LOG_JIT("local-get-0 from stack location " << kLocalsOffset);
+
+        | mov rArg1, rsp
+        | add rArg1, kLocalsOffset
+
+        | mov rArg1, [rArg1]
+
+        | getCompStackIndex rArg2
+        | mov [rArg2], rArg1
+
+        | inc rStackI
         break;
       }
 
@@ -867,6 +883,31 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | je >1
         | throwNativeException code_offset-2, E_EVAL, E_ARITY_CHECK, fargc, r14
         | 1:
+
+        AR_LOG_JIT("argc-eq " << fargc);
+
+        // Initialize local variables
+        if(fargc) {
+          AR_LOG_JIT("initializing locals with loop to " << kLocalsOffset + (8 * fargc));
+          | mov rArg1, rsp
+          | mov rArg2, r15
+          | add rArg1, (kLocalsOffset)
+          | mov rArg3, rArg1
+          | add rArg3, (8 * fargc)
+
+          |->local_init:
+          // mov argv[i] into rArg4
+          | mov rArg4, [rArg2]
+          // mov rArg4 into locals[i]
+           | mov [rArg1], rArg4
+          // Increment and check again
+          | add rArg2, 8
+          | add rArg1, 8
+          | cmp rArg1, rArg3
+          | jne ->local_init
+
+        }
+
         break;
       }
 
@@ -887,12 +928,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   }
 
   | jmp ->unwind
-  |->exception:
-	| stateCallRetValue native_exception
-	| mov rStackI, rax
-  | jmp ->unwind
 
-  |->exception2:
+  |->exception:
   // Append State* state to end of NativeException
   // Arg1 = Pointer to beginning of NativeException structure
 
@@ -972,7 +1009,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   }
   std::cout << ')' << std::endl;
 	std::cout << "Calling against state: " << (ptrdiff_t) &state << std::endl;
-  ptrdiff_t result = ptr(&state, argc-1, (size_t)argv+1, (size_t)vfn.bits);
+
+  std::cout << " argc: " << argc-1 << " argv ptr: " << (size_t)argv+8 << std::endl;
+  ptrdiff_t result = ptr(&state, argc-1, (size_t)argv+8, (size_t)vfn.bits);
 
   //std::cout << (ptrdiff_t)state.get_symbol("print").symbol_value().bits << std::endl;
   std::cout << "result int: " << (result) << std::endl;
