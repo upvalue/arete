@@ -1220,7 +1220,6 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
   // TODO: Could type check more thoroughly here.
 
-  size_t size = sizeof(VMFunction);
   Value name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob = C_FALSE,
      sources_blob, code;
   AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn, free_vars, free_vars_blob,
@@ -1257,18 +1256,14 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
   }
 
   size_t insn_count = insns.vector_length();
-  size_t bytecode_size = (size_t) insn_count * sizeof(size_t);
 
   // Determine actual size of VMFunction
-  size += (bytecode_size);
-
   code = state.make_bytevector<size_t>(insn_count);
 
-  VMFunction* vfn = static_cast<VMFunction*>(state.gc.allocate(VMFUNCTION, size));
+  VMFunction* vfn = static_cast<VMFunction*>(state.gc.allocate(VMFUNCTION, sizeof(VMFunction)));
 
   vfn->min_arity = (unsigned)rec.record_ref(9).fixnum_value();
   vfn->max_arity = (unsigned)rec.record_ref(10).fixnum_value();
-  vfn->bytecode_size = (unsigned)bytecode_size;
   vfn->stack_max = (unsigned)rec.record_ref(6).fixnum_value();
   vfn->local_count = (unsigned)rec.record_ref(5).fixnum_value();
   vfn->name = rec.record_ref(0);

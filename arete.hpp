@@ -1124,7 +1124,6 @@ struct VMFunction : Procedure {
   Bytevector* code;
 
   unsigned min_arity, max_arity, stack_max, local_count;
-  size_t bytecode_size;
 
   static const unsigned CLASS_TYPE = VMFUNCTION;
 
