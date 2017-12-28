@@ -180,7 +180,8 @@ enum {
 // Exception source codes
 enum {
   E_ARITY_CHECK,
-  E_FX_ADD
+  E_FX_ADD,
+  E_FX_SUB
 };
 
 // Exception message codes
@@ -231,10 +232,8 @@ Value native_throw_exception(NativeException* exc) {
       os << "expected exactly " << exc->arg1 << " arguments but got " << exc->arg2;
       break;
     }
-    case E_FX_ADD: {
-      os << "primitive fx+ ";
-      break;
-    }
+    case E_FX_ADD: os << "primitive fx+ "; break;
+    case E_FX_SUB: os << "primitive fx- "; break;
     default: break;
   }
 
@@ -599,7 +598,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     switch(code[code_offset++]) {
 
       case OP_LOCAL_GET_0:
-      case OP_FX_ADD: 
+      case OP_FX_ADD: case OP_FX_SUB:
       case OP_POP:
       case OP_ARGV_REST: continue;
 
@@ -825,25 +824,40 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
-      case OP_FX_ADD: {
+      case OP_FX_ADD:
+      case OP_FX_SUB: {
+        unsigned insn = code[code_offset-1];
+        unsigned src = 0;
+
+        switch(insn) {
+          case OP_FX_ADD: src = E_FX_ADD; AR_LOG_JIT("fx+"); break;
+          case OP_FX_SUB: src = E_FX_SUB; AR_LOG_JIT("fx-"); break;
+        }
+
         | getCompStackIndex rArg2
-        AR_LOG_JIT("fx+");
         | sub rArg2, 8
 
         // 2 labels: two for each type test
-        | checkFixnumP [rArg2], E_FX_ADD, E_EXPECTED_FIXNUM_2
+        | checkFixnumP [rArg2], src, E_EXPECTED_FIXNUM_2
 
         // Extract fixnum argument 1 value
         | shr qword [rArg2], 1
 
         | getCompStackIndex rArg1
         | sub rArg1, 16
-        | checkFixnumP [rArg1], E_FX_ADD, E_EXPECTED_FIXNUM_1
+        | checkFixnumP [rArg1], src, E_EXPECTED_FIXNUM_1
         // extract fixnum argument 2 value
         | shr qword [rArg1], 1
 
         | mov rax, [rArg1]
-        | add rax, [rArg2]
+        switch(insn) {
+          case OP_FX_ADD:
+            | add rax, [rArg2]
+            break;
+          case OP_FX_SUB:
+            | sub rax, [rArg2]
+            break;
+        }
 
         | shl rax, 1
         | inc rax
@@ -905,7 +919,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
           | add rArg1, 8
           | cmp rArg1, rArg3
           | jne ->local_init
-
         }
 
         break;
