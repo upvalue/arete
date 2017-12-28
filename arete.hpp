@@ -2103,7 +2103,7 @@ struct State {
   /** The primary application function */
   Value eval_list(Value lst, bool expand = true, Value env = C_FALSE);
 
-  // Build a list of out of temps
+  // Build a list of out of temps[limit:]
   Value temps_to_list(size_t limit = 0);
 
   Value expand_expr(Value exp);
@@ -2130,7 +2130,7 @@ struct State {
 
   ///// Virtual machine
   Value apply_vm(size_t argc, Value* argv, Value fn);
-  void vm_trace(VMFrame& f, size_t frames_lost, size_t* cp);
+  void trace_function(Value fn, size_t frames_lost, size_t code_offset);
 
   // Command line interface
 

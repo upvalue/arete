@@ -705,20 +705,42 @@ tail_call:
 
               size_t argc = args.list_length();
 
-              // TODO maybe allocate this on stack if possible
-              fn_args = make_vector_storage(argc);
+              if(argc <= 10) {
+                // Allocate arguments on stack if possible
+                // This actually reduces collections during bootstrap from 40 to 30.
+                Value argv[10];
+                {
+                  AR_FRAME(this, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6],
+                    argv[7], argv[8], argv[9]);
 
-              while(args.heap_type_equals(PAIR)) {
-                tmp = eval_body(frame, args.car(), true);
+                  size_t i = 0;
+
+                  while(args.heap_type_equals(PAIR)) {
+                    tmp = eval_body(frame, args.car(), true);
+                    EVAL_CHECK(tmp, exp);
+                    argv[i++] = tmp;
+                    args = args.cdr();
+                  }
+                }
+
+                tmp = fn.as_unsafe<Procedure>()->procedure_addr(*this, argc, argv, fn.heap);
                 EVAL_CHECK(tmp, exp);
-                vector_storage_append(fn_args, tmp);
-                args = args.cdr();
-              }
+                exp = tmp;
+              } else {
+                fn_args = make_vector_storage(argc);
 
-              tmp = fn.as_unsafe<Procedure>()->procedure_addr(*this, argc,
-                fn_args.vector_storage_data(), fn.heap);
-              EVAL_CHECK(tmp, exp);
-              exp = tmp;
+                while(args.heap_type_equals(PAIR)) {
+                  tmp = eval_body(frame, args.car(), true);
+                  EVAL_CHECK(tmp, exp);
+                  vector_storage_append(fn_args, tmp);
+                  args = args.cdr();
+                }
+
+                tmp = fn.as_unsafe<Procedure>()->procedure_addr(*this, argc,
+                  fn_args.vector_storage_data(), fn.heap);
+                EVAL_CHECK(tmp, exp);
+                exp = tmp;
+              }
 
               continue;
           }

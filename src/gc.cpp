@@ -423,7 +423,6 @@ void GCSemispace::collect(size_t request, bool force) {
 
   char* sweep = other->data;
 
-  // AR_ASSERT(sweep != other_cursor);
   while(sweep != other_cursor) {
     HeapValue* obj = (HeapValue*) sweep;
     size_t size = obj->size;

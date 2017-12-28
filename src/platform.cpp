@@ -20,7 +20,9 @@ DefunGroup platform("platform");
 ///// OS SPECIFIC 
 //
 
-Value fn_current_millisecond(State& state, size_t argc, Value* argv) {
+Value fn_current_millisecond(State& state, size_t argc, Value* argv, void* _) {
+	static const char* fn_name = "current-millisecond";
+	AR_FN_ARGC_EQ(state, argc, 0);
 #if AR_OS == AR_POSIX
   struct timeval te; 
   gettimeofday(&te, NULL); // get current time
@@ -47,8 +49,9 @@ Value fn_current_millisecond(State& state, size_t argc, Value* argv) {
 }
 AR_DEFUN("current-millisecond", fn_current_millisecond, 0);
 
-Value fn_file_exists(State& state, size_t argc, Value* argv) {
+Value fn_file_exists(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "file-exists?";
+	AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
 #if AR_OS == AR_POSIX
   struct stat st;
@@ -69,6 +72,8 @@ Value fn_file_exists(State& state, size_t argc, Value* argv) {
 AR_DEFUN("file-exists?", fn_file_exists, 1);
 
 Value fn_path_separator(State& state, size_t argc, Value* argv) {
+	static const char* fn_name = "path-separator";
+	AR_FN_ARGC_EQ(state, argc, 0);
 #if AR_OS == AR_POSIX
 	return state.make_char('/');
 #else

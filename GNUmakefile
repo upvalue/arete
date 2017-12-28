@@ -87,7 +87,7 @@ vendor/dynasm/minilua: vendor/dynasm/minilua.c
 src/compile-x64.cpp: src/compile-x64.cpp.dasc vendor/dynasm/minilua 
 	vendor/dynasm/minilua vendor/dynasm/dynasm.lua $(DASMFLAGS) -D X64 -o $@ $< 
 
-# Compile this to assembly for examination
+# Compile to assembly for examination
 src/compile-x64.S: src/compile-x64.cpp
 	$(CXX) $(CXXFLAGS) -MMD -MF $(patsubst %.o,%.d,$@) -S -o $@ $< 
 

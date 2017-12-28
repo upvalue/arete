@@ -80,11 +80,9 @@
 
 
 // Restore pointers after any potential garbage collection
-//#define VM_RESTORE() (code = (size_t*)((((char*)f.fn->code_pointer() + (size_t)((char*)code - (size_t)code_begin)))))
 #define VM_RESTORE() \
     cp = (size_t*)((((size_t) f.fn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
     code = f.fn->code_pointer(); 
-    //code = f.fn->code_pointer();
 
 #define AR_VM_LOG_ALWAYS false
 
@@ -325,11 +323,6 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
     goto exception;
   }
 
-  //AR_ASSERT(gc.live((HeapValue*) f.code));
-
-  //std::cout << "first insn: " << (*cp) << std::endl;
-  //std::cout << "first insn: " << *(cp + 1) << std::endl;
-
   while(true) {
 #if AR_COMPUTED_GOTO
     VM_DISPATCH();
@@ -364,7 +357,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
         AR_ASSERT(sym.heap_type_equals(SYMBOL));
         AR_LOG_VM("global-get idx: " << idx << " ;; " << f.fn->constants->data[idx]);
         // AR_ASSERT(sym.type() == SYMBOL && "global-get called against non-symbol");
-        VM_STACK_PUSH(sym.symbol_value());
+        VM_STACK_PUSH(sym.as_unsafe<Symbol>()->value);
         if(f.stack[f.stack_i - 1] == C_UNDEFINED) {
           std::ostringstream os;
           os << "reference to undefined variable " << sym;//<< symbol_dequalify(sym);
@@ -844,11 +837,11 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
         // std::cout << lst << std::endl;
         // std::cout << idx << std::endl;
 
-        if(!idx.fixnump()) {
+        if(AR_UNLIKELY(!idx.fixnump())) {
           VM_EXCEPTION("type", "vm primitive list-ref expected a fixnum as its second argument but got " << idx.type());
         }
 
-        if(lst.type() != PAIR) {
+        if(AR_UNLIKELY(!lst.heap_type_equals(PAIR))) {
           VM_EXCEPTION("type", "vm primitive list-ref expected a list as its first argument but got " << lst.type());
         }
 
@@ -946,7 +939,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
     // one to the code position at which the exception occurred.
 
     if(f.exception.exception_trace()) {
-      vm_trace(f, frames_lost, cp);
+      trace_function(f.fn, frames_lost, (((size_t) cp) - (size_t)f.fn->code_pointer()) / sizeof(size_t));
     }
 
     AR_ASSERT(!f.destroyed);
@@ -956,10 +949,8 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
     return exc;
 }
 
-void State::vm_trace(VMFrame& f, size_t frames_lost, size_t* cp) {
-
-  size_t code_offset = (((size_t) cp) - (size_t)f.fn->code_pointer()) / sizeof(size_t);
-  Value sources(f.fn->sources);
+void State::trace_function(Value fn, size_t frames_lost, size_t code_offset) {
+  Value sources(fn.as<VMFunction>()->sources);
   if(sources.type() == BYTEVECTOR && sources.bv_length() > 0) {
     // Source code information is available
     size_t i = 0;
@@ -985,7 +976,7 @@ void State::vm_trace(VMFrame& f, size_t frames_lost, size_t* cp) {
     //AR_ASSERT(vmloc.source < source_names.size());
 
     std::ostringstream os;
-    os << source_info(loc, f.fn->name);
+    os << source_info(loc, fn.vm_function_name());
     if(frames_lost > 0) {
       os << std::endl << "-- " << frames_lost << " frames lost due to tail call optimization";
     }
