@@ -824,6 +824,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
+      // Fixnum arithmetic operations
       case OP_FX_ADD:
       case OP_FX_SUB: {
         unsigned insn = code[code_offset-1];
@@ -836,6 +837,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
         | getCompStackIndex rArg2
         | sub rArg2, 8
+
+        // TODO: Why is the shifting necessary? It should be possible to add or subtract
+        // two fixnum values and return them as-is
 
         // 2 labels: two for each type test
         | checkFixnumP [rArg2], src, E_EXPECTED_FIXNUM_2

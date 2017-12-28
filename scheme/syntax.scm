@@ -745,13 +745,15 @@ TODO: Casting
   (define tag (gensym))
   (define (trigger-continuation value)
     (raise-continuation tag value))
-  (define result
-    (try
-      (lambda () (thunk (lambda (value) (trigger-continuation value))))
-      (lambda (exc)
-        (if (and (eq? (exception-tag exc) 'continuation) (eq? (exception-message exc) tag))
-          (exception-irritants exc)
-          #f))))
+  (define result #f)
+  (try
+    (lambda () (thunk (lambda (value) (trigger-continuation value))))
+    (lambda (exc)
+      (if (and (eq? (exception-tag exc) 'continuation) (eq? (exception-message exc) tag))
+        (begin
+          (set! result (exception-irritants exc))
+          #t)
+        #f)))
   (set! trigger-continuation
     (lambda (value)
       (raise 'eval "Attempt to invoke spent one-shot continuation" tag)))
