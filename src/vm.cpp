@@ -290,7 +290,6 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
   }
 
   tail_recur:
-  size_t code_offset = 0;
 
   // TODO: Try using a stack pointer instead of stack_i for perf
 
@@ -502,13 +501,6 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
         AR_LOG_VM("apply fargc: " << fargc << " fn: " << afn);
 
         if(AR_LIKELY(afn.procedurep())) {
-          if(f.stack[f.stack_i - fargc - 1].as_unsafe<Procedure>()->procedure_addr == 0) {
-            std::cout << f.stack[f.stack_i - fargc - 1] << std::endl;
-            std::cout << f.stack[f.stack_i - fargc - 1].as<Function>()->name << std::endl;
-            std::cout << f.stack[f.stack_i - fargc - 1].as<Function>()->rest_arguments << std::endl;
-            AR_ASSERT(!":(");
-          }
-
           f.stack[f.stack_i - fargc - 1] =
             f.stack[f.stack_i - fargc - 1].as_unsafe<Procedure>()->procedure_addr(*this, fargc, &f.stack[f.stack_i - fargc], (void*) f.stack[f.stack_i - fargc - 1].bits);
 
@@ -679,6 +671,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
       }
 
       VM_CASE(OP_ARGV_REST): {
+        // argv may be &temps[0] if this is a tail call
         if(argv == &temps[0]) {
           f.locals[f.fn->max_arity] = temps_to_list(f.fn->max_arity);
         } else {
@@ -936,7 +929,6 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 #ifndef AR_COMPUTED_GOTO
       default:
 #endif
-        //warn() << "encountered bad opcode: " << VM_CODE()[code_offset-1] << std::endl;
         AR_ASSERT(!"bad opcode");
         break;
       }
@@ -954,48 +946,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
     // one to the code position at which the exception occurred.
 
     if(f.exception.exception_trace()) {
-      Value sources(f.fn->sources);
-      if(sources.type() == BYTEVECTOR && sources.bv_length() > 0) {
-        // Source code information is available
-        size_t i = 0;
-        VMSourceLocation vmloc = sources.bv_ref<VMSourceLocation>(0);
-        // If there is more than one source location,
-        // we'll iterate through the source-locations until we find the one closest to the piece of
-        // code we just errored out on
-        if(sources.bv_length() != 5) {
-          for(i = 1; i <= sources.bv_length() / 5; i++) {
-            VMSourceLocation vmloc2 = sources.bv_ref<VMSourceLocation>(i);
-            if(vmloc2.code >= code_offset) {
-              break;
-            }
-            vmloc = vmloc2;
-          }
-        }
-
-        SourceLocation loc;
-        loc.source = vmloc.source;
-        loc.line = vmloc.line;
-        loc.begin = vmloc.begin;
-        loc.length = vmloc.length;
-        //AR_ASSERT(vmloc.source < source_names.size());
-
-        std::ostringstream os;
-        os << source_info(loc, f.fn->name);
-        if(frames_lost > 0) {
-          os << std::endl << "-- " << frames_lost << " frames lost due to tail call optimization";
-        }
-        std::string line(os.str());
-        if(stack_trace.size() > 0) {
-          StackTrace& last = stack_trace.at(stack_trace.size() - 1);
-          if(last.text.compare(line) == 0) {
-            last.seen++;
-          } else {
-            stack_trace.push_back(line);
-          }
-        } else {
-          stack_trace.push_back(line);
-        }
-      }
+      vm_trace(f, frames_lost, cp);
     }
 
     AR_ASSERT(!f.destroyed);
@@ -1004,4 +955,52 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
     AR_ASSERT(exc.is_active_exception());
     return exc;
 }
+
+void State::vm_trace(VMFrame& f, size_t frames_lost, size_t* cp) {
+
+  size_t code_offset = (((size_t) cp) - (size_t)f.fn->code_pointer()) / sizeof(size_t);
+  Value sources(f.fn->sources);
+  if(sources.type() == BYTEVECTOR && sources.bv_length() > 0) {
+    // Source code information is available
+    size_t i = 0;
+    VMSourceLocation vmloc = sources.bv_ref<VMSourceLocation>(0);
+    // If there is more than one source location,
+    // we'll iterate through the source-locations until we find the one closest to the piece of
+    // code we just errored out on
+    if(sources.bv_length() != 5) {
+      for(i = 1; i <= sources.bv_length() / 5; i++) {
+        VMSourceLocation vmloc2 = sources.bv_ref<VMSourceLocation>(i);
+        if(vmloc2.code >= code_offset) {
+          break;
+        }
+        vmloc = vmloc2;
+      }
+    }
+
+    SourceLocation loc;
+    loc.source = vmloc.source;
+    loc.line = vmloc.line;
+    loc.begin = vmloc.begin;
+    loc.length = vmloc.length;
+    //AR_ASSERT(vmloc.source < source_names.size());
+
+    std::ostringstream os;
+    os << source_info(loc, f.fn->name);
+    if(frames_lost > 0) {
+      os << std::endl << "-- " << frames_lost << " frames lost due to tail call optimization";
+    }
+    std::string line(os.str());
+    if(stack_trace.size() > 0) {
+      StackTrace& last = stack_trace.at(stack_trace.size() - 1);
+      if(last.text.compare(line) == 0) {
+        last.seen++;
+      } else {
+        stack_trace.push_back(line);
+      }
+    } else {
+      stack_trace.push_back(line);
+    }
+  }
+}
+
 }

@@ -126,6 +126,7 @@ void State::boot() {
   load_numeric_functions();
   load_string_functions(*this);
   load_platform_functions(*this);
+  load_native_compiler(*this);
 
 #if AR_LIB_SDL
   load_sdl(*this);

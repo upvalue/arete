@@ -498,6 +498,7 @@ struct Value {
     return bits >> 1;
   }
 
+  /** Returns 0 if value is not a fixnum, value if it is. */
   ptrdiff_t fixnum_value_or_zero() const {
     return fixnump() ? fixnum_value() : 0;
   }
@@ -726,7 +727,7 @@ struct Value {
 
   Value vm_function_name() const;
   Value vm_function_macro_env() const;
-  size_t* vm_function_code() const;
+  Value vm_function_code() const;
   VectorStorage* vm_function_constants() const;
 
   // UPVALUES
@@ -1117,6 +1118,10 @@ struct VMFunction : Procedure {
   Bytevector* free_variables;
   Bytevector* sources;
   Value macro_env;
+  /**
+   * A pointer to a VMFunction's code. Can be either VM wordcode or a natively-compiled function.
+   */
+  Bytevector* code;
 
   unsigned min_arity, max_arity, stack_max, local_count;
   size_t bytecode_size;
@@ -1124,7 +1129,8 @@ struct VMFunction : Procedure {
   static const unsigned CLASS_TYPE = VMFUNCTION;
 
   size_t* code_pointer() {
-    return (size_t*)(((char*)((size_t) this)) + sizeof(VMFunction));
+    return (size_t*)&code->data;
+    //return (size_t*)(((char*)((size_t) this)) + sizeof(VMFunction));
   }
 };
 
@@ -1144,9 +1150,8 @@ inline Value Value::vm_function_name() const {
   return as<VMFunction>()->name;
 }
 
-inline size_t* Value::vm_function_code() const {
-  // No type check because this will be invoked by the GC on a not-yet-live object.
-  return (size_t*)(((char*) heap) + sizeof(VMFunction));
+inline Value Value::vm_function_code() const {
+  return as<VMFunction>()->code;
 }
 
 inline VectorStorage* Value::vm_function_constants() const {
@@ -2083,11 +2088,11 @@ struct State {
   Value env_lookup(Value env, Value name);
 
   Value file_error(const std::string& msg) {
-    return make_exception("file-error", msg);
+    return make_exception("file", msg);
   }
 
   Value type_error(const std::string& msg) {
-    return make_exception("type-error", msg);
+    return make_exception("type", msg);
   }
 
   Value eval_error(const std::string& msg, Value exp = C_FALSE);
@@ -2125,6 +2130,7 @@ struct State {
 
   ///// Virtual machine
   Value apply_vm(size_t argc, Value* argv, Value fn);
+  void vm_trace(VMFrame& f, size_t frames_lost, size_t* cp);
 
   // Command line interface
 

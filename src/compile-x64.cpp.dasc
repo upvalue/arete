@@ -82,6 +82,8 @@
 
 namespace arete {
 
+DefunGroup jit("jit");
+
 static size_t invocation = 0;
 ptrdiff_t print_int(State& state, ptrdiff_t i) {
   std::cout << "print_int(" << invocation++ << "):" << i << std::endl;
@@ -217,8 +219,6 @@ Value generic_apply(State* state, Value fn, size_t argc, Value* argv) {
 
   return result;
 }
-
-#if 0
 
 Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   static const bool sanity_log = true;
@@ -514,7 +514,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     switch(code[code_offset++]) {
 
       case OP_FX_ADD: 
-      case OP_POP: continue;
+      case OP_POP:
+      case OP_ARGV_REST: continue;
 
       case OP_APPLY:
       case OP_APPLY_TAIL:
@@ -524,6 +525,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       case OP_UPVALUE_SET:
       case OP_LOCAL_GET:
       case OP_LOCAL_SET:
+      case OP_ARGC_EQ:
+      case OP_ARGC_GTE:
       case OP_PUSH_CONSTANT: code_offset++; continue;
 
       case OP_GLOBAL_SET: code_offset += 2; continue;
@@ -542,7 +545,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       }
       default: {
         AR_LOG_JIT("label generation unknown bytecode " << code[code_offset-1]);
-        return state.eval_error("unknown bytecode");
+        return state.eval_error("unknown bytecode during label generation");
       }
     }
 
@@ -649,8 +652,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
-      // TODO: Can we tail-apply C++ functions now that we control
-      // the stack?
       case OP_APPLY_TAIL: 
       case OP_APPLY: {
         size_t argc = code[code_offset++];
@@ -782,6 +783,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
+      case OP_ARGC_EQ:
+      case OP_ARGC_GTE: {
+        code_offset++;
+        break;
+      }
+
+      case OP_ARGV_REST: {
+        break;
+      }
+
       default: {
         AR_LOG_JIT("unknown bytecode " << code[code_offset-1]);
         return state.eval_error("unknown bytecode");
@@ -801,7 +812,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	| stateCall state_collect;
   | mov rStackI, [rsp+24]
 
-  if(sanity_log_end) {
+  if(sanity_log) {
     | mov rArg1, rStackI
     | simpCall sanity_log_end
   }
@@ -873,6 +884,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
 AR_DEFUN("vmfunction->native", vmfunction_to_native, 1);
 
-#endif
+void load_native_compiler(State& state) {
+  jit.install(state);
+}
 
 }

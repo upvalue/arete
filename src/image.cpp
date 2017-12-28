@@ -145,6 +145,7 @@ struct PointerUpdater {
         static_cast<VMFunction*>(heap)->macro_env = update_value(static_cast<VMFunction*>(heap)->macro_env);
         static_cast<VMFunction*>(heap)->sources = (Bytevector*)update_heapvalue(static_cast<VMFunction*>(heap)->sources);
         static_cast<VMFunction*>(heap)->free_variables = (Bytevector*)update_heapvalue(static_cast<VMFunction*>(heap)->free_variables);
+        static_cast<VMFunction*>(heap)->code = (Bytevector*)update_heapvalue(static_cast<VMFunction*>(heap)->code);
         break;
       }
 

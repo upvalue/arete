@@ -1222,9 +1222,9 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
 
   size_t size = sizeof(VMFunction);
   Value name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob = C_FALSE,
-     sources_blob;
+     sources_blob, code;
   AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn, free_vars, free_vars_blob,
-    sources_blob);
+    sources_blob, code);
 
   name = rec.record_ref(0);
   insns = rec.record_ref(1);
@@ -1262,16 +1262,9 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
   // Determine actual size of VMFunction
   size += (bytecode_size);
 
+  code = state.make_bytevector<size_t>(insn_count);
+
   VMFunction* vfn = static_cast<VMFunction*>(state.gc.allocate(VMFUNCTION, size));
-
-  vfn->set_header_bit(Value::VALUE_PROCEDURE_BIT);
-
-  // Some wacky casting is necessary in order to get a pointer to State::apply_vm in the format
-  // we want it to be
-
-  Value (State::* member)(size_t, Value*, Value) = &State::apply_vm;
-  void* member2 = (void*&) member;
-  vfn->procedure_addr = (c_closure_t) member2;
 
   vfn->min_arity = (unsigned)rec.record_ref(9).fixnum_value();
   vfn->max_arity = (unsigned)rec.record_ref(10).fixnum_value();
@@ -1281,6 +1274,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
   vfn->name = rec.record_ref(0);
   vfn->free_variables = static_cast<Bytevector*>(free_vars_blob.heap);
   vfn->sources = static_cast<Bytevector*>(sources_blob.heap);
+  vfn->code = code.as_unsafe<Bytevector>();
 
   // Check for variable arity
   if(rec.record_ref(11) == C_TRUE) {
@@ -1289,20 +1283,14 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
 
   fn = vfn;
 
+  fn.procedure_install(&State::apply_vm);
+
   vfn->constants = rec.record_ref(2).vector_storage().as<VectorStorage>();
 
   // Copy bytecode
-  size_t* code_array = (size_t*) fn.vm_function_code();
-
-  AR_ASSERT(((char*) code_array) > ((char*) &fn.as_unsafe<VMFunction>()->constants));
-  
   for(size_t i = 0; i != insn_count; i++) {
-    AR_ASSERT(insns.vector_ref(i).fixnump());
-    (*code_array++) = insns.vector_ref(i).fixnum_value();
+    code.bv_set<size_t>(i, insns.vector_ref(i).fixnum_value());
   }
-
-  // Check we didn't go over the end of the object
-  AR_ASSERT((char*) code_array <= ((char*) (vfn)) + vfn->size);
 
   return fn;
 }

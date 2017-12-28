@@ -484,6 +484,7 @@ void GCSemispace::collect(size_t request, bool force) {
         AR_COPY(VMFunction, free_variables);
         AR_COPY(VMFunction, sources);
         AR_COPY(VMFunction, macro_env);
+        AR_COPY(VMFunction, code);
         break;
       case FUNCTION:
         AR_COPY(Function, name);
