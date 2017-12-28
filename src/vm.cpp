@@ -215,8 +215,6 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 
     &&LABEL_OP_RETURN, &&LABEL_OP_RETURN_END, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
 
-    &&LABEL_OP_LOCAL_GET_0,
-
     &&LABEL_OP_ARGC_EQ,
     &&LABEL_OP_ARGC_GTE,
     &&LABEL_OP_ARGV_REST,
@@ -624,11 +622,6 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
           VM_JUMP(jmp_offset);
         }
 
-        VM_DISPATCH();
-      }
-
-      VM_CASE(OP_LOCAL_GET_0): {
-        f.stack[f.stack_i++] = f.locals[0];
         VM_DISPATCH();
       }
 

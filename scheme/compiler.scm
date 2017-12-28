@@ -174,7 +174,6 @@
     apply apply-tail
     return return-end
     jump jump-when jump-when-pop jump-unless
-    local-get-0
     argc-eq argc-gte argv-rest
     + - < car list-ref not eq? fx< fx+ fx-))
 
@@ -208,7 +207,7 @@
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
                (0 jump jump-when jump-unless words close-over return return-end car not argc-eq argc-gte argv-rest)
-               (1 push-immediate push-constant global-get local-get local-get-0 upvalue-get)
+               (1 push-immediate push-constant global-get local-get upvalue-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
       (let loop2 ((insns (cdr elt)))
@@ -510,7 +509,7 @@
   (compiler-log fn "compiling identifier" result)
 
   (case (car result)
-    (local (if (eq? (cdr result) 0) (emit fn 'local-get-0) (emit fn 'local-get (cdr result))))
+    (local (emit fn 'local-get (cdr result)))
     (global (emit fn 'global-get (register-constant fn x)))
     (upvalue (emit fn 'upvalue-get (cdr result)))
     (else (raise 'compile-internal ":(" (list x))))

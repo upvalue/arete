@@ -751,7 +751,8 @@ TODO: Casting
     (lambda (exc)
       (if (and (eq? (exception-tag exc) 'continuation) (eq? (exception-message exc) tag))
         (begin
-          (set! result (exception-irritants exc))
+          (set! result
+            (exception-irritants exc))
           #t)
         #f)))
   (set! trigger-continuation

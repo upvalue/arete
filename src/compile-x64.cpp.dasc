@@ -596,8 +596,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     //std::cout << code_offset << std::endl;
     //std::cout << code[code_offset] << std::endl;
     switch(code[code_offset++]) {
-
-      case OP_LOCAL_GET_0:
       case OP_FX_ADD: case OP_FX_SUB:
       case OP_POP:
       case OP_ARGV_REST: continue;
@@ -721,11 +719,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
-      case OP_LOCAL_GET_0: {
-        AR_LOG_JIT("local-get-0 from stack location " << kLocalsOffset);
+      case OP_LOCAL_GET: {
+        size_t idx = code[code_offset++];
+        AR_LOG_JIT("local-get from stack location " << kLocalsOffset);
 
         | mov rArg1, rsp
-        | add rArg1, kLocalsOffset
+        | add rArg1, kLocalsOffset + (8 * idx)
 
         | mov rArg1, [rArg1]
 
