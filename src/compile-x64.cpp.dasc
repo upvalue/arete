@@ -209,7 +209,8 @@ enum {
   E_ARITY_CHECK,
   E_APPLY_CHECK,
   E_FX_ADD,
-  E_FX_SUB
+  E_FX_SUB,
+  E_FX_LT,
 };
 
 // Exception message codes
@@ -268,6 +269,7 @@ Value native_throw_exception(NativeException* exc) {
     }
     case E_FX_ADD: os << "primitive fx+ "; break;
     case E_FX_SUB: os << "primitive fx- "; break;
+    case E_FX_LT: os << "primitive fx< "; break;
     default: break;
   }
 
@@ -679,6 +681,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     //std::cout << code[code_offset] << std::endl;
     switch(code[code_offset++]) {
       case OP_FX_ADD: case OP_FX_SUB:
+      case OP_FX_LT:
       case OP_POP:
       case OP_ARGV_REST: continue;
 
@@ -909,6 +912,34 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         } else {
           | je =>lbl
         }
+        break;
+      }
+
+      // Fixnum boolean expressions
+      case OP_FX_LT: {
+        | decStack
+
+        | mov rArg2, rStackI
+
+        | mov rArg1, rStackI
+        | sub rArg1, 8
+
+        | checkFixnumP [rArg2], E_FX_LT, E_EXPECTED_FIXNUM_1
+        | checkFixnumP [rArg1], E_FX_LT, E_EXPECTED_FIXNUM_1
+
+        | mov rArg1, [rArg1]
+        | mov rArg2, [rArg2]
+
+        | decStack
+        | mov qword [rStackI], C_FALSE
+        | cmp rArg1, rArg2
+        | jl >1
+        | jmp >2
+        | 1: 
+        | mov qword [rStackI], C_TRUE
+        | 2:
+        | incStack
+
         break;
       }
 
