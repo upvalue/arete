@@ -715,12 +715,16 @@ struct Value {
   static const unsigned VMFUNCTION_LOG_BIT = 1 << 11;
   static const unsigned VMFUNCTION_MACRO_BIT = 1 << 12;
   static const unsigned VMFUNCTION_IDENTIFIER_MACRO_BIT = 1 << 13;
+  // True if this has been compiled to native code
+  static const unsigned VMFUNCTION_NATIVE_BIT = 1 << 14;
 
   unsigned vm_function_min_arity() const;
   unsigned vm_function_max_arity() const;
+
   bool vm_function_is_macro() const {
     return heap->get_header_bit(VMFUNCTION_MACRO_BIT);
   }
+
   bool vm_function_variable_arity() const {
     return heap->get_header_bit(VMFUNCTION_VARIABLE_ARITY_BIT);
   }
@@ -1123,6 +1127,7 @@ struct VMFunction : Procedure {
    * A pointer to a VMFunction's code. Can be either VM wordcode or a natively-compiled function.
    */
   Bytevector* code;
+  Bytevector* native_code;
 
   unsigned min_arity, max_arity, stack_max, local_count;
 

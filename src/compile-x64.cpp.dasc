@@ -84,6 +84,8 @@
 
 #include "arete.hpp"
 
+#include "base64.h"
+
 #include "dasm_proto.h"
 #include "dasm_x86.h"
 
@@ -317,8 +319,11 @@ struct NativeFrameSize {
   Value scratch;
 };
 
+static const bool dbg = false;
+static const bool sanity_log = true;
+static const bool gc_debug = true;
+
 Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
-  static const bool sanity_log = true;
   const char* fn_name = "vmfunction->native";
 
   AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
@@ -342,7 +347,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Locals + computation stack + pointer to VMFunction and Closure
 
   size_t kFrameSize = sizeof(NativeFrameSize);
-  size_t kValueSize = sizeof(void*);
+  // size_t kValueSize = sizeof(void*);
 
   // Stack frame offsets
   unsigned kLocalsOffset = kFrameSize;
@@ -627,7 +632,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // NativeFrame.value_count
   | mov qword sFrameCount, kFrameValues
 
-  if(sanity_log) {
+  if(dbg && sanity_log) {
     | mov rArg1, rsp
     | simpCall sanity_log_1
 
@@ -660,8 +665,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | cmp rArg1, rArg2
   | jne ->gc_zero
 
-  | mov rArg1, rsp
-  | simpCall print_stack_frame
+  if(dbg) {
+    | mov rArg1, rsp
+    | simpCall print_stack_frame
+  }
 
   // Execute function body
   size_t code_offset = 0;
@@ -1039,11 +1046,14 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
           | jne ->local_init
 
         }
-        | stateCall state_collect;
+        if(dbg && gc_debug) {
+          | stateCall state_collect;
+        }
 
-        | mov rArg1, rsp
-        | simpCall print_stack_frame
-
+        if(dbg) {
+          | mov rArg1, rsp
+          | simpCall print_stack_frame
+        }
         break;
       }
 
@@ -1089,11 +1099,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |->unwind: 
 
   // Protect return value
-  | mov sFrameScratch, rStackI
-	| stateCall state_collect;
-  | mov rStackI, sFrameScratch
+  if(dbg && gc_debug) {
+    | mov sFrameScratch, rStackI
+    | stateCall state_collect;
+    | mov rStackI, sFrameScratch
+  }
 
-  if(sanity_log) {
+  if(dbg && sanity_log) {
     | mov rArg1, rStackI
     | simpCall sanity_log_end
   }
@@ -1129,7 +1141,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   bv = state.make_bytevector<unsigned char>(size);
 
-  std::cout << "function size: " << size << " vs " << (code_offset * 8) << std::endl;
+  AR_LOG_JIT("function size: " << size << " vs " << (code_offset * 8));
 
   dasm_encode(&d, bv.bv_data());
 
@@ -1137,36 +1149,61 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   AR_LOG_JIT("vmfunction->native done; calling function");
 
-  ptrdiff_t (*ptr)(State*, size_t, size_t, size_t) = (ptrdiff_t (*)(State*, size_t, size_t)) bv.bv_data();
+  vfn.as_unsafe<VMFunction>()->native_code = bv.as_unsafe<Bytevector>();
+  vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
 
-  std::cout << "VMFunction ptr: " << (ptrdiff_t)vfn.bits << std::endl;
-  std::cout << "Constants ref: " << (ptrdiff_t)&vfn.as<VMFunction>()->constants << std::endl;
-  std::cout << "Constants ptr: " << (ptrdiff_t)vfn.as<VMFunction>()->constants << std::endl;
-  std::cout << "Constants ptr[0]: " << (ptrdiff_t)&vfn.as<VMFunction>()->constants->data[0] << std::endl;
+  vfn.as_unsafe<VMFunction>()->procedure_addr = (c_closure_t)bv.as_unsafe<Bytevector>()->data;
 
-  std::cout << "#(";
-  for(size_t i = 0; i != vfn.as<VMFunction>()->constants->length; i++) {
-    std::cout << (ptrdiff_t)vfn.as<VMFunction>()->constants->data[i].bits;
-    std::cout << ' ';
-  }
-  std::cout << ')' << std::endl;
-	std::cout << "Calling against state: " << (ptrdiff_t) &state << std::endl;
-
-  std::cout << " argc: " << argc-1 << " argv ptr: " << (size_t)argv+8 << std::endl;
-  ptrdiff_t result = ptr(&state, argc-1, (size_t)argv+8, (size_t)vfn.bits);
-
-  //std::cout << (ptrdiff_t)state.get_symbol("print").symbol_value().bits << std::endl;
-  std::cout << "result int: " << (result) << std::endl;
-  std::cout << "result: " << Value(result) << std::endl;
-
-  std::cout << "state ptr: " << (ptrdiff_t)&state << std::endl;
-  std::cout << "native_Frames: " << (ptrdiff_t)state.gc.native_frames << std::endl;
-  AR_ASSERT(state.gc.native_frames == 0);
-
-  return result;
+  return vfn;
 }
 
-AR_DEFUN("vmfunction->native", vmfunction_to_native, 1);
+AR_DEFUN("vmfunction->native!", vmfunction_to_native, 1);
+
+Value fn_native_call(State& state, size_t argc, Value* argv, Value fn) {
+  static const char* fn_name = "native-call";
+  AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
+
+  AR_ASSERT(argv[0].heap->get_header_bit(Value::VMFUNCTION_NATIVE_BIT));
+
+  Value vfn = argv[0];
+  AR_FRAME(state, vfn);
+  AR_ASSERT(state.gc.live(vfn.as_unsafe<VMFunction>()->native_code));
+
+  Value bv(vfn.as_unsafe<VMFunction>()->native_code);
+
+  if(dbg) {
+    std::cout << "Bv size: " << vfn.as_unsafe<VMFunction>()->native_code->size << std::endl;
+
+    std::cout << "VMFunction ptr: " << (ptrdiff_t)vfn.bits << std::endl;
+    std::cout << "Constants ref: " << (ptrdiff_t)&vfn.as<VMFunction>()->constants << std::endl;
+    std::cout << "Constants ptr: " << (ptrdiff_t)vfn.as<VMFunction>()->constants << std::endl;
+    std::cout << "Constants ptr[0]: " << (ptrdiff_t)&vfn.as<VMFunction>()->constants->data[0] << std::endl;
+
+    std::cout << "#(";
+    for(size_t i = 0; i != vfn.as<VMFunction>()->constants->length; i++) {
+      std::cout << (ptrdiff_t)vfn.as<VMFunction>()->constants->data[i].bits;
+      std::cout << ' ';
+    }
+    std::cout << ')' << std::endl;
+    std::cout << "Calling against state: " << (ptrdiff_t) &state << std::endl;
+
+    std::cout << " argc: " << argc-1 << " argv ptr: " << (size_t)argv+8 << std::endl;
+  }
+  ptrdiff_t (*ptr)(State*, size_t, size_t, size_t) = (ptrdiff_t (*)(State*, size_t, size_t)) vfn.as_unsafe<VMFunction>()->native_code->data;
+  ptrdiff_t result = ptr(&state, argc-1, (size_t)argv+8, (size_t)vfn.bits);
+
+  if(dbg) {
+    std::cout << "result int: " << (result) << std::endl;
+    std::cout << "result: " << Value(result) << std::endl;
+
+    std::cout << "state ptr: " << (ptrdiff_t)&state << std::endl;
+    std::cout << "native_Frames: " << (ptrdiff_t)state.gc.native_frames << std::endl;
+  }
+
+  AR_ASSERT(state.gc.native_frames == 0);
+  return result;
+}
+AR_DEFUN("native-call", fn_native_call, 1);
 
 void load_native_compiler(State& state) {
   jit.install(state);

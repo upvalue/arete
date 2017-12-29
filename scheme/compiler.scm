@@ -278,8 +278,8 @@
 (define primitive-table
   (alist->table '(
     ;; name min-argc max-argc variable-arity
-    (+ 0 0 #t)
-    (- 1 1 #t)
+    ;(+ 0 0 #t)
+    ;(- 1 1 #t)
     (car 1 1 #f)
     (not 1 1 #f)
     (eq? 2 2 #f)
