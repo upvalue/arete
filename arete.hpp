@@ -1009,8 +1009,8 @@ inline Value Value::exception_irritants() const {
 
 /**
  * For ease of use and performance, all Procedures have a pointer to a native function at their
- * beginning. For VM functions and closures, this always points to State::apply_vm, for interpreted
- * functions, to State::apply_interpreted.
+ * beginning. For VM functions and closures, this always points to apply_vm, for interpreted
+ * functions, to apply_interpreted.
  */
 
 struct Procedure : HeapValue {
@@ -2137,7 +2137,6 @@ struct State {
   Value load_file(const std::string&);
 
   ///// Virtual machine
-  Value apply_vm(size_t argc, Value* argv, Value fn);
   void trace_function(Value fn, size_t frames_lost, size_t code_offset);
 
   // Command line interface
@@ -2167,7 +2166,10 @@ struct State {
   const char* boot_from_image(const std::string& path);
 };
 
+// Functions for Procedure::procedure_addr. Must be freestanding because taking
+// a pointer to a State member function does not work well.
 Value apply_interpreter(State& state, size_t argc, Value* argv, Value fn);
+Value apply_vm(State& state, size_t argc, Value* argv, Value fn);
 
 ///// READ! S-Expression reader
 

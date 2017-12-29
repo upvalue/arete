@@ -49,7 +49,7 @@
 # define AR_COMPUTED_GOTO 1
 #endif
 
-#define VM_CODE() (AR_ASSERT(gc.live((HeapValue*)code)), code)
+#define VM_CODE() (AR_ASSERT(state.gc.live((HeapValue*)code)), code)
 
 //#define VM_NEXT_INSN() (VM_CODE()[code_offset++], (*cp++))
 #define VM_NEXT_INSN() (*cp++)
@@ -72,7 +72,7 @@
   f.stack[f.stack_i++] = (expr)
 
 #define VM_EXCEPTION(type, msg) \
-  { std::ostringstream __os; __os << msg ; f.exception = make_exception(type, __os.str()); \
+  { std::ostringstream __os; __os << msg ; f.exception = state.make_exception(type, __os.str()); \
     goto exception;}
 
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
@@ -202,7 +202,7 @@ void VMFrame::close_over() {
 }
 
 
-Value State::apply_vm(size_t argc, Value* argv, Value fn) {
+Value apply_vm(State& state, size_t argc, Value* argv, Value fn) {
 #if AR_COMPUTED_GOTO
   static void* dispatch_table[] = {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,
@@ -233,12 +233,12 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 #endif
   // Frames lost due to tail call optimization
   size_t frames_lost = 0;
-  VMFrame f(*this);
+  VMFrame f(state);
 
   f.setup(fn);
  tail:
 
-  AR_ASSERT(gc.vm_frames == &f);
+  AR_ASSERT(state.gc.vm_frames == &f);
 
   AR_LOG_VM("ENTERING FUNCTION " << f.fn->name << " closure: " << (f.closure == 0 ? "#f" : "#t")
      << " free_variables: " << f.fn->free_variables << " stack_max: " << f.fn->stack_max);
@@ -267,8 +267,8 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
   memcpy(f.locals, argv, (argc > f.fn->max_arity ? f.fn->max_arity : argc) * sizeof(void*));
 
   if(upvalue_count) {
-    gc.protect_argc = argc;
-    gc.protect_argv = argv;
+    state.gc.protect_argc = argc;
+    state.gc.protect_argv = argv;
 
     memset(f.upvalues, 0, f.fn->free_variables->length * sizeof(Value));
 
@@ -276,14 +276,14 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
     AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
 
     for(size_t i = 0; i != f.fn->free_variables->length; i++) {
-      f.upvalues[i] = gc.allocate(UPVALUE, sizeof(Upvalue));
+      f.upvalues[i] = state.gc.allocate(UPVALUE, sizeof(Upvalue));
       size_t idx = ((size_t*) f.fn->free_variables->data)[i];
       AR_LOG_VM("tying free variable " << i << " to local idx " << idx);
       f.upvalues[i].as<Upvalue>()->U.local = &f.locals[idx];
     }
 
-    gc.protect_argc = 0;
-    gc.protect_argv = nullptr;
+    state.gc.protect_argc = 0;
+    state.gc.protect_argv = nullptr;
   }
 
   tail_recur:
@@ -315,10 +315,10 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
   // Always points to the beginning of the code array. Used to restore the code pointer.
   size_t * code = cp;
 
-  if(f.depth > (size_t)get_global_value(G_RECURSION_LIMIT).fixnum_value_or_zero()) {
+  if(f.depth > (size_t) state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero()) {
     std::ostringstream os;
-    os << "non-tail recursive calls exceeded G_RECURSION_LIMIT (" << get_global_value(G_RECURSION_LIMIT) << ")";
-    f.exception = eval_error(os.str());
+    os << "non-tail recursive calls exceeded G_RECURSION_LIMIT (" << state.get_global_value(State::G_RECURSION_LIMIT) << ")";
+    f.exception = state.eval_error(os.str());
     goto exception;
   }
 
@@ -360,7 +360,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
         if(f.stack[f.stack_i - 1] == C_UNDEFINED) {
           std::ostringstream os;
           os << "reference to undefined variable " << sym;//<< symbol_dequalify(sym);
-          f.exception = eval_error(os.str());
+          f.exception = state.eval_error(os.str());
           goto exception;
         }
         VM_DISPATCH();
@@ -380,7 +380,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
           if(key.symbol_value() == C_UNDEFINED) {
             std::ostringstream os;
             os << "attempt to set! undefined variable " << key;
-            f.exception = eval_error(os.str());
+            f.exception = state.eval_error(os.str());
             goto exception;
           }
         }
@@ -412,8 +412,8 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
         size_t idx = VM_NEXT_INSN();
         AR_LOG_VM("upvalue-get " << idx);
         AR_ASSERT(f.closure->upvalues->data[idx].type() == UPVALUE);
-        AR_ASSERT(gc.live(f.closure->upvalues->data[idx]));
-        AR_ASSERT(gc.live(f.closure->upvalues->data[idx].upvalue()));
+        AR_ASSERT(state.gc.live(f.closure->upvalues->data[idx]));
+        AR_ASSERT(state.gc.live(f.closure->upvalues->data[idx].upvalue()));
         f.stack[f.stack_i++] = f.closure->upvalues->data[idx].upvalue();
         VM_DISPATCH();
       }
@@ -448,10 +448,10 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
               f.stack_i = 0;
               goto tail_recur;
             } else {
-              temps.clear();
-              temps.insert(temps.end(), &f.stack[f.stack_i - fargc], &f.stack[f.stack_i]);
+              state.temps.clear();
+              state.temps.insert(state.temps.end(), &f.stack[f.stack_i - fargc], &f.stack[f.stack_i]);
 
-              argv = &temps[0];
+              argv = &state.temps[0];
 
               argc = fargc;
               fn = to_apply;
@@ -465,7 +465,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
             }
           } else {
             f.stack[f.stack_i - fargc - 1] =
-              f.stack[f.stack_i - fargc - 1].as_unsafe<Procedure>()->procedure_addr(*this, fargc, &f.stack[f.stack_i - fargc], (void*) f.stack[f.stack_i - fargc - 1].bits);
+              f.stack[f.stack_i - fargc - 1].as_unsafe<Procedure>()->procedure_addr(state, fargc, &f.stack[f.stack_i - fargc], (void*) f.stack[f.stack_i - fargc - 1].bits);
 
             f.stack_i -= (fargc);
 
@@ -493,7 +493,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 
         if(AR_LIKELY(afn.procedurep())) {
           f.stack[f.stack_i - fargc - 1] =
-            f.stack[f.stack_i - fargc - 1].as_unsafe<Procedure>()->procedure_addr(*this, fargc, &f.stack[f.stack_i - fargc], (void*) f.stack[f.stack_i - fargc - 1].bits);
+            f.stack[f.stack_i - fargc - 1].as_unsafe<Procedure>()->procedure_addr(state, fargc, &f.stack[f.stack_i - fargc], (void*) f.stack[f.stack_i - fargc - 1].bits);
 
           f.stack_i -= (fargc);
 
@@ -509,7 +509,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
           std::ostringstream os;
           AR_PRINT_STACK();
           os << "vm: attempt to apply non-applicable value " << afn;
-          f.exception = eval_error(os.str());
+          f.exception = state.eval_error(os.str());
           goto exception;
         }
 
@@ -528,9 +528,9 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 
         Value storage, closure;
         {
-          AR_FRAME(*this, storage, closure);
+          AR_FRAME(state, storage, closure);
 
-          storage = make_vector_storage(upvalues);
+          storage = state.make_vector_storage(upvalues);
 
           VM_RESTORE();
           // VM ALLOCATION
@@ -542,9 +542,9 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
             if(is_enclosed) {
               AR_LOG_VM("enclosing free variable " << i << " from closure idx " << idx);
               AR_ASSERT(f.closure->upvalues->data[idx].heap_type_equals(UPVALUE));
-              vector_storage_append(storage, f.closure->upvalues->data[idx]);
+              state.vector_storage_append(storage, f.closure->upvalues->data[idx]);
             } else {
-              vector_storage_append(storage, f.upvalues[idx]);
+              state.vector_storage_append(storage, f.upvalues[idx]);
             }
             // VM ALLOCATION
 
@@ -552,9 +552,10 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 
             AR_LOG_VM("upvalue " << i << " = " << storage.as_unsafe<VectorStorage>()->data[i] << " " << storage.as_unsafe<VectorStorage>()->data[i].upvalue())
           }
-          closure = gc.allocate(CLOSURE, sizeof(Closure));
+          closure = state.gc.allocate(CLOSURE, sizeof(Closure));
 
-          closure.procedure_install(&State::apply_vm);
+          //closure.procedure_install(&State::apply_vm);
+          closure.procedure_install((c_closure_t) & arete::apply_vm);
 
           closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
           closure.as_unsafe<Closure>()->function = f.stack[f.stack_i-1];
@@ -634,7 +635,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
           std::ostringstream os;
           os << "function " << f.fn << " expected exactly " << f.fn->min_arity
             << " arguments but got " << argc << std::endl;
-          f.exception = eval_error(os.str());
+          f.exception = state.eval_error(os.str());
           goto exception;
         }
 
@@ -648,7 +649,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
           std::ostringstream os;
           os << "function " << f.fn << " expected at least " << f.fn->min_arity << 
             " arguments but got " << argc << std::endl;
-          f.exception = eval_error(os.str());
+          f.exception = state.eval_error(os.str());
           goto exception;
         }
 
@@ -657,14 +658,14 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 
       VM_CASE(OP_ARGV_REST): {
         // argv may be &temps[0] if this is a tail call
-        if(argv == &temps[0]) {
-          f.locals[f.fn->max_arity] = temps_to_list(f.fn->max_arity);
+        if(argv == &state.temps[0]) {
+          f.locals[f.fn->max_arity] = state.temps_to_list(f.fn->max_arity);
         } else {
-          temps.clear();
+          state.temps.clear();
           unsigned i;
-          temps.insert(temps.end(), &argv[f.fn->max_arity], &argv[argc]);
+          state.temps.insert(state.temps.end(), &argv[f.fn->max_arity], &argv[argc]);
 
-          f.locals[f.fn->max_arity] = temps_to_list();
+          f.locals[f.fn->max_arity] = state.temps_to_list();
 
           //std::cout << argv[f.fn->max_arity] << std::endl;
         }
@@ -716,7 +717,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 
         f.stack_i -= argc;
         f.stack_i += 1;
-        f.stack[f.stack_i - 1] = make_flonum(flresult);
+        f.stack[f.stack_i - 1] = state.make_flonum(flresult);
 
         VM_RESTORE();
         VM_DISPATCH();
@@ -744,7 +745,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
             break;
           case FLONUM:
             if(argc == 1) {
-              f.stack[f.stack_i - 1] = make_flonum(-f.stack[f.stack_i - 1].flonum_value());
+              f.stack[f.stack_i - 1] = state.make_flonum(-f.stack[f.stack_i - 1].flonum_value());
               f.stack_i -= argc - 1;
               // VM ALLOCATION
               VM_RESTORE();
@@ -790,7 +791,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
         }
 
         f.stack_i -= argc - 1;
-        f.stack[f.stack_i - 1] = make_flonum(flresult);
+        f.stack[f.stack_i - 1] = state.make_flonum(flresult);
         // VM ALLOCATION
         VM_RESTORE();
         VM_DISPATCH();
@@ -928,7 +929,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
     // one to the code position at which the exception occurred.
 
     if(f.exception.exception_trace()) {
-      trace_function(f.fn, frames_lost, (((size_t) cp) - (size_t)f.fn->code_pointer()) / sizeof(size_t));
+      state.trace_function(f.fn, frames_lost, (((size_t) cp) - (size_t)f.fn->code_pointer()) / sizeof(size_t));
     }
 
     AR_ASSERT(!f.destroyed);

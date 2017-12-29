@@ -1296,7 +1296,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
 
   fn = vfn;
 
-  fn.procedure_install(&State::apply_vm);
+  fn.procedure_install((c_closure_t)&apply_vm);
 
   vfn->constants = rec.record_ref(2).vector_storage().as<VectorStorage>();
 

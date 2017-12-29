@@ -88,8 +88,7 @@ struct PointerUpdater {
   }
   
   void update_pointers(HeapValue* heap) {
-      Value (State::* member)(size_t, Value*, Value) = &State::apply_vm;
-      c_closure_t apply_vm = (c_closure_t)(void*&) member;
+      c_closure_t apply_vm = (c_closure_t)(void*&) arete::apply_vm;
 
     switch(heap->get_type()) {
       case FLONUM: case STRING: case CHARACTER: case BYTEVECTOR: 
