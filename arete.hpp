@@ -1005,7 +1005,8 @@ inline Value Value::exception_irritants() const {
 
 /**
  * For ease of use and performance, all Procedures have a pointer to a native function at their
- * beginning. For VM functions and closures, this always points to State::apply_vm.
+ * beginning. For VM functions and closures, this always points to State::apply_vm, for interpreted
+ * functions, to State::apply_interpreted.
  */
 
 struct Procedure : HeapValue {

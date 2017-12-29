@@ -68,6 +68,15 @@
 // a-b = local values
 // b-c = upvalues
 
+// Stack
+// rsp+0 = pointer to previous stack frame
+// rsp+8 = closure pointer (if any)
+// rsp+16 = vmfunction pointer
+// rsp+24 = count of gc'd values
+// 24 - a = local variables
+// a - b = upvalues
+// b - c = computation stack
+
 // TODO: Use offsetof and other stuff instead of calling functions to retrieve information
 // about a particular State
 
@@ -162,8 +171,12 @@ void sanity_log_5(ptrdiff_t argv) {
   std::cout << "sanity_log_5: argv ptr: " << argv << std::endl;
 }
 
+void sanity_log_ret(ptrdiff_t rStackI) {
+  std::cout << "sanity_log_ret: rStackI = " << rStackI << std::endl;
+}
+
 void sanity_log_end(ptrdiff_t rStackI) {
-  std::cout << "sanity_log_end: rStackI = " << rStackI << std::endl;
+  std::cout << "sanity_log_end: return value = " << rStackI << std::endl;
 }
 
 // Exception handling
@@ -294,12 +307,15 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Using the otherwise not-used-in-this codebase kBlah style to denote things that will become
   // constants in the compiled code
 
-  unsigned total_stack = local_count+stack_max;
+  unsigned total_stack = local_count + stack_max;
   unsigned kFrameSize = local_count + stack_max + 1;
   // Locals + computation stack + pointer to VMFunction
   unsigned kTotalStackSize = (sizeof(NativeFrame) - sizeof(void*)) + ((total_stack) * sizeof(void*));
   size_t kValueSize = sizeof(void*);
+
+  // Stack frame offsets
   unsigned kLocalsOffset = sizeof(NativeFrame);
+  //unsigned kUpvaluesOffset = sizeof(NativeFrame) + (local_count * sizeof(void*));
   unsigned kCompStackOffset = sizeof(NativeFrame) + (local_count * sizeof(void*));
   //unsigned kCompStackOffset = 24; //kTotalStackSize - (kValueSize * stack_max);
   unsigned kTotalStackSizeAligned = kTotalStackSize;
@@ -420,6 +436,45 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Test failed. Set up registers for exception
   | throwNativeException (code_offset-1), E_TYPE, src, code, 0
   |1:
+  |.endmacro
+
+  // jmp to label >1 if value in STORE is immediate
+  |.macro immediateJmpTo1, store
+  | mov rax, store
+  // bits == 0 is #f
+  | cmp rax, 0
+  | je >1
+  | mov rax, store
+  | and rax, 3
+  | cmp rax, 0
+  | jne >1
+  |.endmacro
+
+  // Check whether a value in STORE is an exception and return it if so
+  |.macro checkExceptionP, store
+  | immediateJmpTo1 store
+  // this is a valid pointer, extract type and check for exception type & exception active bit
+  | mov rax, [store]
+  | and rax, 255
+  | cmp rax, EXCEPTION
+  // not exception type, continue
+  | jne >1
+  // check exception bit
+  | mov rax, [store]
+  | and rax, Value::EXCEPTION_ACTIVE_BIT
+  | cmp rax, Value::EXCEPTION_ACTIVE_BIT
+  | jne >1
+  // this is an exception, return immediately
+  | mov rStackI, store
+  | jmp ->unwind
+  |1:
+  |.endmacro
+
+  // Check whether a value in STORE is applicable and extract its procedure address if so
+  |.macro extractProcedureAddr, store
+  | mov rStackI, 2
+  | jmp ->unwind
+  | immediateJmpTo1 store
   |.endmacro
 
   // Check that value in STORE matches TYPE, if not, generate a type error with SRC and CODE
@@ -582,6 +637,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Execute function body
   size_t code_offset = 0;
+  size_t current_insn = 0;
   size_t *code = vmf->code_pointer();
   bool done = false;
 
@@ -657,6 +713,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   code_offset = 0;
 
   while(!done) {
+    // Test for label generation
     if(offsets.size() > 0 && code_offset == offsets[offsets.size() - 1]) {
       auto i = offsets_to_labels.find(code_offset);
       unsigned lbl = i->second;
@@ -665,14 +722,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       |=>lbl:
     }
 
-    // Implementation of conditionals
-
-    // JUMP jumps to an offset in the bytecode. So, we'll store all the bytecode offsets to jump
-    // to in some kind of data structure,
-    
-    // and regen them.
-
-    // Generate labels here
+    current_insn = code_offset;
 
     switch(code[code_offset++]) {
       case OP_PUSH_IMMEDIATE: {
@@ -721,10 +771,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
       case OP_LOCAL_GET: {
         size_t idx = code[code_offset++];
-        AR_LOG_JIT("local-get from stack location " << kLocalsOffset);
+        size_t stack_offset = (kLocalsOffset + (8 * idx));
+        AR_LOG_JIT("local-get " << idx << " at stack location " << stack_offset);
 
         | mov rArg1, rsp
-        | add rArg1, kLocalsOffset + (8 * idx)
+        | add rArg1, stack_offset
 
         | mov rArg1, [rArg1]
 
@@ -732,6 +783,21 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | mov [rArg2], rArg1
 
         | inc rStackI
+        break;
+      }
+
+      case OP_LOCAL_SET: {
+        size_t idx = code[code_offset++];
+        size_t stack_offset = (kLocalsOffset + (8 * idx));
+        AR_LOG_JIT("local-set " << idx << " at stack location " << stack_offset);
+
+        | mov rArg1, rsp
+        | add rArg1, stack_offset
+
+        | getCompStackTopValue rArg2
+        | mov [rArg1], rArg2
+
+        | dec rStackI
         break;
       }
 
@@ -744,6 +810,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | add rArg1, (ptrdiff_t)(&(((Symbol*)0)->value))
 
         | dec rStackI
+
         | getCompStackIndex rArg2
         | mov rArg2, [rArg2]
         | mov [rArg1], rArg2
@@ -763,26 +830,37 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | getCompStackIndexAt rArg2
 
         // Get pointer to argv (after function on stack)
-        | mov rArg4, rArg2
-        | add rArg4, 8
+        if(argc > 0) {
+          | mov rArg4, rArg2
+          | add rArg4, 8
+        }
         // Load function pointer
         | mov rArg2, [rArg2]
 
         | mov rArg1, rState
         | mov rArg3, (size_t) argc
 
+        // Check for procedure_addr
+
+        | extractProcedureAddr rArg2
+
         | mov64 rax, (size_t) generic_apply
         | call rax
 
+        | mov rArg1, rax
+        | checkExceptionP rArg1
+
+        | mov rax, rArg1
+
         // TODO: Check exception
 
-        // Place result on stack
-        | sub rStackI, argc
-
+        // Replace function pointer with result
+        | sub rStackI, (argc + 1)
         | getCompStackIndex rArg1
         | mov [rArg1], rax
         | inc rStackI
 
+        // Place result on stack
         break;
       }
 
@@ -826,10 +904,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       // Fixnum arithmetic operations
       case OP_FX_ADD:
       case OP_FX_SUB: {
-        unsigned insn = code[code_offset-1];
         unsigned src = 0;
 
-        switch(insn) {
+        switch(code[current_insn]) {
           case OP_FX_ADD: src = E_FX_ADD; AR_LOG_JIT("fx+"); break;
           case OP_FX_SUB: src = E_FX_SUB; AR_LOG_JIT("fx-"); break;
         }
@@ -853,7 +930,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | shr qword [rArg1], 1
 
         | mov rax, [rArg1]
-        switch(insn) {
+        switch(code[current_insn]) {
           case OP_FX_ADD:
             | add rax, [rArg2]
             break;
@@ -878,6 +955,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         //| mov rArg2, rax
         //| stateCall print_int
         //| sub rStackI, 1
+
+        | mov rArg1, rStackI
+        | simpCall sanity_log_ret
 
         | sub rStackI, 1
         | getCompStackIndex rArg1
