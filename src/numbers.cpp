@@ -34,6 +34,9 @@ Value State::make_flonum(double number) {
       if(sub) return argv[0].type() == FLONUM ? state.make_flonum(0 - argv[0].flonum_value()) : Value::make_fixnum(0 - argv[0].fixnum_value()); \
       return argv[0]; \
     } \
+    if(!nozero && argc == 2 && argv[0].fixnump() && argv[1].fixnump()) { \
+      return Value::make_fixnum(argv[0].fixnum_value() operator argv[1].fixnum_value()); \
+    } \
     for(i = 0; i != argc; i++) { \
       if(argv[i].type() == FLONUM) break; \
       AR_FN_ASSERT_ARG(state, i, "to be a number", argv[i].type() == FIXNUM); \
@@ -73,6 +76,9 @@ AR_DEFUN("/", fn_div, 2, 2, true);
     static const char* fn_name = cname; \
     AR_FN_ARGC_GTE(state, argc, 2); \
     AR_FN_ASSERT_ARG(state, 0, "to be numeric", argv[0].numeric()); \
+    if(argc == 2 && argv[0].fixnump() && argv[1].fixnump()) { \
+      return Value::make_boolean(argv[0].fixnum_value() operator argv[1].fixnum_value()); \
+    } \
     for(size_t i = 0; i != argc - 1; i++) { \
       AR_FN_ASSERT_ARG(state, (i+1), "to be numeric", argv[i+1].numeric()); \
       if(argv[i].type() == FIXNUM) { \

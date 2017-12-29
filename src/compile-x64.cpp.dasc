@@ -84,8 +84,6 @@
 
 #include "arete.hpp"
 
-#include "base64.h"
-
 #include "dasm_proto.h"
 #include "dasm_x86.h"
 
@@ -687,6 +685,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     //std::cout << code_offset << std::endl;
     //std::cout << code[code_offset] << std::endl;
     switch(code[code_offset++]) {
+      case OP_NOT:
       case OP_FX_ADD: case OP_FX_SUB:
       case OP_FX_LT:
       case OP_POP:
@@ -922,6 +921,90 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
+      case OP_RETURN:
+      case OP_RETURN_END: {
+        AR_LOG_JIT("return");
+        | sub rStackI, 8
+        | mov rStackI, [rStackI]
+
+        | jmp ->unwind
+
+        if(code[current_insn] == OP_RETURN_END)
+          done = true;
+
+        break;
+      }
+
+      // Checking function arity
+
+      case OP_ARGC_EQ: {
+        size_t fargc = code[code_offset++];
+
+        | mov rax, (size_t) fargc
+        | cmp rax, r14
+        | je >1
+        | throwNativeException code_offset-2, E_EVAL, E_ARITY_CHECK, fargc, r14
+        | 1:
+
+        AR_LOG_JIT("argc-eq " << fargc);
+
+        // Initialize local variables
+        if(fargc) {
+          AR_LOG_JIT("initializing locals with loop to " << kLocalsOffset + (8 * fargc));
+          | mov rArg1, rsp
+          | mov rArg2, r15
+          | add rArg1, (kLocalsOffset)
+          | mov rArg3, rArg1
+          | add rArg3, (8 * fargc)
+
+          |->local_init:
+          // mov argv[i] into rArg4
+          | mov rArg4, [rArg2]
+          // mov rArg4 into locals[i]
+           | mov [rArg1], rArg4
+          // Increment and check again
+          | add rArg2, 8
+          | add rArg1, 8
+          | cmp rArg1, rArg3
+          | jne ->local_init
+
+        }
+        if(dbg && gc_debug) {
+          | stateCall state_collect;
+        }
+
+        if(dbg) {
+          | mov rArg1, rsp
+          | simpCall print_stack_frame
+        }
+        break;
+      }
+
+      case OP_ARGC_GTE: {
+        code_offset++;
+        break;
+      }
+
+      case OP_ARGV_REST: {
+        break;
+      }
+
+      case OP_NOT: {
+        | decStack
+
+        | mov rArg1, [rStackI]
+        | cmp rArg1, C_FALSE
+        | je >1
+        | mov qword [rStackI], C_FALSE
+        | jmp >2
+        | 1:
+        | mov qword [rStackI], C_TRUE
+        | 2:
+
+        | incStack
+        break;
+      }
+
       // Fixnum boolean expressions
       case OP_FX_LT: {
         | decStack
@@ -998,73 +1081,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
-      case OP_RETURN:
-      case OP_RETURN_END: {
-        AR_LOG_JIT("return");
-        | sub rStackI, 8
-        | mov rStackI, [rStackI]
-
-        | jmp ->unwind
-
-        if(code[current_insn] == OP_RETURN_END)
-          done = true;
-
-        break;
-      }
-
-      // Checking function arity
-
-      case OP_ARGC_EQ: {
-        size_t fargc = code[code_offset++];
-
-        | mov rax, (size_t) fargc
-        | cmp rax, r14
-        | je >1
-        | throwNativeException code_offset-2, E_EVAL, E_ARITY_CHECK, fargc, r14
-        | 1:
-
-        AR_LOG_JIT("argc-eq " << fargc);
-
-        // Initialize local variables
-        if(fargc) {
-          AR_LOG_JIT("initializing locals with loop to " << kLocalsOffset + (8 * fargc));
-          | mov rArg1, rsp
-          | mov rArg2, r15
-          | add rArg1, (kLocalsOffset)
-          | mov rArg3, rArg1
-          | add rArg3, (8 * fargc)
-
-          |->local_init:
-          // mov argv[i] into rArg4
-          | mov rArg4, [rArg2]
-          // mov rArg4 into locals[i]
-           | mov [rArg1], rArg4
-          // Increment and check again
-          | add rArg2, 8
-          | add rArg1, 8
-          | cmp rArg1, rArg3
-          | jne ->local_init
-
-        }
-        if(dbg && gc_debug) {
-          | stateCall state_collect;
-        }
-
-        if(dbg) {
-          | mov rArg1, rsp
-          | simpCall print_stack_frame
-        }
-        break;
-      }
-
-      case OP_ARGC_GTE: {
-        code_offset++;
-        break;
-      }
-
-      case OP_ARGV_REST: {
-        break;
-      }
 
       default: {
         AR_LOG_JIT("unknown bytecode " << code[code_offset-1]);
