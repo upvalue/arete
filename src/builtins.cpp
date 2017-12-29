@@ -461,6 +461,8 @@ Value fn_apply(State& state, size_t argc, Value* argv, void* v) {
     lst = lst.cdr();
   }
 
+	AR_ASSERT(state.gc.live(fn));
+
   tmp = state.apply_vector_storage(fn, sub_argv);
   return tmp;
 }

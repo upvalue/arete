@@ -89,6 +89,7 @@
 // about a particular State
 
 #include <algorithm>
+#include <functional>
 
 #include "arete.hpp"
 
@@ -1299,7 +1300,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   vfn.as_unsafe<VMFunction>()->native_code = bv.as_unsafe<Bytevector>();
   vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
 
-  vfn.as_unsafe<VMFunction>()->procedure_addr = (c_closure_t)bv.as_unsafe<Bytevector>()->data;
+  vfn.as_unsafe<VMFunction>()->procedure_addr = (c_closure_t)(void*)bv.as_unsafe<Bytevector>()->data;
 
   return vfn;
 }
@@ -1337,7 +1338,8 @@ Value fn_native_call(State& state, size_t argc, Value* argv, Value fn) {
     std::cout << " argc: " << argc-1 << " argv ptr: " << (size_t)argv+8 << std::endl;
   }
   // argc, argv, fn
-  ptrdiff_t (*ptr)(State*, size_t, size_t, size_t) = (ptrdiff_t (*)(State*, size_t, size_t)) vfn.as_unsafe<VMFunction>()->native_code->data;
+	void* fptr = (void*) vfn.as_unsafe<VMFunction>()->native_code->data;
+  ptrdiff_t (*ptr)(State*, size_t, size_t, size_t) = (ptrdiff_t (*)(State*, size_t, size_t, size_t))(fptr);
   ptrdiff_t result = ptr(&state, argc-1, (size_t)argv+8, (size_t)vfn.bits);
 
   if(dbg) {

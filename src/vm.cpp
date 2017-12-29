@@ -244,8 +244,8 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
      << " free_variables: " << f.fn->free_variables << " stack_max: " << f.fn->stack_max);
 
   // Allocate function's required storage
-#if AR_USE_C_STACK
   size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;
+#if AR_USE_C_STACK
   // Add storage to VM frame
   void* stack[f.fn->stack_max];
   void* locals[f.fn->local_count];

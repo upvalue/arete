@@ -72,8 +72,8 @@
 # define AR_LIKELY(x) (__builtin_expect((x), 1))
 # define AR_UNLIKELY(x) (__builtin_expect((x), 0))
 #else
-# define AR_LIKELY(x)
-# define AR_UNLIKELY(x)
+# define AR_LIKELY(x) (x)
+# define AR_UNLIKELY(x) (x)
 # define AR_FORCE_INLINE
 #endif
 
@@ -2108,7 +2108,6 @@ struct State {
   Value eval_form(EvalFrame frame, Value exp, unsigned);
   Value eval_body(EvalFrame frame, Value exp, bool single = false);
   Value eval_exp(Value exp);
-  Value apply_interpreter(size_t argc, Value* argv, Value fn);
   /** The primary application function */
   Value eval_list(Value lst, bool expand = true, Value env = C_FALSE);
 
@@ -2167,6 +2166,8 @@ struct State {
   /** Load an image. Cannot be called after boot(). */
   const char* boot_from_image(const std::string& path);
 };
+
+Value apply_interpreter(State& state, size_t argc, Value* argv, Value fn);
 
 ///// READ! S-Expression reader
 

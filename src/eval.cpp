@@ -349,7 +349,7 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
         fn->arguments = args;
       }
 
-      saved_fn.procedure_install(&State::apply_interpreter);
+      saved_fn.procedure_install((c_closure_t)arete::apply_interpreter);
       AR_ASSERT(saved_fn.procedurep());
       AR_ASSERT(saved_fn.as_unsafe<Function>()->procedure_addr);
       return saved_fn;
@@ -382,59 +382,57 @@ static Value eval_check_arity(State& state, Value fn, Value exp,
 
 // Apply a function. Not used by the interpreter itself but used for generic apply and calls from
 // C/VM functions
-Value State::apply_interpreter(size_t argc, Value* argv, Value fn) {
+Value apply_interpreter(State& state, size_t argc, Value* argv, Value fn) {
   AR_TYPE_ASSERT(fn.heap_type_equals(FUNCTION));
-  EvalFrame frame;
+	State::EvalFrame frame;
   Value fn_args, fn_rest_args, tmp, new_env;
 
   frame.fn_name = fn.function_name();
   fn_args = fn.function_arguments();
   fn_rest_args = fn.function_rest_arguments();
 
-  AR_FRAME(this, frame.fn_name, frame.env, fn, fn_args, fn_rest_args, tmp, new_env);
+  AR_FRAME(state, frame.fn_name, frame.env, fn, fn_args, fn_rest_args, tmp, new_env);
   // Check argc against args length
   size_t arity = fn_args.list_length();
 
-  tmp = eval_check_arity(*this, fn, C_FALSE, argc, arity, arity, fn_rest_args != C_FALSE);
+  tmp = eval_check_arity(state, fn, C_FALSE, argc, arity, arity, fn_rest_args != C_FALSE);
   if(tmp.is_active_exception()) return tmp;
 
-  temps.clear();
-  temps.insert(temps.end(), argv, &argv[argc]);
-
+  state.temps.clear();
+  state.temps.insert(state.temps.end(), argv, &argv[argc]);
 
   size_t actual_args = arity;
 
   // Handle rest arguments
   if(argc > arity) {
-    tmp = temps_to_list(arity);
-    temps[arity] = tmp;
-    AR_ASSERT(temps.size() > arity);
+    tmp = state.temps_to_list(arity);
+    state.temps[arity] = tmp;
+    AR_ASSERT(state.temps.size() > arity);
     actual_args++;
   } else {
-    temps.push_back(C_NIL);
+    state.temps.push_back(C_NIL);
   }
 
-  new_env = make_env(fn.function_parent_env(), actual_args);
+  new_env = state.make_env(fn.function_parent_env(), actual_args);
 
   size_t i = 0;
   while(fn_args.heap_type_equals(PAIR)) {
-    vector_append(new_env, fn_args.car());
-    vector_append(new_env, temps[i++]);
+    state.vector_append(new_env, fn_args.car());
+    state.vector_append(new_env, state.temps[i++]);
     fn_args = fn_args.cdr();
   }
 
   if(fn_rest_args != C_FALSE) {
-    vector_append(new_env, fn_rest_args);
-    vector_append(new_env, temps[i]);
+    state.vector_append(new_env, fn_rest_args);
+    state.vector_append(new_env, state.temps[i]);
   }
 
   frame.env = new_env;
 
-  tmp = eval_body(frame, fn.function_body());
+  tmp = state.eval_body(frame, fn.function_body());
 
   return tmp;
 }
-
 Value State::eval_body(EvalFrame frame, Value body, bool single) {
   if(get_global_value(G_FORBID_INTERPRETER) == C_TRUE) {
     std::ostringstream os;
@@ -812,8 +810,6 @@ Value State::apply(Value fn, size_t argc, Value* argv) {
   } else {
     return eval_error("cannot apply type", fn);
   }
-
-  return C_UNSPECIFIED;
 }
 
 Value State::apply_vector_storage(Value fn, Value vector_storage) {

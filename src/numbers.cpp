@@ -253,7 +253,7 @@ Value fn_quotient(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  ldiv_t div = ldiv(argv[0].fixnum_value(), argv[1].fixnum_value());
+  ldiv_t div = ldiv((long)argv[0].fixnum_value(), (long)argv[1].fixnum_value());
   return Value::make_fixnum(div.quot);
 }
 AR_DEFUN("quotient", fn_quotient, 2);
@@ -263,7 +263,7 @@ Value fn_remainder(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
-  ldiv_t div = ldiv(argv[0].fixnum_value(), argv[1].fixnum_value());
+  ldiv_t div = ldiv((long)argv[0].fixnum_value(), (long)argv[1].fixnum_value());
   return Value::make_fixnum(div.rem);
 }
 AR_DEFUN("remainder", fn_remainder, 2);
@@ -346,7 +346,7 @@ Value fn_minmax(State& state, size_t argc, Value* argv, bool min) {
   for(; i != argc; i++) {
     if(argv[i].fixnump()) {
       if(!set) {
-        flacc = argv[i].fixnum_value();
+        flacc = (double) argv[i].fixnum_value();
         set = true;
       } else {
         flacc = min ? (flacc > argv[i].fixnum_value() ? argv[i].fixnum_value() : flacc) :
@@ -392,7 +392,7 @@ Value fn_string_to_number(State& state, size_t argc, Value* argv, void* _) {
   NumberReader reader(state, string);
 
   if(argc == 2) {
-    if(!reader.set_radix_param(argv[1].fixnum_value())) {
+    if(!reader.set_radix_param((unsigned)argv[1].fixnum_value())) {
       return state.make_exception("read", reader.error_desc);
     }
   }
@@ -429,7 +429,7 @@ Value fn_exact_to_inexact(State& state, size_t argc, Value* argv, void* _) {
   if(argv[0].heap_type_equals(FLONUM)) return argv[0];
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
 
-  return state.make_flonum(argv[0].fixnum_value());
+  return state.make_flonum((double)argv[0].fixnum_value());
 }
 AR_DEFUN("exact->inexact", fn_exact_to_inexact, 1);
 
