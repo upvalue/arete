@@ -379,6 +379,7 @@ AR_DEFUN("max", fn_max, 1, 1, true);
 
 Value fn_string_to_number(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "string->number";
+
   AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   if(argc == 2) {
@@ -396,6 +397,7 @@ Value fn_string_to_number(State& state, size_t argc, Value* argv, void* _) {
     }
   }
 
+
   Value v = reader.read();
   if(v == C_FALSE) {
     return state.make_exception("read", reader.error_desc);
@@ -403,6 +405,33 @@ Value fn_string_to_number(State& state, size_t argc, Value* argv, void* _) {
   return v;
 }
 AR_DEFUN("string->number", fn_string_to_number, 1, 2);
+
+Value fn_inexact_to_exact(State& state, size_t argc, Value* argv, void* _) {
+  static const char* fn_name = "inexact->exact";
+
+  AR_FN_ARGC_EQ(state, argc, 1);
+  if(argv[0].fixnump()) return argv[0];
+  AR_FN_EXPECT_TYPE(state, argv, 0, FLONUM);
+
+  double flnum = argv[0].flonum_value();
+  if((ptrdiff_t) flnum != flnum) {
+    return state.eval_error("inexact number cannot be represented exactly");
+  } else {
+    return Value::make_fixnum((ptrdiff_t) flnum);
+  }
+}
+AR_DEFUN("inexact->exact", fn_inexact_to_exact, 1);
+
+Value fn_exact_to_inexact(State& state, size_t argc, Value* argv, void* _) {
+  static const char* fn_name = "exact->inexact";
+
+  AR_FN_ARGC_EQ(state, argc, 1);
+  if(argv[0].heap_type_equals(FLONUM)) return argv[0];
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+
+  return state.make_flonum(argv[0].fixnum_value());
+}
+AR_DEFUN("exact->inexact", fn_exact_to_inexact, 1);
 
 ///// SRFI 151: Bitwise operations
 

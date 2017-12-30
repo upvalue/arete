@@ -201,7 +201,7 @@ Value NumberReader::read() {
         case 'F': case 'f': place = 15; if(!check_radix_gte(16, c)) return C_FALSE; break;
         default: {
           std::ostringstream os;
-          os << "number reader encountered unknown character " << c;
+          os << "number reader encountered unknown character " << c << " while reading number " << string;
           error_desc = os.str();
           return C_FALSE;
         }
