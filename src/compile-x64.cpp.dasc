@@ -998,7 +998,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         AR_LOG_JIT((code[current_insn] == OP_ARGC_EQ ? "argc-eq" : "argc-gte") << ' ' << fargc);
 
         // backup argv in r10 in case of rest arguments
-        | mov r10, rArg4
 
         // Initialize local variables
         if(fargc) {
@@ -1014,10 +1013,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
           | add rax, (8 * fargc)
 
           |->local_init:
-          // mov argv[i] into rArg4
-          | mov rArg4, [rArg2]
-          // mov rArg4 into locals[i]
-           | mov [rArg1], rArg4
+          // mov argv[i] into r10
+          | mov r10, [rArg2]
+          // mov r10 into locals[i]
+           | mov [rArg1], r10
           // Increment and check again
           | add rArg2, 8
           | add rArg1, 8
@@ -1040,7 +1039,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
       case OP_ARGV_REST: {
         | mov rArg1, rState
-        | mov rArg4, r10
         | mov64 rax, (size_t)allocate_rest_arguments
         | call rax
 
