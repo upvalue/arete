@@ -63,4 +63,11 @@
 
 (test-equals 'exception (lambda () (2)))
 
+(test-equals () (lambda rest rest))
+
+(test-equals (1 2 3) (lambda rest rest) 1 2 3)
+
+(test-equals () (lambda (a b . c) c) 1 2)
+(test-equals (3) (lambda (a b . c) c) 1 2 3)
+
 (for-each print test-results)

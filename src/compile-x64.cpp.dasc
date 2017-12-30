@@ -1,6 +1,8 @@
 // compile-x64.cpp.dasc - Compile bytecode to native amd64 code
 // This is a DynASM file. Must be run through DynASM to produce a C++ file
 
+#ifndef __EMSCRIPTEN__
+
 // Further reading
 // Agner Fog, Calling Conventions
 // http://www.agner.org/optimize/calling_conventions.pdf
@@ -97,7 +99,13 @@
 
 namespace arete {
 
+static const bool dbg = false;
+static const bool sanity_log = true;
+static const bool gc_debug = true;
+
 DefunGroup jit("jit");
+
+///// A bunch of silly debugging code
 
 static size_t invocation = 0;
 ptrdiff_t print_int(State& state, ptrdiff_t i) {
@@ -199,6 +207,8 @@ void print_stack_frame(NativeFrame* frame) {
   std::cout << ">>" << std::endl;;
 }
 
+///// BELOW HERE: Functions which are actually needed for code to run properly
+
 // Exception handling
 
 // Because string munging in assembly is painful, exceptions are described by the NativeException
@@ -212,8 +222,11 @@ enum {
 
 // Exception source codes
 enum {
-  E_ARITY_CHECK,
+  E_ARITY_CHECK_EQ,
+  E_ARITY_CHECK_GTE,
   E_APPLY_CHECK,
+  E_ADD,
+  E_SUB,
   E_FX_ADD,
   E_FX_SUB,
   E_FX_LT,
@@ -268,13 +281,20 @@ Value native_throw_exception(NativeException* exc) {
       os << "attempt to apply non-applicable value " << exc->arg1;
       break;
     }
-    case E_ARITY_CHECK: {
+    case E_ARITY_CHECK_EQ: {
       check_code = false;
       os << "expected exactly " << exc->arg1 << " arguments but got " << exc->arg2;
       break;
     }
+    case E_ARITY_CHECK_GTE: {
+      check_code = false;
+      os << "expected at least " << exc->arg1 << " arguments but got " << exc->arg2;
+      break;
+    }
     case E_FX_ADD: os << "primitive fx+ "; break;
     case E_FX_SUB: os << "primitive fx- "; break;
+    case E_ADD: os << "primitive + "; break;
+    case E_SUB: os << "primitive - "; break;
     case E_FX_LT: os << "primitive fx< "; break;
     default: break;
   }
@@ -315,6 +335,21 @@ Value generic_apply(State* state, size_t argc, Value* argv, Value fn) {
   return result;
 }
 
+void* allocate_rest_arguments(State* state, size_t arity, size_t argc, Value* argv) {
+  std::cout << "allocating rest arguments list " << (ptrdiff_t) state << " arity: " << arity << ' ' << "rest_argc_begin: " << (ptrdiff_t) argc <<
+    ' ' << (ptrdiff_t) argv << std::endl;
+
+  AR_ASSERT(arity <= argc);
+
+  state->temps.clear();
+  for(size_t i = arity; i != argc; i++ ) {
+    std::cout << argv[i] << std::endl;
+    state->temps.push_back(argv[i]);
+  }
+
+  return (void*) state->temps_to_list(0).bits;
+}
+
 struct NativeFrameSize {
   NativeFrame* previous;
   size_t value_count;
@@ -323,9 +358,6 @@ struct NativeFrameSize {
   Value scratch;
 };
 
-static const bool dbg = false;
-static const bool sanity_log = true;
-static const bool gc_debug = true;
 
 Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   const char* fn_name = "vmfunction->native";
@@ -409,7 +441,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 	| .if WINDOWS
 	| push rbp; mov rbp, rsp; mov64 rax, (ptrdiff_t) fun; call rax; mov rsp, rbp; pop rbp
 	| .else
+  | push rArg3; push rArg4;
   | push rbp; push rsp; mov64 rax, (ptrdiff_t) fun; call rax; pop rsp; pop rbp;
+  | pop rArg4; pop rArg3
 	| .endif
   |.endmacro
 
@@ -475,6 +509,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Test failed. Set up registers for exception
   | throwNativeException (code_offset-1), E_TYPE, src, code, 0
   |1:
+  |.endmacro
+
+  |.macro checkNumberP, store, src, code
   |.endmacro
 
   // jmp to label >1 if value in STORE is immediate
@@ -601,7 +638,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rState, rArg1
   | push rStackI
 
-
   // NOTE: At the boundary of any CALL, stack size must be a multiple of 16!
   // PUSHing grows it by only 8.
 
@@ -622,8 +658,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Shuffle argv into different register so we can use rArg2
   | mov rArg4, rArg3
   | mov rArg3, rArg2
-
-  //| mov rArg3, rArg2
 
   // NativeFrame.previous = state->gc.native_frames
   | mov rArg1, rState
@@ -694,7 +728,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
     switch(code[code_offset++]) {
       case OP_NOT:
-      case OP_FX_ADD: case OP_FX_SUB:
+      case OP_FX_ADD: case OP_FX_SUB: 
       case OP_FX_LT:
       case OP_POP:
       case OP_RETURN: 
@@ -710,7 +744,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       case OP_LOCAL_SET:
       case OP_ARGC_EQ:
       case OP_ARGC_GTE:
-      case OP_PUSH_CONSTANT: code_offset++; continue;
+      case OP_PUSH_CONSTANT:
+      case OP_ADD: case OP_SUB:
+        code_offset++; continue;
 
       case OP_GLOBAL_SET: code_offset += 2; continue;
 
@@ -874,6 +910,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | mov rArg2, (size_t)argc
         | mov rArg1, rState
 
+        // update stack pointer to point to where function was
+        | mov rStackI, rArg4
+
         // Get pointer object from stack
         | mov rArg4, [rArg4]
 
@@ -883,10 +922,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | call rax
 
         | mov rArg1, rax
+
         | checkExceptionP rArg1
 
-        // Place result on stack
-        | sub rStackI, ((argc * 8) + 8)
         | mov [rStackI], rArg1
         | incStack
 
@@ -944,24 +982,36 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
       // Checking function arity
 
-      case OP_ARGC_EQ: {
+      case OP_ARGC_EQ:
+      case OP_ARGC_GTE: {
         size_t fargc = code[code_offset++];
 
         | cmp rArg3, (size_t) fargc
-        | je >1
-        | throwNativeException code_offset-2, E_EVAL, E_ARITY_CHECK, fargc, rArg1
+        if(code[current_insn] == OP_ARGC_EQ) {
+          | je >1
+        } else if(code[current_insn] == OP_ARGC_GTE) {
+          | jge >1
+        }
+        | throwNativeException code_offset-2, E_EVAL, (code[current_insn] == OP_ARGC_EQ ? E_ARITY_CHECK_EQ : E_ARITY_CHECK_GTE), fargc, rArg3
         | 1:
 
-        AR_LOG_JIT("argc-eq " << fargc);
+        AR_LOG_JIT((code[current_insn] == OP_ARGC_EQ ? "argc-eq" : "argc-gte") << ' ' << fargc);
+
+        // backup argv in r10 in case of rest arguments
+        | mov r10, rArg4
 
         // Initialize local variables
         if(fargc) {
           AR_LOG_JIT("initializing locals with loop to " << kLocalsOffset + (8 * fargc));
+          // rArg1 = &locals[0]
           | mov rArg1, rsp
-          | mov rArg2, rArg4
           | add rArg1, (kLocalsOffset)
-          | mov rArg3, rArg1
-          | add rArg3, (8 * fargc)
+          // rArg2 = &argv[0]
+          | mov rArg2, rArg4
+
+          // limit = &locals[max_arity]
+          | mov rax, rArg1
+          | add rax, (8 * fargc)
 
           |->local_init:
           // mov argv[i] into rArg4
@@ -971,10 +1021,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
           // Increment and check again
           | add rArg2, 8
           | add rArg1, 8
-          | cmp rArg1, rArg3
+          | cmp rArg1, rax
           | jne ->local_init
-
         }
+
+        | mov rArg2, (size_t) fargc
+
         if(dbg && gc_debug) {
           | stateCall state_collect;
         }
@@ -986,12 +1038,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
-      case OP_ARGC_GTE: {
-        code_offset++;
-        break;
-      }
-
       case OP_ARGV_REST: {
+        | mov rArg1, rState
+        | mov rArg4, r10
+        | mov64 rax, (size_t)allocate_rest_arguments
+        | call rax
+
+        | mov rArg1, rsp
+        | add rArg1, (kLocalsOffset + (vmf->max_arity * 8))
+        | mov [rArg1], rax
+
         break;
       }
 
@@ -1087,6 +1143,69 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
+      case OP_ADD:
+      case OP_SUB: {
+        size_t argc = code[code_offset++];
+        AR_LOG_JIT("add " << argc);
+        // for i = 0 to argc
+
+        // while fixnum, accumulate in a register
+        // if end of fixnump loop is reached, push value of register onto stack
+        | mov rArg1, rStackI
+        
+        | sub rArg1, (((argc) * 8)) 
+        | mov rArg2, [rArg1]
+        | shr rArg2, 1
+        | add rArg1, 8
+
+        | ->add_fixnum:
+
+        | mov rax, [rArg1]
+        | and rax, 1
+        | cmp rax, 1
+        | jne ->add_flonum
+
+        | mov rax, [rArg1]
+        | shr rax, 1
+
+        switch(code[current_insn]) {
+          case OP_ADD: {
+            | add rArg2, rax
+            break;
+          }
+          case OP_SUB: {
+            | sub rArg2, rax
+            break;
+          }
+        }
+
+        | add rArg1, 8
+        | cmp rArg1, rStackI
+        | jne ->add_fixnum
+
+        | jmp ->good
+
+        | ->add_flonum:
+        | sub rStackI, 8
+        | mov qword [rArg1], 0
+        | jmp ->done
+
+        | ->good:
+
+        | shl rArg2, 1
+        | inc rArg2
+
+        | sub rStackI, ((argc) * 8)
+        | mov [rStackI], rArg2
+        | add rStackI, 8
+
+        | ->done:
+
+        // otherwise, check for fixnum or flonum, accumulate in flonum register
+        // when end of loop is reached, push value of register onto stack
+        break;
+      }
+
 
       default: {
         AR_LOG_JIT("unknown bytecode " << code[code_offset-1]);
@@ -1107,7 +1226,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Arg1 = Pointer to beginning of NativeException structure
 
   // Tricky math: We've added space for 5/6 of NativeException in the
-  // throwNativeException module. Then we set the first value in NativeException
+  // throwNativeException struct. Then we set the first value in NativeException
   // to [rsp+40+24] (VMFunction pointer) and push a state pointer on the end
   | mov rArg1, [rsp+48+16]
   | mov [rsp], rArg1
@@ -1232,3 +1351,5 @@ void load_native_compiler(State& state) {
 }
 
 }
+
+#endif // __EMSCRIPTEN__
