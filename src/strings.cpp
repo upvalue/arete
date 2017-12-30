@@ -80,7 +80,7 @@ AR_DEFUN("char-case-fold", fn_char_case_fold, 1);
 
 Value fn_char_equals(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "char=?";
-  AR_FN_ARGC_EQ(state, argc, 1);
+  AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, 0, argv, CHARACTER);
   AR_FN_EXPECT_TYPE(state, 1, argv, CHARACTER);
   return Value::make_boolean(argv[0].character() == argv[1].character());

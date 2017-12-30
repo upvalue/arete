@@ -221,7 +221,9 @@ Value NumberReader::read() {
 
   // Parse exponent notation
   if(is_exponent) {
-    ptrdiff_t science_amount = 0;
+    ptrdiff_t exponent_amount = 0;
+
+    // TODO: ADD NEGATIVE
     for(; i != string.size(); i++) {
       bool valid = string[i] >= '0' && string[i] <= '9';
       if(!valid) {
@@ -230,16 +232,16 @@ Value NumberReader::read() {
         error_desc = os.str();
         return C_FALSE;
       }
-      science_amount *= 10;
-      science_amount += (string[i] - '0');
+      exponent_amount *= 10;
+      exponent_amount += (string[i] - '0');
     }
 
     if(is_float) {
-      while(science_amount--) {
+      while(exponent_amount--) {
         flonum *= 10;
       }
     } else {
-      while(science_amount--) {
+      while(exponent_amount--) {
         fixnum *= 10;
       }
     }

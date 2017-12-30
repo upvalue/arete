@@ -528,6 +528,11 @@ struct Value {
     return static_cast<Flonum*>(heap)->number;
   }
 
+  double inexact_number() const {
+    if(fixnump()) return (double) fixnum_value();
+    else return flonum_value();
+  }
+
   // VECTORS
   Value vector_storage() const;
   Value vector_ref(size_t i) const;
@@ -2624,6 +2629,8 @@ struct TableIterator {
     AR_FN_STACK_TRACE(state); \
     return state.type_error(os.str()); \
   }
+
+#define AR_FN_EXPECT_NUMBER(state, argv, arg) AR_FN_ASSERT_ARG(state, arg, "to be a number", (argv[(arg)].numeric()))
 
 #define AR_FN_EXPECT_RECORD_ISA(state, argv, arg, tag_index) \
   if((argv)[(arg)].type() != RECORD) { \

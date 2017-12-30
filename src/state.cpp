@@ -133,7 +133,7 @@ void State::boot() {
   register_feature("sdl");
 #endif
 
-  set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(1300));
+  set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(1100));
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_FEATURES, C_NIL);
   set_global_value(G_TCO_ENABLED, C_TRUE);

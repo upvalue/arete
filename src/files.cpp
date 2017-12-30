@@ -124,7 +124,7 @@ AR_DEFUN("get-output-string", fn_get_output_string, 1);
 
 Value fn_open_output_file(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "open-output-file";
-  AR_FN_ARGC_EQ(state, argc, 0);
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
 
   return state.make_output_file_port(argv[0]);

@@ -533,12 +533,12 @@ TODO: Casting
 ;; PORTS
 
 (define (call-with-input-file path thunk)
-  (let ((file (open-input-file)))
+  (let ((file (open-input-file path)))
     (unwind-protect (lambda () (thunk file))
                     (lambda () (close-input-port file)))))
 
 (define (call-with-output-file path thunk)
-  (let ((file (open-output-file)))
+  (let ((file (open-output-file path)))
     (unwind-protect (lambda () (thunk file))
                     (lambda () (close-output-port file)))))
 

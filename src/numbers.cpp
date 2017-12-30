@@ -228,6 +228,16 @@ Value fn_round(State& state, size_t argc, Value* argv, void* v) {
 }
 AR_DEFUN("round", fn_round, 1);
 
+
+Value fn_truncate(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "truncate";
+  AR_FN_ARGC_EQ(state, argc, 1);
+  AR_FN_EXPECT_NUMBER(state, argv, 0);
+  AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].heap_type_equals(FLONUM));
+  return state.make_flonum(trunc(argv[0].inexact_number()));
+}
+AR_DEFUN("truncate", fn_truncate, 1);
+
 Value fn_ceiling(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "ceiling";
   AR_FN_ARGC_EQ(state, argc, 1);
@@ -273,7 +283,7 @@ Value fn_atan(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_ASSERT_ARG(state, 0, "to be a number", argv[0].numeric());
 
-  double y = argv[0].fixnump() ? (double) argv[0].fixnum_value() : argv[0].flonum_value();
+  double y = argv[0].inexact_number();
 
   if(argc == 1) {
     return state.make_flonum(atan(y));
@@ -376,6 +386,19 @@ Value fn_max(State& state, size_t argc, Value* argv, void* v) {
   return fn_minmax(state, argc, argv, false);
 }
 AR_DEFUN("max", fn_max, 1, 1, true);
+
+Value fn_sqrt(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "sqrt";
+  AR_FN_ARGC_EQ(state, argc, 1);
+  AR_FN_EXPECT_NUMBER(state, argv, 0);
+
+  if(argv[0].fixnump()) {
+    return state.make_flonum(sqrt((double)argv[0].fixnum_value()));
+  } else {
+    return state.make_flonum(sqrt(argv[0].flonum_value()));
+  }
+}
+AR_DEFUN("sqrt", fn_sqrt, 1, 1);
 
 Value fn_string_to_number(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "string->number";
