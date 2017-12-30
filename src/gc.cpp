@@ -309,7 +309,8 @@ void GCCommon::visit_roots(T& walker) {
 GCSemispace::GCSemispace(State& state_, size_t heap_size):
     GCCommon(state_, heap_size), 
     active(0), other(0),
-    block_cursor(0) {
+    block_cursor(0),
+    collect_before_every_allocation(false) {
 
   active = new Block(heap_size, 0);
 }
@@ -326,6 +327,11 @@ void GCSemispace::copy(HeapValue** ref) {
     return;
   
   HeapValue* obj = *ref;
+
+  // This reference has already been updated
+  if((char*)obj >= other->data && (char*)obj < (other->data + other->size)) {
+    return;
+  }
 
   // This object has already been copied
   if(obj->header == RESERVED) {

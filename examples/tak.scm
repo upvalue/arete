@@ -10,4 +10,3 @@
 (define (main)
   (display (tak 40 20 11)) (newline))
 
-;(main)

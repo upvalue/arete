@@ -266,7 +266,6 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
   memset(f.locals, 0, f.fn->local_count * sizeof(void*));
   memcpy(f.locals, argv, (argc > f.fn->max_arity ? f.fn->max_arity : argc) * sizeof(void*));
 
-  // Clear upvalues array in case creation of rest arguments causes allocation
   if(upvalue_count) {
     gc.protect_argc = argc;
     gc.protect_argv = argv;
