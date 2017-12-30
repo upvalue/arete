@@ -213,6 +213,7 @@ GCCommon::GCCommon(State& state_, size_t heap_size_):
   frames(0),
   native_frames(0),
   vm_frames(0),
+  protect_argc(0), protect_argv(0),
   collect_before_every_allocation(false),
   allocations(0),
   collections(0), live_objects_after_collection(0), live_memory_after_collection(0),
@@ -259,6 +260,12 @@ void GCCommon::visit_roots(T& walker) {
     break;
   }
 
+  if(protect_argc > 0) {
+    for(size_t i = 0; i != protect_argc; i++) {
+      walker.touch((HeapValue**) &protect_argv[i]);
+    }
+  }
+
   VMFrame* link = vm_frames;
   while(link != 0) {
     VMFunction* fn = link->fn;
@@ -302,8 +309,7 @@ void GCCommon::visit_roots(T& walker) {
 GCSemispace::GCSemispace(State& state_, size_t heap_size):
     GCCommon(state_, heap_size), 
     active(0), other(0),
-    block_cursor(0),
-    collect_before_every_allocation(false) {
+    block_cursor(0) {
 
   active = new Block(heap_size, 0);
 }

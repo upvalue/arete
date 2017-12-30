@@ -213,7 +213,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
     
     &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
 
-    &&LABEL_OP_RETURN, &&LABEL_OP_RETURN_END, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
+    &&LABEL_OP_RETURN, &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
 
     &&LABEL_OP_ARGC_EQ,
     &&LABEL_OP_ARGC_GTE,
@@ -255,8 +255,6 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
   f.locals = (Value*) locals;
 
   f.upvalues = upvalue_count ? (Value*) upvalues : 0;
-  if(upvalue_count)
-    f.upvalues = (Value*) upvalues;
 #endif
 
   // This has to be done in a somewhat funky order. Because allocations can occur here (if a function
@@ -269,11 +267,12 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
   memcpy(f.locals, argv, (argc > f.fn->max_arity ? f.fn->max_arity : argc) * sizeof(void*));
 
   // Clear upvalues array in case creation of rest arguments causes allocation
-  if(f.fn->free_variables != 0) {
-    memset(f.upvalues, 0, f.fn->free_variables->length * sizeof(Value));
-  }
+  if(upvalue_count) {
+    gc.protect_argc = argc;
+    gc.protect_argv = argv;
 
-  if(f.fn->free_variables != 0) {
+    memset(f.upvalues, 0, f.fn->free_variables->length * sizeof(Value));
+
     // Allocate upvalues as needed
     AR_LOG_VM("Allocating space for " << f.fn->free_variables->length << " upvalues");
 
@@ -283,6 +282,9 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
       AR_LOG_VM("tying free variable " << i << " to local idx " << idx);
       f.upvalues[i].as<Upvalue>()->U.local = &f.locals[idx];
     }
+
+    gc.protect_argc = 0;
+    gc.protect_argv = nullptr;
   }
 
   tail_recur:
@@ -487,6 +489,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
       VM_CASE(OP_APPLY): {
         size_t fargc = VM_NEXT_INSN();
 
+        AR_ASSERT(f.stack_i >= (fargc + 1) && "stack underflow");
         Value afn = f.stack[f.stack_i - fargc - 1];
 
         AR_LOG_VM("apply fargc: " << fargc << " fn: " << afn);
@@ -569,8 +572,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
 
       ///// FLOW CONTROL
 
-      VM_CASE(OP_RETURN):
-      VM_CASE(OP_RETURN_END): {
+      VM_CASE(OP_RETURN): {
         AR_LOG_VM("return " << f.stack_i);
         AR_PRINT_STACK();
         Value ret = f.stack_i == 0 ? C_UNSPECIFIED : f.stack[f.stack_i - 1];
@@ -664,7 +666,6 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
           temps.clear();
           unsigned i;
           for(i = f.fn->max_arity; i != argc; i++) {
-            //std::cout << "Creating rest with argc i " << i  << ' ' << argv[i] << std::endl;
             temps.push_back(argv[i]);
           }
 

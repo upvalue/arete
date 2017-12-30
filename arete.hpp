@@ -1558,6 +1558,10 @@ struct GCCommon {
   std::vector<Value> finalizers2;
   NativeFrame* native_frames;
   VMFrame* vm_frames;
+
+  size_t protect_argc;
+  Value* protect_argv;
+
   /** If true, collect before every allocation. Flushes out GC bugs, incredibly expensive */
   bool collect_before_every_allocation;
   /** Number of total allocations */
@@ -2349,27 +2353,26 @@ enum {
   OP_APPLY_TAIL = 12,
   // Flow control
   OP_RETURN = 13,
-  OP_RETURN_END = 14,
-  OP_JUMP = 15,
-  OP_JUMP_WHEN = 16,
-  OP_JUMP_WHEN_POP = 17,
-  OP_JUMP_UNLESS = 18,
+  OP_JUMP = 14,
+  OP_JUMP_WHEN = 15,
+  OP_JUMP_WHEN_POP = 16,
+  OP_JUMP_UNLESS = 17,
   // Prologue instructions
-  OP_ARGC_EQ = 19,
-  OP_ARGC_GTE = 20,
-  OP_ARGV_REST = 21,
+  OP_ARGC_EQ = 18,
+  OP_ARGC_GTE = 19,
+  OP_ARGV_REST = 20,
   // Instructions below this point are primitive versions of the builtin C++ routines for speed;
   // they are not necessary for code to execute correctly.
-  OP_ADD = 22,
-  OP_SUB = 23,
-  OP_LT = 24,
-  OP_CAR = 25,
-  OP_LIST_REF = 26,
-  OP_NOT = 27,
-  OP_EQ = 28,
-  OP_FX_LT = 29,
-  OP_FX_ADD = 30,
-  OP_FX_SUB = 31,
+  OP_ADD = 21,
+  OP_SUB = 22,
+  OP_LT = 23,
+  OP_CAR = 24,
+  OP_LIST_REF = 25,
+  OP_NOT = 26,
+  OP_EQ = 27,
+  OP_FX_LT = 28,
+  OP_FX_ADD = 29,
+  OP_FX_SUB = 30,
 };
 
 inline Type Value::type() const {

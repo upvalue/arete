@@ -172,7 +172,7 @@
     global-get global-set local-get local-set upvalue-get upvalue-set
     close-over
     apply apply-tail
-    return return-end
+    return 
     jump jump-when jump-when-pop jump-unless
     argc-eq argc-gte argv-rest
     + - < car list-ref not eq? fx< fx+ fx-))
@@ -206,7 +206,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
-               (0 jump jump-when jump-unless words close-over return return-end car not argc-eq argc-gte argv-rest)
+               (0 jump jump-when jump-unless words close-over return car not argc-eq argc-gte argv-rest)
                (1 push-immediate push-constant global-get local-get upvalue-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -857,7 +857,7 @@
     )
     body)
 
-  (emit fn 'return-end)
+  (emit fn 'return)
 
   fn)
 

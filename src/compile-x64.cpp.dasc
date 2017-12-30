@@ -8,10 +8,17 @@
 // Hint: If it's crashing for no apparent reason, it's probably because the stack
 // size is screwed up
 
+// TODO: Tail call applications, how to do them in an efficent manner?
+// Specifically, how to pass and preserve argv?
+
 // This discusses the Windows struct return issue, but doesn't
 // seem to indicate why functions returning Value (only 64 bits) 
 // seem to use a different calling convention
 // https://msdn.microsoft.com/en-us/library/7572ztz4.aspx
+
+// TODO: 
+// Keep rState in rArg1. Because all functions we call take State& as the first argument, this will
+// remove the need for some MOV instructions. 
 
 // TODO: GC frames can be trivially omitted in certain cases; if a function
 // does not have upvalues, never calls other functions or allocation primitives
@@ -19,9 +26,6 @@
 // A function like say, memv or assq might benefit heavily from this, but we'd probably need to
 // inline recursive calls in the Scheme compiler in order to make it easy to determine whether this
 // is possible here.
-
-// TODO: Why use rStackI? Why not just use the RSP and decrement/increment by 8? Would probably
-// reduce code quite a bit
 
 // TODO: Currently variables are GC-tracked much in the way we track them C++-side. But in assembly
 // we have full control over the stack. Rather than using the NativeFrame structure, for example,
@@ -53,6 +57,8 @@
 
 // Also, we only really need to store it at spots that can cause errors. Something like
 // PUSH_IMMEDIATE will never fail.
+
+// TODO: Register allocation
 
 // Anatomy of a natively-compiled Scheme function
 
@@ -673,22 +679,26 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   size_t current_insn = 0;
   size_t *code = vmf->code_pointer();
   bool done = false;
+  size_t code_limit = vmf->code->length;
 
   std::unordered_map<size_t, unsigned> offsets_to_labels;
 
   // Generate all labels
 
   // Generate labels
-  while(!done) {
+  while(true) {
     size_t loc = 0;
 
-    //std::cout << code_offset << std::endl;
-    //std::cout << code[code_offset] << std::endl;
+    if(code_offset == code_limit) {
+      break;
+    }
+
     switch(code[code_offset++]) {
       case OP_NOT:
       case OP_FX_ADD: case OP_FX_SUB:
       case OP_FX_LT:
       case OP_POP:
+      case OP_RETURN: 
       case OP_ARGV_REST: continue;
 
       case OP_APPLY:
@@ -705,11 +715,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
       case OP_GLOBAL_SET: code_offset += 2; continue;
 
-      case OP_RETURN: continue;
-      case OP_RETURN_END: {
-        done = true;
-        continue;
-      }
+
       case OP_JUMP:
       case OP_JUMP_WHEN:
       case OP_JUMP_UNLESS:
@@ -742,12 +748,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   std::sort(offsets.begin(), offsets.end(), std::greater<size_t>());
 
+  // Allocate space for labels
   dasm_growpc(&d, label);
 
   done = false;
   code_offset = 0;
 
   while(!done) {
+    if(code_offset == code_limit) {
+      break;
+    }
     // Test for label generation
     if(offsets.size() > 0 && code_offset == offsets[offsets.size() - 1]) {
       auto i = offsets_to_labels.find(code_offset);
@@ -757,6 +767,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       |=>lbl:
     }
 
+    // Keep track of the current VM instruction
+    // This is used to generate exception traces
     current_insn = code_offset;
 
     switch(code[code_offset++]) {
@@ -878,7 +890,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | mov [rStackI], rArg1
         | incStack
 
-
         break;
       }
 
@@ -921,16 +932,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         break;
       }
 
-      case OP_RETURN:
-      case OP_RETURN_END: {
+      case OP_RETURN: {
         AR_LOG_JIT("return");
         | sub rStackI, 8
         | mov rStackI, [rStackI]
 
         | jmp ->unwind
-
-        if(code[current_insn] == OP_RETURN_END)
-          done = true;
 
         break;
       }

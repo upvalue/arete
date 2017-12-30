@@ -56,6 +56,7 @@
 (test-equals 2 (lambda () (return-arg 2) (return-arg 2) (return-arg 2)))
 
 (test-equals #t (lambda () (not #f)))
+(test-equals #f (lambda () (not #t)))
 
 (test-equals 'exception (lambda () (2)))
 
