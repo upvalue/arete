@@ -88,7 +88,7 @@ struct PointerUpdater {
   }
   
   void update_pointers(HeapValue* heap) {
-      c_closure_t apply_vm = (c_closure_t)(void*&) arete::apply_vm;
+      c_closure_t apply_vm_ = (c_closure_t)&arete::apply_vm;
 
     switch(heap->get_type()) {
       case FLONUM: case STRING: case CHARACTER: case BYTEVECTOR: 
@@ -138,7 +138,7 @@ struct PointerUpdater {
         break;
 
       case VMFUNCTION: {
-        static_cast<VMFunction*>(heap)->procedure_addr = apply_vm;
+        static_cast<VMFunction*>(heap)->procedure_addr = apply_vm_;
         static_cast<VMFunction*>(heap)->name = update_value(static_cast<VMFunction*>(heap)->name);
         static_cast<VMFunction*>(heap)->constants = (VectorStorage*)update_heapvalue(static_cast<VMFunction*>(heap)->constants);
         static_cast<VMFunction*>(heap)->macro_env = update_value(static_cast<VMFunction*>(heap)->macro_env);
@@ -149,7 +149,7 @@ struct PointerUpdater {
       }
 
       case CLOSURE: {
-        static_cast<VMFunction*>(heap)->procedure_addr = apply_vm;
+        static_cast<VMFunction*>(heap)->procedure_addr = apply_vm_;
         static_cast<Closure*>(heap)->function = update_value(static_cast<Closure*>(heap)->function);
         static_cast<Closure*>(heap)->upvalues = (VectorStorage*)update_heapvalue(static_cast<Closure*>(heap)->upvalues);
         break;
