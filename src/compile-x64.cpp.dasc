@@ -397,10 +397,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   |.type state, State, rState
 
   // Defined separately in case calling conventions changed
-  |.define rArgState, rArg1
-  |.define rArgArgc, rArg2
-  |.define rArgArgv, rArg3
-  |.define rArgFn, rArg4
 
   |.define sFramePrev, [rsp]
   |.define sFrameCount, [rsp+8]
@@ -508,7 +504,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | cmp rax, Value::EXCEPTION_ACTIVE_BIT
   | jne >1
   // this is an exception, return immediately
-  | mov r14, code[current_insn]
+  | mov rArg3, code[current_insn]
   | mov rStackI, store
   | jmp ->trace_exception
   |1:
@@ -605,13 +601,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rState, rArg1
   | push rStackI
 
-  | push r14; push r15
 
   // NOTE: At the boundary of any CALL, stack size must be a multiple of 16!
   // PUSHing grows it by only 8.
-
-  | mov r14, rArgArgc
-  | mov r15, rArgArgv
 
   // Allocate stack space
   | sub rsp, kTotalStackSizeAligned
@@ -621,10 +613,17 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | add rStackI, kCompStackOffset
 
   // NativeFrame.values[0] = vfn
-  | mov qword sFrameFunction, rArgFn
+  | mov qword sFrameFunction, rArg4
   // NativeFrame.values[1] = closure
   | mov qword sFrameClosure, 18
   | mov qword sFrameScratch, 18
+
+  // Shuffle argc, argv into different registers so they can be processed in the function body
+  // Shuffle argv into different register so we can use rArg2
+  | mov rArg4, rArg3
+  | mov rArg3, rArg2
+
+  //| mov rArg3, rArg2
 
   // NativeFrame.previous = state->gc.native_frames
   | mov rArg1, rState
@@ -647,10 +646,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     | add rArg1, kLocalsOffset
     | simpCall sanity_log_3
 
-    | mov rArg1, r14
+    | mov rArg1, rArg3
     | simpCall sanity_log_4
 
-    | mov rArg1, r15
+    | mov rArg1, rArg4
     | simpCall sanity_log_5
   }
 
@@ -714,7 +713,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       case OP_PUSH_CONSTANT: code_offset++; continue;
 
       case OP_GLOBAL_SET: code_offset += 2; continue;
-
 
       case OP_JUMP:
       case OP_JUMP_WHEN:
@@ -876,8 +874,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | mov rArg2, (size_t)argc
         | mov rArg1, rState
 
+        // Get pointer object from stack
         | mov rArg4, [rArg4]
 
+        // Type check and get Procedure::procedure_addr
         | extractProcedureAddr rArg4
 
         | call rax
@@ -947,10 +947,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
       case OP_ARGC_EQ: {
         size_t fargc = code[code_offset++];
 
-        | mov rax, (size_t) fargc
-        | cmp rax, r14
+        | cmp rArg3, (size_t) fargc
         | je >1
-        | throwNativeException code_offset-2, E_EVAL, E_ARITY_CHECK, fargc, r14
+        | throwNativeException code_offset-2, E_EVAL, E_ARITY_CHECK, fargc, rArg1
         | 1:
 
         AR_LOG_JIT("argc-eq " << fargc);
@@ -959,7 +958,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         if(fargc) {
           AR_LOG_JIT("initializing locals with loop to " << kLocalsOffset + (8 * fargc));
           | mov rArg1, rsp
-          | mov rArg2, r15
+          | mov rArg2, rArg4
           | add rArg1, (kLocalsOffset)
           | mov rArg3, rArg1
           | add rArg3, (8 * fargc)
@@ -1146,7 +1145,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rax, rStackI
 
   // Restore registers
-  | pop r15; pop r14
   | pop rStackI
 	| pop rState
   | pop rbx
@@ -1212,6 +1210,7 @@ Value fn_native_call(State& state, size_t argc, Value* argv, Value fn) {
 
     std::cout << " argc: " << argc-1 << " argv ptr: " << (size_t)argv+8 << std::endl;
   }
+  // argc, argv, fn
   ptrdiff_t (*ptr)(State*, size_t, size_t, size_t) = (ptrdiff_t (*)(State*, size_t, size_t)) vfn.as_unsafe<VMFunction>()->native_code->data;
   ptrdiff_t result = ptr(&state, argc-1, (size_t)argv+8, (size_t)vfn.bits);
 

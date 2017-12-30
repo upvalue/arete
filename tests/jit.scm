@@ -58,6 +58,9 @@
 (test-equals #t (lambda () (not #f)))
 (test-equals #f (lambda () (not #t)))
 
+;; assumes inlining
+(test-equals 2 (lambda () (let ((a 0) (b 1) (c 2)) c)))
+
 (test-equals 'exception (lambda () (2)))
 
 (for-each print test-results)
