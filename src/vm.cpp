@@ -449,9 +449,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
               goto tail_recur;
             } else {
               temps.clear();
-              for(size_t i = 0; i != fargc; i++) {
-                temps.push_back(f.stack[f.stack_i - fargc + i]);
-              }
+              temps.insert(temps.end(), &f.stack[f.stack_i - fargc], &f.stack[f.stack_i]);
 
               argv = &temps[0];
 
@@ -664,9 +662,7 @@ Value State::apply_vm(size_t argc, Value* argv, Value fn) {
         } else {
           temps.clear();
           unsigned i;
-          for(i = f.fn->max_arity; i != argc; i++) {
-            temps.push_back(argv[i]);
-          }
+          temps.insert(temps.end(), &argv[f.fn->max_arity], &argv[argc]);
 
           f.locals[f.fn->max_arity] = temps_to_list();
 

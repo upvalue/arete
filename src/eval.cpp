@@ -399,10 +399,8 @@ Value State::apply_interpreter(size_t argc, Value* argv, Value fn) {
   if(tmp.is_active_exception()) return tmp;
 
   temps.clear();
+  temps.insert(temps.end(), argv, &argv[argc]);
 
-  for(size_t i = 0; i != argc; i++) {
-    temps.push_back(argv[i]);
-  }
 
   size_t actual_args = arity;
 

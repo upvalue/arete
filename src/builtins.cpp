@@ -109,9 +109,7 @@ Value fn_list_source(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_GTE(state, argc, 1);
   if(argc == 1) return C_NIL;
   state.temps.clear();
-  for(size_t i = 1; i != argc; i++) {
-    state.temps.push_back(argv[i]);
-  }
+  state.temps.insert(state.temps.end(), &argv[1], &argv[argc]);
   SourceLocation loc;
   bool have_source = false;
   if(argv[0].heap_type_equals(PAIR) && argv[0].pair_has_source()) {
