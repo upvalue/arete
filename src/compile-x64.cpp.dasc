@@ -13,10 +13,21 @@
 // TODO: Tail call applications, how to do them in an efficent manner?
 // Specifically, how to pass and preserve argv?
 
+// TODO: Windows wants us to allocate space on the stack to return structs
+
 // This discusses the Windows struct return issue, but doesn't
 // seem to indicate why functions returning Value (only 64 bits) 
 // seem to use a different calling convention
 // https://msdn.microsoft.com/en-us/library/7572ztz4.aspx
+
+// This seems to be limited to structs with constructors/destructors; a simple struct, even one with a union of 
+// pointer and ptrdiff_t, is returned in rax as it should be
+
+// Whatever the reason for this, we need to follow the different struct
+// calling conventions on Windows
+
+
+
 
 // TODO: 
 // Keep rState in rArg1. Because all functions we call take State& as the first argument, this will
@@ -100,7 +111,7 @@
 
 namespace arete {
 
-static const bool dbg = false;
+static const bool dbg = true;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
@@ -398,7 +409,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     kTotalStackSizeAligned += 8;
   }
 
-  //kTotalStackSizeAligned += 24;
+#ifdef _MSC_VER
+  //kTotalStackSizeAligned += 8;
+#endif
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kLocalsOffset " << kLocalsOffset << 
@@ -425,7 +438,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | .define rArg2, rsi
   | .define rArg3, rdx
   | .define rArg4, rcx
-  | .define rArg5, r8
 	|.endif
   |.type state, State, rState
 
@@ -439,13 +451,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Call a simple FUN, for debugging only.
   |.macro simpCall, fun
+  | push rArg3; push rArg4;
 	| .if WINDOWS
 	| push rbp; mov rbp, rsp; mov64 rax, (ptrdiff_t) fun; call rax; mov rsp, rbp; pop rbp
 	| .else
-  | push rArg3; push rArg4;
   | push rbp; push rsp; mov64 rax, (ptrdiff_t) fun; call rax; pop rsp; pop rbp;
-  | pop rArg4; pop rArg3
 	| .endif
+  | pop rArg4; pop rArg3
   |.endmacro
 
   // Call a function which takes arete::State as its first argument
@@ -638,6 +650,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | push rState
   | mov rState, rArg1
   | push rStackI
+	|.if WINDOWS
+	| push r14
+
+	// Stack-allocated return space passed through rax
+	| mov r14, rax
+	|.endif
 
   // NOTE: At the boundary of any CALL, stack size must be a multiple of 16!
   // PUSHing grows it by only 8.
@@ -688,6 +706,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     | simpCall sanity_log_5
   }
 
+#if 0
   // Zero out GC frame
   // Assumes function has a stack size of at least one.
 
@@ -1037,7 +1056,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
         | mov rArg2, (size_t) fargc
 
         if(dbg && gc_debug) {
-          | stateCall state_collect;
+          //| stateCall state_collect;
         }
 
         if(dbg) {
@@ -1264,14 +1283,24 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
   | mov rArg2, [rsp]
   | mov [rArg1], rArg2
+
+#endif
   
   // Free stack space
   | add rsp, kTotalStackSizeAligned
 
   // Retrieve return value from rStackI
-  | mov rax, rStackI
+	| .if WINDOWS
+	//|  mov [r14], rStackI
+	|  mov qword [r14], 0
+	| .else
+  |  mov rax, rStackI
+	| .endif
 
   // Restore registers
+	|.if WINDOWS
+	| pop r14
+	|.endif
   | pop rStackI
 	| pop rState
   | pop rbx
@@ -1289,7 +1318,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   bv = state.make_bytevector<unsigned char>(size);
 
-  AR_LOG_JIT("function size: " << size << " vs " << (code_offset * 8));
+  AR_LOG_JIT("function size: " << size << " vs " << (0 * 8));
 
   dasm_encode(&d, bv.bv_data());
 
@@ -1339,8 +1368,8 @@ Value fn_native_call(State& state, size_t argc, Value* argv, Value fn) {
   }
   // argc, argv, fn
 	void* fptr = (void*) vfn.as_unsafe<VMFunction>()->native_code->data;
-  ptrdiff_t (*ptr)(State*, size_t, size_t, size_t) = (ptrdiff_t (*)(State*, size_t, size_t, size_t))(fptr);
-  ptrdiff_t result = ptr(&state, argc-1, (size_t)argv+8, (size_t)vfn.bits);
+  Value (*ptr)(State*, size_t, size_t, size_t) = (Value (*)(State*, size_t, size_t, size_t))(fptr);
+  Value result = ptr(&state, argc-1, (size_t)argv+8, (size_t)vfn.bits);
 
   if(dbg) {
     std::cout << "result int: " << (result) << std::endl;
