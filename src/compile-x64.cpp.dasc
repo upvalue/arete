@@ -690,8 +690,17 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   // Zero out GC frame
   // Assumes function has a stack size of at least one.
 
+  // TODO: Not necessary to zero out whole frame
+
+  // Should be able to just zero out upvalues + computation stack. 
+  // Locals (except rest) will be initialized before any collection
+
+  // TODO: Except what if a function call causes an exception e.g. an arity error?
+  // In that case, we should pop the native_frame off?
+
   | mov rArg1, rsp
   | add rArg1, kFrameSize
+  // | add rArg1, kLocalsOffset + (vmf->max_arity * 8)
 
   | mov rArg2, rsp
   | add rArg2, kTotalStackSizeAligned

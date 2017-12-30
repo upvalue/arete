@@ -426,24 +426,42 @@ AR_DEFUN("reverse", fn_reverse, 1);
 Value fn_apply(State& state, size_t argc, Value* argv, void* v) {
   const char* fn_name = "apply";
 
-  AR_FN_ARGC_EQ(state, argc, 2);
-  AR_FN_ASSERT_ARG(state, 0, "to be a function", (argv[0].procedurep()));
-  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
+  AR_FN_ARGC_GTE(state, argc, 2);
+  AR_FN_ASSERT_ARG(state, 0, "to be a procedure", (argv[0].procedurep()));
 
-  size_t length = argv[1].list_length();
-  Value sub_argv;
+  Value lst = argv[argc-1], fn = argv[0], tmp, sub_argv;
+  AR_FRAME(state, fn, lst, fn, tmp);
 
-  Value fn = argv[0], args = argv[1], tmp;
-  AR_FRAME(state, fn, args, tmp, sub_argv);
+  // Multi-arg apply turns into a list append for some reason, e.g.
+  // (apply + 2 3 '(4)) => 9
+  if(argc > 2) {
+    state.temps.clear();
+    state.temps.insert(state.temps.end(), &argv[1], &argv[argc-1]);
+    tmp = state.temps_to_list();
+    Value tmp2 = tmp;
+    while(true) { 
+      if(tmp2.cdr() == C_NIL) {
+        tmp2.set_cdr(lst);
+        break;
+      }
+      tmp2 = tmp2.cdr();
+    }
+    lst = tmp;
+  }
 
-  sub_argv = state.make_vector_storage(length);
-  while(args.heap_type_equals(PAIR)) {
-    state.vector_storage_append(sub_argv, args.car());
-    args = args.cdr();
+  size_t lst_length = (argc - 2) + argv[argc-1].list_length();
+
+  AR_FN_ASSERT_ARG(state, argc-1, "to be a list", (argv[argc-1] == C_NIL || lst_length > 0));
+
+  AR_FRAME(state, fn, lst, tmp, sub_argv);
+
+  sub_argv = state.make_vector_storage(lst_length);
+  while(lst.heap_type_equals(PAIR)) {
+    state.vector_storage_append(sub_argv, lst.car());
+    lst = lst.cdr();
   }
 
   tmp = state.apply_vector_storage(fn, sub_argv);
-
   return tmp;
 }
 AR_DEFUN("apply", fn_apply, 2);
