@@ -151,19 +151,23 @@ void sanity_log_3(ptrdiff_t locals) {
   std::cout << "sanity_log_3: location of locals[0]: " << locals << "(" << (rsp - locals) << " from rsp)" << std::endl;
 }
 
-void sanity_log_4(ptrdiff_t argc) {
-  std::cout << "sanity_log_4: argc: " << argc << std::endl;
+void sanity_log_4(ptrdiff_t vfn) {
+  std::cout << "sanity_log_4 vfn: " << vfn << std::endl;
 }
 
-void sanity_log_5(ptrdiff_t argv) {
-  std::cout << "sanity_log_5: argv ptr: " << argv << std::endl;
+void sanity_log_5(ptrdiff_t argc) {
+  std::cout << "sanity_log_5: argc: " << argc << std::endl;
+}
+
+void sanity_log_6(ptrdiff_t argv) {
+  std::cout << "sanity_log_6: argv ptr: " << argv << std::endl;
 }
 
 static size_t vfn_bits = 0;
 
 // Check that parameters have been properly extracted
-void sanity_log_6(ptrdiff_t s, ptrdiff_t ac, ptrdiff_t av, void** rsp) {
-  std::cout << "sanity_log_6 state: " << s << " argc: " << ac << " argv: " << av << " fn: " << (ptrdiff_t)rsp << std::endl;
+void sanity_log_7(ptrdiff_t s, ptrdiff_t ac, ptrdiff_t av, void** rsp) {
+  std::cout << "sanity_log_7 state: " << s << " argc: " << ac << " argv: " << av << " fn: " << (ptrdiff_t)rsp << std::endl;
 }
 
 void sanity_log_fourth_argument(void** rsp) {
@@ -390,7 +394,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
     kTotalStackSizeAligned += 8;
   }
 
+#ifdef _MSC_VER
   kTotalStackSizeAligned += 8;
+#endif
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kLocalsOffset " << kLocalsOffset << 
@@ -649,26 +655,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   // NOTE: At the boundary of any CALL, stack size must be a multiple of 16!
   // PUSHing grows it by only 8.
 
-	// Windows, first three arguments are shifted. rcx points at stack space which is return value and location
-	// of argument one, right?
-	//
   // Allocate stack space
   | sub rsp, kTotalStackSizeAligned
-
-	/*
-  if(dbg && sanity_log) {
-
-		| push rArg1; push rArg2; push rArg3; push rArg4;
-
-		| mov rArg2, rArg3	
-		| mov rArg3, rArg4
-		| mov rArg1, rState
-		| mov rArg4, r14
-		| simpCall sanity_log_6
-		| pop rArg4; pop rArg3; pop rArg2; pop rArg2;
-	}
-
-	*/
 
   // Get stack pointer
   | mov rStackI, rsp
@@ -678,7 +666,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	|.if WINDOWS
 	| mov qword sFrameFunction, r14
 	|.else
-  | mov qword sFrameFunction, rArg4
+  | mov sFrameFunction, rArg4
 	|.endif
   // NativeFrame.values[1] = closure
   | mov qword sFrameClosure, 18
@@ -716,12 +704,18 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
     | add rArg1, kLocalsOffset
     | simpCall sanity_log_3
 
-    | mov rArg1, rArg4
+    | mov rArg1, sFrameFunction
+    | simpCall sanity_log_4
+
+    | mov rArg1, rArg3
     | simpCall sanity_log_5
+
+    | mov rArg1, rArg4
+    | simpCall sanity_log_6
 
 		| push rArg1; push rArg2; push rArg3; push rArg4;
 		| mov rArg1, rState
-		| simpCall sanity_log_6
+		| simpCall sanity_log_7
 		| pop rArg4; pop rArg3; pop rArg2; pop rArg2;
   }
 
@@ -1271,15 +1265,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   |->exception:
 	// Add State* and VMFunction pointer to this
-	| mov rArg1, [rsp+sizeof(NativeException)+16]
+	| mov rArg1, [rsp+(sizeof(NativeException)+16)]
   | mov [rsp+16], rArg1
 	| mov qword [rsp+8], rState
   | mov rArg1, rsp
 	| sub rsp, 48
-  //| simpCall native_throw_exception
-	| push rbp; mov rbp, rsp;
-	| mov64 rax, (ptrdiff_t) native_throw_exception; call rax;
-	| mov rsp, rbp; pop rbp
+  | simpCall native_throw_exception
   | mov rStackI, rax
 	| add rsp, 48
   | add rsp, sizeof(NativeException) // Reset stack
@@ -1391,7 +1382,7 @@ Value fn_native_call(State& state, size_t argc, Value* argv, void* fn) {
   //Value result = ptr((State*) 12, (ptrdiff_t)34, (ptrdiff_t) 56, (ptrdiff_t) 78);
 	vfn_bits = (size_t) vfn.bits;
 	//for(size_t i= 0; i != 50; i++) { std::cout <<i<<std::endl;}
-  Value result = ptr((State*) &state, argc-1, (size_t)argv+8, (size_t)12345);
+  Value result = ptr((State*) &state, argc-1, (size_t)argv+8, (size_t)vfn.bits);
 
   if(dbg) {
     std::cout << "result int: " << (ptrdiff_t)(result.bits) << std::endl;

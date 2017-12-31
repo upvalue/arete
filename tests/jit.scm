@@ -21,7 +21,7 @@
 (define test-results '())
 
 (test-equals #t (lambda () #t))
-(test-equals "asdf" (lambda () #t "asdf"))
+;(test-equals "asdf" (lambda () #t "asdf"))
 (test-equals 123 (lambda () global))
 (test-equals 124 (lambda () (set! global 124) global))
 
