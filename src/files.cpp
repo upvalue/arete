@@ -255,9 +255,10 @@ Value fn_write_char(State& state, size_t argc, Value* argv, void* v) {
 
   std::ostream* os = port.file_port_output_handle();
 
+	Value v2(state.globals[State::S_FILE_ERROR]);
+
   if(!os)
-    return state.make_exception(state.globals[State::S_FILE_ERROR],
-      "write-char called against closed port");
+    return state.make_exception(v2, "write-char called against closed port");
 
   char c = argv[0].character();
   os->write(&c, 1);

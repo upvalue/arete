@@ -355,7 +355,7 @@ AR_DEFUN("delay", sdl_delay, 1);
 //
 
 Value ttf_font_finalizer(State& state, size_t argc, Value* argv, void* sfontp) {
-  Value sfont(sfontp);
+  Value sfont((HeapValue*) sfontp);
   TTF_Font** font = sfont.record_data<TTF_Font*>();
   if(*font) {
     TTF_CloseFont(*font);
@@ -516,7 +516,7 @@ Value sdl_remove_timer(State& state, size_t argc, Value* argv, void* closure) {
 AR_DEFUN("remove-timer", sdl_remove_timer, 1);
 
 Value timer_finalizer(State& state, size_t argc, Value* argv, void* timerp) {
-  Value timer(timerp);
+  Value timer((HeapValue*) timerp);
   TimerData* timer_data = timer.record_data<TimerData>();
   if(timer_data->symbol != nullptr) {
     delete timer_data->symbol;

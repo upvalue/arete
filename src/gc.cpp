@@ -741,7 +741,7 @@ void GCIncremental::collect() {
     live_memory_after_collection << "b")
 
   // Allocate a new block if memory is getting a little overloaded
-  double load_factor = (live_memory_after_collection * 100) / heap_size;
+  double load_factor = (double)((live_memory_after_collection * 100) / heap_size);
 
   ARETE_LOG_GC("load factor " << live_memory_after_collection << " " << live_objects_after_collection << " " << load_factor);
   AR_ASSERT(live_memory_after_collection <= heap_size);

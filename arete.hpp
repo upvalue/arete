@@ -383,7 +383,6 @@ struct Value {
   /** Default constructor: set Value to C_FALSE */
   Value(): bits(0) {}
   Value(HeapValue* heap_): heap(heap_) {}
-  Value(void* ptr): heap(static_cast<HeapValue*>(ptr)) {}
   Value(ptrdiff_t bits_): bits(bits_) {}
 
   /** Returns true if this value is immediate */
@@ -2088,11 +2087,13 @@ struct State {
   Value env_lookup(Value env, Value name);
 
   Value file_error(const std::string& msg) {
-    return make_exception("file", msg);
+		std::string file("file");
+    return make_exception(file, msg);
   }
 
   Value type_error(const std::string& msg) {
-    return make_exception("type", msg);
+		std::string type("type");
+    return make_exception(type, msg);
   }
 
   Value eval_error(const std::string& msg, Value exp = C_FALSE);
