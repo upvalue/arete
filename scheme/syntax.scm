@@ -864,6 +864,15 @@ TODO: Casting
         lst
         (loop (fx- i 1) (cons (vector-ref vec (fx- i 1)) lst))))))
 
+(define (vector-map fn vec)
+  (define len (vector-length vec))
+  (define vec2 (make-vector len))
+  (let loop ((i 0))
+    (if (fx= i len)
+      vec2
+      (begin
+        (vector-set! vec2 i (fn (vector-ref vec i)))
+        (loop (fx+ i 1))))))
 
 (define (list->vector lst)
   (if (null? lst)

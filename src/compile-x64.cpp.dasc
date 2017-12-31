@@ -26,9 +26,6 @@
 // Whatever the reason for this, we need to follow the different struct
 // calling conventions on Windows
 
-
-
-
 // TODO: 
 // Keep rState in rArg1. Because all functions we call take State& as the first argument, this will
 // remove the need for some MOV instructions. 
@@ -451,13 +448,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
   // Call a simple FUN, for debugging only.
   |.macro simpCall, fun
-  | push rArg3; push rArg4;
+  | push rArg1; push rArg2; push rArg3; push rArg4;
 	| .if WINDOWS
 	| push rbp; mov rbp, rsp; mov64 rax, (ptrdiff_t) fun; call rax; mov rsp, rbp; pop rbp
 	| .else
   | push rbp; push rsp; mov64 rax, (ptrdiff_t) fun; call rax; pop rsp; pop rbp;
 	| .endif
-  | pop rArg4; pop rArg3
+  | pop rArg4; pop rArg3; pop rArg2; pop rArg1
   |.endmacro
 
   // Call a function which takes arete::State as its first argument
@@ -706,7 +703,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
     | simpCall sanity_log_5
   }
 
-#if 0
   // Zero out GC frame
   // Assumes function has a stack size of at least one.
 
@@ -1053,20 +1049,24 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
           | jne ->local_init
         }
 
-        | mov rArg2, (size_t) fargc
-
-        if(dbg && gc_debug) {
-          //| stateCall state_collect;
-        }
-
         if(dbg) {
+          | push rArg3; push rArg4;
+          if(gc_debug) {
+            | stateCall state_collect;
+          }
           | mov rArg1, rsp
           | simpCall print_stack_frame
+          | pop rArg4; pop rArg3
         }
+
+        | mov rArg2, (size_t) fargc
+
+
         break;
       }
 
       case OP_ARGV_REST: {
+        AR_LOG_JIT("argv-rest");
         | mov rArg1, rState
         | mov64 rax, (size_t)allocate_rest_arguments
         | call rax
@@ -1284,8 +1284,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
   | mov rArg2, [rsp]
   | mov [rArg1], rArg2
 
-#endif
-  
   // Free stack space
   | add rsp, kTotalStackSizeAligned
 

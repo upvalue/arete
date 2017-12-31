@@ -223,8 +223,19 @@ Value NumberReader::read() {
   if(is_exponent) {
     ptrdiff_t exponent_amount = 0;
 
+    bool exp_negative = false;
+
+    if(string[i] == '-') {
+      exp_negative = true;
+      if(!is_float) {
+        flonum = fixnum;
+        is_float = true;
+      }
+      i++;
+    }
+
     // TODO: ADD NEGATIVE
-    for(; i != string.size(); i++) {
+    for(; i < string.size(); i++) {
       bool valid = string[i] >= '0' && string[i] <= '9';
       if(!valid) {
         std::ostringstream os;
@@ -238,7 +249,11 @@ Value NumberReader::read() {
 
     if(is_float) {
       while(exponent_amount--) {
-        flonum *= 10;
+        if(exp_negative) {
+          flonum /= 10;
+        } else {
+          flonum *= 10;
+        }
       }
     } else {
       while(exponent_amount--) {

@@ -70,8 +70,9 @@ Value sdl_init(State& state, size_t argc, Value* argv, void* closure) {
 }
 AR_DEFUN("init", sdl_init, 2);
 
-Value sdl_quit(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_quit(State& state, size_t argc, Value* argv, void* closure) {
   static const char* fn_name = "sdl:quit";
+  AR_FN_CLOSURE(state, closure,  SDLModule*, module);
   AR_FN_ARGC_EQ(state, argc, 0);
   if(module->data.window != 0) {
     SDL_DestroyRenderer(module->data.renderer);
@@ -83,7 +84,8 @@ Value sdl_quit(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("quit", sdl_quit, 0);
 
-Value sdl_clear(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_clear(State& state, size_t argc, Value* argv, void *closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:clear";
   AR_FN_ARGC_EQ(state, argc, 0);
   SDL_SetRenderDrawColor(module->data.renderer, 0, 0, 0, 255);
@@ -93,7 +95,8 @@ Value sdl_clear(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("clear", sdl_clear, 0);
 
-Value sdl_make_event(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_make_event(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:make-event";
   AR_FN_ARGC_EQ(state, argc, 0);
   std::cerr << "sdl:make-event" << std::endl;
@@ -103,7 +106,8 @@ Value sdl_make_event(State& state, size_t argc, Value* argv, SDLModule* module) 
 }
 AR_DEFUN("make-event", sdl_make_event, 0);
 
-Value sdl_poll_event(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_poll_event(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:poll-event";
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_RECORD_ISA(state, argv, 0, module->data.event_tag);
@@ -114,7 +118,8 @@ Value sdl_poll_event(State& state, size_t argc, Value* argv, SDLModule* module) 
 }
 AR_DEFUN("poll-event", sdl_poll_event, 1);
 
-Value sdl_event_type(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_event_type(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:event-type";
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_RECORD_ISA(state, argv, 0, module->data.event_tag);
@@ -139,7 +144,8 @@ Value sdl_event_type(State& state, size_t argc, Value* argv, SDLModule* module) 
 }
 AR_DEFUN("event-type", sdl_event_type, 1);
 
-Value sdl_event_mouse_x(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_event_mouse_x(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:event-mouse-x";
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_RECORD_ISA(state, argv, 0, module->data.event_tag);
@@ -150,7 +156,8 @@ Value sdl_event_mouse_x(State& state, size_t argc, Value* argv, SDLModule* modul
 }
 AR_DEFUN("event-mouse-x", sdl_event_mouse_x, 1);
 
-Value sdl_event_mouse_y(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_event_mouse_y(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:event-mouse-y";
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_RECORD_ISA(state, argv, 0, module->data.event_tag);
@@ -161,7 +168,8 @@ Value sdl_event_mouse_y(State& state, size_t argc, Value* argv, SDLModule* modul
 }
 AR_DEFUN("event-mouse-y", sdl_event_mouse_y, 1);
 
-Value sdl_event_timer_tag(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_event_timer_tag(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:event-timer-tag";
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_RECORD_ISA(state, argv, 0, module->data.event_tag);
@@ -177,14 +185,16 @@ Value sdl_event_timer_tag(State& state, size_t argc, Value* argv, SDLModule* mod
 }
 AR_DEFUN("event-timer-tag", sdl_event_timer_tag, 1);
 
-Value sdl_event_key_modifiers(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_event_key_modifiers(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:event-key-modifiers";
   AR_FN_ARGC_EQ(state, argc, 1);
   return C_UNSPECIFIED;
 }
 AR_DEFUN("event-key-modifiers", sdl_event_key_modifiers, 1);
 
-Value sdl_event_key(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_event_key(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:event-key";
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_RECORD_ISA(state, argv, 0, module->data.event_tag);
@@ -249,13 +259,15 @@ Value sdl_event_key(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("event-key", sdl_event_key, 1);
 
-Value sdl_render(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_render(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   SDL_RenderPresent(module->data.renderer);
   return C_UNSPECIFIED;
 }
 AR_DEFUN("render", sdl_render, 0);
 
-Value sdl_set_color(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_set_color(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:set-color";
   AR_FN_ARGC_BETWEEN(state, argc, 3, 4);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -276,7 +288,8 @@ Value sdl_set_color(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("set-color", sdl_set_color, 3, 4);
 
-Value sdl_fill_rect(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_fill_rect(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:fill-rect";
   AR_FN_ARGC_EQ(state, argc, 4);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -293,7 +306,8 @@ Value sdl_fill_rect(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("fill-rect", sdl_fill_rect, 4);
 
-Value sdl_draw_rect(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_draw_rect(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:draw-rect";
   AR_FN_ARGC_EQ(state, argc, 4);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -310,7 +324,8 @@ Value sdl_draw_rect(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("draw-rect", sdl_draw_rect, 4);
 
-Value sdl_draw_line(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_draw_line(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:draw-line";
   AR_FN_ARGC_EQ(state, argc, 4);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -325,7 +340,8 @@ Value sdl_draw_line(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("draw-line", sdl_draw_line, 4);
 
-Value sdl_delay(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_delay(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:delay";
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -348,7 +364,8 @@ void ttf_font_finalizer(State& state, Value sfont) {
 
 Defun _font_finalizer((void*) ttf_font_finalizer);
 
-Value sdl_open_font(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_open_font(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:open-font";
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
@@ -369,7 +386,8 @@ Value sdl_open_font(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("open-font", sdl_open_font, 2);
 
-Value sdl_draw_text(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_draw_text(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:draw-text";
   size_t font_tag = module->data.font_tag;
 
@@ -397,7 +415,8 @@ Value sdl_draw_text(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("draw-text", sdl_draw_text, 4, 6);
 
-Value sdl_close_font(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_close_font(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:close-font";
   size_t font_tag = module->data.font_tag;
   AR_FN_ARGC_EQ(state, argc, 1);
@@ -441,7 +460,8 @@ struct TimerData {
   SDL_TimerID id;
 };
 
-Value sdl_add_timer(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_add_timer(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:add-timer";
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
@@ -468,7 +488,8 @@ Value sdl_add_timer(State& state, size_t argc, Value* argv, SDLModule* module) {
 }
 AR_DEFUN("add-timer", sdl_add_timer, 2);
 
-Value sdl_remove_timer(State& state, size_t argc, Value* argv, SDLModule* module) {
+Value sdl_remove_timer(State& state, size_t argc, Value* argv, void* closure) {
+  AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:remove-timer";
 
   AR_FN_ARGC_EQ(state, argc, 1);
