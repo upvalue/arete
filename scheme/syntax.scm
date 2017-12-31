@@ -10,7 +10,7 @@
     (define vals #f)
     (define result #f)
 
-    (if (< (length x) 3)
+    (if (fx< (length x) 3)
       (raise-source x 'syntax "let must have at least two arguments (bindings and body)" (list x)))
 
     (if (identifier? (list-ref x 1))

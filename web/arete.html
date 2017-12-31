@@ -121,6 +121,7 @@ class AreteInterface extends preact.Component {
   }
 
   schemeEvaluate(text) {
+    Module.ccall('ar_initialize_cli', null, ['string'], ['scheme/expander.scm']);
     Module.ccall('ar_eval_and_print', null, ['string', 'string'], ['heap32.boot', text]);
   }
 
@@ -240,7 +241,7 @@ window.Module = {
   preRun: [],
   postRun: [],
   TOTAL_STACK: 16777216,
-  TOTAL_MEMORY: 16777216 * 2,
+  TOTAL_MEMORY: 16777216 * 4,
 
   print: (text) => printLine(text, false),
   printErr: (text) => printLine(text, true),

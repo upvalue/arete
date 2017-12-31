@@ -26,7 +26,7 @@ Value State::make_flonum(double number) {
 #define OPV(name, cname, operator, sub, nozero, ret0) \
   Value name(State& state, size_t argc, Value* argv, void* v) { \
     if(argc == 0) return Value::make_fixnum(ret0);  \
-    static const char* fn_name = cname; \
+    static const char* fn_name = cname; (void) v; \
     ptrdiff_t fxresult = 0; \
     size_t i = 0; \
     if(argc == 1) { \
@@ -72,8 +72,8 @@ AR_DEFUN("/", fn_div, 2, 2, true);
 #undef OPV
 
 #define OPV_BOOL(name, cname, operator) \
-  Value name(State& state, size_t argc, Value* argv) { \
-    static const char* fn_name = cname; \
+  Value name(State& state, size_t argc, Value* argv, void* fn) { \
+    static const char* fn_name = cname; (void) fn; \
     AR_FN_ARGC_GTE(state, argc, 2); \
     AR_FN_ASSERT_ARG(state, 0, "to be numeric", argv[0].numeric()); \
     if(argc == 2 && argv[0].fixnump() && argv[1].fixnump()) { \
@@ -158,8 +158,8 @@ Value fn_fx_add(State& state, size_t argc, Value* argv, void* v) {
 AR_DEFUN("fx+", fn_fx_add, 2, 2, true);
 
 #define FX_COMPARISON(cname, name, op) \
-  Value name (State& state, size_t argc, Value* argv) { \
-    static const char* fn_name = cname; \
+  Value name (State& state, size_t argc, Value* argv, void* fn) { \
+    static const char* fn_name = cname; (void) fn; \
     AR_FN_ARGC_EQ(state, argc, 2); \
     AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM); \
     AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM); \

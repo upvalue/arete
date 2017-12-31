@@ -71,8 +71,8 @@ Value fn_file_exists(State& state, size_t argc, Value* argv, void* _) {
 }
 AR_DEFUN("file-exists?", fn_file_exists, 1);
 
-Value fn_path_separator(State& state, size_t argc, Value* argv) {
-	static const char* fn_name = "path-separator";
+Value fn_path_separator(State& state, size_t argc, Value* argv, void* _) {
+	static const char* fn_name = "path-separator"; (void) _;
 	AR_FN_ARGC_EQ(state, argc, 0);
 #if AR_OS == AR_POSIX
 	return state.make_char('/');

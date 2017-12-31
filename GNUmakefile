@@ -11,8 +11,8 @@ LDFLAGS := -fno-rtti -fno-exceptions
 # Emscripten
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) 
-ECXXFLAGS := -s ASSERTIONS=1 -s EMULATE_FUNCTION_POINTER_CASTS=1 -Os $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -DAR_LINENOISE=0 -DARETE_LOG_TAGS="(ARETE_LOG_TAG_IMAGE|ARETE_LOG_TAG_DEFUN)"
-ELDFLAGS := -Os -s ASSERTIONS=1 -s EMULATE_FUNCTION_POINTER_CASTS=1
+ECXXFLAGS := -s ASSERTIONS=1 -O3 $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -DAR_LINENOISE=0 -DARETE_LOG_TAGS="(ARETE_LOG_TAG_IMAGE|ARETE_LOG_TAG_DEFUN)"
+ELDFLAGS := -O3 -s ASSERTIONS=1 -s EXTRA_EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]'
 
 # Retrieve compilation targets
 CXXOBJS := $(filter-out src/compile-x64.o,$(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))) src/compile-x64.o
@@ -22,7 +22,7 @@ CXXOBJS32 := $(patsubst %.o,%.32.o,$(CXXOBJS))
 DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) $(ECXXOBJS:.o=.d) src/main.d 
 
 # Files to include with Emscripten builds
-EFILES := $(addprefix --preload-file ,$(wildcard heap32.boot *.scm scheme/*.scm examples/*.scm examples/*.ttf))
+EFILES := $(addprefix --preload-file ,$(wildcard heap32.boot scheme/*.scm))
 
 # 
 PREFIX = /usr/local/stow/arete

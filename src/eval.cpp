@@ -382,7 +382,8 @@ static Value eval_check_arity(State& state, Value fn, Value exp,
 
 // Apply a function. Not used by the interpreter itself but used for generic apply and calls from
 // C/VM functions
-Value apply_interpreter(State& state, size_t argc, Value* argv, Value fn) {
+Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
+  Value fn((ptrdiff_t) fnp);
   AR_TYPE_ASSERT(fn.heap_type_equals(FUNCTION));
 	State::EvalFrame frame;
   Value fn_args, fn_rest_args, tmp, new_env;

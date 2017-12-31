@@ -195,7 +195,7 @@ size_t State::register_record_type(const std::string& cname, unsigned field_coun
   return idx;
 }
 
-void State::record_type_set_finalizer(size_t idx, c_finalizer_t finalizer) {
+void State::record_type_set_finalizer(size_t idx, c_closure_t finalizer) {
   RecordType* rtd = globals.at(idx).as<RecordType>();
   rtd->finalizer = finalizer;
 }
@@ -486,25 +486,6 @@ void State::defun_core(const std::string& cname, c_closure_t addr, size_t min_ar
 
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);
-}
-
-Value Value::c_function_apply(State& state, size_t argc, Value* argv) {
-  AR_TYPE_ASSERT(heap_type_equals(CFUNCTION));
-  // Emscripten puts all function pointers into a table depending on their type, so it's necessary
-  // to call them using the parameters they were defined with. Otherwise we avoid an if-check
-  // at an important point by doing this.
-
-#ifdef __EMSCRIPTEN__
-/*
-  if(c_function_is_closure()) {
-    return (state, argc, argv, (void*) c_function_closure_data().bits);
-  } else {
-    return c_function_addr()(state, argc, argv);
-  }
-  */
-#else
-  return as_unsafe<CFunction>()->procedure_addr(state, argc, argv, (void*) as_unsafe<CFunction>()->closure.bits);
-#endif
 }
 
 ///// PAIRS

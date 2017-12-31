@@ -1,7 +1,22 @@
 // compile-x64.cpp.dasc - Compile bytecode to native amd64 code
 // This is a DynASM file. Must be run through DynASM to produce a C++ file
 
-#ifndef __EMSCRIPTEN__
+#include <algorithm>
+#include <functional>
+
+#include "arete.hpp"
+
+#if ARETE_64_BIT == 0
+
+namespace arete {
+
+void load_native_compiler(State&) {
+
+}
+
+}
+
+#else
 
 // Further reading
 // Agner Fog, Calling Conventions
@@ -96,10 +111,6 @@
 // TODO: Use offsetof and other stuff instead of calling functions to retrieve information
 // about a particular State
 
-#include <algorithm>
-#include <functional>
-
-#include "arete.hpp"
 
 #include "dasm_proto.h"
 #include "dasm_x86.h"
@@ -368,7 +379,7 @@ struct NativeFrameSize {
 };
 
 
-Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
+Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   const char* fn_name = "vmfunction->native";
 
   AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
@@ -1334,9 +1345,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv) {
 
 AR_DEFUN("vmfunction->native!", vmfunction_to_native, 1);
 
-Value fn_native_call(State& state, size_t argc, Value* argv, Value fn) {
+Value fn_native_call(State& state, size_t argc, Value* argv, void* fn) {
   static const char* fn_name = "native-call";
-  AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
+  AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION); 
 
   AR_ASSERT(argv[0].heap->get_header_bit(Value::VMFUNCTION_NATIVE_BIT));
 
@@ -1388,4 +1399,8 @@ void load_native_compiler(State& state) {
 
 }
 
-#endif // __EMSCRIPTEN__
+#endif // ARETE_64_BIT == 0
+
+
+
+

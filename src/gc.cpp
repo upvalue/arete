@@ -112,7 +112,7 @@ void State::finalize(Type object_type, Value object, bool called_by_gc) {
         needed_finalization = true;
         RecordType* rtd = object.record_type().as<RecordType>();
         if(rtd->finalizer) {
-          (rtd->finalizer)(*this, object);
+          (rtd->finalizer)(*this, 0, 0, (void*) object.bits);
         }
         needed_finalization_desc = rtd->name.string_data();
         object.record_set_finalized();

@@ -202,7 +202,8 @@ void VMFrame::close_over() {
 }
 
 
-Value apply_vm(State& state, size_t argc, Value* argv, Value fn) {
+Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
+  Value fn((ptrdiff_t)fnp);
 #if AR_COMPUTED_GOTO
   static void* dispatch_table[] = {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,

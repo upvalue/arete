@@ -26,11 +26,16 @@ static size_t i = 0;
 extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
-extern void ar_eval_and_print(const char* image, const char* str) {
+extern void ar_initialize_cli(const char* string) {
   if(state == 0) {
     state = new arete::State();
-    state->boot_from_image(image);
+    state->boot_from_image("heap32.boot");
   }
+}
+
+EMSCRIPTEN_KEEPALIVE
+extern void ar_eval_and_print(const char* image, const char* str) {
+  AR_ASSERT(state);
 
   // std::cout << "evaluating: " << str << std::endl;
 
@@ -56,7 +61,7 @@ extern void ar_eval_and_print(const char* image, const char* str) {
     if(x == C_EOF) break;
 
     x = state->make_src_pair(x, C_NIL, x);
-    //std::cout << "evaluating: " << x << std::endl;
+    std::cout << "evaluating: " << x << std::endl;
     x = state->eval_list(x);
 
     if(x.is_active_exception()) {

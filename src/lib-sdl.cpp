@@ -186,7 +186,7 @@ Value sdl_event_timer_tag(State& state, size_t argc, Value* argv, void* closure)
 AR_DEFUN("event-timer-tag", sdl_event_timer_tag, 1);
 
 Value sdl_event_key_modifiers(State& state, size_t argc, Value* argv, void* closure) {
-  AR_FN_CLOSURE(state, closure, SDLModule*, module);
+  // AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:event-key-modifiers";
   AR_FN_ARGC_EQ(state, argc, 1);
   return C_UNSPECIFIED;
@@ -341,7 +341,7 @@ Value sdl_draw_line(State& state, size_t argc, Value* argv, void* closure) {
 AR_DEFUN("draw-line", sdl_draw_line, 4);
 
 Value sdl_delay(State& state, size_t argc, Value* argv, void* closure) {
-  AR_FN_CLOSURE(state, closure, SDLModule*, module);
+  //AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:delay";
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -354,12 +354,14 @@ AR_DEFUN("delay", sdl_delay, 1);
 ///// FONTS
 //
 
-void ttf_font_finalizer(State& state, Value sfont) {
+Value ttf_font_finalizer(State& state, size_t argc, Value* argv, void* sfontp) {
+  Value sfont(sfontp);
   TTF_Font** font = sfont.record_data<TTF_Font*>();
   if(*font) {
     TTF_CloseFont(*font);
     (*font) = 0;
   }
+  return C_UNSPECIFIED;
 }
 
 Defun _font_finalizer((void*) ttf_font_finalizer);
@@ -513,7 +515,8 @@ Value sdl_remove_timer(State& state, size_t argc, Value* argv, void* closure) {
 }
 AR_DEFUN("remove-timer", sdl_remove_timer, 1);
 
-void timer_finalizer(State& state, Value timer) {
+Value timer_finalizer(State& state, size_t argc, Value* argv, void* timerp) {
+  Value timer(timerp);
   TimerData* timer_data = timer.record_data<TimerData>();
   if(timer_data->symbol != nullptr) {
     delete timer_data->symbol;
@@ -522,6 +525,7 @@ void timer_finalizer(State& state, Value timer) {
       SDL_RemoveTimer(timer_data->id);
     }
   }
+  return C_UNSPECIFIED;
 }
 
 Defun _timer_finalizer((void*) timer_finalizer);

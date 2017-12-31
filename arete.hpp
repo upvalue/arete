@@ -192,11 +192,8 @@ extern size_t gc_collect_timer;
 // For debugging purposes only: a global instance of the current state
 extern State* current_state;
 
-typedef Value (*c_function_t)(State&, size_t, Value*);
-typedef Value (*native_function_t)(State&, size_t, Value*);
 // We have to use (void*) here to make Emscripten happy.
 typedef Value (*c_closure_t)(State&, size_t, Value*, void*);
-typedef void (*c_finalizer_t)(State&, Value);
 
 std::ostream& operator<<(std::ostream& os,  Value);
 
@@ -386,6 +383,7 @@ struct Value {
   /** Default constructor: set Value to C_FALSE */
   Value(): bits(0) {}
   Value(HeapValue* heap_): heap(heap_) {}
+  Value(void* ptr): heap(static_cast<HeapValue*>(ptr)) {}
   Value(ptrdiff_t bits_): bits(bits_) {}
 
   /** Returns true if this value is immediate */
@@ -700,8 +698,6 @@ struct Value {
   static const unsigned CFUNCTION_VARIABLE_ARITY_BIT = 1 << 10;
   static const unsigned CFUNCTION_CLOSURE_BIT = 1 << 11;
 
-  c_function_t c_function_addr() const;
-
   bool c_function_is_closure() const { 
     AR_TYPE_ASSERT(heap_type_equals(CFUNCTION));
     return heap->get_header_bit(CFUNCTION_CLOSURE_BIT);
@@ -713,7 +709,6 @@ struct Value {
   size_t c_function_min_arity() const;
   size_t c_function_max_arity() const;
   bool c_function_variable_arity() const;
-  Value c_function_apply(State&, size_t, Value*);
 
   // VM FUNCTIONS
   static const unsigned VMFUNCTION_VARIABLE_ARITY_BIT = 1 << 10;
@@ -1015,21 +1010,12 @@ inline Value Value::exception_irritants() const {
 /**
  * For ease of use and performance, all Procedures have a pointer to a native function at their
  * beginning. For VM functions and closures, this always points to apply_vm, for interpreted
- * functions, to apply_interpreted.
+ * functions, to apply_interpreter.
  */
 
 struct Procedure : HeapValue {
   c_closure_t procedure_addr;
 };
-
-inline void Value::procedure_install(Value (State::* member)(size_t, Value*, Value)) {
-  AR_TYPE_ASSERT(!immediatep());
-  void* member2 = (void*&) member;
-  heap->set_header_bit(Value::VALUE_PROCEDURE_BIT);
-  as_unsafe<Procedure>()->procedure_addr = (c_closure_t) member2;
-  AR_ASSERT(procedurep());
-  AR_ASSERT(as_unsafe<Procedure>()->procedure_addr);
-}
 
 inline void Value::procedure_install(c_closure_t addr) {
   AR_TYPE_ASSERT(!immediatep());
@@ -1315,7 +1301,7 @@ struct RecordType : HeapValue {
   /** Field names */
   Value field_names;
 
-  c_finalizer_t finalizer;
+  c_closure_t finalizer;
 
   /** Count of garbage-collected data stored in the record */
   unsigned field_count;
@@ -1935,7 +1921,7 @@ struct State {
   size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
       Value field_names = C_FALSE, Value parent = C_FALSE);
 
-  void record_type_set_finalizer(size_t global_id, c_finalizer_t finalizer);
+  void record_type_set_finalizer(size_t global_id, c_closure_t finalizer);
 
   void record_set(Value rec_, unsigned field, Value value);
 
@@ -2172,9 +2158,9 @@ struct State {
 };
 
 // Functions for Procedure::procedure_addr. Must be freestanding because taking
-// a pointer to a State member function does not work well.
-Value apply_interpreter(State& state, size_t argc, Value* argv, Value fn);
-Value apply_vm(State& state, size_t argc, Value* argv, Value fn);
+// a pointer to a State member function does not work well on Windows or Emscripten.
+Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp);
+Value apply_vm(State& state, size_t argc, Value* argv, void* fnp);
 
 ///// READ! S-Expression reader
 
@@ -2464,7 +2450,7 @@ struct Defun {
 };
 
 #define AR_DEFUN(name, addr, ...) \
-  static Defun _AR_UNIQUE(defun) ((name), (c_closure_t) addr, __VA_ARGS__);
+  static Defun _AR_UNIQUE(defun) ((name), addr, __VA_ARGS__);
 
 // Various convenience objects. Note that their fields must be registered in an AR_FRAME
 // manually.
