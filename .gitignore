@@ -18,3 +18,4 @@ vgcore*
 /heap32.boot
 /src/compile-x64.cpp
 /vendor/dynasm/minilua
+/arete-distilled.cpp

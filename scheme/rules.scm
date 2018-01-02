@@ -80,12 +80,10 @@
              (if (ellipses? cmp ellipses (cadr pattern))
                ;; There may be elements in the pattern after ...
                (begin
-                 ;; thought, here we match individually and map single to splat... right?
-                 (when (pair? (car pattern))
-                   (print "???" pattern))
                  (if (not (null? (cddr pattern)))
                    (let* ((expect-after (length (cddr pattern)))
                           (to-take (- (length form) expect-after)))
+
 
                      (for-each-i
                        (lambda (i x)
@@ -284,5 +282,5 @@
 (print (rules-match fake-cmp? '... '(hello "atoms") '(hello "atoms") '()))
 (print (rules-match fake-cmp? '... '(hello one ... two three four) '(hello 1 2 3) '()))
 (print (rules-match fake-cmp? '... '(hello one ... two three four five) '(hello 1 2 3 4) '()))
-(print (rules-match fake-cmp? '... '(hello name value) '(hello name #t) '(name)))
 |#
+(print (rules-match fake-cmp? '... '(hello (a ...) ...) '(hello (1) (2) (3)) '()))

@@ -387,7 +387,7 @@
             (if (fx= i argument-list-length)
               (print-source x "Inline function application appears to have too many arguments")
               (if (vmfunction? result)
-                (set-vmfunction-name! result (list-ref argument-list i)))
+                (set-function-name! result (list-ref argument-list i)))
 
               
               )))
@@ -636,7 +636,7 @@
   (let ((result (compile-expr fn (list-ref x 2) #f (list-tail x 2) tail?)))
     (when (procedure? result)
       (begin
-        (set-vmfunction-name! result (symbol-dequalify name)))))
+        (set-function-name! result (symbol-dequalify name)))))
 
   (if (OpenFn/toplevel? fn)
     (begin
@@ -651,7 +651,7 @@
 
   (let ((fn (compile-expr fn (list-ref x 2) #f (list-tail x 2) tail?)))
     (if (vmfunction? fn)
-      (set-vmfunction-name! fn name)))
+      (set-function-name! fn name)))
 
   (case (car result)
     (global
@@ -925,7 +925,8 @@
          )
 
     (let ((fn (compile-lambda #f fn-exxxpr)))
-      (set-vmfunction-name! fn fn-name)
+      (when fn-name
+        (set-function-name! fn fn-name))
       (when is-macro?
         (set-function-macro-env! fn (function-env oldfn))
         (set-function-macro-bit! fn))

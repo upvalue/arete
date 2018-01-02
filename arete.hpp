@@ -270,10 +270,12 @@ struct HeapValue {
   // Heap value headers are formatted like this:
 
   // .... .... .... ....
-  // ffff fffm tttt tttt
+  // ffff ffpm tttt tttt
   // . = an integer (32-bit on 64-bit systems, 16-bit on 32-bit systems) used for
   //     writing objects with shared references. could also be used for caching various computations.
   // f = object-specific flags
+  // p = 1 if this is a struct derived from Procedure and thus has a valid function address attached
+  // to it
   // m = mark bit for incremental GC
   // t = type
   size_t header;
@@ -417,7 +419,6 @@ struct Value {
     }
   }
 
-  void procedure_install(Value (State::* member)(size_t, Value*, Value));
   void procedure_install(c_closure_t addr);
     
   /** Returns true if the object is applicable */
@@ -2508,7 +2509,7 @@ struct TableIterator {
 #define AR_FN_ARGC_EQ(state, argc, expect) \
   if((argc) != (expect)) { \
     std::ostringstream __os; \
-    __os << " function " << (fn_name) << " expected exactly " << (expect) << " arguments but got " << (argc); \
+    __os << "function " << (fn_name) << " expected exactly " << (expect) << " arguments but got " << (argc); \
     AR_FN_STACK_TRACE(state); \
     return (state).eval_error(__os.str()); \
   }
@@ -2516,7 +2517,7 @@ struct TableIterator {
 #define AR_FN_ARGC_GTE(state, argc, expect) \
   if((argc) < (expect)) { \
     std::ostringstream __os; \
-    __os << " function" << (fn_name) << " expected at least " << (expect) << " arguments but got " << (argc); \
+    __os << "function " << (fn_name) << " expected at least " << (expect) << " arguments but got " << (argc); \
     AR_FN_STACK_TRACE(state); \
     return (state).eval_error(__os.str()); \
   }
@@ -2524,7 +2525,7 @@ struct TableIterator {
 #define AR_FN_ARGC_LTE(state, argc, expect) \
   if((argc) > (expect)) { \
     std::ostringstream __os; \
-    __os << " function" << (fn_name) << " expected at least " << (expect) << " arguments but got " << (argc); \
+    __os << "function " << (fn_name) << " expected at least " << (expect) << " arguments but got " << (argc); \
     AR_FN_STACK_TRACE(state); \
     return (state).eval_error(__os.str()); \
   }
@@ -2532,12 +2533,12 @@ struct TableIterator {
 #define AR_FN_ARGC_BETWEEN(state, argc, e1, e2) \
   if((argc) < e1) { \
     std::ostringstream __os; \
-    __os << " function" << (fn_name) << " expected at least " << (e1) << " arguments but got " << (argc); \
+    __os << "function " << (fn_name) << " expected at least " << (e1) << " arguments but got " << (argc); \
     AR_FN_STACK_TRACE(state); \
     return (state).eval_error(__os.str()); \
   } else if ((argc) > e2) { \
     std::ostringstream __os; \
-    __os << " function" << (fn_name) << " expected at most " << (e2) << " arguments but got " << (argc); \
+    __os << "function " << (fn_name) << " expected at most " << (e2) << " arguments but got " << (argc); \
     AR_FN_STACK_TRACE(state); \
     return (state).eval_error(__os.str()); \
   }

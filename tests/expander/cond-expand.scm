@@ -1,0 +1,7 @@
+(print (cond-expand (arete #t)))
+(print (cond-expand ((and arete) #t)))
+(print (cond-expand ((or arete) #t)))
+(print (cond-expand ((or anything arete) #t)))
+(print (cond-expand ((not (not arete)) #t)))
+(print (cond-expand ((library (arete)) #t)))
+(print (cond-expand ((and something) #t)))

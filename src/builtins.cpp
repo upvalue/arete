@@ -639,17 +639,25 @@ Value fn_set_function_name(State& state, size_t argc, Value* argv, void* v) {
 }
 AR_DEFUN("set-function-name!", fn_set_function_name, 2);
 
-Value fn_set_vmfunction_name(State& state, size_t argc, Value* argv, void* v) {
-  static const char* fn_name = "set-vmfunction-name!";
-  AR_FN_ARGC_EQ(state, argc, 2);
-  AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
+Value fn_function_name(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "function-name";
+  AR_FN_ARGC_EQ(state, argc, 1);
+  
 
-  VMFunction* fn = argv[0].as<VMFunction>();
-  fn->name = argv[1];
+  AR_FN_EXPECT_APPLICABLE(state, argv, 0);
 
-  return C_UNSPECIFIED;
+  Value fn = argv[0].closure_unbox();
+
+  switch(fn.type()) {
+    case FUNCTION: return argv[0].as_unsafe<Function>()->name;
+    case CFUNCTION: return argv[0].as_unsafe<CFunction>()->name;
+    case VMFUNCTION: return argv[0].as_unsafe<VMFunction>()->name;
+    default: break;
+  }
+
+  return C_FALSE;
 }
-AR_DEFUN("set-vmfunction-name!", fn_set_vmfunction_name, 2);
+AR_DEFUN("function-name", fn_function_name, 1);
 
 Value fn_set_function_macro_env(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "set-function-macro-env!";
@@ -815,15 +823,6 @@ Value fn_function_body(State& state, size_t argc, Value* argv, void* v) {
 }
 AR_DEFUN("function-body", fn_function_body, 1);
 
-Value fn_function_name(State& state, size_t argc, Value* argv, void* v) {
-  static const char* fn_name = "function-name";
-  AR_FN_ARGC_EQ(state, argc, 1);
-  AR_FN_EXPECT_TYPE(state, argv, 0, FUNCTION);
-
-  return argv[0].as<Function>()->name;
-}
-AR_DEFUN("function-name", fn_function_name, 1);
-
 Value fn_function_arguments(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "function-arguments";
   AR_FN_ARGC_EQ(state, argc, 1);
@@ -844,14 +843,19 @@ AR_DEFUN("function-rest-arguments", fn_function_rest_arguments, 1);
 
 Value fn_top_level_value(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "top-level-value";
-  AR_FN_ARGC_EQ(state, argc, 1);
+  AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
 
   Value r = argv[0].symbol_value();
-  if(r == C_UNDEFINED) return C_UNSPECIFIED;
+  if(r == C_UNDEFINED || r == C_UNSPECIFIED) {
+    if(argc == 2) {
+      return argv[1];
+    }
+    return C_UNSPECIFIED;
+  }
   return r;
 }
-AR_DEFUN("top-level-value", fn_top_level_value, 1);
+AR_DEFUN("top-level-value", fn_top_level_value, 1, 2);
 
 Value fn_top_level_bound(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "top-level-bound?";

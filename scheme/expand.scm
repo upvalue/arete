@@ -427,7 +427,7 @@
   (if (null? lst)
     (car str)
     (if (or (not (pair? lst)) (not (symbol? (car lst))))
-      (raise-source src 'expand "module specification must be a proper list of symbols" (list lst))
+      (raise-source src 'expand "module specification must be a proper list of symbols or fixnums" (list lst))
       (module-spec->string
         src
         (cdr lst)
@@ -892,10 +892,12 @@
   ;(define lookup (list-ref (env-lookup env (car x)) 2))
   (define arity (function-min-arity transformer))
   (define saved-rename-env (top-level-value '*current-rename-env*))
+  (define saved-fn-name (top-level-value '*current-macro-name*))
   (define identifier-application? (and (not (identifier? x)) (function-identifier-macro? transformer)))
   (define form (if identifier-application? (car x) x))
 
   (set-top-level-value! '*current-rename-env* (function-env transformer))
+  (set-top-level-value! '*current-macro-name* (function-name transformer))
 
   (if identifier-application?
     (set! form (car x)))
@@ -919,7 +921,10 @@
               ;; compare procedure
               (lambda (a b) (env-compare env a b))))))
       (lambda ()
-        (set-top-level-value! '*current-rename-env* saved-rename-env))))
+        (set-top-level-value! '*current-rename-env* saved-rename-env)
+        (set-top-level-value! '*current-macro-name* saved-fn-name)
+        
+        )))
 
   (if identifier-application?
     (cons-source x result (expand-map (cdr x) env params)) 

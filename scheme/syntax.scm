@@ -591,12 +591,6 @@ TODO: Casting
         unspecified
         (loop (map1 (lambda (lst) (car lst)) rest) (map1 (lambda (lst) (cdr lst)) rest))))))
 
-(define (map2 f ls1 ls2)
-  (let loop ((ls1 ls1) (ls2 ls2))
-    (if (null? ls1)
-      '()
-      (cons (apply f (list (car ls1) (car ls2))) (loop (cdr ls1) (cdr ls2))))))
-
 #;(define (filter fn lst)
   (if (null? lst)
     '()
@@ -609,24 +603,7 @@ TODO: Casting
 
 ;; TODO: This needs to be rewritten in the style of module-imports, to allow recursion.
 
-(define (cond-expand-check-feature x form)
-  (unless (and (list? form) (not (null? form)))
-    (raise-source form 'syntax "cond-expand feature requirement must be a list with at least one element" (list form)))
-
-  (case (car form)
-    ((and)
-     (reduce (lambda (a b) (and a b)) (map (lambda (x) (if (memq x (top-level-value '*features*)) #t #f)) (cdr form))))
-    ((or)
-     (reduce (lambda (a b) (or a b)) (map (lambda (x) (if (memq x (top-level-value '*features*)) #t #f)) (cdr form))))
-    ((else) #t)
-    ((library)
-     (unless (fx= (length form) 2)
-       (raise 'syntax "cond-expand library expression must have only one argument" (list form)))
-     ;(print (cdr x))
-     (if (table-ref (top-level-value 'module-table) (module-spec->string (cdr form) (cadr form)))
-       #t
-       #f)))
-)
+;; ((and arete sdl))
 
 ;; Print and return an intermediate value. For printf-debugging convenience.
 (define (pi . rst)
@@ -639,32 +616,63 @@ TODO: Casting
       (print (cadr rst))
       (cadr rst))))
 
+(define (syntax-error source . rest)
+  (raise-source source 'syntax (apply print-string rest) (list source)))
+
+(define (syntax-assert-length= src eq . desc)
+  (let ((len (length src))
+        (name (top-level-value '*current-macro-name* #f)))
+    (when (not (fx= len eq))
+      (raise-source src 'syntax (print-string (or name "macro") " expected " (if (null? desc) "expression" (car desc)) " to be exactly " lt " elements but only got" len) (list src)))))
+
+(define (syntax-assert-length<> src lt . gt)
+  (let ((len (length src))
+        (name (top-level-value '*current-macro-name* #f)))
+    (when (fx< len lt)
+      (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at least " lt " elements but only got" len) (list src))
+      (when (and (not (null? gt)) (fx> len (car gt)))
+        (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at most " (car gt) " elements but only got" len) (list src))))))
+
+(define (cond-expand-eval cmp? form)
+  (let ((features (top-level-value '*features*)) (type (if (pair? form) (car form) #f)))
+    (cond 
+      ((identifier? form) (and (memq form features) #t))
+      ((not (pair? form))
+       (syntax-error form "cond-expand clause must be either a pair or a symbol"))
+
+      ((cmp? type 'and)
+       (reduce
+         (lambda (a b) (and a b))
+         (map (lambda (x) (cond-expand-eval cmp? x)) (cdr form))))
+
+      ((cmp? type 'or)
+       (reduce
+         (lambda (a b) (or a b))
+         (map (lambda (x) (cond-expand-eval cmp? x)) (cdr form))))
+
+      ((cmp? type 'not)
+       (not (cond-expand-eval cmp? (cdr form))))
+
+      ((cmp? type 'library)
+       (syntax-assert-length= form 2 "library specifier clause")
+
+       (table-ref (top-level-value 'module-table) (module-spec->string form (cadr form))))
+
+
+      ((cmp? type 'else) #t)
+      (else (and (memq (car form) features) #t)))))
+
 (define-syntax cond-expand
-  (lambda (x)
-
-    (if (null? (cdr x))
-      (if #f #f)
-
-      (cons-source x #'begin
-            (let loop ((clause (cadr x))
-                 (clauses (cddr x))
-                 (results '()))
-
-              (unless (> (length clause) 2)
-                (begin
-                  (raise 'syntax "cond-expand clause length must be at least 2 (feature list and command or definition)"))
-              )
-
-              (let* ((feature-list (car clause))
-                     (commands (cadr clause))
-                     (new-results
-                      (if (cond-expand-check-feature x feature-list)
-                        (cons-source x commands results)
-                        results)))
-                (if (null? clauses)
-                  new-results
-                  (loop (cadr clauses) (cddr clauses) new-results)
-                  )))))))
+  (lambda (x c)
+    (syntax-assert-length<> x 2)
+    (let loop ((clause (cadr x)) (clauses (cddr x)))
+      (unless (list? clause)
+        (syntax-error x "cond-expand clause must be a list with two elements"))
+      (if (cond-expand-eval c (car clause))
+        #`(begin ,@(cdr clause))
+        (if (null? clauses)
+          #f
+          (loop (car clauses) (cdr clauses)))))))
 
 ;; While loop
 
