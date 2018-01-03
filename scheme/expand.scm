@@ -45,7 +45,13 @@
 (define (pair? v) (eq? (value-type v) 11))
 (define (table? v) (eq? (value-type v) 15))
 (define (string? v) (eq? (value-type v) 5))
-(define (symbol? v) (eq? (value-type v) 8))
+
+(define (symbol? v)
+  (and (eq? (value-type v) 8) (not (value-header-bit? v 15))))
+
+(define (keyword? v)
+  (and (eq? (value-type v) 8) (value-header-bit? v 15)))
+
 (define (vector? v) (eq? (value-type v) 9))
 (define (rename? v) (eq? (value-type v) 16))
 (define (identifier? v) (or (rename? v) (symbol? v)))
@@ -63,10 +69,10 @@
 
 ;; @returns whether a symbol is already qualified 
 (define (symbol-qualified? v)
-  (and (symbol? v) (value-header-bit? v 12)))
+  (and (symbol? v) (value-header-bit? v 13)))
 
 (define (self-evaluating? v)
-  (or (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v)))
+  (or (keyword? v) (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v)))
 
 (define unspecified (if #f #f))
 

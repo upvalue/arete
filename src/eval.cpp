@@ -467,26 +467,33 @@ tail_call:
 
     switch(exp.type()) {
       case SYMBOL: {
+        // Keywords are self-evaluating
+        if(exp.symbol_keyword()) {
+          continue;
+        } else {
+
         Value res = env_lookup(frame.env, exp);
 
-        if(res == C_UNDEFINED) {
-          std::ostringstream os;
-          os << "reference to undefined variable " << exp;
-          // EVAL_TRACE(car, fn_name);
-          Value ret = eval_error(os.str(), cell);
-          return ret;
-        } else if(res == C_SYNTAX) {
-          std::stringstream os;
-          os << "attempt to use syntax " << exp << " as value";
-          if(exp == globals[S_DEFINE_SYNTAX]) {
-            // if this happened, it's probably because the macroexpander has not been loaded
-            os << " (did you load the expander?)";
+          if(res == C_UNDEFINED) {
+            std::ostringstream os;
+            os << "reference to undefined variable " << exp;
+            // EVAL_TRACE(car, fn_name);
+            Value ret = eval_error(os.str(), cell);
+            return ret;
+          } else if(res == C_SYNTAX) {
+            std::stringstream os;
+            os << "attempt to use syntax " << exp << " as value";
+            if(exp == globals[S_DEFINE_SYNTAX]) {
+              // if this happened, it's probably because the macroexpander has not been loaded
+              os << " (did you load the expander?)";
+            }
+            EVAL_TRACE(cell);
+            return eval_error(os.str(), exp);
           }
-          EVAL_TRACE(cell);
-          return eval_error(os.str(), exp);
-        }
 
-        return res;
+          exp = res;
+          continue;
+        }
       }
 
       case RENAME: {

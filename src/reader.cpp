@@ -740,8 +740,15 @@ Value XReader::read_expr(TokenType tk) {
       return state.make_string(buffer);
     case TK_SYMBOL: {
       Value sym = state.get_symbol(buffer);
+      // Set symbol bits
       if(!sym.symbol_was_read()) {
         sym.heap->set_header_bit(Value::SYMBOL_READ_BIT);
+      }
+      if(!sym.symbol_keyword()) {
+        if(sym.symbol_name_data()[sym.symbol_name().string_bytes()-1] == ':') {
+          sym.heap->set_header_bit(Value::SYMBOL_KEYWORD_BIT);
+        }
+
       }
       // #`asdf => (quasiquote (rename 'asdf))
       if(quasiquote_renaming) {

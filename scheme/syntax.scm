@@ -150,6 +150,24 @@
     `(,#'if (,#'not ,(list-ref x 1))
         (,#'begin ,@(cddr x)))))
 
+(define (syntax-error source . rest)
+  (raise-source source 'syntax (apply print-string rest) (list source)))
+
+(define (syntax-assert-length= src eq . desc)
+  (let ((len (length src))
+        (name (top-level-value '*current-macro-name* #f)))
+    (when (not (fx= len eq))
+      (raise-source src 'syntax (print-string (or name "macro") " expected " (if (null? desc) "expression" (car desc)) " to be exactly " lt " elements but only got" len) (list src)))))
+
+(define (syntax-assert-length<> src lt . gt)
+  (let ((len (length src))
+        (name (top-level-value '*current-macro-name* #f)))
+    (when (fx< len lt)
+      (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at least " lt " elements but only got" len) (list src))
+      (when (and (not (null? gt)) (fx> len (car gt)))
+        (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at most " (car gt) " elements but only got" len) (list src))))))
+
+
 (define (take lst limit)
 
   (unless (fixnum? limit) (raise 'type "take expected second argument (limit) to be a fixnum"))
@@ -517,6 +535,31 @@ TODO: Casting
 (define (string-ci<=? a b) (<= (string-sum-ci a) (string-sum-ci b)))
 (define (string-ci>=? a b) (>= (string-sum-ci a) (string-sum-ci b)))
 
+(define-syntax type-assert
+  (lambda (x)
+    (syntax-assert-length= 'type-assert 2)
+    (let ((name (list-ref x 1))
+          (kond (list-ref x 2)))
+      #`(let ((result ,kond))
+          (unless result
+            (raise 'type (print-string "function" name "expected an argument to meet the following requirement:" (quote kond))))))))
+
+
+
+#|(define (string-ends-with str end)
+  (type-assert 'string-ends-with (string? end))|#
+
+#|
+(define (string-ends-with str end)
+  (let loop ((i (string-length end)))|#
+
+    #|
+(define (string-ends-with (str: string?) (end: string?))
+  (if (fx< (string-length str) (string-length end))
+    #f
+    (let loop ((i (string-length end)))
+      #t)))|#
+
 ;;;;; STRINGS
 
 (define (list->string lst)
@@ -631,23 +674,6 @@ TODO: Casting
       (print (car rst))
       (print (cadr rst))
       (cadr rst))))
-
-(define (syntax-error source . rest)
-  (raise-source source 'syntax (apply print-string rest) (list source)))
-
-(define (syntax-assert-length= src eq . desc)
-  (let ((len (length src))
-        (name (top-level-value '*current-macro-name* #f)))
-    (when (not (fx= len eq))
-      (raise-source src 'syntax (print-string (or name "macro") " expected " (if (null? desc) "expression" (car desc)) " to be exactly " lt " elements but only got" len) (list src)))))
-
-(define (syntax-assert-length<> src lt . gt)
-  (let ((len (length src))
-        (name (top-level-value '*current-macro-name* #f)))
-    (when (fx< len lt)
-      (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at least " lt " elements but only got" len) (list src))
-      (when (and (not (null? gt)) (fx> len (car gt)))
-        (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at most " (car gt) " elements but only got" len) (list src))))))
 
 ;; recursively "evaluate" a cond-expand clause to true or false
 (define (cond-expand-eval cmp? form)

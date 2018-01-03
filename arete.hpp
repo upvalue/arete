@@ -617,11 +617,18 @@ struct Value {
     return heap->get_header_bit(SYMBOL_QUALIFIED_BIT);
   }
 
-  static const unsigned SYMBOL_GENSYM_BIT = 1 << 10;
-  static const unsigned SYMBOL_READ_BIT = 1 << 11;
-  static const unsigned SYMBOL_QUALIFIED_BIT = 1 << 12;
+  bool symbol_keyword() const {
+    AR_TYPE_ASSERT(heap_type_equals(SYMBOL));
+    return heap->get_header_bit(SYMBOL_KEYWORD_BIT);
+  }
+
+  static const unsigned SYMBOL_GENSYM_BIT = 1 << 11;
+  static const unsigned SYMBOL_READ_BIT = 1 << 12;
+  static const unsigned SYMBOL_QUALIFIED_BIT = 1 << 13;
   // True if symbol is a GC root 
-  static const unsigned SYMBOL_ROOT_BIT = 1 << 13;
+  static const unsigned SYMBOL_ROOT_BIT = 1 << 14;
+  // True if symbol is a keyword, e.g. keyword: 
+  static const unsigned SYMBOL_KEYWORD_BIT = 1 << 15;
 
   // RENAMES
 
