@@ -107,6 +107,10 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       switch(v.constant_value()) {
         case C_TRUE: return os << "#t";
         case C_NIL: return os << "()";
+        case C_OPTIONAL_OBJECT: return os << "#!optional";
+        case C_KEY_OBJECT: return os << "#!key";
+        case C_KEYS_OBJECT: return os << "#!keys";
+        case C_REST_OBJECT: return os << "#!rest";
         case C_FALSE: return os << "#f";
         case C_EOF: return os << "#<eof>";
         case C_UNSPECIFIED: return os << "#<unspecified>";

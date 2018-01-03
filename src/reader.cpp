@@ -214,7 +214,6 @@ Value NumberReader::read() {
         fixnum += place;
       }
     }
-
   }
 
   exponent:
@@ -519,9 +518,8 @@ XReader::TokenType XReader::next_token() {
       else if(c2 == 'd') return tokenize_number(true);
       else {
         eatc();
-        if(c2 == 't') return TK_TRUE;
-        else if(c2 == 'f') return TK_FALSE;
-
+        if(c2 == 't') { return_constant = C_TRUE; return TK_CONSTANT; }
+        else if(c2 == 'f') { return_constant = C_FALSE; return TK_CONSTANT; }
         else if(c2 == '`') return TK_QUASIQUOTE_RENAMING;
         else if(c2 == '\'') return TK_RENAME;
         else if(c2 == '(') return TK_VECTOR_OPEN;
@@ -529,6 +527,7 @@ XReader::TokenType XReader::next_token() {
           // Character literals
           if(!peekc(c2)) {
             unexpected_eof("after #\\ character literal", token_start_line, token_start_position);
+            return TK_ERROR;
           }
 
           if(c2 == ' ')  {
@@ -546,10 +545,28 @@ XReader::TokenType XReader::next_token() {
           buffer += "##";
           tokenize_symbol(true);
           return TK_SYMBOL;
+        } else if(c2 == '!') {
+          // Special symbols: #!optional, #!key, #!keys, #!rest
+          tokenize_symbol(true);
+
+          if(buffer.compare("optional") == 0) {
+            return_constant = C_OPTIONAL_OBJECT;
+          } else if(buffer.compare("key") == 0) {
+            return_constant = C_KEY_OBJECT;
+          } else if(buffer.compare("keys") == 0) {
+            return_constant = C_KEYS_OBJECT;
+          } else if(buffer.compare("rest") == 0) {
+            return_constant = C_REST_OBJECT;
+          } else {
+            read_error("unknown #! constant", token_start_line, token_start_position, position);
+            return TK_ERROR;
+          }
+          return TK_CONSTANT;
         } else if(c2 == ';') {
           // Expression comments
           if(!peekc(c2)) {
             unexpected_eof("after #; expression comment", line, position - 2);
+            return TK_ERROR;
           }
           return TK_EXPRESSION_COMMENT;
         } else if(c2 == '|') {
@@ -716,8 +733,7 @@ Value XReader::read_expr(TokenType tk) {
       return read_error("unexpected right bracket", line, position - 1, position);
     case TK_RPAREN:
       return read_error("unexpected right paren", line, position - 1, position);
-    case TK_TRUE: return C_TRUE;
-    case TK_FALSE: return C_FALSE;
+    case TK_CONSTANT: return return_constant;
 
     case TK_EXPRESSION_COMMENT: {
       Value x = read_expr(TK_READ_NEXT);

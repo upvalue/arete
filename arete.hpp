@@ -262,7 +262,11 @@ enum {
   C_UNSPECIFIED = 14 ,    // 0000 1110 #<unspecified> 
   C_EOF = 18,             // 0001 0010 #<eof>
   C_SYNTAX = 34,          // 0100 0010 #<syntax>
+  C_REST_OBJECT = 50,     // 0011 0010 #!rest
   C_UNDEFINED = 66,       // 1000 0010 #<undefined>
+  C_OPTIONAL_OBJECT = 82, // 0101 0010 #!optional
+  C_KEYS_OBJECT = 86,     // 0101 0110 #!keys
+  C_KEY_OBJECT = 114,     // 0111 0010 #!key
 };
 
 /** A heap-allocated, garbage collected value. */
@@ -2214,6 +2218,7 @@ struct XReader {
   /** Either C_FALSE or an exception that has been encountered during reading; necessary because 
    * the tokenizer does not return Values. read should never be called after this has been set */
   Value active_error;
+  Value return_constant;
 
   /** A temporary buffer that the tokenizer will fill with atomic data (strings, numbers, etc) */
   std::string buffer;
@@ -2244,9 +2249,8 @@ struct XReader {
     TK_LBRACKET,
     TK_RBRACKET,
     TK_CHARACTER,
-    TK_TRUE,
-    TK_FALSE,
     TK_EXPRESSION_COMMENT,
+    TK_CONSTANT,
     TK_EOF
   };
 
