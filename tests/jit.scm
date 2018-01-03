@@ -42,9 +42,12 @@
 (test-equals 'asdf (lambda (a) (if a a #f)) 'asdf) 
 
 (define (return-two) 2)
+(define (return-true) #t)
+(define (return-false) #f)
 
-(test-equals 2 (lambda () (return-two)))
 (test-equals 2 (lambda () (return-two) (return-two) (return-two)))
+(test-equals 2 (lambda () (return-two)))
+(test-equals #f (lambda () (return-false)))
 
 (define (return-exc) (raise 'asdf "asdf" #t))
 

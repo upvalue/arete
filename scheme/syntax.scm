@@ -162,6 +162,22 @@
         (raise 'bounds (print-string limit "values requested by take invocation but only got" got) (list lst limit))
         (loop (fx+ got 1) (cons (car lst) newlst) (cdr lst))))))
 
+;; really scheme, really?. these functions should just throw an error for public indecency
+(define (caaaar x) (car (car (car (car x)))))
+(define (caaadr x) (car (car (car (cdr x)))))
+(define (caadar x) (car (car (cdr (car x)))))
+(define (caaddr x) (car (car (cdr (cdr x)))))
+(define (cadaar x) (car (cdr (car (car x)))))
+(define (cadadr x) (car (cdr (car (cdr x)))))
+(define (cdaaar x) (cdr (car (car (car x)))))
+(define (cdaadr x) (cdr (car (car (cdr x)))))
+(define (cdadar x) (cdr (car (cdr (car x)))))
+(define (cdaddr x) (cdr (car (cdr (cdr x)))))
+(define (cddaar x) (cdr (cdr (car (car x)))))
+(define (cddadr x) (cdr (cdr (car (cdr x)))))
+(define (cdddar x) (cdr (cdr (cdr (car x)))))
+(define (cddddr x) (cdr (cdr (cdr (cdr x)))))
+
 ;; This actually seriously slows down the compiler (which uses memv via case) vs using a C++ function.
 ;;Need some basic inlining for sure.
 
@@ -633,6 +649,7 @@ TODO: Casting
       (when (and (not (null? gt)) (fx> len (car gt)))
         (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at most " (car gt) " elements but only got" len) (list src))))))
 
+;; recursively "evaluate" a cond-expand clause to true or false
 (define (cond-expand-eval cmp? form)
   (let ((features (top-level-value '*features*)) (type (if (pair? form) (car form) #f)))
     (cond 
@@ -658,7 +675,6 @@ TODO: Casting
 
        (table-ref (top-level-value 'module-table) (module-spec->string form (cadr form))))
 
-
       ((cmp? type 'else) #t)
       (else (and (memq (car form) features) #t)))))
 
@@ -668,6 +684,7 @@ TODO: Casting
     (let loop ((clause (cadr x)) (clauses (cddr x)))
       (unless (list? clause)
         (syntax-error x "cond-expand clause must be a list with two elements"))
+
       (if (cond-expand-eval c (car clause))
         #`(begin ,@(cdr clause))
         (if (null? clauses)

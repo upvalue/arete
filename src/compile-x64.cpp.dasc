@@ -115,7 +115,7 @@ void load_native_compiler(State&) {}
 
 namespace arete {
 
-static const bool dbg = true;
+static const bool dbg = false;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
@@ -501,43 +501,40 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   // Check that value in STORE is a valid fixnum, if not, generate a type error with SRC and CODE
   // Generates a label
   |.macro checkFixnumP, store, src, code
-  | mov rax, store
-  | and rax, 1
-  | cmp rax, 1
-  | jz >1
+  | test qword store, 1
+  | jnz >1
   // Test failed. Set up registers for exception
   | throwNativeException (code_offset-1), E_TYPE, src, code, 0
   |1:
   |.endmacro
 
+  |.macro checkFixnumPReg, store, src, code
+  | test store, 1
+  | jnz >1
+  // Test failed. Set up registers for exception
+  | throwNativeException (code_offset-1), E_TYPE, src, code, 0
+  |1:
+  |.endmacro
   |.macro checkNumberP, store, src, code
   |.endmacro
 
   // jmp to label >1 if value in STORE is immediate
   |.macro immediateJmpTo1, store
-  | mov rax, store
   // bits == 0 is #f
-  | cmp rax, 0
+  | test store, store
   | je >1
-  | mov rax, store
-  | and rax, 3
-  | cmp rax, 0
-  | jne >1
+  //| je >1
+  | test store, 3
+  | jnz >1
   |.endmacro
 
   // Check whether a value in STORE is an exception and return it if so
   |.macro checkExceptionP, store
   | immediateJmpTo1 store
-  // this is a valid pointer, extract type and check for exception type & exception active bit
   | mov rax, [store]
-  | and rax, 255
-  | cmp rax, EXCEPTION
-  // not exception type, continue
-  | jne >1
-  // check exception bit
-  | mov rax, [store]
-  | and rax, Value::EXCEPTION_ACTIVE_BIT
-  | cmp rax, Value::EXCEPTION_ACTIVE_BIT
+  // quick exception check: we check for exception TYPE and 1 << 10 EXCEPTION_ACTIVE_BIT at once.
+  | and rax, 2047
+  | cmp rax, (EXCEPTION + Value::EXCEPTION_ACTIVE_BIT)
   | jne >1
   // this is an exception, return immediately
   | mov rArg3, code[current_insn]
@@ -549,11 +546,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   // Check whether a value in STORE is applicable and extract its procedure address if so
   |.macro extractProcedureAddr, store
   | immediateJmpTo1 store
-  | mov rax, [store]
-  | and rax, Value::VALUE_PROCEDURE_BIT
-  | cmp rax, Value::VALUE_PROCEDURE_BIT
-  | jne >1
-  | jmp >2
+  // This is now guaranteed to be a heapvalue pointer, test it for VALUE_PROCEDURE_BIT
+  | test qword [store], Value::VALUE_PROCEDURE_BIT
+  | jnz >2
   | 1:
   | throwNativeException current_insn, E_EVAL, E_APPLY_CHECK, store, 0
   | 2:
@@ -1118,11 +1113,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | mov rArg1, rStackI
         | sub rArg1, 8
 
-        | checkFixnumP [rArg2], E_FX_LT, E_EXPECTED_FIXNUM_1
-        | checkFixnumP [rArg1], E_FX_LT, E_EXPECTED_FIXNUM_1
-
         | mov rArg1, [rArg1]
         | mov rArg2, [rArg2]
+
+        | checkFixnumPReg rArg2, E_FX_LT, E_EXPECTED_FIXNUM_2
+        | checkFixnumPReg rArg1, E_FX_LT, E_EXPECTED_FIXNUM_1
 
         | decStack
         | mov qword [rStackI], C_FALSE
@@ -1153,26 +1148,28 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         // TODO: Why is the shifting necessary? It should be possible to add or subtract
         // two fixnum values and return them as-is
 
+        | mov rArg1, rArg2
+        | mov rArg2, [rArg2]
+
         // 2 labels: two for each type test
-        | checkFixnumP [rArg2], src, E_EXPECTED_FIXNUM_2
+        | checkFixnumPReg rArg2, src, E_EXPECTED_FIXNUM_2
 
         // Extract fixnum argument 1 value
-        | shr qword [rArg2], 1
+        | shr rArg2, 1
 
-        | mov rArg1, rArg2
+        // Get first stackvalu
         | sub rArg1, 8
 
-        | checkFixnumP [rArg1], src, E_EXPECTED_FIXNUM_1
-        // extract fixnum argument 2 value
-        | shr qword [rArg1], 1
-
         | mov rax, [rArg1]
+        | checkFixnumPReg rax, src, E_EXPECTED_FIXNUM_1
+        | shr rax, 1
+
         switch(code[current_insn]) {
           case OP_FX_ADD:
-            | add rax, [rArg2]
+            | add rax, rArg2
             break;
           case OP_FX_SUB:
-            | sub rax, [rArg2]
+            | sub rax, rArg2
             break;
         }
 

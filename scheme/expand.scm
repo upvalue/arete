@@ -33,21 +33,6 @@
 (define (caaar x) (car (car (car x))))
 (define (cdaar x) (cdr (car (car x))))
 (define (cdadr x) (cdr (car (cdr x))))
-;; really scheme, really?. these functions should just throw an error for public indecency
-(define (caaaar x) (car (car (car (car x)))))
-(define (caaadr x) (car (car (car (cdr x)))))
-(define (caadar x) (car (car (cdr (car x)))))
-(define (caaddr x) (car (car (cdr (cdr x)))))
-(define (cadaar x) (car (cdr (car (car x)))))
-(define (cadadr x) (car (cdr (car (cdr x)))))
-(define (cdaaar x) (cdr (car (car (car x)))))
-(define (cdaadr x) (cdr (car (car (cdr x)))))
-(define (cdadar x) (cdr (car (cdr (car x)))))
-(define (cdaddr x) (cdr (car (cdr (cdr x)))))
-(define (cddaar x) (cdr (cdr (car (car x)))))
-(define (cddadr x) (cdr (cdr (car (cdr x)))))
-(define (cdddar x) (cdr (cdr (cdr (car x)))))
-(define (cddddr x) (cdr (cdr (cdr (cdr x)))))
 
 (define (not x) (eq? x #f))
 
@@ -91,7 +76,9 @@
 
 (define (list-tail lst i)
   (if (or (null? lst) (not (pair? lst)))
-    (raise 'type "list-tail expects a list with at least one element as its argument" (list lst)))
+    (if (and (null? lst) (fx= i 0))
+      '()
+      (raise 'type "list-tail expects a list with at least one element as its argument" (list lst))))
 
   (if (= i 0)
     lst
@@ -99,7 +86,9 @@
       (loop loop (cdr lst) 1))
      (lambda (loop rest ii)
        (if (null? rest)
-         (raise 'type "list-tail bounds error" (list lst (length lst) i)))
+         (if (fx= ii i)
+           '()
+           (raise 'type "list-tail bounds error" (list lst (length lst) i))))
        (if (= ii i)
          rest
          (loop loop (cdr rest) (+ ii 1)))))))

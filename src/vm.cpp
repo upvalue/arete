@@ -634,7 +634,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
         if(argc != eargc) {
           std::ostringstream os;
-          os << "function " << f.fn << " expected exactly " << f.fn->min_arity
+          os << "function " << f.fn->name << " expected exactly " << f.fn->min_arity
             << " arguments but got " << argc << std::endl;
           f.exception = state.eval_error(os.str());
           goto exception;
@@ -648,7 +648,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
         if(argc < eargc) {
           std::ostringstream os;
-          os << "function " << f.fn << " expected at least " << f.fn->min_arity << 
+          os << "function " << f.fn->name << " expected at least " << f.fn->min_arity << 
             " arguments but got " << argc << std::endl;
           f.exception = state.eval_error(os.str());
           goto exception;
