@@ -7,7 +7,7 @@
     (let ((var (cadr x))
           (appls (cddr x)))
       (print var appls)
-      (pi#`(let ((result ,var))
+      #`(let ((result ,var))
         ,(fold-right
           (lambda (a b)
             (if (eq? b '())

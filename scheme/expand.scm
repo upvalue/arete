@@ -688,69 +688,100 @@
     ;; map-source?
     (expand-map x env params)))
 
-;; Lambda with extended arguments list
-;; Arguments list can be 
-(define (env-define-identifier! env x)
-  (if (rename? x)
-    (begin
-      (rename-gensym! x)
-      (env-define env x 'variable)
-      (rename-gensym x))
-     (env-define env x 'variable)))
+
+;; Argument list parsing
+
+;; Somewhat complex, as it's used by both the expander (in which case it defines variables in the environment
+;; as a side effect and returns new body expressions) and compiler (in which case it just gives arity information)
+
+(define (define-argument! env x)
+  (if env
+    (if (rename? x)
+      (begin
+        (rename-gensym! x)
+        (env-define env x 'variable)
+        (rename-gensym x))
+       (env-define env x 'variable))
+    x))
 
 ;; will interpreter support optionals? how about type checks?
 
+;; mixing #!optional, #!key, and #!keys is always disallowed
+;; #!optional and #!rest may be mixed
+
+
 ;; returns a list of arguments
 ;; body starts as (#f) and will be replaced by a list of body-expressions, if any
-(define (parse-next-argument x body env new-env params)
+(define (parse-next-argument x ret env new-env params)
   (cond
     ((null? x) '())
     ((identifier? x)
-     (env-define-identifier! new-env x))
+     (vector-set! ret 2 #t)
+     (define-argument! new-env x))
     ((pair? x)
       ((lambda (maybe-arg rest)
+         (define maybe-symbol maybe-arg)
+
+         (if (pair? maybe-arg)
+           (if (not (list? maybe-arg))
+             (raise-source maybe-arg 'expand "default argument specifier must be a list with two elements (name and default)" (list x))
+             (if (not (fx= (length maybe-arg) 2))
+               (raise-source maybe-arg 'expand "default argument specifier must be a list with two elements (name and default)" (list x))
+               (begin
+                 (set! maybe-symbol (car maybe-arg))
+                 (if (not (identifier? maybe-symbol))
+                   (raise-source maybe-arg 'expand "default argument specifier first element must be an identifier" (list x)))
+                 (vector-set! 2 (cons '($optional) (vector-ref ret 2) ))))))
+
          (define item
-           (and (identifier? maybe-arg) (env-define-identifier! new-env maybe-arg)))
+           (and (identifier? maybe-symbol) (define-argument! new-env maybe-arg)))
+
+         ;; Track arity
+         (if item
+           (begin
+             (if (not (assq 'seen-optional params))
+               (vector-set! ret 0 (fx+ (vector-ref ret 0) 1)))
+             (vector-set! ret 1 (fx+ (vector-ref ret 1) 1))))
 
          (cond
-           ((memq maybe-arg '(#!optional #!key #!rest #!keys))
-            (raise-source x 'expand "optional arguments not implemented yet" (list x)))
+           ((eq? maybe-arg #!optional)
+            (if (assq 'seen-optional params)
+              (raise-source x 'expand "multiple #!optional in lambda arguments list" (list x)))
+
+            (set! params
+              (cons '(seen-optional . #t) params))
+
+            (set! item #!optional))
+
+           ((memq maybe-arg '(#!key #!rest #!keys))
+            (raise-source x 'expand (print-string maybe-arg "not implemented yet") (list x)))
+
            ((pair? maybe-arg)
             (raise-source x 'expand "argument assertions not implemented yet" (list x))))
 
-         (cons item
-           (parse-next-argument (cdr x) body env new-env params)
-         ))
+         (if item
+           (cons item (parse-next-argument (cdr x) ret env new-env params))
+           (parse-next-argument (cdr x) ret env new-env params)))
+
        (car x) (cdr x)))
     (else
       (raise-source x 'expand "non-identifier as lambda rest argument" (list x))))
 )
 
-;; mixing #!optional, #!key, and #!keys is always disallowed
-;; #!optional and #!rest may be mixed
-
-;; returns: list of arguments
-(define (parse-arguments-list x args-ret new-env env params)
-  ;; Simple identifier -- define in environment and return the name
-  (cond 
-    ((identifier? x)
-     (env-define-identifier! new-env x) '())
-    ((null? x) '(()))
-    ((pair? x)
-      (parse-next-argument x '() env new-env params))
-    (else
-      (raise-source (cdr x) 'expand "non-identifier as lambda rest argument" (list x)))))
 
 (define (expand-lambda x env params)
   (if (fx< (length x) 3)
     (raise-source x 'expand "lambda has no body" (list x)))
 
   (define new-env (env-make env))
-  (define args-ret (make-vector))
+  (define args-ret (make-vector 4 0))
   (define args (cadr x))
 
+  (vector-set! args-ret 2 #f)
+  (vector-set! args-ret 3 '())
+
   (define bindings
-    (parse-next-argument args args-ret env new-env params))
+    (parse-next-argument args args-ret env new-env '()))
 
   (cons-source x (make-rename #f 'lambda) (cons-source x bindings (expand-map (cddr x) new-env '()))))
 

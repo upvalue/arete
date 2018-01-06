@@ -713,7 +713,6 @@ Value State::pretty_print(std::ostream& os, Value v) {
 
   if(table_max.fixnump() && table_max.fixnum_value() > 0) {
     ps.table_max = (size_t) table_max.fixnum_value();
-    std::cout << ps.table_max << std::endl;
   }
 
   ps.printed = printed;

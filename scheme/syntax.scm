@@ -862,7 +862,6 @@ TODO: Casting
               (set-top-level-value! ',(caddr x) value)
               (top-level-value ',(caddr x))))))))
 
-;; We have to set these later because the compiler can't compile an interpreted closure correctly
 (define-top-level-parameter current-output-port *current-output-port*)
 (define-top-level-parameter current-input-port *current-input-port*)
 (define-top-level-parameter *print-readably* PRINT-READABLY)

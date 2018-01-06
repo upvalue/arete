@@ -551,13 +551,19 @@
   (define arg-len (args-length args))
   (define varargs (or (not (list? args)) (identifier? args)))
 
-  ;; Check what the value of sub-fn is during a recompiled compile-lambda call
-  ; (print sub-fn)
+  (define arg-info (make-vector 4 0))
+  (define arg-lst (parse-next-argument (cadr x) arg-info #f #f '()))
+
+  ;(define arg-len (vector-ref arg-info 0))
+  ;(define varargs (vector-ref arg-info 2))
+
+  ;(print "bwahahaha" args arg-len)
+  ;(print "arg-info of above" arg-info)
 
   (compiler-log sub-fn (OpenFn/name sub-fn))
 
   (when fn
-    (compiler-log fn "parent of " (OpenFn/name sub-fn) " is " (OpenFn/name fn)))
+    (compiler-log fn "parent of" (OpenFn/name sub-fn) "is" (OpenFn/name fn)))
 
   ;; Most of the complexity of this function is just setting up the fields of OpenFn
   (OpenFn/parent! sub-fn fn)
@@ -565,17 +571,49 @@
   ;; Note the depth of the function
   (OpenFn/depth! sub-fn (if fn (fx+ (OpenFn/depth fn) 1) 0))
 
+
+  #;(if (not (eq? (vector-ref arg-info 0) (vector-ref arg-info 1)))
+    (begin
+      (print "Optional!")))
+
   ;; Calculate arity
-  (OpenFn/min-arity! sub-fn arg-len)
-  (OpenFn/max-arity! sub-fn arg-len)
-  (OpenFn/var-arity! sub-fn varargs)
+  #|(OpenFn/min-arity! sub-fn (vector-ref arg-info 0))
+  (OpenFn/max-arity! sub-fn (vector-ref arg-info 1))
+  (OpenFn/var-arity! sub-fn (eq? varargs #t))|#
+  ;; Sanity check while working on optional/keyword args
+  (begin
+    (if (not (equal? args arg-lst))
+      (print "!!!"))
+
+    (if (not (eq? (vector-ref arg-info 0) arg-len))
+      (print "!!! ~:)"))
+    (if (not (eq? (eq? (vector-ref arg-info 2) #t) varargs))
+      (print "!!!"))
+  )
+
+  (OpenFn/min-arity! sub-fn (vector-ref arg-info 0))
+  (OpenFn/max-arity! sub-fn (vector-ref arg-info 1))
+  (OpenFn/var-arity! sub-fn (eq? (vector-ref arg-info 2) #t))
 
   ;; Emit argument checking / rest argument creation instructions
-  (if varargs
+
+  ;; If this function has a simple arity (no rest arguments, no optional arguments), we use argc-eq;
+  ;; otherwise we use argc-gte and emit an argv-rest afterwards for rest arguments, if desired.
+  (if (or (eq? (vector-ref arg-info 2) #t) (not (eq? (vector-ref arg-info 0) (vector-ref arg-info 1))))
+    (begin
+      (emit sub-fn 'argc-gte (vector-ref arg-info 0))
+      (when (eq? (vector-ref arg-info 2) #t)
+        (emit sub-fn 'argv-rest)))
+    (emit sub-fn 'argc-eq arg-len))
+
+  #;(if (eq? (vector-ref arg-info 2) #t)
     (begin
       (emit sub-fn 'argc-gte arg-len)
       (emit sub-fn 'argv-rest))
     (emit sub-fn 'argc-eq arg-len))
+
+  ;; TODO HERE. Calculate argument count as part of argument parsing
+  ;; We'll still define arguments 
 
   ;; Calculate argument count
   (OpenFn/local-count! sub-fn (if (identifier? args) 1 (fx+ arg-len (if (OpenFn/var-arity sub-fn) 1 0))))

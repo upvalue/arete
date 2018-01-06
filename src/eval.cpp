@@ -167,6 +167,7 @@ Value State::temps_to_list(size_t limit) {
   if(temps.size() == 0) return C_NIL;
   Value ret = C_NIL;
   AR_FRAME(this, ret);
+  AR_ASSERT(temps.size() >= limit);
   for(size_t i = temps.size(); i != limit; i--) {
     ret = make_pair(temps[i-1], ret);
   }
@@ -547,7 +548,7 @@ tail_call:
           unsigned form = get_form(*this, kar);
           switch(form) {
             case S_IF: {
-              if(length < 2) {
+              if(length < 3) {
                 return eval_error("if must have at least two arguments (condition and then branch)",
                   exp);
               } else if(length > 4) {
