@@ -58,14 +58,14 @@
 (define (function? v) (eq? (value-type v) 13))
 (define (vmfunction? v) (eq? (value-type v) 19))
 
-(define list (lambda lst lst))
+(define (list . lst) lst)
 
 ;; Constants
 (define (null? v) (eq? (value-bits v) 10))
 (define (eof-object? v) (eq? (value-bits v) 18))
 
-(define input-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 9))))
-(define output-port? (lambda (v) (and (eq? (value-type v) 23) (value-header-bit? v 10))))
+(define (input-port? v) (and (eq? (value-type v) 23) (value-header-bit? v 9)))
+(define (output-port? v) (and (eq? (value-type v) 23) (value-header-bit? v 10)))
 
 ;; @returns whether a symbol is already qualified 
 (define (symbol-qualified? v)
@@ -187,9 +187,7 @@
           ;; However, there is no need to gensym names
           (if (and (symbol? name) (not (gensym? name)) (eq? value 'variable)) (gensym name) (if (gensym? name) name value))))
 
-       ;(vector-append! env (if (and (symbol? name) (not (gensym? name)) (eq? value 'variable)) (gensym name) (if (gensym? name) name value)))
-       (if (and (eq? (top-level-value 'EXPANDER-PRINT) #t) (table? closest))
-         (pretty-print env))
+
        (vector-ref env (fx- (vector-length env) 1)))
       (closest-non-syntactic-env env)))
     (else (begin (raise 'expand "env-define failed" (list name value))))))
@@ -690,37 +688,69 @@
     ;; map-source?
     (expand-map x env params)))
 
+;; Lambda with extended arguments list
+;; Arguments list can be 
+(define (env-define-identifier! env x)
+  (if (rename? x)
+    (begin
+      (rename-gensym! x)
+      (env-define env x 'variable)
+      (rename-gensym x))
+     (env-define env x 'variable)))
+
+;; will interpreter support optionals? how about type checks?
+
+;; returns a list of arguments
+;; body starts as (#f) and will be replaced by a list of body-expressions, if any
+(define (parse-next-argument x body env new-env params)
+  (cond
+    ((null? x) '())
+    ((identifier? x)
+     (env-define-identifier! new-env x))
+    ((pair? x)
+      ((lambda (maybe-arg rest)
+         (define item
+           (and (identifier? maybe-arg) (env-define-identifier! new-env maybe-arg)))
+
+         (cond
+           ((memq maybe-arg '(#!optional #!key #!rest #!keys))
+            (raise-source x 'expand "optional arguments not implemented yet" (list x)))
+           ((pair? maybe-arg)
+            (raise-source x 'expand "argument assertions not implemented yet" (list x))))
+
+         (cons item
+           (parse-next-argument (cdr x) body env new-env params)
+         ))
+       (car x) (cdr x)))
+    (else
+      (raise-source x 'expand "non-identifier as lambda rest argument" (list x))))
+)
+
+;; mixing #!optional, #!key, and #!keys is always disallowed
+;; #!optional and #!rest may be mixed
+
+;; returns: list of arguments
+(define (parse-arguments-list x args-ret new-env env params)
+  ;; Simple identifier -- define in environment and return the name
+  (cond 
+    ((identifier? x)
+     (env-define-identifier! new-env x) '())
+    ((null? x) '(()))
+    ((pair? x)
+      (parse-next-argument x '() env new-env params))
+    (else
+      (raise-source (cdr x) 'expand "non-identifier as lambda rest argument" (list x)))))
+
 (define (expand-lambda x env params)
   (if (fx< (length x) 3)
     (raise-source x 'expand "lambda has no body" (list x)))
 
   (define new-env (env-make env))
+  (define args-ret (make-vector))
   (define args (cadr x))
 
   (define bindings
-    (if (or (null? args) (pair? args))
-      (map-improper-i
-        (lambda (i arg)
-          (if (not (identifier? arg))
-            (raise-source (list-tail args i) 'expand (print-string "non-identifier in lambda argument list" arg) (list x)))
-
-          (if (rename? arg)
-            (begin
-              (rename-gensym! arg)
-              (env-define new-env arg 'variable)
-              (rename-gensym arg))
-            (env-define new-env arg 'variable)))
-        args)
-      (if (not (identifier? args))
-        (raise-source (cdr x) 'expand "non-identifier as lambda rest argument" (list x))
-        (if (rename? args)
-          (begin
-            (rename-gensym! args)
-            (env-define new-env args 'variable)
-            (rename-gensym args))
-          (begin
-            (env-define new-env args 'variable)
-            )))))
+    (parse-next-argument args args-ret env new-env params))
 
   (cons-source x (make-rename #f 'lambda) (cons-source x bindings (expand-map (cddr x) new-env '()))))
 
@@ -812,7 +842,7 @@
   (set! fn-arity (function-min-arity fn))
 
   (if (fx< fn-arity 1)
-    (raise-source (caddr x) 'expand "define-syntax body must evaluate to a function that takes one argument" (list x)))
+    (raise-source (caddr x) 'expand "define-syntax body must evaluate to a function that takes at least one argument" (list x)))
 
   (set-function-name! fn (rename-strip name))
   (set-function-macro-bit! fn)

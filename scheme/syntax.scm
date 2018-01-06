@@ -213,6 +213,8 @@
 (define (member obj lst) (%member-impl equal? obj lst))
 |#
 
+;;
+
 #;(define (memv obj lst)
   (if (null? lst) 
     #f
