@@ -157,7 +157,7 @@
   (let ((len (length src))
         (name (top-level-value '*current-macro-name* #f)))
     (when (not (fx= len eq))
-      (raise-source src 'syntax (print-string (or name "macro") " expected " (if (null? desc) "expression" (car desc)) " to be exactly " lt " elements but only got" len) (list src)))))
+      (raise-source src 'syntax (print-string (or name "macro") " expected " (if (null? desc) "expression" (car desc)) " to be exactly " eq " elements but only got" len) (list src)))))
 
 (define (syntax-assert-length<> src lt . gt)
   (let ((len (length src))
@@ -762,7 +762,7 @@ TODO: Casting
 
 (define-syntax assert
   (lambda (x)
-    (syntax-check-length= x 1)
+    (syntax-assert-length= x 2)
     #`(let ((result ,(list-ref x 1)))
         (unless result
           (raise 'assert (print-string "Assertion failure: expected expression" (quote ,(list-ref x 1)) " to be true"))))))

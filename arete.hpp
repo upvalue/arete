@@ -2367,19 +2367,20 @@ enum {
   // Prologue instructions
   OP_ARGC_EQ = 18,
   OP_ARGC_GTE = 19,
-  OP_ARGV_REST = 20,
+  OP_ARG_OPTIONAL = 20,
+  OP_ARGV_REST = 21,
   // Instructions below this point are primitive versions of the builtin C++ routines for speed;
   // they are not necessary for code to execute correctly.
-  OP_ADD = 21,
-  OP_SUB = 22,
-  OP_LT = 23,
-  OP_CAR = 24,
-  OP_LIST_REF = 25,
-  OP_NOT = 26,
-  OP_EQ = 27,
-  OP_FX_LT = 28,
-  OP_FX_ADD = 29,
-  OP_FX_SUB = 30,
+  OP_ADD = 22,
+  OP_SUB = 23,
+  OP_LT = 24,
+  OP_CAR = 25,
+  OP_LIST_REF = 26,
+  OP_NOT = 27,
+  OP_EQ = 28,
+  OP_FX_LT = 29,
+  OP_FX_ADD = 30,
+  OP_FX_SUB = 31,
 };
 
 inline Type Value::type() const {

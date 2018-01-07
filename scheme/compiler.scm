@@ -174,8 +174,11 @@
     apply apply-tail
     return 
     jump jump-when jump-when-pop jump-unless
-    argc-eq argc-gte argv-rest
+    argc-eq argc-gte arg-optional argv-rest
     + - < car list-ref not eq? fx< fx+ fx-))
+
+;; Static labels
+(define label-list '(past-optionals))
 
 (let loop ((i 0) (lst insn-list))
   (table-set! insns-to-bytes (car lst) i)
@@ -187,7 +190,7 @@
   (cond
     ((fixnum? insn) insn)
     ;; Replace labels with their location
-    ((gensym? insn) (table-ref (OpenFn/labels fn) insn))
+    ((or (gensym? insn) (memq insn label-list)) (table-ref (OpenFn/labels fn) insn))
     (else 
       (aif (table-ref insns-to-bytes insn)
         it
@@ -206,7 +209,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
-               (0 jump jump-when jump-unless words close-over return car not argc-eq argc-gte argv-rest)
+               (0 jump jump-when argc-optional jump-unless words close-over return car not argc-eq argc-gte argv-rest arg-optional)
                (1 push-immediate push-constant global-get local-get upvalue-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -553,26 +556,44 @@
        (OpenFn/define! fn x)))
     (else
       (begin
-        (map-improper
+        (for-each-improper
           (lambda (a)
             (cond
-              ((identifier? a)
-               (OpenFn/min-arity! fn (fx+ arg-i 1))
-               (OpenFn/max-arity! fn (fx+ arg-i 1))
-               (set! arg-i (fx+ arg-i 1))
-               (OpenFn/define! fn a))
+              ((or (identifier? a) (pair? a))
+               (let ((name (if (identifier? a) a (car a))))
+                 (unless seen-optional
+                   (OpenFn/min-arity! fn (fx+ arg-i 1)))
+
+                 (OpenFn/max-arity! fn (fx+ arg-i 1))
+                 (set! arg-i (fx+ arg-i 1))
+                 (OpenFn/define! fn name)))
+
+              ((eq? a #!optional)
+               (set! seen-optional #t)
+               )
+              ((memq a '(#!keys #!key #!rest)
+                (raise-source a 'compiler (print-string a "not supported yet") (list a))))
               (else
-                (raise-source a 'compiler (print-string a "not supported yet") (list a)))))
+                (raise-source x 'compiler-internal "unexpected argument list item" (lsit a)))))
           x)
 
         ;; Handle improper list rest argument
         (unless (list? x)
           (OpenFn/var-arity! fn #t)
-          (OpenFn/min-arity! fn (fx- (OpenFn/min-arity fn) 1))
+          ;; Remove rest argument from arity.
+          (when (fx= (OpenFn/min-arity fn) (OpenFn/max-arity fn))
+            (OpenFn/min-arity! fn (fx- (OpenFn/min-arity fn) 1)))
           (OpenFn/max-arity! fn (fx- (OpenFn/max-arity fn) 1)))))
     
     )
 )
+
+;; Optional argument evaluation:
+;; ($optional 5)
+;; ($optional 6)
+;; ($optional 7)
+;; if argc < current optional index (given as wordcode operand), evaluate the stuff on the right; otherwise, jump
+;; to the body of the function (given by label optionals)
 
 (define (compile-lambda fn x)
   ;; Create a new OpenFn with fn as a parent
@@ -599,7 +620,7 @@
       (emit sub-fn 'argc-gte (OpenFn/min-arity sub-fn))
       (when (OpenFn/var-arity sub-fn)
         (emit sub-fn 'argv-rest))))
-  
+
   (scan-local-defines sub-fn (cddr x))
   ;; Compile the lambda's body
   (compile sub-fn (cddr x))
@@ -784,6 +805,10 @@
       )
       (cdr x))))
 
+(define (compile-optional fn x)
+  (emit fn 'arg-optional (cadr x) 'past-optionals)
+  (print "$OPTIONAL" x))
+
 (define (compile-special-form fn x cd src type tail?)
   (compiler-log fn "compiling special form" type x)
   (case type
@@ -798,6 +823,10 @@
     (or (compile-condeval 'or fn x tail?))
     (quote (compile-quote fn x))
     (begin (compile-begin fn x tail?))
+
+    ;; Expander-generated builtins
+    ($optional (compile-optional fn x))
+    ($label-past-optionals (register-label fn 'past-optionals))
     (else
       (begin
         (raise 'compile-internal "unknown special form" (list type (car x)))))))
@@ -809,7 +838,7 @@
 
     (set! x (rename-expr x)))
 
-  (if (memq x '(lambda define set! if begin and or quote)) x #f))
+  (if (memq x '(lambda define set! if begin and or quote $optional $label-past-optionals)) x #f))
 
 (define (compile-expr fn x cd src tail?)
   (and #f #f)

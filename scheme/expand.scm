@@ -691,10 +691,11 @@
 
 ;; Argument list parsing
 
-;; Somewhat complex, as it's used by both the expander (in which case it defines variables in the environment
-;; as a side effect and returns new body expressions) and compiler (in which case it just gives arity information)
-
 (define (define-argument! env x)
+  ;; Check for existing argument only in this environment, which is guaranteed to be a vector as this is a function
+  (if (env-vec-lookup env (vector-length env) 2 x)
+    (raise-source x 'expand (print-string "duplicate argument name" x) (list x)))
+
   (if (rename? x)
     (begin
       (rename-gensym! x)
@@ -702,8 +703,15 @@
       (rename-gensym x))
      (env-define env x 'variable)))
 
+;; This function takes care of several things:
+
+;; Defining all arguments in the function's new environment
+;; Expanding the default values of optional and keyword arguments
+;; Prepending expressions to the body of the lambda in question to execute said defaults
+
 (define (expand-argument-list x env new-env)
   (define seen-optional #f)
+  (define argi 0)
   (define body '())
 
   (define result 
@@ -722,16 +730,22 @@
              (raise-source x 'expand (print-string a "not supported yet" (list x))))
 
             ((identifier? a)
-             (define-argument! new-env a))
+
+             (set! argi (fx+ argi 1))
+             (define-argument! new-env a)
+             
+             )
 
             ((pair? a)
              (if (not seen-optional)
                (raise-source a 'expand "required argument cannot have default value" (list a)))
 
-             (if (not (identifier? (car x)))
+             (if (not (identifier? (car a)))
                (raise-source a 'expand "argument name must be a valid identifier" (list a)))
 
-             (set! body (cons (make-rename #f '$optional) (expand (cdr a) new-env '((disallow-defines . #t)))))
+             (set! body (cons (cons (make-rename #f '$optional) (cons argi (expand (cdr a) new-env '((disallow-defines . #t))))) body))
+
+             (set! argi (fx+ argi 1))
 
              (cons (define-argument! new-env (car a)) (cdr a)))
             
@@ -760,16 +774,16 @@
 
   (define bindings-and-body (expand-argument-list (cadr x) env new-env))
   (define bindings (car bindings-and-body))
-  (define prepend-body (cdr bindings-and-body))
+  (define prepend-body (reverse (cdr bindings-and-body)))
   (define body (expand-map (cddr x) new-env '()))
 
-  (if (not (null? prepend-body))
-    (print "!!!" prepend-body))
+  ;(if (not (null? prepend-body))
+  ;  (print "!!!" prepend-body))
 
   (cons-source x (make-rename #f 'lambda) (cons-source x bindings
                                                        (if (null? prepend-body)
                                                          body
-                                                         (cons-source x prepend-body body)))))
+                                                         (cons-source x prepend-body (cons-source x (list (make-rename #f '$label-past-optionals)) body))))))
 
 (define (expand-if x env params)
   (define len (length x))

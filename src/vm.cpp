@@ -218,6 +218,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
     &&LABEL_OP_ARGC_EQ,
     &&LABEL_OP_ARGC_GTE,
+    &&LABEL_OP_ARG_OPTIONAL,
     &&LABEL_OP_ARGV_REST,
 
     // Primitives implemented directly in the VM
@@ -652,6 +653,21 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
             " arguments but got " << argc << std::endl;
           f.exception = state.eval_error(os.str());
           goto exception;
+        }
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ARG_OPTIONAL): {
+        size_t idx = VM_NEXT_INSN();
+        size_t jmp = VM_NEXT_INSN();
+
+        if(argc < idx) {
+          // Evaluate statement and continue execution
+
+        } else {
+          // Jump to next statement
+          VM_JUMP(jmp);
         }
 
         VM_DISPATCH();
