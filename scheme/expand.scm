@@ -506,7 +506,7 @@
   (cond
     ((eq? kar 'prefix)
      (begin
-       (if (not (symbol? (caddr spec)))
+       (if (and (not (keyword? (caddr spec))) (not (symbol? (caddr spec))))
          (raise-source (cddr spec) 'expand "module prefix must be a symbol" (list spec)))
        (if (not (fx= (length spec) 3))
          (raise-source (cdddr spec) 'expand "prefix specifier must have exactly three elements" (list spec)))
@@ -695,95 +695,81 @@
 ;; as a side effect and returns new body expressions) and compiler (in which case it just gives arity information)
 
 (define (define-argument! env x)
-  (if env
-    (if (rename? x)
-      (begin
-        (rename-gensym! x)
-        (env-define env x 'variable)
-        (rename-gensym x))
-       (env-define env x 'variable))
-    x))
+  (if (rename? x)
+    (begin
+      (rename-gensym! x)
+      (env-define env x 'variable)
+      (rename-gensym x))
+     (env-define env x 'variable)))
 
-;; will interpreter support optionals? how about type checks?
+(define (expand-argument-list x env new-env)
+  (define seen-optional #f)
+  (define body '())
 
-;; mixing #!optional, #!key, and #!keys is always disallowed
-;; #!optional and #!rest may be mixed
+  (define result 
+    (if (identifier? x)
+      (define-argument! new-env x)
+      (map-improper
+        (lambda (a)
+          (cond 
+            ((eq? a #!optional)
+             (if seen-optional
+               (raise-source x 'expand "multiple #!optional in lambda arguments list" (list x)))
+             (set! seen-optional #t)
+             #!optional)
 
+            ((memq a '(#!rest #!keys #!key))
+             (raise-source x 'expand (print-string a "not supported yet" (list x))))
 
-;; returns a list of arguments
-;; body starts as (#f) and will be replaced by a list of body-expressions, if any
-(define (parse-next-argument x ret env new-env params)
-  (cond
-    ((null? x) '())
-    ((identifier? x)
-     (vector-set! ret 2 #t)
-     (define-argument! new-env x))
-    ((pair? x)
-      ((lambda (maybe-arg rest)
-         (define maybe-symbol maybe-arg)
+            ((identifier? a)
+             (define-argument! new-env a))
 
-         (if (pair? maybe-arg)
-           (if (not (list? maybe-arg))
-             (raise-source maybe-arg 'expand "default argument specifier must be a list with two elements (name and default)" (list x))
-             (if (not (fx= (length maybe-arg) 2))
-               (raise-source maybe-arg 'expand "default argument specifier must be a list with two elements (name and default)" (list x))
-               (begin
-                 (set! maybe-symbol (car maybe-arg))
-                 (if (not (identifier? maybe-symbol))
-                   (raise-source maybe-arg 'expand "default argument specifier first element must be an identifier" (list x)))
-                 (vector-set! 2 (cons '($optional) (vector-ref ret 2) ))))))
+            ((pair? a)
+             (if (not seen-optional)
+               (raise-source a 'expand "required argument cannot have default value" (list a)))
 
-         (define item
-           (and (identifier? maybe-symbol) (define-argument! new-env maybe-arg)))
+             (if (not (identifier? (car x)))
+               (raise-source a 'expand "argument name must be a valid identifier" (list a)))
 
-         ;; Track arity
-         (if item
-           (begin
-             (if (not (assq 'seen-optional params))
-               (vector-set! ret 0 (fx+ (vector-ref ret 0) 1)))
-             (vector-set! ret 1 (fx+ (vector-ref ret 1) 1))))
+             (set! body (cons (make-rename #f '$optional) (expand (cdr a) new-env '((disallow-defines . #t)))))
 
-         (cond
-           ((eq? maybe-arg #!optional)
-            (if (assq 'seen-optional params)
-              (raise-source x 'expand "multiple #!optional in lambda arguments list" (list x)))
+             (cons (define-argument! new-env (car a)) (cdr a)))
+            
 
-            (set! params
-              (cons '(seen-optional . #t) params))
+            (else
+              (raise-source x 'expand "invalid element in arguments list: must be an identifier, a #! specifier like #!optional, or a pair of an identifier and default argument" (list x)))))
 
-            (set! item #!optional))
+        x)
+      ))
 
-           ((memq maybe-arg '(#!key #!rest #!keys))
-            (raise-source x 'expand (print-string maybe-arg "not implemented yet") (list x)))
-
-           ((pair? maybe-arg)
-            (raise-source x 'expand "argument assertions not implemented yet" (list x))))
-
-         (if item
-           (cons item (parse-next-argument (cdr x) ret env new-env params))
-           (parse-next-argument (cdr x) ret env new-env params)))
-
-       (car x) (cdr x)))
-    (else
-      (raise-source x 'expand "non-identifier as lambda rest argument" (list x))))
-)
-
+  (cons result body))
 
 (define (expand-lambda x env params)
   (if (fx< (length x) 3)
     (raise-source x 'expand "lambda has no body" (list x)))
 
   (define new-env (env-make env))
-  (define args-ret (make-vector 4 0))
-  (define args (cadr x))
 
-  (vector-set! args-ret 2 #f)
-  (vector-set! args-ret 3 '())
+  #|
+  (define args-ret (make-argument-list-info))
+  (define args (cadr x))
 
   (define bindings
     (parse-next-argument args args-ret env new-env '()))
+  |#
 
-  (cons-source x (make-rename #f 'lambda) (cons-source x bindings (expand-map (cddr x) new-env '()))))
+  (define bindings-and-body (expand-argument-list (cadr x) env new-env))
+  (define bindings (car bindings-and-body))
+  (define prepend-body (cdr bindings-and-body))
+  (define body (expand-map (cddr x) new-env '()))
+
+  (if (not (null? prepend-body))
+    (print "!!!" prepend-body))
+
+  (cons-source x (make-rename #f 'lambda) (cons-source x bindings
+                                                       (if (null? prepend-body)
+                                                         body
+                                                         (cons-source x prepend-body body)))))
 
 (define (expand-if x env params)
   (define len (length x))

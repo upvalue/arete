@@ -537,31 +537,6 @@ TODO: Casting
 (define (string-ci<=? a b) (<= (string-sum-ci a) (string-sum-ci b)))
 (define (string-ci>=? a b) (>= (string-sum-ci a) (string-sum-ci b)))
 
-(define-syntax type-assert
-  (lambda (x)
-    (syntax-assert-length= 'type-assert 2)
-    (let ((name (list-ref x 1))
-          (kond (list-ref x 2)))
-      #`(let ((result ,kond))
-          (unless result
-            (raise 'type (print-string "function" name "expected an argument to meet the following requirement:" (quote kond))))))))
-
-
-
-#|(define (string-ends-with str end)
-  (type-assert 'string-ends-with (string? end))|#
-
-#|
-(define (string-ends-with str end)
-  (let loop ((i (string-length end)))|#
-
-    #|
-(define (string-ends-with (str: string?) (end: string?))
-  (if (fx< (string-length str) (string-length end))
-    #f
-    (let loop ((i (string-length end)))
-      #t)))|#
-
 ;;;;; STRINGS
 
 (define (list->string lst)
@@ -785,12 +760,12 @@ TODO: Casting
 
 ;; ASSERTIONS
 
-(define-syntax assert-equal?
+(define-syntax assert
   (lambda (x)
-    `(,#'let ((,#'result1 ,(list-ref x 1))
-              (,#'result2 ,(list-ref x 2)))
-        (,#'unless (,#'equal? ,#'result1 ,#'result2)
-          (,#'raise 'assert (,#'print-string "Assertion failure: expected expression" (quote ,(list-ref x 1)) "to equal" (quote ,(list-ref x 2))) (,#'list ,#'result1 ,#'result2))))))
+    (syntax-check-length= x 1)
+    #`(let ((result ,(list-ref x 1)))
+        (unless result
+          (raise 'assert (print-string "Assertion failure: expected expression" (quote ,(list-ref x 1)) " to be true"))))))
 
 ;; ONE-SHOT CONTINUATIONS
 

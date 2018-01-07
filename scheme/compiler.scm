@@ -515,23 +515,17 @@
     (else (raise 'compile-internal ":(" (list x))))
 )
 
-;; This function gives us the number of proper arguments to a function
-(define (args-length x)
-  (if (or (identifier? x) (null? x))
-    0
-    (let loop ((rest (cdr x))
-               (i 1))
-      (if (or (null? rest) (not (pair? rest)))
-        i
-        (loop (cdr rest) (fx+ i 1))))))
+(define (OpenFn/define! fn name)
+  (let ((var (Var/make (OpenFn/local-count fn) name)))
+    (table-set! (OpenFn/env fn) name var)
+    (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))
+    var))
 
 (define (scan-local-defines-expr fn x)
   (when (pair? x)
     (cond
       ((eq? (rename-strip (car x)) 'define)
-        (let ((var (Var/make (OpenFn/local-count fn) (cadr x))))
-          (table-set! (OpenFn/env fn) (cadr x) var)
-          (OpenFn/local-count! fn (fx+ (OpenFn/local-count fn) 1))))
+       (OpenFn/define! fn (cadr x)))
       ((eq? (rename-strip (car x)) 'quote) #f)
       ((eq? (rename-strip (car x)) 'lambda) #f)
       (else
@@ -544,24 +538,47 @@
     body)
  )
 
+;; Processes an arguments list. Defines all argument names as local variables, sets up function arity and local count
+;; appropriately.
+
+(define (process-argument-list! fn x)
+  (define arg-i 0)
+  (define seen-optional #f)
+
+  (cond
+    ((null? x) #t)
+    ((identifier? x)
+     (begin
+       (OpenFn/var-arity! fn #t)
+       (OpenFn/define! fn x)))
+    (else
+      (begin
+        (map-improper
+          (lambda (a)
+            (cond
+              ((identifier? a)
+               (OpenFn/min-arity! fn (fx+ arg-i 1))
+               (OpenFn/max-arity! fn (fx+ arg-i 1))
+               (set! arg-i (fx+ arg-i 1))
+               (OpenFn/define! fn a))
+              (else
+                (raise-source a 'compiler (print-string a "not supported yet") (list a)))))
+          x)
+
+        ;; Handle improper list rest argument
+        (unless (list? x)
+          (OpenFn/var-arity! fn #t)
+          (OpenFn/min-arity! fn (fx- (OpenFn/min-arity fn) 1))
+          (OpenFn/max-arity! fn (fx- (OpenFn/max-arity fn) 1)))))
+    
+    )
+)
+
 (define (compile-lambda fn x)
   ;; Create a new OpenFn with fn as a parent
   (define sub-fn (OpenFn/make (gensym 'lambda)))
   (define args (cadr x))
-  (define arg-len (args-length args))
-  (define varargs (or (not (list? args)) (identifier? args)))
-
-  (define arg-info (make-vector 4 0))
-  (define arg-lst (parse-next-argument (cadr x) arg-info #f #f '()))
-
-  ;(define arg-len (vector-ref arg-info 0))
-  ;(define varargs (vector-ref arg-info 2))
-
-  ;(print "bwahahaha" args arg-len)
-  ;(print "arg-info of above" arg-info)
-
   (compiler-log sub-fn (OpenFn/name sub-fn))
-
   (when fn
     (compiler-log fn "parent of" (OpenFn/name sub-fn) "is" (OpenFn/name fn)))
 
@@ -571,71 +588,18 @@
   ;; Note the depth of the function
   (OpenFn/depth! sub-fn (if fn (fx+ (OpenFn/depth fn) 1) 0))
 
+  ;; Emit prologue argument checking/processing instructions
 
-  #;(if (not (eq? (vector-ref arg-info 0) (vector-ref arg-info 1)))
+  (process-argument-list! sub-fn args)
+  ;; If this function has simple arity (no optional or rest arguments), we use argc-eq. Otherwise, we use argc-gte,
+  ;; followed by argv-rest
+  (if (and (fx= (OpenFn/min-arity sub-fn) (OpenFn/max-arity sub-fn)) (not (OpenFn/var-arity sub-fn)))
+    (emit sub-fn 'argc-eq (OpenFn/min-arity sub-fn))
     (begin
-      (print "Optional!")))
-
-  ;; Calculate arity
-  #|(OpenFn/min-arity! sub-fn (vector-ref arg-info 0))
-  (OpenFn/max-arity! sub-fn (vector-ref arg-info 1))
-  (OpenFn/var-arity! sub-fn (eq? varargs #t))|#
-  ;; Sanity check while working on optional/keyword args
-  (begin
-    (if (not (equal? args arg-lst))
-      (print "!!!"))
-
-    (if (not (eq? (vector-ref arg-info 0) arg-len))
-      (print "!!! ~:)"))
-    (if (not (eq? (eq? (vector-ref arg-info 2) #t) varargs))
-      (print "!!!"))
-  )
-
-  (OpenFn/min-arity! sub-fn (vector-ref arg-info 0))
-  (OpenFn/max-arity! sub-fn (vector-ref arg-info 1))
-  (OpenFn/var-arity! sub-fn (eq? (vector-ref arg-info 2) #t))
-
-  ;; Emit argument checking / rest argument creation instructions
-
-  ;; If this function has a simple arity (no rest arguments, no optional arguments), we use argc-eq;
-  ;; otherwise we use argc-gte and emit an argv-rest afterwards for rest arguments, if desired.
-  (if (or (eq? (vector-ref arg-info 2) #t) (not (eq? (vector-ref arg-info 0) (vector-ref arg-info 1))))
-    (begin
-      (emit sub-fn 'argc-gte (vector-ref arg-info 0))
-      (when (eq? (vector-ref arg-info 2) #t)
-        (emit sub-fn 'argv-rest)))
-    (emit sub-fn 'argc-eq arg-len))
-
-  #;(if (eq? (vector-ref arg-info 2) #t)
-    (begin
-      (emit sub-fn 'argc-gte arg-len)
-      (emit sub-fn 'argv-rest))
-    (emit sub-fn 'argc-eq arg-len))
-
-  ;; TODO HERE. Calculate argument count as part of argument parsing
-  ;; We'll still define arguments 
-
-  ;; Calculate argument count
-  (OpenFn/local-count! sub-fn (if (identifier? args) 1 (fx+ arg-len (if (OpenFn/var-arity sub-fn) 1 0))))
-
-  (unless (null? args)
-    (if (identifier? args)
-      ;; (lambda args args)
-      (table-set! (OpenFn/env sub-fn) args (Var/make 0 args))
-
-      ;; Handle arguments, including varargs
-      (let loop ((rest (cdr args))
-                 (item (car args))
-                 (i 0))
-        (table-set! (OpenFn/env sub-fn) item (Var/make i item))
-        (unless (null? rest)
-
-          (if (pair? rest)
-            (loop (cdr rest) (car rest) (+ i 1))
-            ;; We've hit the varargs
-            (begin
-              (table-set! (OpenFn/env sub-fn) rest (Var/make (+ i 1) rest))))))))
-
+      (emit sub-fn 'argc-gte (OpenFn/min-arity sub-fn))
+      (when (OpenFn/var-arity sub-fn)
+        (emit sub-fn 'argv-rest))))
+  
   (scan-local-defines sub-fn (cddr x))
   ;; Compile the lambda's body
   (compile sub-fn (cddr x))
@@ -957,7 +921,7 @@
          (fn-exxxpr
            ;; Unexpanded boot functions which use COND
            ;; need to be expanded.
-           (if (memq fn-name '(parse-next-argument parse-arguments-list module-import-eval expand-apply expand env-lookup env-define env-compare env-resolve expand-module-decl))
+           (if (memq fn-name '(expand-argument-list parse-next-argument parse-arguments-list module-import-eval expand-apply expand env-lookup env-define env-compare env-resolve expand-module-decl))
              (expand-toplevel fn-expr #f)
              fn-expr))
          )

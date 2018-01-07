@@ -658,17 +658,21 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
       }
 
       VM_CASE(OP_ARGV_REST): {
-        // argv may be &temps[0] if this is a tail call
-        if(argv == &state.temps[0]) {
-          f.locals[f.fn->max_arity] = state.temps_to_list(f.fn->max_arity);
+        if(argc <= f.fn->max_arity) {
+          f.locals[f.fn->max_arity] = C_NIL;
         } else {
-          state.temps.clear();
-          unsigned i;
-          state.temps.insert(state.temps.end(), &argv[f.fn->max_arity], &argv[argc]);
+          // argv may be &temps[0] if this is a tail call
+          if(argv == &state.temps[0]) {
+            f.locals[f.fn->max_arity] = state.temps_to_list(f.fn->max_arity);
+          } else {
+            state.temps.clear();
+            unsigned i;
+            state.temps.insert(state.temps.end(), &argv[f.fn->max_arity], &argv[argc]);
 
-          f.locals[f.fn->max_arity] = state.temps_to_list();
+            f.locals[f.fn->max_arity] = state.temps_to_list();
 
-          //std::cout << argv[f.fn->max_arity] << std::endl;
+            //std::cout << argv[f.fn->max_arity] << std::endl;
+          }
         }
         VM_RESTORE();
         VM_DISPATCH();

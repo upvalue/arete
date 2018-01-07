@@ -13,7 +13,7 @@
             (if (eq? b '())
               (append a (list var))
               (append a (list b))))
-          '() appls))))))
+          '() appls)))))
 
 (let ((text "HELLO WORLD"))
   (print
