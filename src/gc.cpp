@@ -199,6 +199,8 @@ void State::print_gc_stats(std::ostream& os) {
   std::cout << "approximately " << ((double)(gc_collect_timer + gc_alloc_timer) * 100) / (double)(gc_overall_timer) << "% of program time spent in GC" << std::endl;
   std::cout << "longest pause: " << (gc_longest_pause / 1000) << "ms" << std::endl;
 
+  std::cout << "stack: " << gc.vm_stack_used << "/" << gc.vm_stack_size << " slots" << std::endl;
+
 #endif
 }
 
@@ -207,6 +209,8 @@ GCCommon::GCCommon(State& state_, size_t heap_size_):
   frames(0),
   native_frames(0),
   vm_frames(0),
+  vm_stack(static_cast<Value*>(calloc(512, sizeof(Value)))),
+  vm_stack_size(512), vm_stack_used(0),
   protect_argc(0), protect_argv(0),
   collect_before_every_allocation(false),
   allocations(0),
@@ -214,6 +218,10 @@ GCCommon::GCCommon(State& state_, size_t heap_size_):
   heap_size(heap_size_),
   block_size(heap_size_) {
 
+}
+
+GCCommon::~GCCommon() {
+  free(vm_stack);
 }
 
 // This applies a GC-specific function to all the root variables of a program
@@ -258,6 +266,10 @@ void GCCommon::visit_roots(T& walker) {
     for(size_t i = 0; i != protect_argc; i++) {
       walker.touch((HeapValue**) &protect_argv[i]);
     }
+  }
+
+  for(size_t i = 0; i != vm_stack_used; i++) {
+    walker.touch((HeapValue**) &vm_stack[i]);
   }
 
   VMFrame* link = vm_frames;

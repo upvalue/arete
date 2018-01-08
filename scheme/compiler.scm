@@ -79,7 +79,7 @@
 
 (set! OpenFn/make
   (lambda (name)
-    (%OpenFn/make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 0 0 #f 0 #f (make-table)
+    (%OpenFn/make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 #f 0 #f 0 #f (make-table)
                   #f #f)))
 
 ;; Although this is called Var, it might be more proper to think of it as a Binding that can be propagated through the
@@ -178,7 +178,7 @@
     + - < car list-ref not eq? fx< fx+ fx-))
 
 ;; Static labels
-(define label-list '(past-optionals))
+(define static-labels '(past-optionals))
 
 (let loop ((i 0) (lst insn-list))
   (table-set! insns-to-bytes (car lst) i)
@@ -190,7 +190,7 @@
   (cond
     ((fixnum? insn) insn)
     ;; Replace labels with their location
-    ((or (gensym? insn) (memq insn label-list)) (table-ref (OpenFn/labels fn) insn))
+    ((or (gensym? insn) (memq insn static-labels)) (table-ref (OpenFn/labels fn) insn))
     (else 
       (aif (table-ref insns-to-bytes insn)
         it
@@ -270,19 +270,22 @@
     (vector-append! (OpenFn/sources fn) it)))
 
 (define (alist->table alist)
-  (let ((table (make-table)))
-    (let loop ((cell (car alist))
-               (rest (cdr alist)))
-      (table-set! table (car cell) cell)
-      (if (null? rest)
-        table
-        (loop (car rest) (cdr rest))))))
+  (if (null? alist)
+    (make-table)
+    (let ((table (make-table)))
+      (let loop ((cell (car alist))
+                 (rest (cdr alist)))
+        (table-set! table (car cell) cell)
+        (if (null? rest)
+          table
+          (loop (car rest) (cdr rest)))))))
 
 (define primitive-table
   (alist->table '(
     ;; name min-argc max-argc variable-arity
-    ;(+ 0 0 #t)
-    ;(- 1 1 #t)
+    #|
+    (+ 0 0 #t)
+    (- 1 1 #t)
     (car 1 1 #f)
     (not 1 1 #f)
     (eq? 2 2 #f)
@@ -290,6 +293,7 @@
     (fx+ 2 2 #f)
     (fx- 2 2 #f)
     (fx< 2 2 #f)
+    |#
   ))
 )
 

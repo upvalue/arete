@@ -1082,12 +1082,6 @@ struct NativeFunction : HeapValue {
  */
 struct CFunction : Procedure {
   Value name, closure;
-  /*
-  union {
-    c_function_t addr;
-    c_closure_t closure_addr;
-  };
-  */
 
   size_t min_arity, max_arity;
 
@@ -1131,7 +1125,7 @@ struct VMFunction : Procedure {
   Bytevector* code;
   Bytevector* native_code;
 
-  unsigned min_arity, max_arity, stack_max, local_count;
+  unsigned min_arity, max_arity, stack_max, local_count, upvalue_count;
 
   static const unsigned CLASS_TYPE = VMFUNCTION;
 
@@ -1555,12 +1549,16 @@ struct GCCommon {
   Frame* frames;
   std::list<Handle*> handles;
 
-  /** Vector of obejcts that need to be finalized */
+  /** Vector of objects that need to be finalized */
   std::vector<Value> finalizers;
   std::vector<Value> finalizers2;
   NativeFrame* native_frames;
   VMFrame* vm_frames;
+  Value* vm_stack;
+  size_t vm_stack_size;
+  size_t vm_stack_used;
 
+  // For virtual machine: protect a single array during function initialization
   size_t protect_argc;
   Value* protect_argv;
 
@@ -1574,9 +1572,21 @@ struct GCCommon {
   size_t block_size;
 
   GCCommon(State& state_, size_t heap_size_);
-  ~GCCommon() {}
+  ~GCCommon();
 
   template <class T> void visit_roots(T& visitor);
+
+  void grow_stack(size_t size) {
+    vm_stack_used += size;
+    if(vm_stack_used > vm_stack_size) {
+      vm_stack_size *= 2;
+      vm_stack = static_cast<Value*>(realloc(vm_stack, vm_stack_size * sizeof(Value)));
+    }
+  }
+
+  void shrink_stack(size_t size) {
+    vm_stack_used -= size;
+  }
 
   // Align a value along a boundary e.g. align(8, 7) == 8, align(8, 16) == 16,
   // and align(8, 247) == 248 

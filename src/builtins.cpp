@@ -1290,6 +1290,9 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
   vfn->local_count = (unsigned)rec.record_ref(5).fixnum_value();
   vfn->name = rec.record_ref(0);
   vfn->free_variables = static_cast<Bytevector*>(free_vars_blob.heap);
+  if(free_vars != C_FALSE && free_vars.vector_length() > 0) {
+    vfn->upvalue_count = free_vars.vector_length();
+  }
   vfn->sources = static_cast<Bytevector*>(sources_blob.heap);
   vfn->code = code.as_unsafe<Bytevector>();
 

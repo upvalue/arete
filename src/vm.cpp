@@ -1,5 +1,30 @@
 // vm.cpp - Virtual machine
 
+// TODO: VM rewrite
+
+// Current VM is too clever by half. Sticking a bunch of stuff in VMFrame prevents the compiler from
+// storing important stuff in registers during program execution. Allocating everything on the stack
+// uses a lot of stack space, but doesn't seem to bring the kind of speed improvements we would like
+// from an optimization of this complexity.
+
+// OTOH, one advantage of the VMFrame approach is that we don't have to restore a lot of GC'd
+// pointers (at the moment, only code)
+
+// Solution: Stack will be a giant heap-allocated array which we can interact with normally.
+
+// We need access to the following GC'd variables during execution:
+
+// Code
+// Constants
+// Closure
+// Stack, locals, and upvalues
+
+// We can collapse stack, locals and upvalues into our heap-allocated stack, which will still behave
+// like a stack.
+
+// Issues: how do we grow this heap-allocated structure on-demand?
+
+
 // TODO Disassembler
 
 // TODO: Style. It's somewhat awkward and difficult to manipulate the stack by arithmetic
@@ -78,13 +103,12 @@
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
 //#define VM_CODE() (f.code)
 
-
 // Restore pointers after any potential garbage collection
 #define VM_RESTORE() \
     cp = (size_t*)((((size_t) f.fn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
-    code = f.fn->code_pointer(); 
+    code = f.fn->code_pointer();
 
-#define AR_VM_LOG_ALWAYS false
+#define AR_VM_LOG_ALWAYS true
 
 #define AR_LOG_VM(msg) \
   if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
@@ -201,8 +225,206 @@ void VMFrame::close_over() {
   destroyed = true;
 }
 
+struct VMFrame2 {
+  VMFrame2(State& state_, Value fnp): state(state_) {
+    fn = fnp.closure_unbox();
+    VMFunction* vfn = fn.as<VMFunction>();
+    vm_stack_used = vfn->local_count + vfn->upvalue_count + vfn->stack_max;
+    state.gc.grow_stack(vm_stack_used);
+  }
+
+  ~VMFrame2() {
+    state.gc.shrink_stack(vm_stack_used);
+  }
+
+  State& state;
+  Value fn;
+  size_t vm_stack_used;
+  size_t depth;
+};
+
+#define VM_REWRITE 1
+
+//#define VM2_RESTORE() 
+
+// Code
+// Constants
+// Closure
+// Stack, locals, and upvalues
+
+// Upvalues we don't actually need to interact with regularly, just at the beginning and end
+// of the function, so we don't really need them as easily accessible
+
+#define VM2_RESTORE() \
+  vfn = f.fn.as_unsafe<VMFunction>(); \
+  locals = &state.gc.vm_stack[sff_offset]; \
+  std::cout << "stack offset:" << ((size_t)stack ) - ((size_t) sbegin) << std::endl; \
+  stack = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count + ((((size_t)stack) - ((size_t)sbegin)) / 8)]; \
+  sbegin = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count]; \
+  cp = (size_t*)((((size_t) vfn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
+  code = vfn->code_pointer();
+
+#define AR_LOG_VM2(msg) \
+  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || vfn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
+    ARETE_LOG((ARETE_LOG_TAG_VM), "vm", msg); \
+  }
 
 Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
+#if VM_REWRITE
+  std::cout << "apply_vm called" << std::endl;
+  // Stack function frame and stack pointer
+  size_t sff_offset = state.gc.vm_stack_used;
+
+  VMFrame2 f(state, Value((HeapValue*) fnp));
+  AR_FRAME(state, f.fn);
+
+  Value exception;
+  VMFunction* vfn = static_cast<VMFunction*>(f.fn.heap);
+  Value *locals, *stack = 0, *sbegin = 0;
+  size_t *cp = 0, *code = 0;
+
+  // Calculate initial pointers to info
+  VM2_RESTORE();
+
+  memset(locals, 0, f.vm_stack_used * sizeof(Value*));
+  memcpy(locals, argv, argc * sizeof(Value*));
+
+  static void* dispatch_table[] = {
+    &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,
+    &&LABEL_OP_GLOBAL_GET, &&LABEL_OP_GLOBAL_SET, &&LABEL_OP_LOCAL_GET, &&LABEL_OP_LOCAL_SET,
+    &&LABEL_OP_UPVALUE_GET, &&LABEL_OP_UPVALUE_SET, &&LABEL_OP_CLOSE_OVER,
+    &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
+    &&LABEL_OP_RETURN,
+    0, 0, 0, 0, 
+    &&LABEL_OP_ARGC_EQ, 0, 0, 0,
+  };
+
+  std::cout << "Offset of frame storage: " << ((size_t)locals - (size_t)state.gc.vm_stack) << std::endl;
+  std::cout << "Offset of stack: " << ((size_t)stack - (size_t)state.gc.vm_stack) << std::endl;
+
+  while(true) {
+#if AR_COMPUTED_GOTO
+    VM_DISPATCH();
+#endif
+
+    VM_SWITCH() {
+      VM_CASE(OP_BAD): {
+        assert(!"bad instruction");
+      }
+
+      VM_CASE(OP_PUSH_CONSTANT):  {
+        size_t idx = VM_NEXT_INSN();
+        (*stack++) = vfn->constants->data[idx];
+        AR_LOG_VM2("push-constant idx: " << idx << "; " << vfn->constants->data[idx]);
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_PUSH_IMMEDIATE): {
+        (*stack++) = VM_NEXT_INSN();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_POP): {
+        stack--;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_GLOBAL_GET): {
+        size_t idx = VM_NEXT_INSN();
+        Value global = vfn->constants->data[idx];
+        Value value = global.symbol_value();
+        if(value == C_UNDEFINED) {
+          std::ostringstream os;
+          os << "reference to undefined variable " << global;
+          exception = state.eval_error(os.str());
+          goto exception;
+        }
+        (*stack++) = global.symbol_value();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_GLOBAL_SET): {
+        size_t idx = VM_NEXT_INSN();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_LOCAL_GET): {
+        size_t idx = VM_NEXT_INSN();
+        (*stack++) = locals[idx];
+        VM_DISPATCH();
+      }
+      
+      VM_CASE(OP_LOCAL_SET): {
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_UPVALUE_GET): {
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_UPVALUE_SET): {
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_CLOSE_OVER): {
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_APPLY):
+      VM_CASE(OP_APPLY_TAIL): {
+        size_t fargc = VM_NEXT_INSN();
+        Value afn = *(stack - (fargc + 1));
+        if(AR_LIKELY(afn.procedurep())) {
+          std::cout << afn.bits << std::endl;
+          std::cout << "procedure addr" << (size_t)afn.as_unsafe<Procedure>()->procedure_addr << std::endl;
+          *(stack - (fargc + 1)) = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) (*(stack - fargc - 1)).heap);
+          std::cout << (ptrdiff_t) stack << std::endl;
+          VM2_RESTORE();
+          std::cout << (ptrdiff_t) stack << std::endl;
+          stack -= fargc;
+
+          if((*(stack-1)).is_active_exception()) {
+            exception = *(stack-1);
+            goto exception;
+          }
+        } else {
+          std::ostringstream os;
+          os << "vm: attempt to apply non-applicable value " << *(stack - 1);
+          exception = state.eval_error(os.str());
+          goto exception;
+        }
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_RETURN): {
+        goto ret;
+      }
+
+      VM_CASE(OP_ARGC_EQ): {
+        size_t eargc = VM_NEXT_INSN();
+        AR_LOG_VM2("argc-eq " << eargc);
+        if(AR_UNLIKELY(argc != eargc)) {
+          std::ostringstream os;
+          os << "function expected exactly " << eargc << " arguments but got " << argc;
+          exception = state.eval_error(os.str());
+          goto exception;
+        }
+        VM_DISPATCH();
+      }
+    }
+
+  }
+  state.gc.collect();
+
+  exception:
+
+  return exception;
+
+  ret:
+  return Value(*(stack - 1));
+
+#else
   Value fn((ptrdiff_t)fnp);
 #if AR_COMPUTED_GOTO
   static void* dispatch_table[] = {
@@ -246,17 +468,16 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
      << " free_variables: " << f.fn->free_variables << " stack_max: " << f.fn->stack_max);
 
   // Allocate function's required storage
-  size_t upvalue_count = f.fn->free_variables ? f.fn->free_variables->length : 0;
 #if AR_USE_C_STACK
   // Add storage to VM frame
   void* stack[f.fn->stack_max];
   void* locals[f.fn->local_count];
-  void* upvalues[upvalue_count];
+  void* upvalues[f.fn->upvalue_count];
 
   f.stack = (Value*) stack;
   f.locals = (Value*) locals;
 
-  f.upvalues = upvalue_count ? (Value*) upvalues : 0;
+  f.upvalues = f.fn->upvalue_count ? (Value*) upvalues : 0;
 #endif
 
   // This has to be done in a somewhat funky order. Because allocations can occur here (if a function
@@ -268,7 +489,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
   memset(f.locals, 0, f.fn->local_count * sizeof(void*));
   memcpy(f.locals, argv, (argc > f.fn->max_arity ? f.fn->max_arity : argc) * sizeof(void*));
 
-  if(upvalue_count) {
+  if(f.fn->upvalue_count) {
     state.gc.protect_argc = argc;
     state.gc.protect_argv = argv;
 
@@ -287,6 +508,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
     state.gc.protect_argc = 0;
     state.gc.protect_argv = nullptr;
   }
+
 
   tail_recur:
 
@@ -958,6 +1180,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
     f.close_over();
     AR_ASSERT(exc.is_active_exception());
     return exc;
+#endif
 }
 
 void State::trace_function(Value fn, size_t frames_lost, size_t code_offset) {
