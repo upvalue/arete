@@ -227,17 +227,25 @@ void VMFrame::close_over() {
 
 struct VMFrame2 {
   VMFrame2(State& state_, Value fnp): state(state_) {
-    fn = fnp.closure_unbox();
+    closure = fnp;
+    fn = closure.closure_unbox();
     VMFunction* vfn = fn.as<VMFunction>();
     vm_stack_used = vfn->local_count + vfn->upvalue_count + vfn->stack_max;
     state.gc.grow_stack(vm_stack_used);
   }
 
   ~VMFrame2() {
+    VMFunction* vfn = fn.as<VMFunction>();
+    Value* upvalues = &state.gc.vm_stack[state.gc.vm_stack_used - vm_stack_used + vfn->local_count];
+    for(size_t i = 0; i != vfn->upvalue_count; i++) {
+      AR_ASSERT(upvalues[i].heap_type_equals(UPVALUE));
+      upvalues[i].upvalue_close();
+    }
     state.gc.shrink_stack(vm_stack_used);
   }
 
   State& state;
+  Value closure;
   Value fn;
   size_t vm_stack_used;
   size_t depth;
@@ -272,11 +280,14 @@ struct VMFrame2 {
 Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 #if VM_REWRITE
   std::cout << "apply_vm called" << std::endl;
-  // Stack function frame and stack pointer
+
+  size_t frames_lost = 0;
+
+  // Function frame, allocated on stack
   size_t sff_offset = state.gc.vm_stack_used;
 
   VMFrame2 f(state, Value((HeapValue*) fnp));
-  AR_FRAME(state, f.fn);
+  AR_FRAME(state, f.fn, f.closure);
 
   Value exception;
   VMFunction* vfn = static_cast<VMFunction*>(f.fn.heap);
@@ -286,8 +297,30 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
   // Calculate initial pointers to info
   VM2_RESTORE();
 
+  // This has to be done in a somewhat funky order. Because allocations can occur here (if a function
+  // has upvalues, or if a function has rest arguments). We have to take care to make sure everything
+  // is garbage collected at the allocation points here. So we check function arity right before
+  // starting the actual function.
+
+  // Initialize local variables
   memset(locals, 0, f.vm_stack_used * sizeof(Value*));
-  memcpy(locals, argv, argc * sizeof(Value*));
+  memcpy(locals, argv, std::max(argc, (size_t)vfn->max_arity) * sizeof(Value*));
+
+  if(vfn->upvalue_count) {
+    Value* upvalues = &state.gc.vm_stack[sff_offset + vfn->local_count];
+    state.gc.protect_argc = argc;
+    state.gc.protect_argv = argv;
+
+    AR_LOG_VM2("allocating space for " << vfn->free_variables->length << " upvalues");
+
+    for(size_t i = 0; i != f.fn.as_unsafe<VMFunction>()->free_variables->length; i++) {
+      upvalues[i] = state.gc.allocate(UPVALUE, sizeof(Upvalue));
+      size_t idx = ((size_t*) f.fn.as_unsafe<VMFunction>()->free_variables->data)[i];
+      upvalues[i].as<Upvalue>()->U.local = &locals[idx];
+    }
+
+    state.gc.protect_argc = 0;
+  }
 
   static void* dispatch_table[] = {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,
@@ -309,7 +342,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
     VM_SWITCH() {
       VM_CASE(OP_BAD): {
-        assert(!"bad instruction");
+        AR_ASSERT(!"bad instruction");
       }
 
       VM_CASE(OP_PUSH_CONSTANT):  {
@@ -344,30 +377,102 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
       }
 
       VM_CASE(OP_GLOBAL_SET): {
-        size_t idx = VM_NEXT_INSN();
+        size_t err_on_undefined = VM_NEXT_INSN();
+        size_t constant_id = VM_NEXT_INSN();
+
+        //Value val = f.stack[f.stack_i - 2], key = f.stack[f.stack_i - 1];
+        Value val = (*--stack);
+        Value key = vfn->constants->data[constant_id];
+        AR_LOG_VM2("global-set (" << (err_on_undefined ? "set!" : "define") << ") " << key << " = " << val);
+
+        if(err_on_undefined && key.symbol_value() == C_UNDEFINED) {
+          std::ostringstream os;
+          os << "attempt to set! undefined variable " << key;
+          exception = state.eval_error(os.str());
+          goto exception;
+        }
+
+        key.set_symbol_value(val);
         VM_DISPATCH();
       }
 
       VM_CASE(OP_LOCAL_GET): {
         size_t idx = VM_NEXT_INSN();
+        AR_LOG_VM2("local-get " << idx);
         (*stack++) = locals[idx];
         VM_DISPATCH();
       }
       
       VM_CASE(OP_LOCAL_SET): {
+        size_t idx = VM_NEXT_INSN();
+        AR_LOG_VM2("local-set " << idx);
+
+        locals[idx] = (*--stack);
+
         VM_DISPATCH();
       }
 
       VM_CASE(OP_UPVALUE_GET): {
+        size_t idx = VM_NEXT_INSN();
+        AR_LOG_VM2("upvalue-get " << idx);
+        (*stack++) = f.closure.as_unsafe<Closure>()->upvalues->data[idx].upvalue();
         VM_DISPATCH();
       }
 
       VM_CASE(OP_UPVALUE_SET): {
+        size_t idx = VM_NEXT_INSN();
+        Value val = (*--stack);
+        Value upval = f.closure.as_unsafe<Closure>()->upvalues->data[idx];
+        upval.upvalue_set(val);
+        AR_LOG_VM2("upvalue-set " << idx << " = " << val);
         VM_DISPATCH();
       }
 
       VM_CASE(OP_CLOSE_OVER): {
-        VM_DISPATCH();
+        size_t upvalue_count = VM_NEXT_INSN();
+        AR_LOG_VM2("close-over " << upvalue_count);
+
+        Value storage, closure;
+        {
+          AR_FRAME(state, storage, closure);
+
+          storage = state.make_vector_storage(upvalue_count);
+
+          VM2_RESTORE();
+          // VM ALLOCATION
+
+          Value* upvalues = &state.gc.vm_stack[sff_offset + vfn->local_count];
+
+          for(size_t i = 0; i != upvalue_count; i++) {
+            size_t is_enclosed = VM_NEXT_INSN();
+            size_t idx = VM_NEXT_INSN();
+
+            if(is_enclosed) {
+              AR_LOG_VM2("enclosing free variable " << i << " from closure idx " << idx);
+              state.vector_storage_append(storage, f.fn.as<Closure>()->upvalues->data[idx]);
+            } else {
+              state.vector_storage_append(storage, upvalues[idx]);
+            }
+            // VM ALLOCATION
+
+            VM2_RESTORE();
+
+            AR_LOG_VM2("upvalue " << i << " = " << storage.as_unsafe<VectorStorage>()->data[i] << " " << storage.as_unsafe<VectorStorage>()->data[i].upvalue())
+          }
+          closure = state.gc.allocate(CLOSURE, sizeof(Closure));
+
+          //closure.procedure_install(&State::apply_vm);
+          closure.procedure_install((c_closure_t) & arete::apply_vm);
+
+          closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
+          closure.as_unsafe<Closure>()->function = *(stack-1);
+
+          // VM ALLOCATION
+
+          *(stack-1) = closure;
+        }
+        VM2_RESTORE();
+        VM_DISPATCH();  
       }
 
       VM_CASE(OP_APPLY):
