@@ -5,7 +5,7 @@
     n
     (+ (fib (- n 1)) (fib (- n 2)))))
 
-(vmfunction->native! fib)
+;(vmfunction->native! fib)
 
-(display (fib 36)) (newline)
+(display (fib 35)) (newline)
 

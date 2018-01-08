@@ -263,32 +263,47 @@ struct VMFrame2 {
 // Upvalues we don't actually need to interact with regularly, just at the beginning and end
 // of the function, so we don't really need them as easily accessible
 
+// Restore only GC-moved pointers.
+
+#define VM2_RESTORE_GC() \
+  vfn = f.fn.as_unsafe<VMFunction>(); \
+  cp = (size_t*)((((size_t) vfn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
+  code = vfn->code_pointer();
+
 #define VM2_RESTORE() \
   vfn = f.fn.as_unsafe<VMFunction>(); \
   locals = &state.gc.vm_stack[sff_offset]; \
-  std::cout << "stack offset:" << ((size_t)stack ) - ((size_t) sbegin) << std::endl; \
-  stack = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count + ((((size_t)stack) - ((size_t)sbegin)) / 8)]; \
+  /*std::cout << "stack offset:" << ((size_t)stack ) - ((size_t) sbegin) << std::endl; */\
+  stack = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count + (((((size_t)stack) - ((size_t)sbegin))) / 8)]; \
   sbegin = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count]; \
   cp = (size_t*)((((size_t) vfn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
   code = vfn->code_pointer();
 
 #define AR_LOG_VM2(msg) \
-  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || vfn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
+  if(false && ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || vfn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", msg); \
   }
 
 Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 #if VM_REWRITE
-  std::cout << "apply_vm called" << std::endl;
+  //std::cout << "apply_vm called" << std::endl;
 
   size_t frames_lost = 0;
 
   // Function frame, allocated on stack
   size_t sff_offset = state.gc.vm_stack_used;
 
+tail:
   VMFrame2 f(state, Value((HeapValue*) fnp));
   AR_FRAME(state, f.fn, f.closure);
 
+  // We keep these pointers to garbage-collected values outside of the GC frame, because it allows
+  // the compiler to store them in registers, providing a modest speedup.
+
+  // But because of that, they have to be restored after anything that might call the GC
+
+  // In addition, pointers to the VM stack (which is managed manually, but can be realloc) have to
+  // be updated after anything that might result in another apply_vm call
   Value exception;
   VMFunction* vfn = static_cast<VMFunction*>(f.fn.heap);
   Value *locals, *stack = 0, *sbegin = 0;
@@ -304,7 +319,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
   // Initialize local variables
   memset(locals, 0, f.vm_stack_used * sizeof(Value*));
-  memcpy(locals, argv, std::max(argc, (size_t)vfn->max_arity) * sizeof(Value*));
+  memcpy(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
 
   if(vfn->upvalue_count) {
     Value* upvalues = &state.gc.vm_stack[sff_offset + vfn->local_count];
@@ -328,12 +343,14 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
     &&LABEL_OP_UPVALUE_GET, &&LABEL_OP_UPVALUE_SET, &&LABEL_OP_CLOSE_OVER,
     &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
     &&LABEL_OP_RETURN,
-    0, 0, 0, 0, 
-    &&LABEL_OP_ARGC_EQ, 0, 0, 0,
+    &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
+    &&LABEL_OP_ARGC_EQ, &&LABEL_OP_ARGC_GTE, &&LABEL_OP_ARG_OPTIONAL, &&LABEL_OP_ARGV_REST,
+    // Extended instructions
+    0, 0, 0, 0
   };
 
-  std::cout << "Offset of frame storage: " << ((size_t)locals - (size_t)state.gc.vm_stack) << std::endl;
-  std::cout << "Offset of stack: " << ((size_t)stack - (size_t)state.gc.vm_stack) << std::endl;
+  //std::cout << "Offset of frame storage: " << ((size_t)locals - (size_t)state.gc.vm_stack) << std::endl;
+  //std::cout << "Offset of stack: " << ((size_t)stack - (size_t)state.gc.vm_stack) << std::endl;
 
   while(true) {
 #if AR_COMPUTED_GOTO
@@ -353,12 +370,15 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
       }
 
       VM_CASE(OP_PUSH_IMMEDIATE): {
+        AR_LOG_VM2("push-immediate " << (size_t) *cp);
+        // std::cout << (size_t) stack << ' ' << (size_t) sbegin << std::endl;
         (*stack++) = VM_NEXT_INSN();
         VM_DISPATCH();
       }
 
       VM_CASE(OP_POP): {
-        stack--;
+        AR_LOG_VM2("pop");
+        (*stack--);
         VM_DISPATCH();
       }
 
@@ -438,7 +458,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
           storage = state.make_vector_storage(upvalue_count);
 
-          VM2_RESTORE();
+          VM2_RESTORE_GC();
           // VM ALLOCATION
 
           Value* upvalues = &state.gc.vm_stack[sff_offset + vfn->local_count];
@@ -455,7 +475,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
             }
             // VM ALLOCATION
 
-            VM2_RESTORE();
+            VM2_RESTORE_GC();
 
             AR_LOG_VM2("upvalue " << i << " = " << storage.as_unsafe<VectorStorage>()->data[i] << " " << storage.as_unsafe<VectorStorage>()->data[i].upvalue())
           }
@@ -471,22 +491,20 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
           *(stack-1) = closure;
         }
-        VM2_RESTORE();
+        VM2_RESTORE_GC();
         VM_DISPATCH();  
       }
 
-      VM_CASE(OP_APPLY):
-      VM_CASE(OP_APPLY_TAIL): {
+      VM_CASE(OP_APPLY): {
         size_t fargc = VM_NEXT_INSN();
         Value afn = *(stack - (fargc + 1));
+        AR_LOG_VM2("apply " << fargc << " " << afn);
         if(AR_LIKELY(afn.procedurep())) {
-          std::cout << afn.bits << std::endl;
-          std::cout << "procedure addr" << (size_t)afn.as_unsafe<Procedure>()->procedure_addr << std::endl;
-          *(stack - (fargc + 1)) = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) (*(stack - fargc - 1)).heap);
-          std::cout << (ptrdiff_t) stack << std::endl;
+          Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) (*(stack - fargc - 1)).heap);
           VM2_RESTORE();
-          std::cout << (ptrdiff_t) stack << std::endl;
+          *(stack - (fargc + 1)) = ret;
           stack -= fargc;
+
 
           if((*(stack-1)).is_active_exception()) {
             exception = *(stack-1);
@@ -494,7 +512,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
           }
         } else {
           std::ostringstream os;
-          os << "vm: attempt to apply non-applicable value " << *(stack - 1);
+          os << "vm: attempt to apply non-applicable value " << afn;
           exception = state.eval_error(os.str());
           goto exception;
         }
@@ -502,9 +520,97 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
         VM_DISPATCH();
       }
 
+      VM_CASE(OP_APPLY_TAIL): {
+        size_t fargc = VM_NEXT_INSN();
+
+        Value afn = *(stack - fargc - 1);
+        Value to_apply = afn;
+        AR_LOG_VM2("apply-tail fargc " << fargc << " fn: " << afn);
+
+        if(AR_LIKELY(afn.procedurep())) {
+          // Stack frame is trivially reusable (same function, same argument count, no closures)
+          if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
+            frames_lost++;
+
+            afn = afn.closure_unbox();
+
+            state.temps.clear();
+            state.temps.insert(state.temps.end(), stack - fargc, stack);
+
+            argv = &state.temps[0];
+            argc = fargc;
+            fnp = (void*) afn.bits;
+
+            goto tail;
+          } else {
+            Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) (*(stack - fargc - 1)).heap);
+            VM2_RESTORE();
+            *(stack - (fargc + 1)) = ret;
+            stack -= fargc;
+
+            if((*(stack-1)).is_active_exception()) {
+              exception = *(stack-1);
+              goto exception;
+            }
+          }
+        } else {
+          std::ostringstream os;
+          os << "vm: attempt to apply non-applicable value " << afn;
+          exception = state.eval_error(os.str());
+          goto exception;
+        }
+      }
+
       VM_CASE(OP_RETURN): {
         goto ret;
       }
+
+      VM_CASE(OP_JUMP): {
+        size_t jmp = VM_NEXT_INSN();
+        AR_LOG_VM2("jump " << jmp);
+
+        VM_JUMP(jmp);
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_JUMP_WHEN): {
+        size_t jmp_offset = VM_NEXT_INSN();
+        Value val = *(stack-1);
+
+        if(val == C_FALSE) {
+          AR_LOG_VM2("jump-if-false jumping " << jmp_offset);
+          VM_JUMP(jmp_offset);
+        } else {
+          AR_LOG_VM2("jump-if-false not jumping" << jmp_offset);
+        }
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_JUMP_WHEN_POP): {
+        size_t jmp_offset = VM_NEXT_INSN();
+        if((*--stack) == C_FALSE) {
+          VM_JUMP(jmp_offset);
+        }
+
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_JUMP_UNLESS): {
+        size_t jmp_offset = VM_NEXT_INSN();
+        Value val = *(stack-1);
+
+        if(val == C_FALSE) {
+          AR_LOG_VM2("jump-if-true not jumping " << jmp_offset);
+        } else {
+          AR_LOG_VM2("jump-if-true jumping " << jmp_offset);
+          VM_JUMP(jmp_offset);
+        }
+
+        VM_DISPATCH();
+      }
+
 
       VM_CASE(OP_ARGC_EQ): {
         size_t eargc = VM_NEXT_INSN();
@@ -515,6 +621,45 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
           exception = state.eval_error(os.str());
           goto exception;
         }
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ARGC_GTE): {
+        size_t eargc = VM_NEXT_INSN();
+
+        AR_LOG_VM2("argc-gte " << eargc);
+
+        if(AR_UNLIKELY(argc < eargc)) {
+          std::ostringstream os;
+          os << "function expected at least " << eargc << " arguments but got " << argc;
+          exception = state.eval_error(os.str());
+          goto exception;
+        }
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ARG_OPTIONAL): {
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ARGV_REST): {
+        if(argc <= vfn->max_arity) {
+          locals[vfn->max_arity] = C_NIL;
+        } else {
+          // argv may be &temps[0] if this is a tail call
+          if(argv == &state.temps[0]) {
+            locals[vfn->max_arity] = state.temps_to_list(vfn->max_arity);
+          } else {
+            state.temps.clear();
+            unsigned i;
+            state.temps.insert(state.temps.end(), &argv[vfn->max_arity], &argv[argc]);
+
+            locals[vfn->max_arity] = state.temps_to_list();
+
+            //std::cout << argv[f.fn->max_arity] << std::endl;
+          }
+        }
+        VM2_RESTORE_GC();
         VM_DISPATCH();
       }
     }
