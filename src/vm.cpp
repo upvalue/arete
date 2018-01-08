@@ -108,7 +108,7 @@
     cp = (size_t*)((((size_t) f.fn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
     code = f.fn->code_pointer();
 
-#define AR_VM_LOG_ALWAYS true
+#define AR_VM_LOG_ALWAYS false
 
 #define AR_LOG_VM(msg) \
   if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || f.fn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
@@ -237,6 +237,7 @@ struct VMFrame2 {
   ~VMFrame2() {
     VMFunction* vfn = fn.as<VMFunction>();
     Value* upvalues = &state.gc.vm_stack[state.gc.vm_stack_used - vm_stack_used + vfn->local_count];
+    //std::cout << "closing over " << vfn->upvalue_count << " upvalues" << std::endl;
     for(size_t i = 0; i != vfn->upvalue_count; i++) {
       AR_ASSERT(upvalues[i].heap_type_equals(UPVALUE));
       upvalues[i].upvalue_close();
@@ -280,7 +281,7 @@ struct VMFrame2 {
   code = vfn->code_pointer();
 
 #define AR_LOG_VM2(msg) \
-  if(false && ((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || vfn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
+  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || vfn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
     ARETE_LOG((ARETE_LOG_TAG_VM), "vm", msg); \
   }
 
@@ -326,11 +327,17 @@ tail:
     state.gc.protect_argc = argc;
     state.gc.protect_argv = argv;
 
-    AR_LOG_VM2("allocating space for " << vfn->free_variables->length << " upvalues");
+    //AR_LOG_VM2("allocating space for " << vfn->free_variables->length << " upvalues");
 
     for(size_t i = 0; i != f.fn.as_unsafe<VMFunction>()->free_variables->length; i++) {
       upvalues[i] = state.gc.allocate(UPVALUE, sizeof(Upvalue));
       size_t idx = ((size_t*) f.fn.as_unsafe<VMFunction>()->free_variables->data)[i];
+      // TODO: Idea here
+
+      // You can't tie something to locals because, unlike the stack, it might change.
+      // Alternatives would be to get an absolute index, and require dereferencing upvalues
+      // to involve State.
+
       upvalues[i].as<Upvalue>()->U.local = &locals[idx];
     }
 
@@ -435,7 +442,8 @@ tail:
       VM_CASE(OP_UPVALUE_GET): {
         size_t idx = VM_NEXT_INSN();
         AR_LOG_VM2("upvalue-get " << idx);
-        (*stack++) = f.closure.as_unsafe<Closure>()->upvalues->data[idx].upvalue();
+        Value upval = f.closure.as_unsafe<Closure>()->upvalues->data[idx];
+        (*stack++) = upval.upvalue();
         VM_DISPATCH();
       }
 
@@ -471,6 +479,8 @@ tail:
               AR_LOG_VM2("enclosing free variable " << i << " from closure idx " << idx);
               state.vector_storage_append(storage, f.fn.as<Closure>()->upvalues->data[idx]);
             } else {
+              AR_LOG_VM2("enclosing local variable " << idx);
+              AR_ASSERT(upvalues[idx].heap_type_equals(UPVALUE));
               state.vector_storage_append(storage, upvalues[idx]);
             }
             // VM ALLOCATION
@@ -485,7 +495,10 @@ tail:
           closure.procedure_install((c_closure_t) & arete::apply_vm);
 
           closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
+
           closure.as_unsafe<Closure>()->function = *(stack-1);
+
+          AR_ASSERT(closure.as_unsafe<Closure>()->function.heap_type_equals(VMFUNCTION));
 
           // VM ALLOCATION
 
@@ -500,7 +513,7 @@ tail:
         Value afn = *(stack - (fargc + 1));
         AR_LOG_VM2("apply " << fargc << " " << afn);
         if(AR_LIKELY(afn.procedurep())) {
-          Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) (*(stack - fargc - 1)).heap);
+          Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, afn.heap);
           VM2_RESTORE();
           *(stack - (fargc + 1)) = ret;
           stack -= fargc;
@@ -539,11 +552,11 @@ tail:
 
             argv = &state.temps[0];
             argc = fargc;
-            fnp = (void*) afn.bits;
+            fnp = (void*) to_apply.bits;
 
             goto tail;
           } else {
-            Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) (*(stack - fargc - 1)).heap);
+            Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) to_apply.heap);
             VM2_RESTORE();
             *(stack - (fargc + 1)) = ret;
             stack -= fargc;
@@ -656,7 +669,6 @@ tail:
 
             locals[vfn->max_arity] = state.temps_to_list();
 
-            //std::cout << argv[f.fn->max_arity] << std::endl;
           }
         }
         VM2_RESTORE_GC();
@@ -665,7 +677,6 @@ tail:
     }
 
   }
-  state.gc.collect();
 
   exception:
 
@@ -1018,6 +1029,7 @@ tail:
               AR_ASSERT(f.closure->upvalues->data[idx].heap_type_equals(UPVALUE));
               state.vector_storage_append(storage, f.closure->upvalues->data[idx]);
             } else {
+              AR_LOG_VM("enclosing local variable " << idx);
               state.vector_storage_append(storage, f.upvalues[idx]);
             }
             // VM ALLOCATION
@@ -1159,7 +1171,6 @@ tail:
 
             f.locals[f.fn->max_arity] = state.temps_to_list();
 
-            //std::cout << argv[f.fn->max_arity] << std::endl;
           }
         }
         VM_RESTORE();
