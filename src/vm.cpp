@@ -100,6 +100,10 @@
   { std::ostringstream __os; __os << msg ; f.exception = state.make_exception(type, __os.str()); \
     goto exception;}
 
+#define VM2_EXCEPTION(type, msg) \
+  { std::ostringstream __os; __os << msg ; exception = state.make_exception(type, __os.str()); \
+    goto exception;}
+
 //#define VM_CODE() (assert(gc.live((HeapValue*)f.code)), f.code)
 //#define VM_CODE() (f.code)
 
@@ -229,9 +233,12 @@ struct VMFrame2 {
   VMFrame2(State& state_, Value fnp): state(state_) {
     closure = fnp;
     fn = closure.closure_unbox();
+    AR_ASSERT(state.gc.live(closure.heap));
+    AR_ASSERT(state.gc.live(fn.heap));
+    AR_ASSERT("Wizard fight" && arete::current_state->gc.live(fn.heap));
     VMFunction* vfn = fn.as<VMFunction>();
     vm_stack_used = vfn->local_count + vfn->upvalue_count + vfn->stack_max;
-    state.gc.grow_stack(vm_stack_used);
+    //state.gc.grow_stack(vm_stack_used);
   }
 
   ~VMFrame2() {
@@ -240,7 +247,8 @@ struct VMFrame2 {
     //std::cout << "closing over " << vfn->upvalue_count << " upvalues" << std::endl;
     for(size_t i = 0; i != vfn->upvalue_count; i++) {
       AR_ASSERT(upvalues[i].heap_type_equals(UPVALUE));
-      upvalues[i].upvalue_close();
+      upvalues[i].as_unsafe<Upvalue>()->U.converted = state.gc.vm_stack[upvalues[i].as_unsafe<Upvalue>()->U.vm_local_idx];
+      upvalues[i].heap->set_header_bit(Value::UPVALUE_CLOSED_BIT);
     }
     state.gc.shrink_stack(vm_stack_used);
   }
@@ -275,7 +283,7 @@ struct VMFrame2 {
   vfn = f.fn.as_unsafe<VMFunction>(); \
   locals = &state.gc.vm_stack[sff_offset]; \
   /*std::cout << "stack offset:" << ((size_t)stack ) - ((size_t) sbegin) << std::endl; */\
-  stack = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count + (((((size_t)stack) - ((size_t)sbegin))) / 8)]; \
+  stack = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count + (((((size_t)stack) - ((size_t)sbegin))) / sizeof(void*))]; \
   sbegin = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count]; \
   cp = (size_t*)((((size_t) vfn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
   code = vfn->code_pointer();
@@ -295,7 +303,21 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
   size_t sff_offset = state.gc.vm_stack_used;
 
 tail:
+  AR_ASSERT(state.gc.live((HeapValue*) fnp));
   VMFrame2 f(state, Value((HeapValue*) fnp));
+
+  // If argv points to somewhere on the existing stack, we need to update it
+  if(state.gc.stack_needs_realloc(f.vm_stack_used) && ((size_t)argv >= (size_t)state.gc.vm_stack && (size_t)argv <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*))))) {
+    size_t argv_offset = ((size_t)argv) - ((size_t) state.gc.vm_stack);
+
+    state.gc.grow_stack(f.vm_stack_used);
+
+    argv = (Value*) ((((size_t) state.gc.vm_stack) + argv_offset));
+  } else {
+    state.gc.grow_stack(f.vm_stack_used);
+  }
+
+
   AR_FRAME(state, f.fn, f.closure);
 
   // We keep these pointers to garbage-collected values outside of the GC frame, because it allows
@@ -317,11 +339,20 @@ tail:
   // has upvalues, or if a function has rest arguments). We have to take care to make sure everything
   // is garbage collected at the allocation points here. So we check function arity right before
   // starting the actual function.
+  //std::cout << (ptrdiff_t) state.gc.vm_stack << std::endl;
+  //std::cout << (ptrdiff_t) locals << std::endl;
+  AR_ASSERT((size_t)locals >= (size_t)state.gc.vm_stack && (size_t)locals <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*))));
 
-  // Initialize local variables
+  // Problem: ARGV is moved after stack growth!
+
+  // Zero out the whole stack
   memset(locals, 0, f.vm_stack_used * sizeof(Value*));
+  // Initialize local variables
   memcpy(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
 
+  // Here we allocate all upvalues needed by functions that will be enclosed by this function.
+  // Each upvalue is tied to a local until control exits this function, at which point they become
+  // freestanding
   if(vfn->upvalue_count) {
     Value* upvalues = &state.gc.vm_stack[sff_offset + vfn->local_count];
     state.gc.protect_argc = argc;
@@ -331,16 +362,17 @@ tail:
 
     for(size_t i = 0; i != f.fn.as_unsafe<VMFunction>()->free_variables->length; i++) {
       upvalues[i] = state.gc.allocate(UPVALUE, sizeof(Upvalue));
+      AR_ASSERT(state.gc.live(f.fn));
+      AR_ASSERT(state.gc.live(upvalues[i]));
       size_t idx = ((size_t*) f.fn.as_unsafe<VMFunction>()->free_variables->data)[i];
-      // TODO: Idea here
+      size_t vm_stack_idx = ((size_t)&locals[idx] - (size_t) state.gc.vm_stack) / sizeof(void*);
 
-      // You can't tie something to locals because, unlike the stack, it might change.
-      // Alternatives would be to get an absolute index, and require dereferencing upvalues
-      // to involve State.
 
-      upvalues[i].as<Upvalue>()->U.local = &locals[idx];
+      AR_ASSERT(current_state->gc.live(upvalues[i]));
+      upvalues[i].as<Upvalue>()->U.vm_local_idx = vm_stack_idx;
     }
 
+    VM2_RESTORE_GC();
     state.gc.protect_argc = 0;
   }
 
@@ -353,7 +385,15 @@ tail:
     &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
     &&LABEL_OP_ARGC_EQ, &&LABEL_OP_ARGC_GTE, &&LABEL_OP_ARG_OPTIONAL, &&LABEL_OP_ARGV_REST,
     // Extended instructions
-    0, 0, 0, 0
+    &&LABEL_OP_ADD, &&LABEL_OP_SUB,
+    &&LABEL_OP_LT,
+    &&LABEL_OP_CAR,
+    &&LABEL_OP_LIST_REF,
+    &&LABEL_OP_NOT,
+    &&LABEL_OP_EQ,
+    &&LABEL_OP_FX_LT,
+    &&LABEL_OP_FX_ADD,
+    &&LABEL_OP_FX_SUB,
   };
 
   //std::cout << "Offset of frame storage: " << ((size_t)locals - (size_t)state.gc.vm_stack) << std::endl;
@@ -394,10 +434,7 @@ tail:
         Value global = vfn->constants->data[idx];
         Value value = global.symbol_value();
         if(value == C_UNDEFINED) {
-          std::ostringstream os;
-          os << "reference to undefined variable " << global;
-          exception = state.eval_error(os.str());
-          goto exception;
+          VM2_EXCEPTION("eval", "reference to undefined variable " << global);
         }
         (*stack++) = global.symbol_value();
         VM_DISPATCH();
@@ -413,10 +450,7 @@ tail:
         AR_LOG_VM2("global-set (" << (err_on_undefined ? "set!" : "define") << ") " << key << " = " << val);
 
         if(err_on_undefined && key.symbol_value() == C_UNDEFINED) {
-          std::ostringstream os;
-          os << "attempt to set! undefined variable " << key;
-          exception = state.eval_error(os.str());
-          goto exception;
+          VM2_EXCEPTION("eval", "attempt to set! undefined variable " << key);
         }
 
         key.set_symbol_value(val);
@@ -442,16 +476,26 @@ tail:
       VM_CASE(OP_UPVALUE_GET): {
         size_t idx = VM_NEXT_INSN();
         AR_LOG_VM2("upvalue-get " << idx);
-        Value upval = f.closure.as_unsafe<Closure>()->upvalues->data[idx];
-        (*stack++) = upval.upvalue();
+        Upvalue* upval = f.closure.as_unsafe<Closure>()->upvalues->data[idx].as_unsafe<Upvalue>();
+        if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
+          (*stack++) = upval->U.converted;
+        } else {
+          (*stack++) = state.gc.vm_stack[upval->U.vm_local_idx];
+        }
+        // (*stack++) = upval.upvalue();
         VM_DISPATCH();
       }
 
       VM_CASE(OP_UPVALUE_SET): {
         size_t idx = VM_NEXT_INSN();
+        Upvalue* upval = f.closure.as_unsafe<Closure>()->upvalues->data[idx].as_unsafe<Upvalue>();
         Value val = (*--stack);
-        Value upval = f.closure.as_unsafe<Closure>()->upvalues->data[idx];
-        upval.upvalue_set(val);
+        if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
+          upval->U.converted = val;
+        } else {
+          state.gc.vm_stack[upval->U.vm_local_idx] = val;
+        }
+        //upval.upvalue_set(val);
         AR_LOG_VM2("upvalue-set " << idx << " = " << val);
         VM_DISPATCH();
       }
@@ -477,7 +521,7 @@ tail:
 
             if(is_enclosed) {
               AR_LOG_VM2("enclosing free variable " << i << " from closure idx " << idx);
-              state.vector_storage_append(storage, f.fn.as<Closure>()->upvalues->data[idx]);
+              state.vector_storage_append(storage, f.closure.as<Closure>()->upvalues->data[idx]);
             } else {
               AR_LOG_VM2("enclosing local variable " << idx);
               AR_ASSERT(upvalues[idx].heap_type_equals(UPVALUE));
@@ -524,10 +568,7 @@ tail:
             goto exception;
           }
         } else {
-          std::ostringstream os;
-          os << "vm: attempt to apply non-applicable value " << afn;
-          exception = state.eval_error(os.str());
-          goto exception;
+          VM2_EXCEPTION("eval", "vm: attempt to apply non-applicable value" << afn);
         }
 
         VM_DISPATCH();
@@ -541,7 +582,6 @@ tail:
         AR_LOG_VM2("apply-tail fargc " << fargc << " fn: " << afn);
 
         if(AR_LIKELY(afn.procedurep())) {
-          // Stack frame is trivially reusable (same function, same argument count, no closures)
           if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
             frames_lost++;
 
@@ -567,10 +607,7 @@ tail:
             }
           }
         } else {
-          std::ostringstream os;
-          os << "vm: attempt to apply non-applicable value " << afn;
-          exception = state.eval_error(os.str());
-          goto exception;
+          VM2_EXCEPTION("eval", "vm: attempt to apply non-applicable value" << afn);
         }
       }
 
@@ -629,10 +666,7 @@ tail:
         size_t eargc = VM_NEXT_INSN();
         AR_LOG_VM2("argc-eq " << eargc);
         if(AR_UNLIKELY(argc != eargc)) {
-          std::ostringstream os;
-          os << "function expected exactly " << eargc << " arguments but got " << argc;
-          exception = state.eval_error(os.str());
-          goto exception;
+          VM2_EXCEPTION("eval", "function expected exactly " << eargc << " arguments but got " << argc);
         }
         VM_DISPATCH();
       }
@@ -643,10 +677,7 @@ tail:
         AR_LOG_VM2("argc-gte " << eargc);
 
         if(AR_UNLIKELY(argc < eargc)) {
-          std::ostringstream os;
-          os << "function expected at least " << eargc << " arguments but got " << argc;
-          exception = state.eval_error(os.str());
-          goto exception;
+          VM2_EXCEPTION("eval", "function expected at least " << eargc << " arguments but got " << argc);
         }
         VM_DISPATCH();
       }
@@ -672,6 +703,181 @@ tail:
           }
         }
         VM2_RESTORE_GC();
+        VM_DISPATCH();
+      }
+
+#define STACK_PICK(i) (*(stack - (i)))
+
+      VM_CASE(OP_ADD): {
+        size_t argc = VM_NEXT_INSN();
+        size_t i;
+        ptrdiff_t fx = 0;
+        for(i = argc; i != 0; i--) {
+          Value n(*(stack - i));
+          if(n.fixnump()) {
+            fx += n.fixnum_value();
+          } else {
+            break;
+          }
+        }
+        if(i == 0) {
+          stack -= argc;
+          (*stack++) = Value::make_fixnum(fx);
+        } else {
+          double fl = (double) fx;
+          for(; i != 0; i--) {
+            Value n(*(stack - i));
+            if(n.fixnump()) {
+              fl += (double) n.fixnum_value();
+            } else if(n.heap_type_equals(FLONUM)) {
+              fl += n.flonum_value();
+            } else {
+              VM2_EXCEPTION("type", "vm primitive + expected a fixnum or flonum as argument " << i << " but got " << n.type());
+            }
+          }
+          stack -= argc;
+          (*stack++) = state.make_flonum(fl);
+          VM2_RESTORE_GC();
+        }
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_SUB): {
+        size_t argc = VM_NEXT_INSN();
+        // TODO Separate unary operator
+        if(argc == 0) {
+          VM2_EXCEPTION("eval", "vm primitive - expects at least one argument");
+        } else if(argc == 1) {
+          if(STACK_PICK(1).fixnump()) {
+            *(stack - 1) = Value::make_fixnum(-STACK_PICK(1).fixnum_value());
+          } else if(STACK_PICK(1).heap_type_equals(FLONUM)) {
+            *(stack - 1) = state.make_flonum(-STACK_PICK(1).flonum_value());
+          } else {
+            VM2_EXCEPTION("type", "vm primitive - expected fixnum or flonum as argument but got " << STACK_PICK(1).type());
+          }
+        } else {
+          Value n(*(stack - argc));
+          ptrdiff_t fx = 0;
+          size_t i = 1;
+          for(i; i != argc; i++) {
+            Value n2(*(stack - i));
+            if(n2.fixnump()) {
+              fx += n2.fixnum_value();
+            } else {
+              break;
+            }
+          }
+          if(i == argc) {
+            *(stack - argc) = Value::make_fixnum(n.fixnum_value() - fx);
+          } else {
+            double fl = (double) fx;
+            for(; i != argc; i++) {
+              Value n2(STACK_PICK(i));
+              if(n2.fixnump()) {
+                fl += n2.fixnum_value();
+              } else if(n2.heap_type_equals(FLONUM)) {
+                fl += n2.flonum_value();
+              } else {
+                VM2_EXCEPTION("type", "vm primitive - expected fixnum or flonum as argument but got " << STACK_PICK(i).type());
+              }
+            }
+            if(n.fixnump()) {
+              *(stack - argc) = state.make_flonum((double)n.fixnum_value() - fl);
+            } else {
+              *(stack - argc) = state.make_flonum(n.flonum_value() - fl);
+            }
+          }
+          stack -= (argc - 1);
+        }
+
+        VM2_RESTORE_GC();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_LT): {
+        size_t argc = VM_NEXT_INSN();
+        for(size_t i = 0; i != argc - 1; i++) {
+          Value n(STACK_PICK(argc-i));
+          Value n2(STACK_PICK(argc-i-1));
+          if(!n.numeric()) {
+            VM2_EXCEPTION("type", "< expects all numeric arguments but argument " << i+1 << " is a " << n.type());
+          } else if(!n2.numeric()) {
+            VM2_EXCEPTION("type", "< expects all numeric arguments but argument " << i+2 << " is a " << n2.type());
+          }
+          if(n.fixnump()) {
+            if(n2.fixnump() && !(n.fixnum_value() < n2.fixnum_value())) {
+              *(stack - argc) = C_FALSE;
+              goto fals;
+            } else if(n2.heap_type_equals(FLONUM) && !(n.fixnum_value() < n2.flonum_value())) {
+              *(stack - argc) = C_FALSE;
+              goto fals;
+            } 
+          } else {
+            if(n2.fixnump() && !(n.flonum_value() < n2.fixnum_value())) {
+              *(stack - argc) = C_FALSE;
+              goto fals;
+            } else if(n2.heap_type_equals(FLONUM) && !(n.flonum_value() < n2.flonum_value())) {
+              *(stack - argc) = C_FALSE;
+              goto fals;
+            } 
+          }
+        }
+        *(stack - argc) = C_TRUE;
+        fals:
+        stack -= (argc - 1);
+        VM_DISPATCH();
+      }
+
+#define VM_TOP_PAIR_CHECK(name) \
+  if(AR_UNLIKELY(!STACK_PICK(1).heap_type_equals(PAIR))) { \
+    VM2_EXCEPTION("type", "vm primitive " name " expected a pair as its argument but got " << STACK_PICK(1).type()); \
+  }
+
+      VM_CASE(OP_CAR): {
+        VM_TOP_PAIR_CHECK("car");
+        *(stack - 1) = STACK_PICK(1).car();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_LIST_REF): {
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_NOT): {
+        *(stack - 1) = (*(stack - 1) == C_FALSE ? C_TRUE : C_FALSE);
+        VM_DISPATCH();
+      }
+      
+      VM_CASE(OP_EQ): {
+        *(stack - 2) = Value::make_boolean(STACK_PICK(2).bits == STACK_PICK(1).bits);
+        stack--;
+        VM_DISPATCH();
+      }
+
+    #define VM_FX_CHECK(name) \
+      if(!STACK_PICK(1).fixnump() || !STACK_PICK(2).fixnump()) { \
+        VM2_EXCEPTION("type", "vm primitive " name " expected a fixnum as its arguments but got " << STACK_PICK(2).type() << ' ' << STACK_PICK(1).type()) \
+      }
+
+      VM_CASE(OP_FX_LT): {
+        VM_FX_CHECK("fx<");
+        *(stack - 2) = STACK_PICK(2).bits < STACK_PICK(1).bits ? C_TRUE : C_FALSE;
+        stack--;
+        //*(stack--) = ((*(stack - 1)).fixnump() && (*(stack - 2)).fixnump() && (*(stack - 2)).bits < *(stack -)
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_FX_ADD): {
+        VM_FX_CHECK("fx+");
+        *(stack - 2) = Value::make_fixnum(STACK_PICK(2).fixnum_value() + STACK_PICK(1).fixnum_value());
+        stack--;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_FX_SUB): {
+        VM_FX_CHECK("fx-");
+        *(stack - 2) = Value::make_fixnum(STACK_PICK(2).fixnum_value() - STACK_PICK(1).fixnum_value());
+        stack--;
         VM_DISPATCH();
       }
     }

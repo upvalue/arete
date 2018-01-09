@@ -1159,11 +1159,17 @@ inline VectorStorage* Value::vm_function_constants() const {
   return as<VMFunction>()->constants;
 }
 
+/**
+ * An free variable. When the function it is in is still alive on the stack, the upvalue contains
+ * an index into the stack noting where that variable can be found.
+ * After that function exits, it is converted into a freestanding garbage-collected variable
+ */
 struct Upvalue : HeapValue {
   union U {
     U(): converted(C_FALSE) {}
 
     Value* local;
+    size_t vm_local_idx;
     Value converted;
   } U;
 
@@ -1576,12 +1582,21 @@ struct GCCommon {
 
   template <class T> void visit_roots(T& visitor);
 
-  void grow_stack(size_t size) {
+  bool stack_needs_realloc(size_t size) const {
+    return (vm_stack_used + size) > vm_stack_size;
+  }
+
+  /** Check whether the VM stack needs to be grown and do it, if so
+   * @returns true if VM stack was grown
+   */
+  bool grow_stack(size_t size) {
     vm_stack_used += size;
     if(vm_stack_used > vm_stack_size) {
       vm_stack_size *= 2;
       vm_stack = static_cast<Value*>(realloc(vm_stack, vm_stack_size * sizeof(Value)));
+      return true;
     }
+    return false;
   }
 
   void shrink_stack(size_t size) {

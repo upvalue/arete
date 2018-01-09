@@ -284,16 +284,17 @@
   (alist->table '(
     ;; name min-argc max-argc variable-arity
     #|
+    (list-ref 2 2 #f)
+    |#
+    (< 2 2 #t)
     (+ 0 0 #t)
     (- 1 1 #t)
     (car 1 1 #f)
     (not 1 1 #f)
     (eq? 2 2 #f)
-    (list-ref 2 2 #f)
     (fx+ 2 2 #f)
     (fx- 2 2 #f)
     (fx< 2 2 #f)
-    |#
   ))
 )
 

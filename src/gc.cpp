@@ -262,10 +262,8 @@ void GCCommon::visit_roots(T& walker) {
     break;
   }
 
-  if(protect_argc > 0) {
-    for(size_t i = 0; i != protect_argc; i++) {
-      walker.touch((HeapValue**) &protect_argv[i]);
-    }
+  for(size_t i = 0; i != protect_argc; i++) {
+    walker.touch((HeapValue**) &protect_argv[i]);
   }
 
   for(size_t i = 0; i != vm_stack_used; i++) {
