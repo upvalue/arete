@@ -1490,32 +1490,6 @@ struct NativeFrame {
   Value values[1];
 };
 
-/**
- * Like frames, but specifically for the virtual machine which does complex stack allocation
- */
-struct VMFrame {
-  State& state;
-
-  VMFrame* previous;
-  VMFunction* fn;
-  Closure* closure;
-  Value* stack;
-  Value* locals;
-  Value* upvalues;
-  /** Pointer to wordcode, updated by the GC */
-  size_t *code;
-  Value exception;
-  size_t stack_i;
-  size_t depth;
-  bool destroyed;
-
-  VMFrame(State& state);
-  ~VMFrame();
-
-  void setup(Value to_apply);
-  void close_over();
-};
-
 /** An individual tracked pointer. Can be allocated on the heap. */
 struct Handle {
   State& state;
@@ -1559,7 +1533,6 @@ struct GCCommon {
   std::vector<Value> finalizers;
   std::vector<Value> finalizers2;
   NativeFrame* native_frames;
-  VMFrame* vm_frames;
   Value* vm_stack;
   size_t vm_stack_size;
   size_t vm_stack_used;

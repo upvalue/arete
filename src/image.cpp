@@ -387,7 +387,7 @@ void State::save_image(const std::string& path) {
 
   fwrite(&hdr, sizeof(ImageHeader), 1, f);
 
-  AR_ASSERT(!gc.vm_frames);
+  // AR_ASSERT(!gc.vm_stack_used && "image-save called during execution");
 
   ImageWriter writer(*this, f);
   writer.write_globals();

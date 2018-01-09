@@ -208,7 +208,6 @@ GCCommon::GCCommon(State& state_, size_t heap_size_):
   state(state_), 
   frames(0),
   native_frames(0),
-  vm_frames(0),
   vm_stack(static_cast<Value*>(calloc(512, sizeof(Value)))),
   vm_stack_size(512), vm_stack_used(0),
   protect_argc(0), protect_argv(0),
@@ -268,41 +267,6 @@ void GCCommon::visit_roots(T& walker) {
 
   for(size_t i = 0; i != vm_stack_used; i++) {
     walker.touch((HeapValue**) &vm_stack[i]);
-  }
-
-  VMFrame* link = vm_frames;
-  while(link != 0) {
-    VMFunction* fn = link->fn;
-
-    size_t stack_i = link->stack_i;
-    unsigned local_count = fn->local_count;
-    size_t free_vars = fn->free_variables ? fn->free_variables->length : 0;
-
-    walker.touch((HeapValue**) &link->fn);
-
-    walker.touch((HeapValue**) &link->exception);
-
-    for(size_t i = 0; i != free_vars; i++)
-      walker.touch((HeapValue**) &link->upvalues[i].heap);
-
-    if(link->closure != 0)
-      walker.touch((HeapValue**) &link->closure);
-
-    if(link->stack != 0)
-      for(size_t i = 0; i != stack_i; i++)
-        walker.touch((HeapValue**) &link->stack[i]);
-
-    if(link->locals != 0)
-      for(unsigned i = 0; i != local_count; i++)
-        walker.touch((HeapValue**) &link->locals[i]);
-
-    // Update code pointer.
-    //link->code = link->fn->code_pointer();
-
-    // I lost like two hours to a missing paren here
-    // Like this: link->code = (size_t*)(char*) (link->fn) + sizeof(VMFunction);
-    // Fun stuff.
-    link = link->previous;
   }
 }
 
