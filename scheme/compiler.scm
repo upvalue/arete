@@ -813,7 +813,9 @@
 
 (define (compile-optional fn x)
   (emit fn 'arg-optional (cadr x) 'past-optionals)
-  (print "$OPTIONAL" x))
+  (compile-expr fn (caddr x) #f x #f)
+  (emit fn 'local-set (cadr x))
+  )
 
 (define (compile-special-form fn x cd src type tail?)
   (compiler-log fn "compiling special form" type x)

@@ -505,6 +505,14 @@ tail:
       }
 
       VM_CASE(OP_ARG_OPTIONAL): {
+        size_t eargc = VM_NEXT_INSN();
+        size_t offset = VM_NEXT_INSN();
+        
+        AR_LOG_VM2("arg-optional " << eargc << ' ' << offset << ' ' << (argc > eargc ? "jumping" : "not jumping"));
+        if(argc > eargc) {
+          VM_JUMP(offset);
+        }
+
         VM_DISPATCH();
       }
 

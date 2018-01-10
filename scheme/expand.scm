@@ -783,7 +783,7 @@
   (cons-source x (make-rename #f 'lambda) (cons-source x bindings
                                                        (if (null? prepend-body)
                                                          body
-                                                         (cons-source x prepend-body (cons-source x (list (make-rename #f '$label-past-optionals)) body))))))
+                                                         (append1 (reverse prepend-body) (cons-source x (list (make-rename #f '$label-past-optionals)) body))))))
 
 (define (expand-if x env params)
   (define len (length x))
