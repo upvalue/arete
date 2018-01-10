@@ -80,6 +80,11 @@
   (if (eq? (top-level-value 'xtrace) #t)
     (apply print (cons "expander:" rest))))
 
+(define (append1 x y)
+  (if (pair? x)
+      (cons (car x) (append1 (cdr x) y))
+      y))
+
 (define (list-tail lst i)
   (if (or (null? lst) (not (pair? lst)))
     (if (and (null? lst) (fx= i 0))
@@ -730,11 +735,13 @@
              (raise-source x 'expand (print-string a "not supported yet" (list x))))
 
             ((identifier? a)
-
              (set! argi (fx+ argi 1))
-             (define-argument! new-env a)
-             
-             )
+
+             ((lambda (arg)
+                (if seen-optional
+                  (set! body (cons (list (make-rename #f '$optional) argi #f) body)))
+                arg)
+              (define-argument! new-env a)))
 
             ((pair? a)
              (if (not seen-optional)
@@ -743,7 +750,7 @@
              (if (not (identifier? (car a)))
                (raise-source a 'expand "argument name must be a valid identifier" (list a)))
 
-             (set! body (cons (cons (make-rename #f '$optional) (cons argi (expand (cdr a) new-env '((disallow-defines . #t))))) body))
+             (set! body (cons (list (make-rename #f '$optional) argi (expand (cdr a) new-env '((disallow-defines . #t)))) body))
 
              (set! argi (fx+ argi 1))
 
@@ -776,9 +783,6 @@
   (define bindings (car bindings-and-body))
   (define prepend-body (reverse (cdr bindings-and-body)))
   (define body (expand-map (cddr x) new-env '()))
-
-  ;(if (not (null? prepend-body))
-  ;  (print "!!!" prepend-body))
 
   (cons-source x (make-rename #f 'lambda) (cons-source x bindings
                                                        (if (null? prepend-body)

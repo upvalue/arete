@@ -71,11 +71,6 @@
           (begin
             (loop (fx+ i 1) (fn result (list-ref lst (fx+ i 1))))))))))
 
-(define (append1 x y)
-  (if (pair? x)
-      (cons (car x) (append (cdr x) y))
-      y))
-
 (define (append . lsts)
   (reduce (lambda (a b) (append1 a b)) lsts))
 

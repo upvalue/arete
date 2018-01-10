@@ -162,12 +162,12 @@ tail:
 
   // Problem: ARGV is moved after stack growth!
 
-  // size_t locals_size = std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*);
+  size_t locals_size = std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*);
   // Initialize local variables
   memcpy(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
   // Zero out whole stack
   // TODO: Necessary?
-  //memset((void*)((size_t)locals) + locals_size, 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
+  memset((void*)((size_t)locals) + locals_size, 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
 
   // Here we allocate all upvalues needed by functions that will be enclosed by this function.
   // Each upvalue is tied to a local until control exits this function, at which point they become

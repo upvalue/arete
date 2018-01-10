@@ -624,7 +624,9 @@
     (emit sub-fn 'argc-eq (OpenFn/min-arity sub-fn))
     (begin
       (emit sub-fn 'argc-gte (OpenFn/min-arity sub-fn))
-      (when (OpenFn/var-arity sub-fn)
+      ;; We generate argv-rest after the argc checks only for functions which don't take optional arguments
+      ;; Otherwise it will be generated after $label-rest-optionals
+      (when (and (OpenFn/var-arity sub-fn) (fx= (OpenFn/min-arity sub-fn) (OpenFn/max-arity sub-fn)))
         (emit sub-fn 'argv-rest))))
 
   (scan-local-defines sub-fn (cddr x))
@@ -834,7 +836,11 @@
 
     ;; Expander-generated builtins
     ($optional (compile-optional fn x))
-    ($label-past-optionals (register-label fn 'past-optionals))
+    ($label-past-optionals
+      (begin
+        (register-label fn 'past-optionals)
+        (when (OpenFn/var-arity fn)
+          (emit fn 'argv-rest))))
     (else
       (begin
         (raise 'compile-internal "unknown special form" (list type (car x)))))))
