@@ -99,15 +99,11 @@
 #define ARETE_GC_SEMISPACE 0
 #define ARETE_GC_INCREMENTAL 1
 
-#ifndef ARETE_GC_STRATEGY
-# define ARETE_GC_STRATEGY ARETE_GC_SEMISPACE
-#endif 
-
 #ifndef ARETE_GC_DEBUG
 # define ARETE_GC_DEBUG 0
 #endif
 
-#if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE && ARETE_GC_DEBUG == 1
+#if ARETE_GC_DEBUG == 1
 # define ARETE_ASSERT_LIVE(obj) \
    AR_ASSERT("attempt to invoke method on non-live object" && (arete::current_state->gc.live((obj)) == true));
 #endif
@@ -1643,31 +1639,6 @@ struct GCSemispace : GCCommon {
   }
 };
 
-/** Incremental garbage collector */
-struct GCIncremental : GCCommon {
-  unsigned char mark_bit;
-  std::vector<Block*> blocks;
-  size_t block_i, block_cursor;
-
-  GCIncremental(State& state_, size_t heap_size);
-  ~GCIncremental();
-
-  /** This doesn't do anything, but is here so GCSemispace::live calls can be used in normal
-   * source code */
-  bool live(const Value v) { (void) v; return true; }
-
-  bool marked(HeapValue* v) const {
-    return v->get_mark_bit() == mark_bit;
-  }
-
-  void mark(HeapValue* v);
-  void collect();
-  void grow_heap();
-  void run_finalizers(bool) {}
-
-  HeapValue* allocate(Type type, size_t size);
-};
-
 // RUN! The Arete Runtime
 
 /** A re-entrant instance of the Arete runtime */
@@ -1675,11 +1646,7 @@ struct State {
   struct EvalFrame;
   typedef std::unordered_map<std::string, Symbol*> symbol_table_t;
 
-#if ARETE_GC_STRATEGY == ARETE_GC_INCREMENTAL
-  GCIncremental gc;
-#elif ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE
   GCSemispace gc;
-#endif 
 
   /** Counts how many times gensym has been called; appended to the end of gensyms to ensure
    * their uniqueness */ 
@@ -2373,12 +2340,13 @@ enum {
   OP_SUB = 23,
   OP_LT = 24,
   OP_CAR = 25,
-  OP_LIST_REF = 26,
-  OP_NOT = 27,
-  OP_EQ = 28,
-  OP_FX_LT = 29,
-  OP_FX_ADD = 30,
-  OP_FX_SUB = 31,
+  OP_CDR = 26,
+  OP_LIST_REF = 27,
+  OP_NOT = 28,
+  OP_EQ = 29,
+  OP_FX_LT = 30,
+  OP_FX_ADD = 31,
+  OP_FX_SUB = 32,
 };
 
 inline Type Value::type() const {

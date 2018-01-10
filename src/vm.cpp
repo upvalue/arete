@@ -1,5 +1,7 @@
 // vm.cpp - Virtual machine
 
+#define NOMINMAX
+
 #include "arete.hpp"
 
 #define VM_NEXT_INSN() (*cp++)
@@ -27,11 +29,6 @@
 #define VM2_EXCEPTION(type, msg) \
   { std::ostringstream __os; __os << msg ; exception = state.make_exception(type, __os.str()); \
     goto exception;}
-
-// Restore pointers after any potential garbage collection
-#define VM_RESTORE() \
-    cp = (size_t*)((((size_t) f.fn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
-    code = f.fn->code_pointer();
 
 #define AR_VM_LOG_ALWAYS false
 
@@ -82,7 +79,6 @@ struct VMFrame2 {
   size_t depth;
 };
 
-
 // It is possible for pointers to be moved around during program execution; however, putting them
 // in an AR_FRAME tracking structure means they can't be stored in registers.
 
@@ -97,11 +93,13 @@ struct VMFrame2 {
 
 // VM2_RESTORE restores GC and stack pointers and is called after applications
 
+// TODO: Way to do this without division?
+
 #define VM2_RESTORE() \
   vfn = f.fn.as_unsafe<VMFunction>(); \
   locals = &state.gc.vm_stack[sff_offset]; \
   /*std::cout << "stack offset:" << ((size_t)stack ) - ((size_t) sbegin) << std::endl; */\
-  stack = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count + (((((size_t)stack) - ((size_t)sbegin))) / sizeof(void*))]; \
+  stack = (Value*)(((size_t)&state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count] + (((((size_t)stack) - ((size_t)sbegin)))))); \
   sbegin = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count]; \
   cp = (size_t*)((((size_t) vfn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
   code = vfn->code_pointer();
@@ -118,6 +116,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
   // Function frame, allocated on stack
   size_t sff_offset = state.gc.vm_stack_used;
+  Value exception;
 
 tail:
   AR_ASSERT(state.gc.live((HeapValue*) fnp));
@@ -134,6 +133,7 @@ tail:
     state.gc.grow_stack(f.vm_stack_used);
   }
 
+  // TODO: CHECK RECURSION LIMIT
 
   AR_FRAME(state, f.fn, f.closure);
 
@@ -144,11 +144,11 @@ tail:
 
   // In addition, pointers to the VM stack (which is managed manually, but can be realloc) have to
   // be updated after anything that might result in another apply_vm call
-  Value exception;
   VMFunction* vfn = static_cast<VMFunction*>(f.fn.heap);
   Value *locals, *stack = 0, *sbegin = 0;
-  size_t *cp = 0, *code = 0;
+  size_t  *code = 0;
 
+  size_t *cp = 0;
   // Calculate initial pointers to info
   VM2_RESTORE();
 
@@ -162,10 +162,12 @@ tail:
 
   // Problem: ARGV is moved after stack growth!
 
-  // Zero out the whole stack
-  memset(locals, 0, f.vm_stack_used * sizeof(Value*));
+  // size_t locals_size = std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*);
   // Initialize local variables
   memcpy(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
+  // Zero out whole stack
+  // TODO: Necessary?
+  //memset((void*)((size_t)locals) + locals_size, 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
 
   // Here we allocate all upvalues needed by functions that will be enclosed by this function.
   // Each upvalue is tied to a local until control exits this function, at which point they become
@@ -206,6 +208,7 @@ tail:
     &&LABEL_OP_ADD, &&LABEL_OP_SUB,
     &&LABEL_OP_LT,
     &&LABEL_OP_CAR,
+    &&LABEL_OP_CDR,
     &&LABEL_OP_LIST_REF,
     &&LABEL_OP_NOT,
     &&LABEL_OP_EQ,
@@ -655,6 +658,13 @@ tail:
         *(stack - 1) = STACK_PICK(1).car();
         VM_DISPATCH();
       }
+
+      VM_CASE(OP_CDR): {
+        VM_TOP_PAIR_CHECK("cdr");
+        *(stack - 1) = STACK_PICK(1).cdr();
+        VM_DISPATCH();
+      }
+
 
       VM_CASE(OP_LIST_REF): {
         VM_DISPATCH();

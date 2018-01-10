@@ -175,7 +175,7 @@
     return 
     jump jump-when jump-when-pop jump-unless
     argc-eq argc-gte arg-optional argv-rest
-    + - < car list-ref not eq? fx< fx+ fx-))
+    + - < car cdr list-ref not eq? fx< fx+ fx-))
 
 ;; Static labels
 (define static-labels '(past-optionals))
@@ -209,7 +209,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
-               (0 jump jump-when argc-optional jump-unless words close-over return car not argc-eq argc-gte argv-rest arg-optional)
+               (0 jump jump-when argc-optional jump-unless words close-over return car cdr not argc-eq argc-gte argv-rest arg-optional)
                (1 push-immediate push-constant global-get local-get upvalue-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -290,6 +290,7 @@
     (+ 0 0 #t)
     (- 1 1 #t)
     (car 1 1 #f)
+    (cdr 1 1 #f)
     (not 1 1 #f)
     (eq? 2 2 #f)
     (fx+ 2 2 #f)
