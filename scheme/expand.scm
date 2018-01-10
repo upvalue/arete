@@ -716,6 +716,7 @@
 
 (define (expand-argument-list x env new-env)
   (define seen-optional #f)
+  (define seen-rest #f) ;; #f = not seen, 1 = seen and expecting symbol, 2 = not expecting symbol
   (define argi 0)
   (define body '())
 
@@ -726,24 +727,44 @@
         (lambda (a)
           (cond 
             ((eq? a #!optional)
+
              (if seen-optional
                (raise-source x 'expand "multiple #!optional in lambda arguments list" (list x)))
+
+             (if seen-rest
+               (raise-source x 'expand "#!optional in lambda arguments list not allowed after #!rest" (list x)))
+
              (set! seen-optional #t)
              #!optional)
+
+            ((eq? a #!rest)
+             (if seen-rest
+               (raise-source x 'expand "multiple #!rest in lambda arguments list" (list x)))
+
+             (set! seen-rest 1)
+             #!rest)
 
             ((memq a '(#!rest #!keys #!key))
              (raise-source x 'expand (print-string a "not supported yet" (list x))))
 
             ((identifier? a)
+             (if (eq? seen-rest 2)
+               (raise-source x 'expand "identifier in lambda arguments list after #!rest argument" (list x)))
+
              (set! argi (fx+ argi 1))
 
              ((lambda (arg)
                 (if seen-optional
                   (set! body (cons (list (make-rename #f '$optional) argi #f) body)))
+                (if seen-rest
+                  (set! seen-rest 2))
                 arg)
               (define-argument! new-env a)))
 
             ((pair? a)
+             (if seen-rest
+               (raise-source x 'expand "pair item in lambda arguments list after #!rest argument" (list x)))
+
              (if (not seen-optional)
                (raise-source a 'expand "required argument cannot have default value" (list a)))
 

@@ -553,6 +553,7 @@
 (define (process-argument-list! fn x)
   (define arg-i 0)
   (define seen-optional #f)
+  (define seen-rest #f)
 
   (cond
     ((null? x) #t)
@@ -567,16 +568,26 @@
             (cond
               ((or (identifier? a) (pair? a))
                (let ((name (if (identifier? a) a (car a))))
-                 (unless seen-optional
-                   (OpenFn/min-arity! fn (fx+ arg-i 1)))
+                 ;; Check for #!rest argument
+                 (if seen-rest
+                   (begin
+                     (OpenFn/var-arity! fn #t)
+                     (OpenFn/define! fn name))
+                   (begin
+                     (unless seen-optional
+                       (OpenFn/min-arity! fn (fx+ arg-i 1)))
 
-                 (OpenFn/max-arity! fn (fx+ arg-i 1))
-                 (set! arg-i (fx+ arg-i 1))
-                 (OpenFn/define! fn name)))
+                     (OpenFn/max-arity! fn (fx+ arg-i 1))
+                     (set! arg-i (fx+ arg-i 1))
+                     (OpenFn/define! fn name)))))
 
               ((eq? a #!optional)
                (set! seen-optional #t)
                )
+
+              ((eq? a #!rest)
+               (set! seen-rest #t))
+
               ((memq a '(#!keys #!key #!rest)
                 (raise-source a 'compiler (print-string a "not supported yet") (list a))))
               (else
