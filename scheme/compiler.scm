@@ -174,7 +174,7 @@
     apply apply-tail
     return 
     jump jump-when jump-when-pop jump-unless
-    argc-eq argc-gte arg-optional argv-rest
+    argc-eq argc-gte arg-optional argv-rest arg-key argv-keys
     + - < car cdr list-ref not eq? fx< fx+ fx-))
 
 ;; Static labels

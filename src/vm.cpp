@@ -167,7 +167,7 @@ tail:
   memcpy(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
   // Zero out whole stack
   // TODO: Necessary?
-  memset((void*)((size_t)locals) + locals_size, 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
+  memset((void*)(((size_t)locals) + locals_size), 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
 
   // Here we allocate all upvalues needed by functions that will be enclosed by this function.
   // Each upvalue is tied to a local until control exits this function, at which point they become
@@ -204,6 +204,7 @@ tail:
     &&LABEL_OP_RETURN,
     &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
     &&LABEL_OP_ARGC_EQ, &&LABEL_OP_ARGC_GTE, &&LABEL_OP_ARG_OPTIONAL, &&LABEL_OP_ARGV_REST,
+    &&LABEL_OP_ARG_KEY, &&LABEL_OP_ARGV_KEYS,
     // Extended instructions
     &&LABEL_OP_ADD, &&LABEL_OP_SUB,
     &&LABEL_OP_LT,
@@ -531,6 +532,14 @@ tail:
           }
         }
         VM2_RESTORE_GC();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ARG_KEY): {
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_ARGV_KEYS): {
         VM_DISPATCH();
       }
 

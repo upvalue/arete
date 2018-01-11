@@ -203,8 +203,8 @@ GCCommon::GCCommon(State& state_, size_t heap_size_):
   state(state_), 
   frames(0),
   native_frames(0),
-  vm_stack(static_cast<Value*>(calloc(512, sizeof(Value)))),
-  vm_stack_size(512), vm_stack_used(0),
+  vm_stack(static_cast<Value*>(calloc(2048, sizeof(Value)))),
+  vm_stack_size(2048), vm_stack_used(0),
   protect_argc(0), protect_argv(0),
   collect_before_every_allocation(false),
   allocations(0),
@@ -281,7 +281,6 @@ GCSemispace::GCSemispace(State& state_, size_t heap_size):
 GCSemispace::~GCSemispace() {
   delete active;
   if(other != 0) delete other;
-
 }
 
 void GCSemispace::copy(HeapValue** ref) {
