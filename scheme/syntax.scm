@@ -154,6 +154,12 @@
     (when (not (fx= len eq))
       (raise-source src 'syntax (print-string (or name "macro") " expected " (if (null? desc) "expression" (car desc)) " to be exactly " eq " elements but only got" len) (list src)))))
 
+(define (syntax-assert-length> src gt)
+  (let ((len (length src))
+        (name (top-level-value '*current-macro-name* #f)))
+    (when (fx<= len gt)
+      (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at most "  gt " elements but only got" len) (list src)))))
+
 (define (syntax-assert-length<> src lt . gt)
   (let ((len (length src))
         (name (top-level-value '*current-macro-name* #f)))

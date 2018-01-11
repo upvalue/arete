@@ -329,7 +329,7 @@ Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bo
 
 Value fn_print_source(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "print-source";
-  AR_FN_ARGC_EQ(state, argc, 1);
+  AR_FN_ARGC_GTE(state, argc, 1);
   if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
     state.print_src_pair(std::cerr, argv[0]);
     std::cerr << std::endl;

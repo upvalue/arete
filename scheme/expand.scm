@@ -717,6 +717,7 @@
 (define (expand-argument-list x env new-env)
   (define seen-optional #f)
   (define seen-rest #f) ;; #f = not seen, 1 = seen and expecting symbol, 2 = not expecting symbol
+  (define seen-keys #f) ;; same as above
   (define argi 0)
   (define body '())
 
@@ -734,6 +735,9 @@
              (if seen-rest
                (raise-source x 'expand "#!optional in lambda arguments list not allowed after #!rest" (list x)))
 
+             (if seen-keys
+               (raise-source x 'expand "#!optional and #!keys cannot be mixed" (list x)))
+
              (set! seen-optional #t)
              #!optional)
 
@@ -741,15 +745,31 @@
              (if seen-rest
                (raise-source x 'expand "multiple #!rest in lambda arguments list" (list x)))
 
+             (if seen-keys
+               (raise-source x 'expand "#!rest and #!keys cannot be mixed" (list x)))
+
              (set! seen-rest 1)
              #!rest)
 
-            ((memq a '(#!rest #!keys #!key))
-             (raise-source x 'expand (print-string a "not supported yet" (list x))))
+            ((eq? a #!keys)
+             (if seen-keys
+               (raise-source x 'expand "multiple #!keys in lambda arguments list" (list x)))
+
+             (if seen-rest
+               (raise-source x 'expand "#!rest and #!keys cannot be mixed" (list x)))
+
+             (set! seen-keys 1)
+             #!keys)
+
+            ((memq a '(#!key))
+             (raise-source x 'expand (print-string a "not supported yet") (list x)))
 
             ((identifier? a)
              (if (eq? seen-rest 2)
                (raise-source x 'expand "identifier in lambda arguments list after #!rest argument" (list x)))
+
+             (if (eq? seen-keys 2)
+               (raise-source x 'expand "identifier in lambda arguments list after #!keys argument" (list x)))
 
              (set! argi (fx+ argi 1))
 
@@ -758,12 +778,17 @@
                   (set! body (cons (list (make-rename #f '$optional) argi #f) body)))
                 (if seen-rest
                   (set! seen-rest 2))
+                (if seen-keys
+                  (set! seen-keys 2))
                 arg)
               (define-argument! new-env a)))
 
             ((pair? a)
              (if seen-rest
                (raise-source x 'expand "pair item in lambda arguments list after #!rest argument" (list x)))
+
+             (if seen-keys
+               (raise-source x 'expand "pair item in lambda arguments list after #!keys argument" (list x)))
 
              (if (not seen-optional)
                (raise-source a 'expand "required argument cannot have default value" (list a)))

@@ -540,6 +540,33 @@ tail:
       }
 
       VM_CASE(OP_ARGV_KEYS): {
+        // Convert argv to table containing keywords
+        Value table;
+        {
+          AR_FRAME(state, table);
+
+          state.gc.protect_argc = argc;
+          state.gc.protect_argv = argv;
+
+          locals[vfn->max_arity] = state.make_table();
+
+          VM2_RESTORE_GC();
+
+          for(size_t i = vfn->max_arity; i != argc; i += 2) {
+            if(i + 1 == argc) {
+              VM2_EXCEPTION("eval", "odd number of arguments to keyword-accepting function");
+            }
+
+            Value k = argv[i], v = argv[i+1];
+
+            if(!(k.heap_type_equals(SYMBOL) && k.symbol_keyword())) {
+              VM2_EXCEPTION("eval", "expected keyword as argument " << i << " but got " << k.type());
+            }
+
+            state.table_set(locals[vfn->max_arity], k, v);
+            VM2_RESTORE_GC();
+          }
+        }
         VM_DISPATCH();
       }
 

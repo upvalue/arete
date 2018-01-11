@@ -55,7 +55,7 @@
   min-arity ;; 9
   ;; Maximum arguments to function; ignored if var-arity is #t
   max-arity ;; 10
-  ;; #t if function is variable arity
+  ;; 'rest if function takes rest arguments, 'keys if function takes keyword arguments, #f otherwise
   var-arity ;; 11
   ;; Depth of the function
   depth ;; 12
@@ -96,15 +96,13 @@
   upvalue?
   ;; If not #f, index in f.fn->upvalues. Mutually exclusive with upvalue?
   free-variable-id
-  ;; #t if variable is ever set!
-  mutated?
   ;; OpenFn/depth the variable was defined at.
   scope
   )
 
 (define %Var/make Var/make)
 (set! Var/make
-  (lambda (id name) (%Var/make id name #f #f #f #f)))
+  (lambda (id name) (%Var/make id name #f #f  #f)))
 
 (define AVar/make
   (lambda (id name fn)
@@ -209,7 +207,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
-               (0 jump jump-when argc-optional jump-unless words close-over return car cdr not argc-eq argc-gte argv-rest arg-optional)
+               (0 jump jump-when argc-optional jump-unless words close-over return car cdr not argc-eq argc-gte argv-rest arg-optional argv-keys)
                (1 push-immediate push-constant global-get local-get upvalue-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -387,19 +385,32 @@
           (and (pair? (cadar x)) (cadar x))
           #f))
 
-      (define argument-list-length (if (and argument-list (list? argument-list)) (length argument-list) #f))
+      (define check-argument-name (and argument-list (list? argument-list) (every identifier? argument-list)))
+
+      ;; This code compiles the arguments of an application. However, it also tries to retrieve the names of arguments
+      ;; from inline applications for functions, so that functions like
+      ;; (letrec ((even ...)))
+      ;; have appropriate debug names.
+
+      ;; It does not work for inline function applications with more complex arguments (optionals, keys, etc) as this
+      ;; covers 99% of use cases
 
       (for-each-i
         (lambda (i sub-x)
           (define result (compile-expr fn sub-x #f (list-tail x (fx+ i 1)) #f))
-          (when (and argument-list argument-list-length)
+          #;(when (and argument-list argument-list-length)
             (if (fx= i argument-list-length)
               (print-source x "Inline function application appears to have too many arguments")
               (if (vmfunction? result)
                 (set-function-name! result (list-ref argument-list i)))
 
               
-              )))
+              ))
+          (when check-argument-name
+            (if (vmfunction? result)
+              (set-function-name! result (list-ref argument-list i))))
+        
+        )
         (cdr x))
 
       ;; Stack size sanity check
@@ -554,12 +565,13 @@
   (define arg-i 0)
   (define seen-optional #f)
   (define seen-rest #f)
+  (define seen-keys #f)
 
   (cond
     ((null? x) #t)
     ((identifier? x)
      (begin
-       (OpenFn/var-arity! fn #t)
+       (OpenFn/var-arity! fn 'rest)
        (OpenFn/define! fn x)))
     (else
       (begin
@@ -569,9 +581,9 @@
               ((or (identifier? a) (pair? a))
                (let ((name (if (identifier? a) a (car a))))
                  ;; Check for #!rest argument
-                 (if seen-rest
+                 (if (or seen-rest seen-keys)
                    (begin
-                     (OpenFn/var-arity! fn #t)
+                     (OpenFn/var-arity! fn (if seen-rest 'rest 'keys))
                      (OpenFn/define! fn name))
                    (begin
                      (unless seen-optional
@@ -587,6 +599,9 @@
 
               ((eq? a #!rest)
                (set! seen-rest #t))
+              
+              ((eq? a #!keys)
+               (set! seen-keys #t))
 
               ((memq a '(#!keys #!key #!rest)
                 (raise-source a 'compiler (print-string a "not supported yet") (list a))))
@@ -596,7 +611,7 @@
 
         ;; Handle improper list rest argument
         (unless (list? x)
-          (OpenFn/var-arity! fn #t)
+          (OpenFn/var-arity! fn 'rest)
           ;; Remove rest argument from arity.
           (when (fx= (OpenFn/min-arity fn) (OpenFn/max-arity fn))
             (OpenFn/min-arity! fn (fx- (OpenFn/min-arity fn) 1)))
@@ -638,7 +653,9 @@
       ;; We generate argv-rest after the argc checks only for functions which don't take optional arguments
       ;; Otherwise it will be generated after $label-rest-optionals
       (when (and (OpenFn/var-arity sub-fn) (fx= (OpenFn/min-arity sub-fn) (OpenFn/max-arity sub-fn)))
-        (emit sub-fn 'argv-rest))))
+        (if (eq? (OpenFn/var-arity sub-fn) 'rest)
+          (emit sub-fn 'argv-rest)
+          (emit sub-fn 'argv-keys)))))
 
   (scan-local-defines sub-fn (cddr x))
   ;; Compile the lambda's body
