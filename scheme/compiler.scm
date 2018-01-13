@@ -207,7 +207,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
-               (0 jump jump-when argc-optional jump-unless words close-over return car cdr not argc-eq argc-gte argv-rest arg-optional argv-keys)
+               (0 jump jump-when argc-optional jump-unless words close-over return car cdr not argc-eq argc-gte argv-rest arg-optional arg-key argv-keys)
                (1 push-immediate push-constant global-get local-get upvalue-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -558,6 +558,9 @@
     body)
  )
 
+;; TODO: Redo this without body expressions whatsoever. And rather than emitting argc stuff afterwards, it should
+;; be emitted precisely when things are known. Should make the code a little cleaner.
+
 ;; Processes an arguments list. Defines all argument names as local variables, sets up function arity and local count
 ;; appropriately.
 
@@ -566,6 +569,9 @@
   (define seen-optional #f)
   (define seen-rest #f)
   (define seen-keys #f)
+  (define seen-key #f)
+
+  ;; How to handle keywords
 
   (cond
     ((null? x) #t)
@@ -586,11 +592,12 @@
                      (OpenFn/var-arity! fn (if seen-rest 'rest 'keys))
                      (OpenFn/define! fn name))
                    (begin
-                     (unless seen-optional
+                     (unless (or seen-optional seen-key)
                        (OpenFn/min-arity! fn (fx+ arg-i 1)))
 
-                     (OpenFn/max-arity! fn (fx+ arg-i 1))
-                     (set! arg-i (fx+ arg-i 1))
+                     (unless seen-key
+                       (OpenFn/max-arity! fn (fx+ arg-i 1))
+                       (set! arg-i (fx+ arg-i 1)))
                      (OpenFn/define! fn name)))))
 
               ((eq? a #!optional)
@@ -603,8 +610,13 @@
               ((eq? a #!keys)
                (set! seen-keys #t))
 
-              ((memq a '(#!keys #!key #!rest)
-                (raise-source a 'compiler (print-string a "not supported yet") (list a))))
+              ((eq? a #!key)
+
+               (OpenFn/var-arity! fn 'keys)
+               (OpenFn/define! fn (gensym 'keys))
+
+               (set! seen-key #t))
+
               (else
                 (raise-source x 'compiler-internal "unexpected argument list item" (lsit a)))))
           x)
@@ -847,6 +859,27 @@
   (emit fn 'local-set (cadr x))
   )
 
+(define (compile-key fn x)
+  ;; ($key <local idx> <keyword constant> <default expr)
+  ;; becomes
+
+  ;; (arg-key <local idx> <keyword constant idx> <evaluation label>)
+  ;; default expr code
+  ;; <label>
+
+  (print x)
+  (define key-label (gensym 'key))
+  (define key-const (register-constant fn (list-ref x 2)))
+  (define local-idx (list-ref x 1))
+
+  ;; local-idx of key variables is incremented by one because we create a local variable to store the keys table
+
+  (emit fn 'arg-key (fx+ local-idx 1) key-const key-label)
+  (compile-expr fn (car (list-ref x 3)) #f x #f)
+  (emit fn 'local-set (fx+ local-idx 1))
+  (register-label fn key-label)
+)
+
 (define (compile-special-form fn x cd src type tail?)
   (compiler-log fn "compiling special form" type x)
   (case type
@@ -864,8 +897,9 @@
 
     ;; Expander-generated builtins
     ($optional (compile-optional fn x))
+    ($key (compile-key fn x))
     ($label-past-optionals
-      (begin
+      (unless (eq? (OpenFn/var-arity fn) 'keys)
         (register-label fn 'past-optionals)
         (when (OpenFn/var-arity fn)
           (emit fn 'argv-rest))))
@@ -880,7 +914,7 @@
 
     (set! x (rename-expr x)))
 
-  (if (memq x '(lambda define set! if begin and or quote $optional $label-past-optionals)) x #f))
+  (if (memq x '(lambda define set! if begin and or quote $key $optional $label-past-optionals)) x #f))
 
 (define (compile-expr fn x cd src tail?)
   (and #f #f)

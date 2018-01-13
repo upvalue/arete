@@ -111,6 +111,8 @@
       (car alist)
       (assq obj (cdr alist)))))
 
+(define (identifier->keyword x) (string->symbol (string-append (symbol->string (rename-strip x)) ":")))
+
 (define (string-map-i i limit src dst fn)
   (string-set! dst i (fn (string-ref src i)))
   (if (not (fx= (fx+ i 1) limit))
@@ -718,6 +720,7 @@
   (define seen-optional #f)
   (define seen-rest #f) ;; #f = not seen, 1 = seen and expecting symbol, 2 = not expecting symbol
   (define seen-keys #f) ;; same as above
+  (define seen-key #f)  
   (define argi 0)
   (define body '())
 
@@ -729,14 +732,14 @@
           (cond 
             ((eq? a #!optional)
 
-             (if seen-optional
-               (raise-source x 'expand "multiple #!optional in lambda arguments list" (list x)))
+             (if seen-optional (raise-source x 'expand "multiple #!optional in lambda arguments list" (list x)))
 
              (if seen-rest
                (raise-source x 'expand "#!optional in lambda arguments list not allowed after #!rest" (list x)))
 
-             (if seen-keys
-               (raise-source x 'expand "#!optional and #!keys cannot be mixed" (list x)))
+             (if seen-keys (raise-source x 'expand "#!optional and #!keys cannot be mixed" (list x)))
+
+             (if seen-key (raise-source x 'expand "#!optional and #!key cannot be mixed" (list x)))
 
              (set! seen-optional #t)
              #!optional)
@@ -745,24 +748,34 @@
              (if seen-rest
                (raise-source x 'expand "multiple #!rest in lambda arguments list" (list x)))
 
-             (if seen-keys
-               (raise-source x 'expand "#!rest and #!keys cannot be mixed" (list x)))
+             (if seen-keys (raise-source x 'expand "#!rest and #!keys cannot be mixed" (list x)))
+             (if seen-key (raise-source x 'expand "#!rest and #!key cannot be mixed" (list x)))
 
              (set! seen-rest 1)
              #!rest)
 
+            ((eq? a #!key)
+             (if seen-rest (raise-source x 'expand "#!rest and #!key cannot be mixed" (list x)))
+
+             (if seen-keys (raise-source x 'expand "#!key and #!keys cannot be mixed" (list x)))
+             (if seen-optional (raise-source x 'expand "#!key and #!optional cannot be mixed" (list x)))
+             (if seen-key (raise-source x 'expand "duplicate #!key in lambda arguments list" (list x)))
+
+             (set! seen-key #t)
+             #!key)
+
             ((eq? a #!keys)
              (if seen-keys
                (raise-source x 'expand "multiple #!keys in lambda arguments list" (list x)))
+
+             (if seen-key
+               (raise-source x 'expand "#!key and #!keys cannot be mixed" (list x)))
 
              (if seen-rest
                (raise-source x 'expand "#!rest and #!keys cannot be mixed" (list x)))
 
              (set! seen-keys 1)
              #!keys)
-
-            ((memq a '(#!key))
-             (raise-source x 'expand (print-string a "not supported yet") (list x)))
 
             ((identifier? a)
              (if (eq? seen-rest 2)
@@ -776,6 +789,8 @@
              ((lambda (arg)
                 (if seen-optional
                   (set! body (cons (list (make-rename #f '$optional) argi #f) body)))
+                (if seen-key
+                  (set! body (cons (list (make-rename #f '$key) argi (identifier->keyword a) #f) body)))
                 (if seen-rest
                   (set! seen-rest 2))
                 (if seen-keys
@@ -790,18 +805,23 @@
              (if seen-keys
                (raise-source x 'expand "pair item in lambda arguments list after #!keys argument" (list x)))
 
-             (if (not seen-optional)
+             (if (not (or seen-optional seen-key))
                (raise-source a 'expand "required argument cannot have default value" (list a)))
 
              (if (not (identifier? (car a)))
                (raise-source a 'expand "argument name must be a valid identifier" (list a)))
 
-             (set! body (cons (list (make-rename #f '$optional) argi (expand (cdr a) new-env '((disallow-defines . #t)))) body))
+             ((lambda (default)
+               (set! body (cons
+                            (if seen-key
+                              (list (make-rename #f '$key) argi (identifier->keyword (car a)) default)
+                              (list (make-rename #f '$optional) argi default))
+                            body)))
+              (expand (cdr a) new-env '((disallow-defines . #t))))
 
              (set! argi (fx+ argi 1))
 
              (cons (define-argument! new-env (car a)) (cdr a)))
-            
 
             (else
               (raise-source x 'expand "invalid element in arguments list: must be an identifier, a #! specifier like #!optional, or a pair of an identifier and default argument" (list x)))))

@@ -1297,7 +1297,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
   vfn->code = code.as_unsafe<Bytevector>();
 
   // Check for variable arity
-  if(rec.record_ref(11) == C_TRUE) {
+  if(rec.record_ref(11) != C_FALSE) {
     vfn->set_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT);
   }
 

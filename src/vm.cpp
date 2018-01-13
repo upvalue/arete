@@ -536,6 +536,28 @@ tail:
       }
 
       VM_CASE(OP_ARG_KEY): {
+        size_t local_idx = VM_NEXT_INSN();
+        size_t key_constant = VM_NEXT_INSN();
+        size_t label = VM_NEXT_INSN();
+
+
+        // Attempt to find key in #!keys table
+        Value keys = locals[vfn->max_arity];
+        Value constant = vfn->constants->data[key_constant];
+        AR_LOG_VM2("arg-key " << local_idx << " " << constant)
+
+        bool found;
+        Value result = state.table_get(keys, constant, found);
+
+        std::cout << "keys: " << keys << std::endl;
+        std::cout << "constant: " << constant << std::endl;
+
+        if(found) {
+          locals[local_idx] = result;
+          AR_LOG_VM2("arg-key found key, jumping past default value expression");
+          VM_JUMP(label);
+        } 
+
         VM_DISPATCH();
       }
 
