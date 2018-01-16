@@ -152,21 +152,21 @@
   (let ((len (length src))
         (name (top-level-value '*current-macro-name* #f)))
     (when (not (fx= len eq))
-      (raise-source src 'syntax (print-string (or name "macro") " expected " (if (null? desc) "expression" (car desc)) " to be exactly " eq " elements but only got" len) (list src)))))
+      (raise-source src 'syntax (print-string (or name "macro") "expected" (if (null? desc) "expression" (car desc)) "to be exactly" eq " elements but only got" len) (list src)))))
 
 (define (syntax-assert-length> src gt)
   (let ((len (length src))
         (name (top-level-value '*current-macro-name* #f)))
     (when (fx<= len gt)
-      (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at most "  gt " elements but only got" len) (list src)))))
+      (raise-source src 'syntax (print-string (or name "macro") "expected expression to be at most "  gt "elements but only got" len) (list src)))))
 
 (define (syntax-assert-length<> src lt . gt)
   (let ((len (length src))
         (name (top-level-value '*current-macro-name* #f)))
     (when (fx< len lt)
-      (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at least " lt " elements but only got" len) (list src))
+      (raise-source src 'syntax (print-string (or name "macro") "expected expression to be at least" lt "elements but only got" len) (list src))
       (when (and (not (null? gt)) (fx> len (car gt)))
-        (raise-source src 'syntax (print-string (or name "macro") " expected expression to be at most " (car gt) " elements but only got" len) (list src))))))
+        (raise-source src 'syntax (print-string (or name "macro") "expected expression to be at most" (car gt) "elements but only got" len) (list src))))))
 
 
 (define (take lst limit)
@@ -760,6 +760,14 @@ TODO: Casting
         (loop (car rest) (cdr rest))))))
 
 ;; ASSERTIONS
+
+(define-syntax syntax-assert
+  (lambda (x)
+    (syntax-assert-length= x 4)
+    #`(let ((result ,(list-ref x 2))
+            (name (top-level-value '*current-macro-name* "unknown macro")))
+        (unless result
+          (raise-source ,(list-ref x 1) 'syntax (print-string name ":" ,(list-ref x 3)) ,(list-ref x 1))))))
 
 (define-syntax assert
   (lambda (x)

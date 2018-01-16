@@ -45,6 +45,8 @@
 (define (pair? v) (eq? (value-type v) 11))
 (define (table? v) (eq? (value-type v) 15))
 (define (string? v) (eq? (value-type v) 5))
+(define (record? v) (eq? (value-type v) 17))
+(define (record-type? v) (eq? (value-type v) 18))
 
 (define (symbol? v)
   (and (eq? (value-type v) 8) (not (value-header-bit? v 15))))
@@ -379,6 +381,8 @@
     (begin
       ;; Take apart the more complex (define (function) ...) case
       (set! name (car kar))
+      (if (not (identifier? name))
+        (raise-source kar 'expand "lambda name must be an identifier" (list kar)))
       (set! value
         (list-source x (make-rename #f 'lambda) (cdr kar)
           (cons-source x (make-rename #f 'begin) (cddr x))))))
@@ -916,6 +920,7 @@
   (define expanded-body #f)
   (define fn #f)
   (define fn-arity #f)
+  (define procedural-transformer #t)
   (define identifier-transformer #f)
 
   (if (not (identifier? name))
@@ -925,11 +930,17 @@
     (if (table-ref env "module-export-all")
       (table-set! (table-ref env "module-exports") name #t)))
 
-  (if (eq? (car body) 'identifier)
+  (if (eq? (rename-strip (car body)) 'identifier-transformer)
     (begin
       (set! body (cadr body))
-      (set! identifier-transformer #t)
-      #;(print "found identifier transformer" body)))
+      (set! procedural-transformer #f)
+      (set! identifier-transformer #t)))
+
+  (if (eq? (rename-strip (car body)) 'combined-transformer)
+    (begin
+      (set! body (cadr body))
+      (set! procedural-transformer #t)
+      (set! identifier-transformer #t)))
 
   (set! expanded-body (expand-delayed (expand body env params)))
 
@@ -946,7 +957,10 @@
     (raise-source (caddr x) 'expand "define-syntax body must evaluate to a function that takes at least one argument" (list x)))
 
   (set-function-name! fn (rename-strip name))
-  (set-function-macro-bit! fn)
+
+  (if procedural-transformer
+    (set-function-macro-bit! fn))
+
   (if identifier-transformer
     (set-function-identifier-macro-bit! fn))
 
@@ -1019,7 +1033,8 @@
   (define arity (function-min-arity transformer))
   (define saved-rename-env (top-level-value '*current-rename-env*))
   (define saved-fn-name (top-level-value '*current-macro-name*))
-  (define identifier-application? (and (not (identifier? x)) (function-identifier-macro? transformer)))
+  ;; #t if this is an application of an identifier-only macro...
+  (define identifier-application? (and (not (identifier? x)) (function-identifier-macro? transformer) (not (function-procedural-macro? transformer))))
   (define form (if identifier-application? (car x) x))
 
   (set-top-level-value! '*current-rename-env* (function-env transformer))
@@ -1030,6 +1045,10 @@
 
   (if (and (identifier? x) (not (function-identifier-macro? transformer)))
     (raise-source x 'expand (print-string "use of syntax" x "as value") (list x)))
+
+  #;(if (top-level-value 'EXPANDER-PRINT #f)
+    (begin
+      (print x)))
 
   (define result
     (unwind-protect

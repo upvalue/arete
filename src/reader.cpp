@@ -767,7 +767,7 @@ Value XReader::read_expr(TokenType tk) {
 
       }
       // #`asdf => (quasiquote (rename 'asdf))
-      if(quasiquote_renaming) {
+      if(quasiquote_renaming && !sym.symbol_keyword()) {
         AR_FRAME(state, sym);
         sym = state.make_pair(sym, C_NIL);
         sym = state.make_pair(state.globals[State::S_QUOTE], sym);

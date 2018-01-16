@@ -58,6 +58,7 @@ void State::boot() {
   static const char* _symbols[] = {
     // C_SYNTAX values
     "quote", "begin", "define", "lambda", "if", "cond",  "and", "or", "set!", "let",
+    "identifier-transformer", "combined-transformer",
     "module", "define-library", "import", "define-syntax", "let-syntax", "letrec-syntax",
     // Used by interpreter
     "else",

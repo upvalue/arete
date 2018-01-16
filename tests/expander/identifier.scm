@@ -1,11 +1,11 @@
 (define-syntax true
-  (identifier 
+  (identifier-transformer
     (lambda (x) #t)))
 
 (print true)
 
 (define-syntax function-id
-  (identifier
+  (identifier-transformer
     (lambda (x) 'print)))
 
 (function-id #t)

@@ -371,6 +371,22 @@ Value fn_print_string(State& state, size_t argc, Value* argv, void* v) {
 }
 AR_DEFUN("print-string", fn_print_string, 0, 0, true);
 
+Value fn_print_string_no_space(State& state, size_t argc, Value* argv, void* v) {
+  std::ostringstream os;
+  Value chk = fn_print_impl(state, argc, argv, os, false, false);
+  if(chk.is_active_exception()) return chk;
+  return state.make_string(os.str());
+}
+AR_DEFUN("print-string-no-space", fn_print_string_no_space, 0, 0, true);
+
+Value fn_print_symbol(State& state, size_t argc, Value* argv, void* v) {
+  std::ostringstream os;
+  Value chk = fn_print_impl(state, argc, argv, os, false, false);
+  if(chk.is_active_exception()) return chk;
+  return state.get_symbol(os.str());
+}
+AR_DEFUN("print-symbol", fn_print_symbol, 0, 0, true);
+
 static Value fn_pretty_print(State& state, size_t argc, Value* argv, void* v) {
   Value chk = fn_print_impl(state, argc, argv, std::cout, true, true);
   std::cout << std::endl;

@@ -1703,6 +1703,8 @@ struct State {
     S_OR,
     S_SET,
     S_LET,
+    S_IDENTIFIER_TRANSFORMER,
+    S_COMBINED_TRANSFORMER,
     // Module forms
     S_MODULE,
     S_DEFINE_LIBRARY,
@@ -2603,7 +2605,7 @@ struct TableIterator {
 #define AR_FN_EXPECT_RECORD_ISA(state, argv, arg, tag_index) \
   if((argv)[(arg)].type() != RECORD) { \
     std::ostringstream __os; \
-    __os << fn_name << " expected argument " << (arg) << " to be a record but got " << ((argv)[(arg)].type()); \
+    __os << fn_name << " expected argument " << (arg) << " to be a record of typebut got " << ((argv)[(arg)].type()); \
     return state.type_error(__os.str()); \
   } else if((argv)[(arg)].record_type() != (state).globals.at((tag_index))) { \
     std::ostringstream __os; \

@@ -6,7 +6,7 @@
 
 (define (spin-out n)
   (if (= n 10)
-    (dont-have-a-cow-man!)
+    (cause-error) ;; the actual error
     (begin
       (spin-out (+ n 1))
       (do-nothing))))

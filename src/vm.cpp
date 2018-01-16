@@ -430,7 +430,7 @@ tail:
             }
           }
         } else {
-          VM2_EXCEPTION("eval", "vm: attempt to apply non-applicable value" << afn);
+          VM2_EXCEPTION("eval", "vm: attempt to apply non-applicable value " << afn);
         }
       }
 

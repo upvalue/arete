@@ -19,3 +19,4 @@ vgcore*
 /src/compile-x64.cpp
 /vendor/dynasm/minilua
 /arete-distilled.cpp
+/scraps
