@@ -142,28 +142,38 @@
           (record-isa? rec ,name)))
 
     (define type-name (print-symbol "%" name "/type"))
-    
+
     #`(begin
         (define ,type-name (register-record-type ,(symbol->string name) ,field-count 0 (quote ,fields) ,parent))
 
+        ;; This is the syntatic introspection facility
         (define-syntax ,name
           (combined-transformer
-            (lambda (x)
-              (if (identifier? x)
-                `,type-name
-                (begin
-                  (syntax-assert-length<> x 2)
-                  (cond
-                    ((eq? (cadr x) get:)
-                      (let lp ((fields (quote ,fields)) (i 0))
-                        (if (null? fields)
-                           #`(syntax-error x (print-string "record type" (quote ,name) "has no field named" (caddr x))))
-                          (if (eq? (car fields) (caddr x))
-                            i
-                            (lp (cdr fields) (fx+ i 1)))))
-
-                    (else
-                      (syntax-error (cdr x) (print-string "unsupported record type inspection syntax" x)))))))))
+            (let ((all-fields
+                    (if ,parent
+                      (append (,parent fields:) (list ,@(map (lambda (x) (list (rename 'quote) x)) fields)))
+                      (quote ,fields))))
+              (lambda (x)
+                (if (identifier? x)
+                  `,type-name
+                  (begin
+                    (cond
+                      ((eq? (cadr x) fields:)
+                       (syntax-assert-length= x 2)
+                       #;(if ,parent
+                         (list (rename 'quote) (append (,parent fields:) (list ,@(map (lambda (x) (list (rename 'quote) x)) fields))))
+                         (list (rename 'quote) (list ,@(map (lambda (x) (list (rename 'quote) x)) fields))))
+                      (list (rename 'quote) all-fields))
+                      ((eq? (cadr x) get:)
+                        (syntax-assert-length= x 3)
+                        (let lp ((fields all-fields) (i 0))
+                          (if (null? fields)
+                            (syntax-error x (print-string "record type" (quote ,name) "has no field named" (caddr x)))
+                            (if (eq? (car fields) (caddr x))
+                              i
+                              (lp (cdr fields) (fx+ i 1))))))
+                      (else
+                        (syntax-error (cdr x) (print-string "unsupported record type inspection syntax" x))))))))))
 
         ,predicate
         ,constructor

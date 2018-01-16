@@ -664,16 +664,18 @@ Value fn_set_function_macro_env(State& state, size_t argc, Value* argv, void* v)
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_ENV(state, 1);
 
-  switch(argv[0].type()) {
+  Value fn = argv[0].closure_unbox();
+
+  switch(fn.type()) {
     case VMFUNCTION: {
-      VMFunction* fn = argv[0].as<VMFunction>();
-      fn->macro_env = argv[1];
+      VMFunction* vfn = fn.as<VMFunction>();
+      vfn->macro_env = argv[1];
       break;
     }
     case FUNCTION: {
-      Function* fn = argv[0].as<Function>();
-      AR_ASSERT(fn->procedure_addr);
-      fn->parent_env = argv[1];
+      Function* sfn = fn.as<Function>();
+      AR_ASSERT(sfn->procedure_addr);
+      sfn->parent_env = argv[1];
       break;
     }
     default: std::cerr << "set-function-macro-env! got a bad argument " << argv[0] << std::endl;
@@ -710,10 +712,11 @@ AR_DEFUN("set-vmfunction-log!", fn_set_vmfunction_log, 2);
 Value fn_function_env(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "function-env";
   AR_FN_ARGC_EQ(state, argc, 1);
-  switch(argv[0].type()) {
-    case FUNCTION: return argv[0].function_parent_env();
+  Value fn(argv[0].closure_unbox());
+  switch(fn.type()) {
+    case FUNCTION: return fn.function_parent_env();
     case CLOSURE:
-    case VMFUNCTION: return argv[0].vm_function_macro_env();
+    case VMFUNCTION: return fn.vm_function_macro_env();
     default: return state.type_error("function-env expected valid macro");
   }
 }
@@ -743,14 +746,15 @@ AR_DEFUN("set-function-macro-bit!", fn_set_function_macro_bit, 1);
 Value fn_function_is_macro(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "function-macro?";
   AR_FN_ARGC_EQ(state, argc, 1);
-  switch(argv[0].type()) {
+
+  Value fn(argv[0].closure_unbox());
+  switch(fn.type()) {
     case FUNCTION:
       return Value::make_boolean(
-        argv[0].heap->get_header_bit(Value::FUNCTION_MACRO_BIT)
-        || argv[0].heap->get_header_bit(Value::FUNCTION_IDENTIFIER_MACRO_BIT) 
+        fn.heap->get_header_bit(Value::FUNCTION_MACRO_BIT)
+        || fn.heap->get_header_bit(Value::FUNCTION_IDENTIFIER_MACRO_BIT) 
         );
     case VMFUNCTION: {
-      Value fn = argv[0].closure_unbox();
       return Value::make_boolean(
         fn.heap->get_header_bit(Value::VMFUNCTION_MACRO_BIT)
         || fn.heap->get_header_bit(Value::VMFUNCTION_IDENTIFIER_MACRO_BIT)
@@ -765,12 +769,12 @@ AR_DEFUN("function-macro?", fn_function_is_macro, 1);
 Value fn_function_procedural_macro_bit(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "function-procedural-macro?";
   AR_FN_ARGC_EQ(state, argc, 1);
-  switch(argv[0].type()) {
+  Value fn(argv[0].closure_unbox());
+  switch(fn.type()) {
     case FUNCTION:
-      return Value::make_boolean(argv[0].heap->get_header_bit(Value::FUNCTION_MACRO_BIT));
+      return Value::make_boolean(fn.heap->get_header_bit(Value::FUNCTION_MACRO_BIT));
     case CLOSURE:
     case VMFUNCTION: {
-      Value fn = argv[0].closure_unbox();
       return Value::make_boolean(fn.heap->get_header_bit(Value::VMFUNCTION_MACRO_BIT));
     }
     default: break;
