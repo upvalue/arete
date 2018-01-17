@@ -252,7 +252,6 @@ Value State::make_record(Value tipe) {
   unsigned field_count = tipe.as<RecordType>()->field_count;
   unsigned data_size = tipe.as<RecordType>()->data_size;
 
-
   Value record = static_cast<Record*>(
     gc.allocate(RECORD, sizeof(Record) + 
       ((field_count * sizeof(Value)) - sizeof(Value))

@@ -205,11 +205,15 @@ std::ostream& operator<<(std::ostream& os, Value v) {
         os << "#<vmfunction ";
       }
       os << v.vm_function_name();
-      os << ' ' << v.vm_function_min_arity() << '-';
-      if(v.vm_function_variable_arity()) {
-        os << "rest";
+      if(v.vm_function_min_arity() == v.vm_function_max_arity() && !v.vm_function_variable_arity()) {
+        os << ' ' << v.vm_function_min_arity();
       } else {
-        os << v.vm_function_max_arity();
+        os << ' ' << v.vm_function_min_arity() << '-';
+        if(v.vm_function_variable_arity()) {
+          os << "rest";
+        } else {
+          os << v.vm_function_max_arity();
+        }
       }
       return os << '>';
     }

@@ -424,7 +424,7 @@
 
 ;; Expand and/or
 (define (expand-and-or x env params)
-  (cons-source x (car x) (expand-map (cdr x) env params)))
+  (cons-source x (if (symbol? (car x)) (make-rename #f (car x)) (car x)) (expand-map (cdr x) env params)))
 
 ;;;;; Module machinery
 (define (module-spec->string src lst . str)
@@ -828,7 +828,7 @@
              (cons (define-argument! new-env (car a)) (cdr a)))
 
             (else
-              (raise-source x 'expand "invalid element in arguments list: must be an identifier, a #! specifier like #!optional, or a pair of an identifier and default argument" (list x)))))
+              (raise-source x 'expand (print-string "invalid element" a "in arguments list: must be an identifier, a #! specifier like #!optional, or a pair of an identifier and default argument") (list x)))))
 
         x)
       ))
@@ -1046,9 +1046,6 @@
   (if (and (identifier? x) (not (function-identifier-macro? transformer)))
     (raise-source x 'expand (print-string "use of syntax" x "as value") (list x)))
 
-  #;(if (top-level-value 'EXPANDER-PRINT #f)
-    (begin
-      (print x)))
 
   (define result
     (unwind-protect

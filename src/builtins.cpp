@@ -675,7 +675,7 @@ Value fn_set_function_macro_env(State& state, size_t argc, Value* argv, void* v)
     case FUNCTION: {
       Function* sfn = fn.as<Function>();
       AR_ASSERT(sfn->procedure_addr);
-      sfn->parent_env = argv[1];
+      sfn->macro_env = argv[1];
       break;
     }
     default: std::cerr << "set-function-macro-env! got a bad argument " << argv[0] << std::endl;
@@ -714,7 +714,7 @@ Value fn_function_env(State& state, size_t argc, Value* argv, void* _) {
   AR_FN_ARGC_EQ(state, argc, 1);
   Value fn(argv[0].closure_unbox());
   switch(fn.type()) {
-    case FUNCTION: return fn.function_parent_env();
+    case FUNCTION: return fn.as<Function>()->macro_env;
     case CLOSURE:
     case VMFUNCTION: return fn.vm_function_macro_env();
     default: return state.type_error("function-env expected valid macro");

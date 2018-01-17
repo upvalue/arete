@@ -1034,7 +1034,7 @@ inline void Value::procedure_install(c_closure_t addr) {
 
 /** An interpreted Scheme function */
 struct Function : Procedure {
-  Value name, parent_env, arguments, rest_arguments, body;
+  Value name, parent_env, arguments, rest_arguments, body, macro_env;
 
   static const unsigned CLASS_TYPE = FUNCTION;
 };
@@ -1682,6 +1682,9 @@ struct State {
 
   /** A stack trace. */
   std::vector<StackTrace> stack_trace;
+
+  // Current VM depth
+  size_t vm_depth;
   
   State();
   ~State();

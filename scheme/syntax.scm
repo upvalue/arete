@@ -114,7 +114,6 @@
     (cadr lst)
     (if (c #'quasiquote (car lst))
       (begin 
-        (print "sub-quasiquote" lst)
         (qq-list c lst))
       (qq-list c lst))))
          
@@ -170,7 +169,6 @@
 
 
 (define (take lst limit)
-
   (unless (fixnum? limit) (raise 'type "take expected second argument (limit) to be a fixnum"))
   (let loop ((got 0)
              (newlst '())
@@ -181,7 +179,17 @@
         (raise 'bounds (print-string limit "values requested by take invocation but only got" got) (list lst limit))
         (loop (fx+ got 1) (cons (car lst) newlst) (cdr lst))))))
 
-;; really scheme, really?. these functions should just throw an error for public indecency
+(define (%iota i n)
+  (if (fx= i n)
+    '()
+    (cons i (%iota (fx+ i 1) n))))
+
+(define (iota i)
+  (if (fx= i 0)
+    '()
+    (%iota 0 i)))
+
+;; really scheme, really? these functions should just throw an error for public indecency
 (define (caaaar x) (car (car (car (car x)))))
 (define (caaadr x) (car (car (car (cdr x)))))
 (define (caadar x) (car (car (cdr (car x)))))
@@ -214,7 +222,15 @@
 (define (member obj lst) (%member-impl equal? obj lst))
 |#
 
-;;
+#|
+(define (memqi obj lst)
+  (let lp ((lst lst))
+    (if (null? lst)
+      #f
+      (if (not (pair? obj))
+        (raise 'type (print-string "memqi expected a valid list but found" obj) obj)
+        (if (eq? (car obj)
+                 |#
 
 #;(define (memv obj lst)
   (if (null? lst) 
@@ -312,89 +328,6 @@
     `(,#'let (,@(map1 (lambda (b) (list-source b (car b) #'unspecified)) bindings))
       ,@(map1 (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
       ,@body))))
-
-;; Records.
-
-(define-syntax define-record
-  (lambda (x)
-    (define name #f)
-    (define field-count 0)
-    (define parent #f)
-    (define fields #f)
-    (define accessors #f)
-    (define name-string #f)
-    (define constructor #f)
-    (define predicate #f)
-
-    (unless (fx> (length x) 1)
-      (raise-source x 'syntax "define-record expects at least one argument: a record name" (list x)))
-
-    (set! name (cadr x))
-
-    (unless (symbol? name)
-      (raise-source (cdr x) 'syntax (print-string "define-record name must be a symbol but got" name) (list x)))
-
-    (set! name-string (symbol->string name))
-
-    (when (fx> (length x) 2)
-      (if (list? (list-ref x 2))
-        (begin
-          (when (null? (list-ref x 2))
-            (raise-source (caddr x) 'syntax "define-record inheritance argument must be a list with exactly one symbol but got none" (list x (cddr x))))
-          (when (> (length (list-ref x 2)) 1)
-            (raise-source (caddr x) 'syntax "define-record inheritance argument must be a list with exactly one symbol but more than one" (list x (cddr x))))
-          (set! parent (car (list-ref x 2)))
-          (set! fields (cdddr x)))
-        (set! fields (cddr x))))
-
-    (unless (or (symbol? parent) (not parent))
-      (raise-source (caddr x) 'syntax "define-record inheritance argument should be a list with exactly one symbol" (list x (caddr x))))
-
-    (set! accessors
-      (map-i
-        (lambda (i field-name)
-          (define getter #f)
-          (define setter #f)
-
-          (unless (symbol? field-name)
-            (raise-source (list-tail fields i) 'syntax "define-record fields must be symbols" (list x name)))
-
-          (set! getter (string->symbol (string-append name-string "/" (symbol->string field-name))))
-          (set! getter `(,#'define (,getter ,#'rec) (,#'record-ref ,name ,#'rec ,field-count)))
-
-          (set! setter (string->symbol (string-append name-string "/" (symbol->string field-name) "!")))
-          (set! setter `(,#'define (,setter ,#'rec ,#'value) (,#'record-set! ,name ,#'rec ,field-count ,#'value)))
-
-          (set! field-count (fx+ field-count 1))
-
-          `(,#'begin ,getter ,setter))
-      fields))
-
-    (set! constructor
-      `(,#'define (,(string->symbol (string-append name-string "/make")) ,@fields)
-        (,#'let ((,#'instance (,#'make-record ,name)))
-        ,@(map-i
-          (lambda (i x)
-            `(,#'record-set! ,name ,#'instance ,i ,(list-ref fields i)))
-          fields)
-        ,#'instance)))
-
-    (set! predicate
-      `(,#'define ,(list (string->symbol (string-append name-string "?")) #'instance)
-        (,#'record-isa? ,#'instance ,name)))
-
-    `(,#'begin
-       (,#'define ,name
-        (,#'let ((,#'fields (list ,@(map1 (lambda (x) `(,#'quote ,x)) fields))))
-          (begin
-            ;(print ,#'fields)
-            (,#'register-record-type ,name-string ,field-count 0 ,#'fields ,parent))))
-       ,predicate
-       ,constructor
-       ,@accessors
-      )
-    
-  )) ;; lambda (x)
 
 ;;;;; NUMBERS
 

@@ -469,6 +469,7 @@ void GCSemispace::collect(size_t request, bool force) {
         AR_COPY(Function, arguments);
         AR_COPY(Function, rest_arguments);
         AR_COPY(Function, body);
+        AR_COPY(Function, macro_env);
         break;
       // Variable ptrs / more complex collection required
       case RECORD: {

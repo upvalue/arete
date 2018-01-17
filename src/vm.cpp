@@ -57,6 +57,7 @@ struct VMFrame2 {
     AR_ASSERT("Wizard fight" && arete::current_state->gc.live(fn.heap));
     VMFunction* vfn = fn.as<VMFunction>();
     vm_stack_used = vfn->local_count + vfn->upvalue_count + vfn->stack_max;
+    state.vm_depth++;
     //state.gc.grow_stack(vm_stack_used);
   }
 
@@ -70,6 +71,7 @@ struct VMFrame2 {
       upvalues[i].heap->set_header_bit(Value::UPVALUE_CLOSED_BIT);
     }
     state.gc.shrink_stack(vm_stack_used);
+    state.vm_depth--;
   }
 
   State& state;
@@ -134,6 +136,14 @@ tail:
   }
 
   // TODO: CHECK RECURSION LIMIT
+
+  if(state.vm_depth >= state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero()) {
+    std::ostringstream os;
+    os << " non-tail recursive calls exceeded RECURSION-LIMIT (" << 
+      state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero() << ')';
+    exception = state.make_exception(State::S_EVAL_ERROR, os.str());
+    return exception;
+  }
 
   AR_FRAME(state, f.fn, f.closure);
 

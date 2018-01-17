@@ -22,7 +22,8 @@ State::State():
   source_contents(),
   globals(),
   temps(),
-  stack_trace()
+  stack_trace(),
+  vm_depth(0)
   {
 
   symbol_table = new symbol_table_t();
@@ -134,7 +135,7 @@ void State::boot() {
   register_feature("sdl");
 #endif
 
-  set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(1100));
+  set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(1500));
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_FEATURES, C_NIL);
   set_global_value(G_TCO_ENABLED, C_TRUE);

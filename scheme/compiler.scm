@@ -909,7 +909,7 @@
 
 (define (special-form x)
   (when (rename? x)
-    (if (rename-env x) 
+    (if (and (rename-env x) (not (table? (rename-env x))))
       (raise 'compile-internal "compiler encountered non-toplevel rename" (list x)))
 
     (set! x (rename-expr x)))

@@ -32,12 +32,6 @@
   (list keywords (if (eq? body unspecified) '() body))
 )
 
-;; TODO: HIGHLIGHTING OF KEYWORD INFORMATION
-;; Should be possible to do something like this
-;; (predicate: "cat")
-;;  ^^^^^^^^^^^^^^^^
-;; highlight the keyword and the following.
-
 ;; Record implementation
 
 (define-syntax define-record
@@ -126,9 +120,10 @@
                   fields)
               instance))))
 
-    (print field-names)
-    (print kwargs)
-    (print accessors)
+    #;(begin
+      (print field-names)
+      (print kwargs)
+      (print accessors))
 
     (define predicate-name
       (aif (assq 'predicate: kwargs)
@@ -144,8 +139,6 @@
     (define type-name (print-symbol "%" name "/type"))
 
     #`(begin
-        (define ,type-name (register-record-type ,(symbol->string name) ,field-count 0 (quote ,fields) ,parent))
-
         ;; This is the syntatic introspection facility
         (define-syntax ,name
           (combined-transformer
@@ -158,6 +151,8 @@
                   `,type-name
                   (begin
                     (cond
+                      ((eq? (cadr x) fields-count:)
+                       (length all-fields))
                       ((eq? (cadr x) fields:)
                        (syntax-assert-length= x 2)
                        #;(if ,parent
@@ -175,30 +170,57 @@
                       (else
                         (syntax-error (cdr x) (print-string "unsupported record type inspection syntax" x))))))))))
 
+        (define ,type-name (register-record-type ,(symbol->string name) ,field-count 0 (,name fields:) ,parent))
+
+        (define ,constructor-name
+          (lambda rest
+            (define instance (make-record ,name))
+            (let lp ((i 0) (limit (,name fields-count:)) (lst rest))
+              (if (fx= i limit)
+                (if (not (null? lst))
+                  (raise 'eval (print-string "record constructor expected" limit "arguments but got more") #f)
+                  instance)
+                (if (null? lst)
+                  (raise 'eval (print-string "record constructor expected" limit "arguments but got only" i) #f)
+                  (begin
+                    (record-set! ,name instance i (car lst))
+                    (lp (fx+ i 1) limit (cdr lst))))))))
+
         ,predicate
-        ,constructor
         ,@accessors
     ))
 )
 
 (define-syntax with-record
   (lambda (x)
-    (syntax-check-length<> x 3)
+    (syntax-assert-length<> x 3)
 
     (define args (cadr x))
 
-    (syntax-assert (cdr x) (and (list? args) (fx> (length args) 2)) "with-record expects first argument to be a list of identifier")
+    (syntax-assert (cdr x) (and (list? args) (fx> (length args) 2)) "with-record expects first argument to be a list of 3 or more identifiers")
 
     (syntax-assert args (identifier? (car args)) "with-record first element (expression evaluating to record) must be an identifier")
     (syntax-assert (cdr args) (identifier? (cadr args)) "with-record second element (expression evaluating to record type) must be an identifier")
-    (syntax-assert args (every identfiier? (cddr args)) "with-record elements must all be valid identifier")
+    (syntax-assert args (every identifier? (cddr args)) "with-record elements must all be valid identifiers")
 
-    (define record-type (cadr args))
+    (define var (cadr args))
+    (define record-type (caddr args))
     (define fields (cddr args))
+
+    ;; (let ((x (record-ref Point 0 p))) (y (record-ref Point 1 p)))
 
     #t))
 
-(define-record Shape)
+;(define-record Shape)
+
+;(define-record Point x y)
+
+;(define p (Point/make 2 2))
+;(with-record (p Point x)
+;  (print x))
+
+;(with-record (s Shape)
+;   #t)
 
 ;; 
 #|
