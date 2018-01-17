@@ -921,7 +921,7 @@
   (define fn #f)
   (define fn-arity #f)
   (define procedural-transformer #t)
-  (define identifier-transformer #f)
+  (define id-transformer #f)
 
   (if (not (identifier? name))
     (raise-source (cdr x) 'expand "define-syntax first argument (macro name) must be an identifier" (list x (cdr x))))
@@ -934,13 +934,13 @@
     (begin
       (set! body (cadr body))
       (set! procedural-transformer #f)
-      (set! identifier-transformer #t)))
+      (set! id-transformer #t)))
 
   (if (eq? (rename-strip (car body)) 'combined-transformer)
     (begin
       (set! body (cadr body))
       (set! procedural-transformer #t)
-      (set! identifier-transformer #t)))
+      (set! id-transformer #t)))
 
   (set! expanded-body (expand-delayed (expand body env params)))
 
@@ -961,7 +961,7 @@
   (if procedural-transformer
     (set-function-macro-bit! fn))
 
-  (if identifier-transformer
+  (if id-transformer
     (set-function-identifier-macro-bit! fn))
 
   (env-define env name fn #t)

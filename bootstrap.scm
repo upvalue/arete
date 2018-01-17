@@ -10,3 +10,4 @@
 
 (pull-up-bootstraps)
 
+(##arete#load "scheme/library.scm")

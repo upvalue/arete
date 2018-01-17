@@ -1056,26 +1056,35 @@
 (define (pull-up-bootstraps)
   (time-function "bootstrapped!"
     (lambda () 
+      (define (compile-top-level k v)
+        (let ((vmf (recompile-function v)))
+          (set-top-level-value! k vmf)
+          (if (and (symbol-qualified? k) (and (eq? (top-level-value (symbol-dequalify k)) unspecified)))
+            (set-top-level-value! (symbol-dequalify k) vmf)
+            #t)))
+
+      ;; Compiling a few key functions in-order speeds up compilation
+      (for-each1
+        (lambda (k) (compile-top-level k (top-level-value k)))
+        '(##arete#emit ##arete#fn-lookup ##arete#compile-expr ##arete#compile-constant ##arete#compile-apply
+          ##arete#compile-identifier ##arete#special-form))
+
       (top-level-for-each
         (lambda (k v)
           ;; This is pretty shoddy, but since the module system currently just creates duplicates of every function
           ;; defined before it is installed, we'll compile all functions in the module system.
 
           (if (and (eq? (value-type v) 13))
-            (begin
-              (let ((is-macro (env-syntax? #f k)))
-                (let ((vmf (recompile-function v)))
-                  (set-top-level-value! k vmf)
-                  (if (and (symbol-qualified? k) (and (eq? (top-level-value (symbol-dequalify k)) unspecified)))
-                    (set-top-level-value! (symbol-dequalify k) vmf)
-                    #t))
+            (compile-top-level k v)
+            #;(begin
+              (let ((vmf (recompile-function v)))
+                (set-top-level-value! k vmf)
+                (if (and (symbol-qualified? k) (and (eq? (top-level-value (symbol-dequalify k)) unspecified)))
+                  (set-top-level-value! (symbol-dequalify k) vmf)
+                  #t))
                 )
 
-              ))))
-
-      ;; Fascinating: moving this table-for-each above the other really changes the speed of bootstrapping
-      ;; There's probably an optimal order in which to recompile the system for bootstrapping speed, getting the 
-      ;; compile functions first
+              )))
 
       ;; Recompile macros, which have not been defined at the toplevel.
       (table-for-each
