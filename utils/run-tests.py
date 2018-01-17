@@ -84,10 +84,10 @@ def run_tests(path, args = []):
 suites = (
     ('reader', ['--read', '{}']),
     ('preboot',  ['{}']),
-    ('expander', ['scheme/expand.scm', 'scheme/syntax.scm', '{}']),
-    ('compiler',  ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', '--set', 'compiler-test-file', '"{}"',
+    ('expander', ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/types.scm', '{}']),
+    ('compiler',  ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/types.scm', 'scheme/compiler.scm', '--set', 'compiler-test-file', '"{}"',
                    'tests/compiler-test.scm']),
-    ('modules', ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', 
+    ('modules', ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/types.scm', 'scheme/compiler.scm', 
         '--eval', "(set-top-level-value! '*module-paths* (append (top-level-value '*module-paths*) (list \"tests/modules\")))",
         '{}']),
     #('syntax-rules', 

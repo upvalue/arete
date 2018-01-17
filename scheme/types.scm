@@ -34,6 +34,9 @@
 
 ;; Record implementation
 
+;; TODO: While "syntactic inspection" works, it's very unwieldy to write large macros with. How do large Scheme systems
+;; handle things like this?
+
 (define-syntax define-record
   (lambda (x)
     (define name #f)
@@ -146,11 +149,20 @@
                     (if ,parent
                       (append (,parent fields:) (list ,@(map (lambda (x) (list (rename 'quote) x)) fields)))
                       (quote ,fields))))
-              (lambda (x)
+              (lambda (x r c)
                 (if (identifier? x)
                   `,type-name
                   (begin
                     (cond
+                      ((eq? (cadr x) constructor:)
+                       (list (r 'lambda) all-fields
+                             (list (r 'define) (r 'instance) (list (r 'make-record) (quote ,type-name)))
+                             (cons 'begin
+                               (map-i
+                                 (lambda (i f)
+                                   (list (r 'record-set!) (quote ,type-name) (r 'instance) i f))
+                                 all-fields))
+                             (r 'instance)))
                       ((eq? (cadr x) fields-count:)
                        (length all-fields))
                       ((eq? (cadr x) fields:)
@@ -172,19 +184,7 @@
 
         (define ,type-name (register-record-type ,(symbol->string name) ,field-count 0 (,name fields:) ,parent))
 
-        (define ,constructor-name
-          (lambda rest
-            (define instance (make-record ,name))
-            (let lp ((i 0) (limit (,name fields-count:)) (lst rest))
-              (if (fx= i limit)
-                (if (not (null? lst))
-                  (raise 'eval (print-string "record constructor expected" limit "arguments but got more") #f)
-                  instance)
-                (if (null? lst)
-                  (raise 'eval (print-string "record constructor expected" limit "arguments but got only" i) #f)
-                  (begin
-                    (record-set! ,name instance i (car lst))
-                    (lp (fx+ i 1) limit (cdr lst))))))))
+        (define ,constructor-name (,name constructor:))
 
         ,predicate
         ,@accessors
@@ -203,107 +203,21 @@
     (syntax-assert (cdr args) (identifier? (cadr args)) "with-record second element (expression evaluating to record type) must be an identifier")
     (syntax-assert args (every identifier? (cddr args)) "with-record elements must all be valid identifiers")
 
-    (define var (cadr args))
-    (define record-type (caddr args))
+    (define var (car args))
+    (define record-type (cadr args))
     (define fields (cddr args))
+    (define body (cddr x))
 
-    ;; (let ((x (record-ref Point 0 p))) (y (record-ref Point 1 p)))
-
-    #t))
-
-;(define-record Shape)
-
-;(define-record Point x y)
-
-;(define p (Point/make 2 2))
-;(with-record (p Point x)
-;  (print x))
-
-;(with-record (s Shape)
-;   #t)
-
-;; 
-#|
-
-(with-record (p Point x y)
-  #t)
-
-(define-record <point> ()
-  (x type: fixnum? getter: point-x setter: set-point-x!)
-  (y type: fixnum? getter: point-y setter: set-point-y!)
-  constructor:
-    (lambda (k)
-      (lambda (#!optional (x 0) (y 0))
-        (k x y)))
-  predicate: point?
-)
-
-;; we can get record-name...
-
-;; We need a list of field names at the very least, right.
-
-;; '(x y)
-;; '(0 1)
-
-;; but we need this at expansion time.
-;; okay, we need to return a macro what does the thing with the stuff.
-
-;; (with-record (p Point x y)
-;;   #t)
-
-;; becomes
-
-;; (%with-record (%Point/fields) x y)
-
-;; (%Point/predicate) 
-
-;; (%Point/field p 'x)
-;; (record-ref Point p 'x ??)
-
-;; (let ((x (%Point/field p 'x)) (y (%Point/field 'y))
-;;   #t)
+    (define bindings
+      (map
+        (lambda (name)
+          (list name #`(record-ref ,record-type instance (,record-type get: ,name))))
+        fields))
 
 
+    (print bindings)
 
-;; ???
-
-;; (let ((x (Point/x p)) (y (Point/y p))) #t)
-
-(with-record (p Point x y)
-  (print x))
-
-;; how is record information communicated at expand-time?
-
-;; maybe it returns another macro...
-
-
-(with-record (p Point x y)
-  (print x))
-
-;; (record-fields (Point x y))
-;; 
-(let-record (p Point) (x y)
-  (print x))
-
-(define-generic thing)
-
-(define-method thing (x type: point?)
-  (print x))
-
-(let-record (Point p x y)
-  (set! x #t))
-
-(let-record p Point (x y)
-
-(let-record p Point (x y)
-  x
-  y
-  (set! x #t)
-  (set! y #t))
-
-|#
-
-;(define-generic print)
-;(define-method (print 'asdf)
-
+    #`(let ((instance ,var))
+        (let ,bindings
+          ,@body))))
 

@@ -358,10 +358,11 @@ TODO: Casting
 
 
 (define (abs a) (if (< a 0) (- a) a))
-(define (complex? x) (or (fixnum? x) (flonum? x)))
-(define (rational? x) (or (fixnum? x) (flonum? x)))
+;(define (complex? x) (or (fixnum? x) (flonum? x)))
+;(define (rational? x) (or (fixnum? x) (flonum? x)))
+(define complex? number?)
+(define real? number?)
 ;; TODO NaN
-(define (real? x) (or (fixnum? x) (flonum? x)))
 
 ;;;;; DELAY/FORCE
 
