@@ -53,7 +53,7 @@
       (begin
         (syntax-assert (list-ref x 2) (and (identifier? (car (list-ref x 2))) (fx= (length (list-ref x 2)) 1)) "define-record parent argument must be a list with a single identifier")
 
-        (set! parent (caaddr x))
+        (set! parent (caar (cddr x)))
         (set! fields (cdddr x)))
       (begin
         (set! fields (cddr x))))
@@ -151,7 +151,7 @@
                       (quote ,fields))))
               (lambda (x r c)
                 (if (identifier? x)
-                  `,type-name
+                  ',type-name
                   (begin
                     (cond
                       ((eq? (cadr x) constructor:)
@@ -192,7 +192,7 @@
 )
 
 (define-syntax with-record
-  (lambda (x)
+  (lambda (x r c)
     (syntax-assert-length<> x 3)
 
     (define args (cadr x))
@@ -211,13 +211,18 @@
     (define bindings
       (map
         (lambda (name)
-          (list name #`(record-ref ,record-type instance (,record-type get: ,name))))
+          (list name #`(record-ref ,record-type ,instance-var (,record-type get: ,name))))
         fields))
-
-
-    (print bindings)
 
     #`(let ((instance ,var))
         (let ,bindings
-          ,@body))))
+          (let-syntax ((,'set! 
+                         (lambda (x r c)
+                           (syntax-assert-length= x 3)
+                           ;(print "kount:" (,record-type fields-count:))
+                           (if (memq (cadr x) (,record-type fields:))
+                             (list #'record-set! ,record-type ,instance-var 0 #t)
+                             (list #'set! (cadr x) (caddr x)))
+                           )))
+            ,@body)))))
 

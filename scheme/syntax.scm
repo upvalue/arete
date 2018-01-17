@@ -83,26 +83,23 @@
          (alist-check-cell lst x)
            (cons (car x) (cdr x))) lst))
 
-(define (fold-left f init seq)
-  (if (null? seq)
-    init
-    (fold-left f (f (car seq) init) (cdr seq))))
-
-(define (fold-right f init seq) 
-  (if (null? seq) 
-    init 
-    (f (car seq) 
-      (fold-right f init (cdr seq))))) 
-
 (define (qq-list c lst)
+  #;(if (top-level-value 'EXPANDER-PRINT #f)
+    (print lst))
   (if (pair? lst)
     (let ((obj (car lst)))
       (if (and (pair? obj) (c #'unquote-splicing (car obj)))
         (if (cdr lst)
-          (list #'append (cadr obj) (qq-list c (cdr lst)))
+          (list '##arete#append1 (cadr obj) (qq-list c (cdr lst)))
           (cadr obj))
-        ;; TODO: This could be replaced with cons* for less calls and less confusing output
-        (list #'cons (qq-object c obj) (qq-list c (cdr lst)))
+        (let ((chk (qq-list c (cdr lst))))
+          (if (and (pair? chk) (c #'cons* (car chk)))
+            (append1 (list #'cons* (qq-object c obj)) (cdr chk))
+            (if (pair? chk)
+              (append1 (list #'cons* (qq-object c obj)) (if (null? chk) '(()) (list chk)))
+              (begin
+                (append1 (list #'cons* (qq-object c obj)) (if (null? chk) '(()) chk))))))
+        ;(list #'cons (qq-object c obj) (qq-list c (cdr lst)))
       ))
     (begin
       (if (null? lst) 
@@ -112,9 +109,8 @@
 (define (qq-element c lst)
   (if (c #'unquote (car lst))
     (cadr lst)
-    (if (c #'quasiquote (car lst))
-      (begin 
-        (qq-list c lst))
+    (if (or (c #'quasiquote (car lst)) (eq? (car lst) 'quasiquote))
+      (list #'quote lst)
       (qq-list c lst))))
          
 (define (qq-object c object)
@@ -127,6 +123,7 @@
   (lambda (x c)
     (qq-object c (cadr x))
     ))
+
 
 (define-syntax when
   (lambda (x)
@@ -370,35 +367,6 @@
           (,#'loop ,(cadr x))))))
 
 ;; TODO: Simple for loop
-
-;; Do loop
-
-(define-syntax do
-  (lambda (x)
-    (unless (> (length x) 2)
-      (raise-source x 'syntax "do loop needs at least two elements: variables and test" (list x)))
-
-    (let ((varb (list-ref x 1))
-          (test (list-ref x 2))
-          (body (if (= (length x) 3) unspecified (cdddr x))))
-
-      (define vars
-        (map
-          (lambda (v)
-            (unless (and (> (length v) 1) (< (length v) 4))
-              (raise-source v 'syntax "do loop variable binding expects at least two but no more than three elements: variable name and initial value" (list v)))
-
-            (list (list-ref v 0) (list-ref v 1) (if (eq? (length v) 2) (list-ref v 0) (list-ref v 2))))
-          varb))
-
-      #`(let loop (,@(map (lambda (v) (list (list-ref v 0) (list-ref v 1))) vars))
-          (if ,(list-ref test 0)
-            (begin ,@(cdr test))
-            (begin
-              ,@body
-              (loop ,@(map (lambda (v) (list-ref v 2)) vars)))))
-
-      )))
 
 ;; SRFI 1
 

@@ -119,7 +119,7 @@
   (and (not (eq? a terminate)) (cons a b)))
 
 (define (fold-template ellipses matches lst)
-  (print matches)
+  ;(print matches)
   (fold-right
     (lambda (a b)
       (and (not (eq? b terminate))
@@ -282,5 +282,5 @@
 (print (rules-match fake-cmp? '... '(hello "atoms") '(hello "atoms") '()))
 (print (rules-match fake-cmp? '... '(hello one ... two three four) '(hello 1 2 3) '()))
 (print (rules-match fake-cmp? '... '(hello one ... two three four five) '(hello 1 2 3 4) '()))
-|#
 (print (rules-match fake-cmp? '... '(hello (a ...) ...) '(hello (1) (2) (3)) '()))
+|#

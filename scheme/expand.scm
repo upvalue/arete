@@ -74,18 +74,14 @@
   (and (symbol? v) (value-header-bit? v 13)))
 
 (define (self-evaluating? v)
-  (or (keyword? v) (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v)))
+  (or (keyword? v) (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v)
+      (record? v) (record-type? v)))
 
 (define unspecified (if #f #f))
 
 (define (expander-trace . rest)
   (if (eq? (top-level-value 'xtrace) #t)
     (apply print (cons "expander:" rest))))
-
-(define (append1 x y)
-  (if (pair? x)
-      (cons (car x) (append1 (cdr x) y))
-      y))
 
 (define (list-tail lst i)
   (if (or (null? lst) (not (pair? lst)))
@@ -965,6 +961,9 @@
     (set-function-identifier-macro-bit! fn))
 
   (env-define env name fn #t)
+
+  (if (top-level-value 'EXPANDER-PRINT #f)
+    (print expanded-body))
 
   unspecified)
 

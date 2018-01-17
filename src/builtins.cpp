@@ -104,6 +104,58 @@ Value fn_cons_source(State& state, size_t argc, Value* argv, void* v) {
 }
 AR_DEFUN("cons-source", fn_cons_source, 3);
 
+// (cons* 1) => 1
+// (cons* 1 2 3) => (1 2 . 3)
+Value fn_cons_star(State& state, size_t argc, Value* argv, void* v) {
+  //static const char* fn_name = "cons*";
+  if(argc == 1) return argv[0];
+
+  state.temps.clear();
+  for(size_t i = 0; i != argc - 1; i++) {
+    state.temps.push_back(argv[i]);
+  }
+
+  Value lst, elt;
+  AR_FRAME(state, lst, elt);
+  elt = argv[argc-1];
+  for(size_t i = state.temps.size(); i != 0; i--) {
+    lst = state.make_pair(state.temps[i-1], elt);
+    elt = lst;
+  }
+  return lst;
+}
+AR_DEFUN("cons*", fn_cons_star, 1, 1, true);
+
+Value fn_append1(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "append1";
+
+  Value lst1 = argv[0], lst2 = argv[1];
+  ListAppender nlst;
+  if(lst1 == C_NIL) return lst2;
+  AR_FRAME(state, lst1, lst2, nlst.head, nlst.tail);
+
+  if(!lst1.heap_type_equals(PAIR)) {
+    std::cout << "failed before append: " << lst1 << ' ' << lst2 << std::endl;
+    return state.type_error("append1: argument 1 is not a proper list");
+  }
+
+  while(lst1.heap_type_equals(PAIR)) {
+    nlst.append(state, lst1.car());
+    lst1 = lst1.cdr();
+  }
+
+  if(lst1 != C_NIL) {
+    std::cout << "failed after append " << lst1 << std::endl;
+    return state.type_error("append1: argument 1 is not a proper list");
+  }
+
+  nlst.tail.set_cdr(lst2);
+
+
+  return nlst.head;
+}
+AR_DEFUN("append1", fn_append1, 2, 2);
+
 Value fn_list_source(State& state, size_t argc, Value* argv, void* v) {
   static const char *fn_name = "list-source";
   AR_FN_ARGC_GTE(state, argc, 1);

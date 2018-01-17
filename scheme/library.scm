@@ -1,14 +1,33 @@
 ;; library.scm - standard library functions that are not required for the expander or compiler
 
-(define (%iota i n)
-  (if (fx= i n)
-    '()
-    (cons i (%iota (fx+ i 1) n))))
+;; Do loop
 
-(define (iota i)
-  (if (fx= i 0)
-    '()
-    (%iota 0 i)))
+(define-syntax do
+  (lambda (x)
+    (unless (> (length x) 2)
+      (raise-source x 'syntax "do loop needs at least two elements: variables and test" (list x)))
+
+    (let ((varb (list-ref x 1))
+          (test (list-ref x 2))
+          (body (if (= (length x) 3) '() (cdddr x))))
+
+      (define vars
+        (map
+          (lambda (v)
+            (unless (and (> (length v) 1) (< (length v) 4))
+              (raise-source v 'syntax "do loop variable binding expects at least two but no more than three elements: variable name and initial value" (list v)))
+
+            (list (list-ref v 0) (list-ref v 1) (if (eq? (length v) 2) (list-ref v 0) (list-ref v 2))))
+          varb))
+
+      #`(let loop (,@(map (lambda (v) (list (list-ref v 0) (list-ref v 1))) vars))
+          (if ,(list-ref test 0)
+            (begin ,@(cdr test))
+            (begin
+              ,@body
+              (loop ,@(map (lambda (v) (list-ref v 2)) vars)))))
+
+      )))
 
 ;; really scheme, really? these functions should just throw an error for public indecency
 (define (caaaar x) (car (car (car (car x)))))
@@ -55,8 +74,6 @@ TODO: Casting
 
 
 (define (abs a) (if (< a 0) (- a) a))
-;(define (complex? x) (or (fixnum? x) (flonum? x)))
-;(define (rational? x) (or (fixnum? x) (flonum? x)))
 (define complex? number?)
 (define real? number?)
 ;; TODO NaN
@@ -288,8 +305,8 @@ TODO: Casting
       (raise 'eval "Attempt to invoke spent one-shot continuation" tag)))
   result)
 
-;; We define call/cc and dynamic-wind on the simpler unwind-protect and call/1cc. It won't support more extreme uses
-;; of continuations but for many of them, is sufficient.
+;; We define call/cc and dynamic-wind on the simpler unwind-protect and call/1cc. It will throw an error for more
+;; extreme uses of continuations but is sufficient for many of them.
 
 (define call/cc call/1cc)
 (define call-with-current-continuation call/1cc)
@@ -340,10 +357,30 @@ TODO: Casting
 
 (define (vector . lst) (list->vector lst))
 
-
 ;; COMPATIBILITY
 
 (define-syntax er-macro-transformer
   (lambda (x)
     (cadr x)))
 
+;; SRFI 1 / LISTS
+(define (fold-left f init seq)
+  (if (null? seq)
+    init
+    (fold-left f (f (car seq) init) (cdr seq))))
+
+(define (fold-right f init seq) 
+  (if (null? seq) 
+    init 
+    (f (car seq) 
+      (fold-right f init (cdr seq))))) 
+
+(define (%iota i n)
+  (if (fx= i n)
+    '()
+    (cons i (%iota (fx+ i 1) n))))
+
+(define (iota i)
+  (if (fx= i 0)
+    '()
+    (%iota 0 i)))
