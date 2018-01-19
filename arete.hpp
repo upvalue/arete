@@ -1424,10 +1424,13 @@ inline bool Value::applicable() const {
 
 struct FilePort : HeapValue {
   Value path;
+
   union {
     std::istream* input_handle;
     std::ostream* output_handle;
   };
+
+  size_t line, column;
 
   /** S-expression reader. Created lazily */
   XReader* reader;

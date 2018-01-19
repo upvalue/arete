@@ -39,9 +39,10 @@ Value State::make_input_file_port(Value path) {
   AR_TYPE_ASSERT(path.type() == STRING);
   std::string cpath(path.string_data());
   std::ifstream* fs = new std::ifstream(cpath);
-  if(!fs) {
+  if(!fs->is_open()) {
+    delete fs;
     std::ostringstream os;
-    os << "failed to open file \"" << path << "\"";
+    os << "failed to open file " << cpath;
     return make_exception(globals[S_FILE_ERROR], os.str());
   }
   AR_FRAME(this, path);
@@ -59,7 +60,8 @@ Value State::make_output_file_port(Value path) {
   AR_TYPE_ASSERT(path.type() == STRING);
   std::string cpath(path.string_data());
   std::ofstream* fs = new std::ofstream(cpath);
-  if(!fs) {
+  if(!fs->is_open()) {
+    delete fs;
     std::ostringstream os;
     os << "failed to open file \"" << path << "\"";
     return make_exception(globals[S_FILE_ERROR], os.str());
@@ -166,7 +168,8 @@ Value fn_flush_port(State& state, size_t argc, Value* argv, void* v) {
 }
 AR_DEFUN("flush-output-port", fn_flush_port, 1);
 
-// Extract a file port from an argument, or return *current-input-port*
+// Extract a file port from an argument, or return *current-input-port* if that argument was not
+// provided
 #define  AR_MAYBE_INPUT_PORT(state, argv, argc, argi, name) \
   Value name ; \
   if(((argc) > (argi)) && ((argv)[(argi)].type() != FILE_PORT || !(argv[(argi)].file_port_readable()))) { \
@@ -189,10 +192,34 @@ Value fn_read_char(State& state, size_t argc, Value* argv, void* v) {
   std::istream* is = port.file_port_input_handle();
   if(!is && is->eof()) return C_EOF;
   is->read(&c, 1);
+
+  if(c == '\n') {
+    port.as_unsafe<FilePort>()->line++;
+    port.as_unsafe<FilePort>()->column = 0;
+  } else {
+    port.as_unsafe<FilePort>()->column++;
+  }
+
   if(is->eof()) return C_EOF;
   return state.make_char(c);
 }
 AR_DEFUN("read-char", fn_read_char, 0, 1);
+
+Value fn_port_line(State& state, size_t argc, Value* argv, void *v) {
+  static const char* fn_name = "port-line";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FILE_PORT);
+
+  return Value::make_fixnum((ptrdiff_t) argv[0].as<FilePort>()->line);
+}
+AR_DEFUN("port-line", fn_port_line, 1, 1);
+
+Value fn_port_column(State& state, size_t argc, Value* argv, void *v) {
+  static const char* fn_name = "port-line";
+  AR_FN_EXPECT_TYPE(state, argv, 0, FILE_PORT);
+
+  return Value::make_fixnum((ptrdiff_t) argv[0].as<FilePort>()->column);
+}
+AR_DEFUN("port-column", fn_port_column, 1, 1);
 
 Value fn_peek_char(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "peek-char";
