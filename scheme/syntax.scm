@@ -83,9 +83,9 @@
          (alist-check-cell lst x)
            (cons (car x) (cdr x))) lst))
 
+;; Quasiquote implementation
+
 (define (qq-list c lst nest)
-  #;(if (top-level-value 'EXPANDER-PRINT #f)
-    (print lst))
   (if (pair? lst)
     (let ((obj (car lst)))
       (if (and (pair? obj) (c #'unquote-splicing (car obj)))
@@ -123,12 +123,10 @@
       (qq-element c object nest)
       (list #'quote object)))
 
-;; TODO: Needs to allow nesting
 (define-syntax quasiquote
   (lambda (x c)
     (qq-object c (cadr x) 0)
     ))
-
 
 (define-syntax when
   (lambda (x)

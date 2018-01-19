@@ -557,6 +557,9 @@ XReader::TokenType XReader::next_token() {
             return_constant = C_KEYS_OBJECT;
           } else if(buffer.compare("rest") == 0) {
             return_constant = C_REST_OBJECT;
+          } else if(buffer.compare("arete-image") == 0) {
+            read_error("reader encountered an image file; images must always be the first argument", token_start_line, token_start_position, position);
+            return TK_ERROR;
           } else {
             read_error("unknown #! constant", token_start_line, token_start_position, position);
             return TK_ERROR;

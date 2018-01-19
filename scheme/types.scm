@@ -103,25 +103,7 @@
              (print-symbol name "/make"))
         (print-symbol name "/make")))
 
-    (define constructor
-      (aif (assq constructor: kwargs)
-         ;; User overridden constructor
-         #`(define ,constructor-name
-             (,(cadr it)
-                (lambda ,fields
-                  (let ((instance (make-record ,name)))
-                    ,@(map-i
-                        (lambda (i f) #`(record-set! ,name instance ,i ,f))
-                        fields)
-                    instance))))
-        ;; Simple constructor
-        #`(define (,constructor-name ,@fields)
-            (let ((instance (make-record ,name)))
-              ,@(map-i
-                  (lambda (i f)
-                    #`(record-set! ,name instance ,i ,f))
-                  fields)
-              instance))))
+    (define constructor (aif (assq constructor: kwargs) (cadr it) #f))
 
     #;(begin
       (print field-names)
@@ -151,7 +133,7 @@
                       (quote ,fields))))
               (lambda (x r c)
                 (if (identifier? x)
-                  ',type-name
+                  #',type-name
                   (begin
                     (cond
                       ((eq? (cadr x) constructor:)
@@ -171,26 +153,48 @@
                          (list (rename 'quote) (append (,parent fields:) (list ,@(map (lambda (x) (list (rename 'quote) x)) fields))))
                          (list (rename 'quote) (list ,@(map (lambda (x) (list (rename 'quote) x)) fields))))
                       (list (rename 'quote) all-fields))
-                      ((eq? (cadr x) get:)
-                        (syntax-assert-length= x 3)
+
+                      ;; (type getter: var-name field-name)
+                      ;; returns 
+                      ;; (record-ref type-name var-name field-idx)
+                      ((eq? (cadr x) getter:)
+                        (syntax-assert-length= x 4)
                         (let lp ((fields all-fields) (i 0))
                           (if (null? fields)
-                            (syntax-error x (print-string "record type" (quote ,name) "has no field named" (caddr x)))
-                            (if (eq? (car fields) (caddr x))
-                              i
+                            (syntax-error x (print-string "record type" (quote ,name) "has no field named" (list-ref x 3)))
+                            (if (eq? (car fields) (list-ref x 3))
+                              (list #'record-ref #',type-name (list-ref x 2) i)
                               (lp (cdr fields) (fx+ i 1))))))
+
+                      ;; (type setter: var-name field-name value)
+                      ;; returns
+                      ;; (record-set! type-name var-name field-idx value)
+
+                      ((eq? (cadr x) setter:)
+                       (syntax-assert-length= x 5)
+                       (let lp ((fields all-fields) (i 0))
+                         (if (null? fields)
+                           (syntax-error x (print-string "record type" ',name "has no field named" (list-ref x 3)))
+                           (if (eq? (car fields) (list-ref x 3))
+                             (list #'record-set! #',type-name (list-ref x 2) i (list-ref x 4))
+                             (lp (cdr fields) (fx+ i 1))))))
+
                       (else
                         (syntax-error (cdr x) (print-string "unsupported record type inspection syntax" x))))))))))
 
         (define ,type-name (register-record-type ,(symbol->string name) ,field-count 0 (,name fields:) ,parent))
 
-        (define ,constructor-name (,name constructor:))
+        ,(if constructor
+           #`(define ,constructor-name 
+               (,constructor (,name constructor:)))
+           #`(define ,constructor-name (,name constructor:)))
 
         ,predicate
         ,@accessors
     ))
 )
 
+;; with-record, convenience syntax for unwrapping records in a type-checked fashion
 (define-syntax with-record
   (lambda (x r c)
     (syntax-assert-length<> x 3)
@@ -211,18 +215,18 @@
     (define bindings
       (map
         (lambda (name)
-          (list name #`(record-ref ,record-type ,instance-var (,record-type get: ,name))))
+          (list name #`(,record-type getter: ,var ,name)))
+          ;(list name #`(record-ref ,record-type ,var (,record-type get: ,name))))
         fields))
 
-    #`(let ((instance ,var))
-        (let ,bindings
-          (let-syntax ((,'set! 
-                         (lambda (x r c)
-                           (syntax-assert-length= x 3)
-                           ;(print "kount:" (,record-type fields-count:))
-                           (if (memq (cadr x) (,record-type fields:))
-                             (list #'record-set! ,record-type ,instance-var 0 #t)
-                             (list #'set! (cadr x) (caddr x)))
-                           )))
-            ,@body)))))
+    #`(let ,bindings
+        (let-syntax ((,'set! 
+                       (lambda (x r c)
+                         (syntax-assert-length= x 3)
+                         ;(print "kount:" (,record-type fields-count:))
+                         (if (memq (cadr x) (,record-type fields:))
+                           (list ',record-type setter: ,var (cadr x) (caddr x))
+                           (list #'set! (cadr x) (caddr x)))
+                         )))
+          ,@body))))
 

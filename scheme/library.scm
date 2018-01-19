@@ -384,3 +384,14 @@ TODO: Casting
   (if (fx= i 0)
     '()
     (%iota 0 i)))
+
+;; SRFI 8
+
+(define-syntax receive
+  (lambda (x)
+    (syntax-assert-length<> x 3)
+    
+    #`(call-with-values
+        (lambda () ,(caddr x))
+        (lambda ,(cadr x) ,@(cdddr x)))))
+

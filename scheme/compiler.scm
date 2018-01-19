@@ -1092,7 +1092,7 @@
           (if (eq? (value-type v) 13)
             (let ((vmf (recompile-function v)))
               (table-set! (top-level-value '*core-module*) k vmf)
-              (table-set! (top-level-value '*user-module*) k vmf)
+              ;;(table-set! (top-level-value '*user-module*) k vmf)
               )))
         (top-level-value '*core-module*))
 
@@ -1101,11 +1101,3 @@
       (set-top-level-value! 'compiler compile-toplevel)
 
 )))
-
-(expand-import (top-level-value '*user-module*) '(arete))
-
-;; Turn over default execution to the (user) module
-(set-top-level-value! '*push-module* (top-level-value '*user-module*))
-(set-top-level-value! '*current-module* (top-level-value '*user-module*))
-(set-top-level-value! 'compiler compile-toplevel)
-

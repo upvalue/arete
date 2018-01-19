@@ -1151,6 +1151,7 @@
 ;; Set up module system
 
 ;; This is finished at the end of compiler.scm
+#|
 
 (define *core-module* (module-make "arete"))
 
@@ -1192,3 +1193,4 @@
 
 ; Install expander
 (set-top-level-value! 'expander expand-toplevel)
+|#

@@ -16,11 +16,11 @@ using namespace std;
 namespace arete {
 
 static const char* help[] = {
+  "The first argument may be an image file created by --save-image.",
   "Note: Arguments are evaluated left to right, e.g. arete <file1> --repl <file2>",
   "will cause <file1> to be loaded, a REPL to be opened, and <file2> to be loaded after it is closed.\n",
   "  --help: Print this message",
-  "  --image-load <path>: Load a heap image. Must be the first argument.",
-  "  --image-save <path>: Save a heap image. Program exits after this.",
+  "  --save-image <path>: Save a heap image. Program exits after this.",
   "  -- <arguments...>: Arguments after -- will be pass to Scheme as a list of strings named *command-line*",
   "  --set <variable> <expr>: Set a top-level variable to an expression (only read, not evaluated)",
   "  Helpful top-level variables:",
@@ -211,7 +211,6 @@ int State::enter_cli(int argc_, char* argv[]) {
   static const std::string bad("--");
   static const std::string debug_gc("--debug-gc");
   static const std::string save_image("--save-image");
-  static const std::string load_image("--load-image");
   static const std::string set("--set");
   static const std::string eval("--eval");
   static const std::string stats("--stats");
@@ -220,14 +219,18 @@ int State::enter_cli(int argc_, char* argv[]) {
   size_t i = 1;
 
   // Load a boot image
-  if(argc > 2 && load_image.compare(argv[1]) == 0) {
-    std::string image_path(argv[2]);
-    const char* result = boot_from_image(image_path);
-    if(result) {
-      std::cerr << "arete: failed to load image: " << result << std::endl;
-      return EXIT_FAILURE;
+  if(argc > 1) {
+    std::string image_path(argv[1]);
+    if(file_is_image(image_path)) {
+      i++;
+      const char* err = boot_from_image(image_path);
+      if(err != nullptr) {
+        std::cerr << "arete: failed to load image file " << image_path << ": " << err << std::endl;
+        return EXIT_FAILURE;
+      }
+    } else {
+      boot();
     }
-    i = 3;
   } else {
     boot();
   }
@@ -273,9 +276,6 @@ int State::enter_cli(int argc_, char* argv[]) {
     if(help.compare(arg) == 0) {
       print_help();
       return EXIT_SUCCESS;
-    } else if(load_image.compare(arg) == 0) {
-      std::cerr << "--load-image must be the first argument to CLI" << std::endl;
-      return EXIT_FAILURE;
     } else if(read.compare(arg) == 0) {
       EXPECT_NEXT_ARG();
       if(repl.compare(arg2) == 0) {
@@ -386,8 +386,10 @@ int State::enter_cli(int argc_, char* argv[]) {
         return EXIT_FAILURE;
       } else {
         std::string path(argv[i]);
-        if(!do_file(*this, path, false))
+        // Try loading the first argument as an image file
+        if(!do_file(*this, path, false)) {
           return EXIT_FAILURE;
+        }
       }
     }
   }

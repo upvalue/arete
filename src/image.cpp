@@ -19,6 +19,7 @@
 // TODO: Why don't we just insist that each C function has a unique name?
 
 #include <assert.h>
+#include <fstream>
 
 #include "arete.hpp"
 
@@ -34,9 +35,7 @@
 
 namespace arete {
 
-#if ARETE_GC_STRATEGY == ARETE_GC_SEMISPACE
-
-static const char MAGIC_STRING[] = "ARETE-IMAGE\n";
+static const char MAGIC_STRING[] = "#!arete-image\n";
 
 struct ImageHeader {
   char magic[sizeof(MAGIC_STRING)] AR_ALIGN;
@@ -446,17 +445,14 @@ const char* State::boot_from_image(const std::string& path) {
   return 0;
 }
 
-#else 
+bool State::file_is_image(const std::string& path) {
+  std::ifstream fs(path.c_str());
+  char hdr[sizeof(MAGIC_STRING)];
+  fs.read(hdr, sizeof(MAGIC_STRING));
 
-void State::save_image(const std::string& path) {
-  std::cerr << "image loading disabled on incremental GC";
-  exit(EXIT_FAILURE);
+  fs.close();
+
+  return strncmp(hdr, MAGIC_STRING, sizeof(MAGIC_STRING)) == 0;
 }
-
-const char* State::boot_from_image(const std::string& path) {
-  return "image loading disabled on incremental GC";
-}
-
-#endif
 
 }

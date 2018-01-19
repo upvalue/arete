@@ -2138,6 +2138,7 @@ struct State {
 
   /** Load an image. Cannot be called after boot(). */
   const char* boot_from_image(const std::string& path);
+  bool file_is_image(const std::string& path);
 };
 
 // Functions for Procedure::procedure_addr. Must be freestanding because taking

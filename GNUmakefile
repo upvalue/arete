@@ -22,9 +22,7 @@ CXXOBJS32 := $(patsubst %.o,%.32.o,$(CXXOBJS))
 DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) $(ECXXOBJS:.o=.d) src/main.d 
 
 # Scheme sources, order is important
-SSRC := scheme/expand.scm scheme/syntax.scm scheme/types.scm scheme/compiler.scm 
-# To be loaded after bootstrap
-SSRCA := scheme/library.scm
+SSRC := scheme/expand.scm scheme/syntax.scm scheme/types.scm scheme/compiler.scm scheme/library.scm
 
 # Files to include with Emscripten builds
 EFILES := $(addprefix --preload-file ,$(wildcard heap32.boot scheme/*.scm))
@@ -104,13 +102,13 @@ bin/arete32: $(CXXOBJS32) src/main.32.o
 	$(call colorecho, "LD32 $@ ")
 	$(CXX) $(LDFLAGS) -m32 -o $@ $^
 
-heap.boot: bin/arete $(CXXOBJS) $(SSRC) $(SSRCA)
+heap.boot: bin/arete $(CXXOBJS) $(SSRC) 
 	$(call colorecho, "IMG $@ ")
-	bin/arete $(SSRC) --eval "(pull-up-bootstraps)" $(SSRCA) --save-image $@
+	bin/arete boot.scm --save-image $@
 
-heap32.boot: bin/arete32 $(SSRC) $(SSRCA)
+heap32.boot: bin/arete32 $(SSRC) 
 	$(call colorecho, "IMG $@ ")
-	bin/arete32 $(SSRC) --eval "(pull-up-bootstraps)" $(SSRCA) --save-image $@
+	bin/arete32 boot.scm --save-image $@
 
 web/arete.js: $(ECXXOBJS) src/main.em.o heap32.boot
 	$(call colorecho, "LD $@ ")

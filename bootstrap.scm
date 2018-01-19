@@ -7,6 +7,7 @@
 (load "scheme/syntax.scm")
 (load "scheme/types.scm")
 (load "scheme/compiler.scm")
+(##arete#set-top-level-value! '*current-module* (##arete#top-level-value '*core-module*))
 (load "scheme/library.scm")
 
 (pull-up-bootstraps)
