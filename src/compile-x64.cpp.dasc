@@ -1,6 +1,11 @@
 // compile-x64.cpp.dasc - Compile bytecode to native amd64 code
 // This is a DynASM file. Must be run through DynASM to produce a C++ file
 
+// Major todos
+
+// TODO: Full closure support
+// TODO: Allocate off of GC heap
+
 #include <algorithm>
 #include <functional>
 
@@ -101,9 +106,9 @@ void load_native_compiler(State&) {}
 // rsp+16 = vmfunction pointer
 // rsp+24 = closure pointer (if any)
 // rsp+32 = gc scratch for debugging purposes
-// 32 - a = local variables
-// a - b = upvalues
-// b - c = computation stack
+// 32 - kUpvalueOffset = local variables
+// kUpvalueOffset - kCompStackOffset = upvalues
+// kCompStackOffset - rsp = computation stack
 
 // TODO: Use offsetof and other stuff instead of calling functions to retrieve information
 // about a particular State
@@ -116,7 +121,7 @@ void load_native_compiler(State&) {}
 
 namespace arete {
 
-static const bool dbg = false;
+static const bool dbg = true;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
@@ -217,6 +222,7 @@ enum {
 
 // Exception source codes
 enum {
+  E_UPVALUES_NOT_SUPPORTED,
   E_ARITY_CHECK_EQ,
   E_ARITY_CHECK_GTE,
   E_APPLY_CHECK,
@@ -273,6 +279,11 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
 
   bool check_code = true;
   switch(exc->src) {
+    case E_UPVALUES_NOT_SUPPORTED: {
+      check_code = false;
+      os << "closures not supported :(";
+      break;
+    }
     case E_APPLY_CHECK: {
       check_code = false;
       //Value varg1(exc->arg1);
@@ -356,6 +367,41 @@ struct NativeFrameSize {
   Value scratch;
 };
 
+void upvalue_close(State* state, Value upval) {
+  AR_ASSERT(state->gc.live(upval.heap));
+  AR_ASSERT(upval.type() == UPVALUE);
+  upval.upvalue_close();
+}
+
+size_t allocate_upvalue(State* state, Value* local) {
+  Value upvalue = state->gc.allocate(UPVALUE, sizeof(Upvalue));
+  upvalue.heap->set_header_bit(Value::UPVALUE_POINTER_BIT);
+  upvalue.as_unsafe<Upvalue>()->U.local = local;
+  AR_LOG_JIT("allocating upvalue " << upvalue.bits << " to stack location " << (size_t) local);
+
+  return (size_t) upvalue.bits;
+
+}
+
+size_t make_closure(State* state, size_t upvalues, Value* stack_start) {
+  Value storage, closure, vmf(stack_start[0]);
+  AR_FRAME(*state, vmf, storage, closure, vmf);
+  AR_LOG_JIT("make-closure upvalues: " << upvalues << " function: " << vmf);
+
+
+  storage = state->make_vector_storage(upvalues);
+  for(size_t i = 0; i != upvalues; i++) {
+    state->vector_storage_append(storage, stack_start[1+i]);
+  }
+
+  closure = state->gc.allocate(CLOSURE, sizeof(Closure));
+  closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
+
+  closure.as_unsafe<Closure>()->function = vmf;
+  closure.procedure_install(vmf.as_unsafe<Procedure>()->procedure_addr);
+
+  return closure.bits;
+}
 
 Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   const char* fn_name = "vmfunction->native";
@@ -379,17 +425,17 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   // Using the otherwise not-used-in-this codebase kBlah style to denote things that will become
   // constants in the compiled code
 
-  unsigned total_stack = local_count + stack_max;
-  unsigned kFrameValues = local_count + stack_max + 2;
-  // Locals + computation stack + pointer to VMFunction and Closure
+  unsigned total_stack = local_count + stack_max + upvalue_count;
+  unsigned kFrameValues = local_count + stack_max + 3;
+  // Locals + computation stack + pointer to VMFunction and Closure and scratch
 
   size_t kFrameSize = sizeof(NativeFrameSize);
   // size_t kValueSize = sizeof(void*);
 
   // Stack frame offsets
   unsigned kLocalsOffset = kFrameSize;
-  //unsigned kUpvaluesOffset = sizeof(NativeFrame) + (local_count * sizeof(void*));
-  unsigned kCompStackOffset = kFrameSize + (local_count * sizeof(void*));
+  unsigned kUpvaluesOffset = kFrameSize + (local_count * sizeof(void*));
+  unsigned kCompStackOffset = kFrameSize + ((local_count + upvalue_count) * sizeof(void*));
 
   unsigned kTotalStackSize = kFrameSize + (total_stack * 8);
   unsigned kTotalStackSizeAligned = kTotalStackSize;
@@ -684,8 +730,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   // Extract closure, if there is one
 
-  // TODO: We know at compile time whether or not a VMFunction is a closure.
-
+  // TODO: We know at compile time whether or not a VMFunction is a closure. Need to add a flag
+  // or something so we don't emit this on non-closures
   | mov rax, sFrameFunction
   | mov rax, [rax]
   | and rax, 255
@@ -760,6 +806,33 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | add rArg1, 8
   | cmp rArg1, rArg2
   | jne ->gc_zero
+
+  if(upvalue_count) {
+    for(size_t i = 0; i != upvalue_count; i++) {
+      size_t idx = vmf->free_variables->bv_ref<size_t>(i);
+
+      AR_LOG_JIT("allocating upvalue[" << i << "] from local idx " << idx);
+      // TODO: This depends on GCC not smashing the argument registers, which it doesn't seem to.
+      // Probably not portable though.
+      | mov rArg1, rState
+      | mov rArg2, rsp
+      | add rArg2, (kLocalsOffset + (idx * 8))
+      | mov64 rax, (size_t) allocate_upvalue
+      | call rax
+
+      | mov rArg1, rsp
+      | add rArg1, (kUpvaluesOffset + (i * 8))
+      | mov [rArg1], rax
+    }
+
+
+    if(dbg) {
+      | mov rArg1, rsp
+      | simpCall print_stack_frame
+    }
+
+    //| throwNativeException 0, E_EVAL, E_UPVALUES_NOT_SUPPORTED, 0, 0
+  }
 
   if(dbg) {
     | mov rArg1, rsp
@@ -963,24 +1036,92 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | add rax, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
         | mov rax, [rax]
 
+        // How to simplify this?
+
         // Check upvalue header
         | mov rArg1, [rax]
         | and rArg1, (Value::UPVALUE_CLOSED_BIT)
         | cmp rArg1, (Value::UPVALUE_CLOSED_BIT)
-        | je >1
+        | je >2
         // Native locals not yet supported
-        | mov qword [rStackI], 0
-        | jmp >2
+        | mov rArg1, [rax]
+        | and rArg1, (Value::UPVALUE_POINTER_BIT)
+        | cmp rArg1, (Value::UPVALUE_POINTER_BIT)
+        | je >1
+        // The upvalue is an offset into the VM stack
+        | mov rArg1, rax
+        | add rArg1, (ptrdiff_t)(&((Upvalue*)0)->U.vm_local_idx)
+        | mov rArg1, [rArg1]
+        // Get pointer to VM stack
+        | mov rArg2, rState
+        | add rArg2, (ptrdiff_t)(&((arete::State*)0)->gc.vm_stack)
+        | mov rArg2, [rArg2]
+        // Get offset of VM stack
+        | imul rArg1, 8
+        | add rArg2, rArg1
+        | mov rArg1, [rArg2]
+        | mov [rStackI], rArg1
+        | jmp >3
         | 1:
+        | throwNativeException 0, E_EVAL, E_UPVALUES_NOT_SUPPORTED, 0, 0
+        /*
+        | add rax, (ptrdiff_t)(&((Upvalue*)0)->U.local)
+        | mov rax, [rax] // get Upvalue::U.local
+        | mov rax, [rax] // dereference U.local to get stack pointer
+        | mov rStackI, [rax] // finally get the actual value
+        */
+        | jmp >3
+        | 2:
         // If the upvalue is closed
         | mov rArg1, [rax]
         | add rax, (ptrdiff_t)(&((Upvalue*)0)->U.converted)
         | mov rax, [rax]
         | mov [rStackI], rax
-        | 2:
+        | 3:
 
         | incStack
         //| incStack
+
+        break;
+      }
+
+      case OP_UPVALUE_FROM_CLOSURE: {
+        size_t idx = code[code_offset++];
+        break;
+      }
+
+      case OP_UPVALUE_FROM_LOCAL: {
+        size_t idx = code[code_offset++];
+
+        AR_LOG_JIT("upvalue-from-local " << idx);
+
+        | mov qword [rStackI], 18
+        | mov rArg1, rsp
+        | add rArg1, (kUpvaluesOffset + (idx * 8))
+        | mov rArg1, [rArg1]
+        | mov [rStackI], rArg1
+        | incStack
+
+        break;
+      }
+
+      case OP_CLOSE_OVER: {
+        size_t upvalues = code[code_offset++];
+
+        | mov rArg1, rState
+        | mov64 rArg2, (size_t) upvalues
+        | mov rArg3, rStackI
+        // Stack position = stack - 8 - upvalues - 8 (for VMFunction at the beginning)
+        | sub rArg3, (((size_t)((upvalues * 8) + 8)))
+        | mov64 rax, (size_t) make_closure
+        | call rax
+
+        | sub rStackI, (((size_t)((upvalues * 8) + 8)))
+        | mov [rStackI], rax
+        | incStack
+
+        | mov rArg1, rsp
+        | simpCall print_stack_frame
 
         break;
       }
@@ -1347,6 +1488,19 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
     | simpCall sanity_log_end
   }
 
+  // Close over local upvalues
+  if(upvalue_count) {
+    for(size_t i = 0; i != upvalue_count; i++) {
+      | mov rArg2, rsp
+      | add rArg2, (kUpvaluesOffset + (i * 8))
+      | mov rArg2, [rArg2]
+      
+      | mov rArg1, rState
+      | mov64 rax, (size_t) upvalue_close
+      | call rax
+    }
+  }
+
   // state->gc.native_frames = NativeFrame.previous
   | mov rArg1, rState
   | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
@@ -1383,24 +1537,27 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   AR_FRAME(state, bv, nfn, vfn, closure);
 
-  bv = state.make_bytevector<unsigned char>(size);
+  char* proc_addr = state.allocate_native_code(size);
+  std::cout << (ptrdiff_t) proc_addr << std::endl;
+
+  //bv = state.make_bytevector<unsigned char>(size);
 
   AR_LOG_JIT("function size: " << size << " vs " << (0 * 8));
 
-  dasm_encode(&d, bv.bv_data());
+  //dasm_encode(&d, bv.bv_data());
+  dasm_encode(&d, proc_addr);
 
   dasm_free(&d);
 
   AR_LOG_JIT("vmfunction->native done; calling function");
 
-  vfn.as_unsafe<VMFunction>()->native_code = bv.as_unsafe<Bytevector>();
+  //vfn.as_unsafe<VMFunction>()->native_code = bv.as_unsafe<Bytevector>();
   vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
-
-  vfn.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)bv.as_unsafe<Bytevector>()->data;
 
   // PROBLEM: A closure cannot have all procedure_addrs replaced in-place by the JIT compiler.
 
-  closure.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)bv.as_unsafe<Bytevector>()->data;
+  vfn.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)proc_addr;
+  closure.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)proc_addr;
 
   return vfn;
 }
@@ -1415,12 +1572,12 @@ Value fn_native_call(State& state, size_t argc, Value* argv, void* fn) {
 
   Value vfn = argv[0];
   AR_FRAME(state, vfn);
-  AR_ASSERT(state.gc.live(vfn.as_unsafe<VMFunction>()->native_code));
+  //AR_ASSERT(state.gc.live(vfn.as_unsafe<VMFunction>()->native_code));
 
-  Value bv(vfn.as_unsafe<VMFunction>()->native_code);
+  //Value bv(vfn.as_unsafe<VMFunction>()->native_code);
 
   if(dbg) {
-    std::cout << "Bv size: " << vfn.as_unsafe<VMFunction>()->native_code->size << std::endl;
+    //std::cout << "Bv size: " << vfn.as_unsafe<VMFunction>()->native_code->size << std::endl;
 
     std::cout << "VMFunction ptr: " << (ptrdiff_t)vfn.bits << std::endl;
     std::cout << "Constants ref: " << (ptrdiff_t)&vfn.as<VMFunction>()->constants << std::endl;
@@ -1439,7 +1596,8 @@ Value fn_native_call(State& state, size_t argc, Value* argv, void* fn) {
   }
 
   // argc, argv, fn
-	void* fptr = (void*) vfn.as_unsafe<VMFunction>()->native_code->data;
+	//void* fptr = (void*) vfn.as_unsafe<VMFunction>()->native_code->data;
+  void *fptr = (void*) vfn.as_unsafe<VMFunction>()->procedure_addr;
   Value (*ptr)(State*, size_t, size_t, size_t) = (Value (*)(State*, size_t, size_t, size_t))(fptr);
   //Value result = ptr((State*) 12, (ptrdiff_t)34, (ptrdiff_t) 56, (ptrdiff_t) 78);
 	vfn_bits = (size_t) vfn.bits;

@@ -8,7 +8,6 @@
 // TYPE! Internal value representation and basic operations
 // GC! Garbage collection
 // RUN! Runtime 
-// CLI! Command line interface
 // READ! S-expression input and output
 // MISC! Various inline functions 
 
@@ -284,8 +283,8 @@ struct HeapValue {
    * copied objects */
   size_t size;
 
-  void initialize(unsigned type, unsigned mark_bit, size_t size_) {
-    header = (type) + (mark_bit << 8);
+  void initialize(unsigned type, size_t size_) {
+    header = type;
     size = size_;
   }
 
@@ -762,6 +761,7 @@ struct Value {
   Value closure_unbox() const;
 
   static const unsigned UPVALUE_CLOSED_BIT = 1 << 10;
+  static const unsigned UPVALUE_POINTER_BIT = 1 << 11;
 
   // RECORD
   Value record_type() const;
@@ -1512,7 +1512,7 @@ struct Block {
   char* data;
   size_t size;
 
-  Block(size_t size_, unsigned char mark_bit);
+  Block(size_t size_, bool executable);
   ~Block();
 
   /** Returns true if there is room in a block for a given allocation */
@@ -1633,7 +1633,7 @@ struct GCSemispace : GCCommon {
     allocations++;
     HeapValue* v = (HeapValue*) (active->data + block_cursor);
     memset((((char*)v) + sizeof(HeapValue)), 0, size - sizeof(HeapValue));
-    v->initialize(type, 0, size);
+    v->initialize(type, size);
     block_cursor += size;
     // Assert that pointer is aligned properly.
     // AR_ASSERT(!Value(v).immediatep());
@@ -1674,6 +1674,12 @@ struct State {
 
   /** A GC-tracked array of temporary values. May be cleared by function calls. */
   std::vector<Value> temps;
+
+  /** Non-moving blocks containing native code */
+  std::vector<Block*> native_code;
+
+  /** Allocation cursor for native code; points to current location in native_code.end() */
+  size_t native_code_cursor;
 
   struct StackTrace {
     StackTrace(const std::string& text_): text(text_), seen(0) {}
@@ -2142,6 +2148,9 @@ struct State {
   /** Load an image. Cannot be called after boot(). */
   const char* boot_from_image(const std::string& path);
   bool file_is_image(const std::string& path);
+
+  // Native code memory management
+  void* allocate_native_code(size_t);  
 };
 
 // Functions for Procedure::procedure_addr. Must be freestanding because taking

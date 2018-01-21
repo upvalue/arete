@@ -318,7 +318,11 @@ tail:
         if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
           (*stack++) = upval->U.converted;
         } else {
-          (*stack++) = state.gc.vm_stack[upval->U.vm_local_idx];
+          if(upval->get_header_bit(Value::UPVALUE_POINTER_BIT)) {
+            (*stack++) = upval->U.local->bits;
+          } else {
+            (*stack++) = state.gc.vm_stack[upval->U.vm_local_idx];
+          }
         }
         // (*stack++) = upval.upvalue();
         VM_DISPATCH();

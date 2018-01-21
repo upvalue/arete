@@ -3,6 +3,12 @@
 
 #include "arete.hpp"
 
+#if AR_OS == AR_POSIX
+# include <sys/mman.h>
+#else
+# include <Windows.h>
+#endif
+
 namespace arete {
 
 State* current_state = 0;
@@ -32,6 +38,9 @@ State::State():
 
 State::~State() {
   // Finalize all objects (close ports, free memory, etc)
+  for(size_t i = 0; i != native_code.size(); i++) {
+    delete native_code[i];
+  }
   gc.run_finalizers(true);
   delete symbol_table;
   current_state = 0;
@@ -182,5 +191,47 @@ Value State::load_file(const std::string& path) {
   return x;
 }
 
+#if AR_OS == AR_POSIX
+
+static void* gc_allocate(size_t size) {
+  return mmap(NULL, size, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+}
+
+static void gc_free(void* ptr, size_t length) {
+  munmap(ptr, length);
+}
+
+#else 
+
+static void* gc_allocate(size_t size) {
+	void* mem = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	DWORD w;
+	VirtualProtect(mem, size, PAGE_EXECUTE_READWRITE, &w);
+	// TODO: FlushInstructionCache (?)
+	return mem;
+}
+
+static void gc_free(void* ptr, size_t size) {
+	(void) size;
+	VirtualFree(ptr, size, MEM_DECOMMIT);
+}
+
+#endif
+
+void* State::allocate_native_code(size_t size) {
+  AR_ASSERT(size < 4096);
+  if(!native_code.size() || ((native_code_cursor + size) > 4096)) {
+    Block* b = new Block(4096, true);
+    native_code.push_back(b);
+    native_code_cursor = 0;
+  }
+  Block* b = native_code[native_code.size() - 1];
+
+  char* ptr = (b->data + native_code_cursor);
+  native_code_cursor += size;
+  AR_ASSERT(native_code_cursor != 4096);
+
+  return ptr;
+}
 
 }

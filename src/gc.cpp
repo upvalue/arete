@@ -38,8 +38,10 @@ namespace arete {
 
 #if AR_OS == AR_POSIX
 
-static void* gc_allocate(size_t size) {
-  return mmap(NULL, size, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+static void* gc_allocate(size_t size, bool executable) {
+  int prot = PROT_READ | PROT_WRITE;
+  if(executable) prot |= PROT_EXEC;
+  return mmap(NULL, size, prot, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 }
 
 static void gc_free(void* ptr, size_t length) {
@@ -48,9 +50,10 @@ static void gc_free(void* ptr, size_t length) {
 
 #else 
 
-static void* gc_allocate(size_t size) {
+static void* gc_allocate(size_t size, bool executable) {
 	void* mem = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 	DWORD w;
+  int prot = executable ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
 	VirtualProtect(mem, size, PAGE_EXECUTE_READWRITE, &w);
 	// TODO: FlushInstructionCache (?)
 	return mem;
@@ -60,18 +63,6 @@ static void gc_free(void* ptr, size_t size) {
 	(void) size;
 	VirtualFree(ptr, size, MEM_DECOMMIT);
 }
-
-#if 0
-
-static void* gc_allocate(size_t size) {
-  return calloc(1, size);
-}
-
-static void gc_free(void* ptr, size_t size) {
-  free(ptr);
-}
-
-#endif
 
 #endif
 
@@ -171,9 +162,9 @@ struct GCTimer {
 
 GCTimer gc_overall_timer_i(gc_overall_timer);
 
-Block::Block(size_t size_, unsigned char mark_bit): size(size_) {
-  data = static_cast<char*>(gc_allocate(size));
-  ((HeapValue*) data)->initialize(BLOCK, !mark_bit, size_);
+Block::Block(size_t size_, bool executable): size(size_) {
+  data = static_cast<char*>(gc_allocate(size, executable));
+  ((HeapValue*) data)->initialize(BLOCK, size_);
 }
 
 Block::~Block() {
@@ -268,6 +259,8 @@ void GCCommon::visit_roots(T& walker) {
 //
 ///// SEMISPACE COLLECTOR
 //
+
+// TODO: Remove GCCommon and stuff intended to make the GC generic.
 
 GCSemispace::GCSemispace(State& state_, size_t heap_size):
     GCCommon(state_, heap_size), 
