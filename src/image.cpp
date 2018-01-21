@@ -129,6 +129,7 @@ struct PointerUpdater {
       }
 
       case FUNCTION:
+        static_cast<VMFunction*>(heap)->procedure_addr = apply_interpreter;
         static_cast<Function*>(heap)->name = update_value(static_cast<Function*>(heap)->name);
         static_cast<Function*>(heap)->parent_env = update_value(static_cast<Function*>(heap)->parent_env);
         static_cast<Function*>(heap)->arguments = update_value(static_cast<Function*>(heap)->arguments);

@@ -214,7 +214,11 @@ Value fn_table_ref(State& state, size_t argc, Value* argv, void* v) {
 
   AR_FN_ARGC_BETWEEN(state, argc, 2, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
-  AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
+  if(!argv[1].hashable()) {
+    std::ostringstream os;
+    os << "to be hashable, but got " << argv[1].type();
+    AR_FN_ASSERT_ARG(state, 1, os.str(), argv[1].hashable());
+  }
 
   bool found;
   Value result = state.table_get(argv[0], argv[1], found);

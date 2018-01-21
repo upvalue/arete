@@ -2329,35 +2329,37 @@ enum {
   OP_UPVALUE_GET = 8,
   OP_UPVALUE_SET = 9,
   OP_CLOSE_OVER = 10,
+  OP_UPVALUE_FROM_LOCAL = 11,
+  OP_UPVALUE_FROM_CLOSURE = 12,
   // Application
-  OP_APPLY = 11,
-  OP_APPLY_TAIL = 12,
+  OP_APPLY = 13,
+  OP_APPLY_TAIL = 14,
   // Flow control
-  OP_RETURN = 13,
-  OP_JUMP = 14,
-  OP_JUMP_WHEN = 15,
-  OP_JUMP_WHEN_POP = 16,
-  OP_JUMP_UNLESS = 17,
+  OP_RETURN = 15,
+  OP_JUMP = 16,
+  OP_JUMP_WHEN = 17,
+  OP_JUMP_WHEN_POP = 18,
+  OP_JUMP_UNLESS = 19,
   // Prologue instructions
-  OP_ARGC_EQ = 18,
-  OP_ARGC_GTE = 19,
-  OP_ARG_OPTIONAL = 20,
-  OP_ARGV_REST = 21,
-  OP_ARG_KEY = 22,
-  OP_ARGV_KEYS = 23,
+  OP_ARGC_EQ = 20,
+  OP_ARGC_GTE = 21,
+  OP_ARG_OPTIONAL = 22,
+  OP_ARGV_REST = 23,
+  OP_ARG_KEY = 24,
+  OP_ARGV_KEYS = 25,
   // Instructions below this point are primitive versions of the builtin C++ routines for speed;
   // they are not necessary for code to execute correctly.
-  OP_ADD = 24,
-  OP_SUB = 25,
-  OP_LT = 26,
-  OP_CAR = 27,
-  OP_CDR = 28,
-  OP_LIST_REF = 29,
-  OP_NOT = 30,
-  OP_EQ = 31,
-  OP_FX_LT = 32,
-  OP_FX_ADD = 33,
-  OP_FX_SUB = 34,
+  OP_ADD = 26,
+  OP_SUB = 27,
+  OP_LT = 28,
+  OP_CAR = 29,
+  OP_CDR = 30,
+  OP_LIST_REF = 31,
+  OP_NOT = 32,
+  OP_EQ = 33,
+  OP_FX_LT = 34,
+  OP_FX_ADD = 35,
+  OP_FX_SUB = 36,
 };
 
 inline Type Value::type() const {
@@ -2514,7 +2516,7 @@ struct TableIterator {
 #define AR_FN_ARGC_LTE(state, argc, expect) \
   if((argc) > (expect)) { \
     std::ostringstream __os; \
-    __os << "function " << (fn_name) << " expected at least " << (expect) << " arguments but got " << (argc); \
+    __os << "function " << (fn_name) << " expected at most " << (expect) << " arguments but got " << (argc); \
     AR_FN_STACK_TRACE(state); \
     return (state).eval_error(__os.str()); \
   }

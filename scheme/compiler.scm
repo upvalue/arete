@@ -168,7 +168,7 @@
   '(bad
     push-constant push-immediate pop
     global-get global-set local-get local-set upvalue-get upvalue-set
-    close-over
+    close-over upvalue-from-local upvalue-from-closure
     apply apply-tail
     return 
     jump jump-when jump-when-pop jump-unless
@@ -207,8 +207,8 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
-               (0 jump jump-when argc-optional jump-unless words close-over return car cdr not argc-eq argc-gte argv-rest arg-optional arg-key argv-keys)
-               (1 push-immediate push-constant global-get local-get upvalue-get)
+               (0 jump jump-when argc-optional jump-unless words return car cdr not argc-eq argc-gte argv-rest arg-optional arg-key argv-keys)
+               (1 push-immediate push-constant global-get local-get upvalue-get upvalue-from-closure upvalue-from-local)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
       (let loop2 ((insns (cdr elt)))
@@ -230,7 +230,7 @@
         ;; Variable microcode: Remove arguments from stack, and re-use one of the argument slots to push results
         ((+ - <) (fx+ (fx- 0 (cadr insns)) 1))
         ;; Remove arguments from stack, but push a single result in the place of the function on the stack
-        ((apply apply-tail) (fx- 0 (cadr insns)))
+        ((apply apply-tail close-over) (fx- 0 (cadr insns)))
         (else (raise 'compile-internal (print-string "unknown instruction" (car insns)) (list fn (car insns) insns))))
     ))
 
@@ -687,6 +687,15 @@
       ;; That will create a closure at runtime out of the compiled function
       (aif (OpenFn/closure sub-fn)
         (begin
+          (let loop ((i 0))
+            (unless (eq? i (vector-length it))
+              (let ((var (vector-ref it i)))
+                (if (Var/upvalue? var)
+                  (emit fn 'upvalue-from-closure (Var/idx var))
+                  (emit fn 'upvalue-from-local (Var/free-variable-id var))))
+              (loop (fx+ i 1))))
+          (emit fn 'close-over (vector-length it)))
+        #;(begin
           (emit fn 'close-over (vector-length it))
 
           (let loop ((i 0))

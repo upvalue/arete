@@ -1,6 +1,8 @@
 // vm.cpp - Virtual machine
 
-#define NOMINMAX
+#ifndef NOMINMAX
+# define NOMINMAX
+#endif
 
 #include "arete.hpp"
 
@@ -54,8 +56,8 @@ struct VMFrame2 {
     fn = closure.closure_unbox();
     AR_ASSERT(state.gc.live(closure.heap));
     AR_ASSERT(state.gc.live(fn.heap));
-    AR_ASSERT("Wizard fight" && arete::current_state->gc.live(fn.heap));
-    VMFunction* vfn = fn.as<VMFunction>();
+    ARETE_ASSERT_LIVE(fn.heap);
+    VMFunction* vfn = fn.as_unsafe<VMFunction>();
     vm_stack_used = vfn->local_count + vfn->upvalue_count + vfn->stack_max;
     state.vm_depth++;
     //state.gc.grow_stack(vm_stack_used);
@@ -137,7 +139,7 @@ tail:
 
   // TODO: CHECK RECURSION LIMIT
 
-  if(state.vm_depth >= state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero()) {
+  if(state.vm_depth >= (size_t)state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero()) {
     std::ostringstream os;
     os << " non-tail recursive calls exceeded RECURSION-LIMIT (" << 
       state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero() << ')';
@@ -209,7 +211,8 @@ tail:
   static void* dispatch_table[] = {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,
     &&LABEL_OP_GLOBAL_GET, &&LABEL_OP_GLOBAL_SET, &&LABEL_OP_LOCAL_GET, &&LABEL_OP_LOCAL_SET,
-    &&LABEL_OP_UPVALUE_GET, &&LABEL_OP_UPVALUE_SET, &&LABEL_OP_CLOSE_OVER,
+    &&LABEL_OP_UPVALUE_GET, &&LABEL_OP_UPVALUE_SET,
+    &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_UPVALUE_FROM_LOCAL, &&LABEL_OP_UPVALUE_FROM_CLOSURE,
     &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
     &&LABEL_OP_RETURN,
     &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
@@ -229,6 +232,8 @@ tail:
   };
 #endif
 
+
+#define STACK_PICK(i) (*(stack - (i)))
   //std::cout << "Offset of frame storage: " << ((size_t)locals - (size_t)state.gc.vm_stack) << std::endl;
   //std::cout << "Offset of stack: " << ((size_t)stack - (size_t)state.gc.vm_stack) << std::endl;
 
@@ -337,6 +342,33 @@ tail:
         size_t upvalue_count = VM_NEXT_INSN();
         AR_LOG_VM2("close-over " << upvalue_count);
 
+        {
+          Value storage, closure;
+          AR_FRAME(state, storage, closure);
+          storage = state.make_vector_storage(upvalue_count);
+          for(size_t i = upvalue_count; i != 0; i--) {
+            state.vector_storage_append(storage, STACK_PICK(i));
+            //std::cout << i << std::endl;
+            //std::cout << STACK_PICK(i) << std::endl;
+            AR_ASSERT(STACK_PICK(i).type() == UPVALUE);
+          }
+          closure = state.gc.allocate(CLOSURE, sizeof(Closure));
+          closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
+          stack -= upvalue_count;
+          closure.as_unsafe<Closure>()->function = *(stack - 1);
+          closure.procedure_install(apply_vm);
+
+          AR_ASSERT(closure.as_unsafe<Closure>()->function.heap_type_equals(VMFUNCTION));
+          AR_ASSERT(closure.heap_type_equals(CLOSURE));
+          AR_ASSERT((*(stack - 1)).heap_type_equals(VMFUNCTION));
+
+          AR_ASSERT(state.gc.live(closure.heap));
+          AR_ASSERT(state.gc.live((*(stack - 1)).heap));
+
+          *(stack - 1) = closure;
+        }
+
+#if 0
         Value storage, closure;
         {
           AR_FRAME(state, storage, closure);
@@ -381,8 +413,27 @@ tail:
 
           *(stack-1) = closure;
         }
+      #endif
         VM2_RESTORE_GC();
         VM_DISPATCH();  
+      }
+
+      VM_CASE(OP_UPVALUE_FROM_CLOSURE): {
+        size_t idx = VM_NEXT_INSN();
+        AR_LOG_VM2("upvalue-from-closure" << idx);
+        (*stack++) = f.closure.as<Closure>()->upvalues->data[idx];
+        AR_ASSERT((*(stack - 1)).heap_type_equals(UPVALUE));
+        VM_DISPATCH();  
+      }
+
+      VM_CASE(OP_UPVALUE_FROM_LOCAL): {
+        size_t idx = VM_NEXT_INSN();
+        (*stack++) = state.gc.vm_stack[sff_offset + vfn->local_count + idx];
+        AR_LOG_VM2("upvalue-from-local " << idx << ' ' << *(stack - 1));
+
+        //(*stack++) = (&state.gc.vm_stack[sff_offset + vfn->local_count])[idx];
+        AR_ASSERT((*(stack - 1)).heap_type_equals(UPVALUE));
+        VM_DISPATCH();
       }
 
       VM_CASE(OP_APPLY): {
@@ -550,7 +601,6 @@ tail:
         size_t key_constant = VM_NEXT_INSN();
         size_t label = VM_NEXT_INSN();
 
-
         // Attempt to find key in #!keys table
         Value keys = locals[vfn->max_arity];
         Value constant = vfn->constants->data[key_constant];
@@ -601,8 +651,6 @@ tail:
         }
         VM_DISPATCH();
       }
-
-#define STACK_PICK(i) (*(stack - (i)))
 
       VM_CASE(OP_ADD): {
         size_t argc = VM_NEXT_INSN();

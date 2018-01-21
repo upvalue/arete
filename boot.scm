@@ -1,5 +1,12 @@
 ;; boot.scm - load all code, initialize module system, and compile everything in-place.
 
+;; the toplevel value BOOT-STAGE can be used to stop at a certain point. used mainly for testing.
+
+;; BOOT-STAGE 1: only load expander
+;; BOOT-STAGE 2: load expander, syntax and types but not compiler
+;; BOOT-STAGE 3: load compiler 
+;; BOOT-STAGE 4: bootstrap the whole system
+
 ;; order is important
 
 ;; Step 1) Load expander
@@ -45,26 +52,30 @@
   (set-top-level-value! '*current-module* *core-module*)
 
   ; Install expander
-  (set-top-level-value! 'expander expand-toplevel)
-)
+  (set-top-level-value! 'expander expand-toplevel))
 
 ;; Step 2) Load core syntax (things like let, record,s etc)
-(load "scheme/syntax.scm")
-(load "scheme/types.scm")
+(if (>= (top-level-value 'BOOT-STAGE 10) 2)
+  (begin
+    (load "scheme/syntax.scm")
+    (load "scheme/types.scm")))
 
 ;; Step 3) Load compiler and bootstrap
-(begin
-  (load "scheme/compiler.scm")
+(if (>= (top-level-value 'BOOT-STAGE 10) 3)
+  (begin
+    (load "scheme/compiler.scm")
 
-  ;; Install compiler. All code loaded after this point (not including the currently executing file) will be compiled
-  ;; and run on the virtual machine
-  (set-top-level-value! 'compiler compile-toplevel)
-  
-  (pull-up-bootstraps)
-)
+    ;; Install compiler. All code loaded after this point (not including the currently executing file) will be compiled
+    ;; and run on the virtual machine
+
+    (set-top-level-value! 'compiler compile-toplevel)
+  ))
+
+(if (>= (top-level-value 'BOOT-STAGE 10) 4) (pull-up-bootstraps))
 
 ;; Step 4) Load modules
-(load "scheme/library.scm")
+(if (>= (top-level-value 'BOOT-STAGE 10) 5)
+  (load "scheme/library.scm"))
 
 ;; Finish bootstrapping by importing all functions defined in (arete) to the (user) module
 (expand-import (top-level-value '*user-module*) '(arete))

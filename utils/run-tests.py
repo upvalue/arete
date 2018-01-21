@@ -15,7 +15,7 @@ print_errors = False
 ansi_escape = re.compile(r'\x1b[^m]*m')
 
 def arete_line(x):
-    return not ansi_escape.sub('', x).startswith('arete:')
+    return not ansi_escape.sub('', x).startswith('arete:') and not ansi_escape.sub('', x).startswith(';;')
 
 def run_tests(path, args = []):
     global successful_tests, total_tests
@@ -84,14 +84,11 @@ def run_tests(path, args = []):
 suites = (
     ('reader', ['--read', '{}']),
     ('preboot',  ['{}']),
-    ('expander', ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/types.scm', '{}']),
-    ('compiler',  ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/types.scm', 'scheme/compiler.scm', '--set', 'compiler-test-file', '"{}"',
-                   'tests/compiler-test.scm']),
-    ('modules', ['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/types.scm', 'scheme/compiler.scm', 
-        '--eval', "(set-top-level-value! '*module-paths* (append (top-level-value '*module-paths*) (list \"tests/modules\")))",
-        '{}']),
-    #('syntax-rules', 
-        #['scheme/expand.scm', 'scheme/syntax.scm', 'scheme/compiler.scm', 'scheme/rules.scm', '{}'])
+    ('expander', ['--set', 'BOOT-STAGE', '2', 'boot.scm', '{}']),
+    ('compiler', ['--set', 'BOOT-STAGE', '3', 'boot.scm', '--set', 'compiler-test-file', '"{}"', 'tests/compiler-test.scm']),
+    ('modules', ['--set', 'BOOT-STAGE', '3 ', 'boot.scm',
+        '--eval', "(set-top-level-value! '*module-paths* (append (top-level-value '*module-paths*) (list \"tests/modules\")))", '{}']),
+    ('library', ['--set', 'BOOT-STAGE', '5', 'boot.scm', '{}']),
 )
 
 if __name__ == '__main__':

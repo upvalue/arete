@@ -42,7 +42,7 @@ Value State::make_input_file_port(Value path) {
   if(!fs->is_open()) {
     delete fs;
     std::ostringstream os;
-    os << "failed to open file " << cpath;
+    os << "failed to open file " << path;
     return make_exception(globals[S_FILE_ERROR], os.str());
   }
   AR_FRAME(this, path);
@@ -63,7 +63,7 @@ Value State::make_output_file_port(Value path) {
   if(!fs->is_open()) {
     delete fs;
     std::ostringstream os;
-    os << "failed to open file \"" << path << "\"";
+    os << "failed to open file " << path;
     return make_exception(globals[S_FILE_ERROR], os.str());
   }
   AR_FRAME(this, path);
@@ -184,7 +184,7 @@ AR_DEFUN("flush-output-port", fn_flush_port, 1);
 
 Value fn_read_char(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "read-char";
-  AR_FN_ARGC_LTE(state, argc, 1);
+  AR_FN_ARGC_GTE(state, argc, 1);
 
   AR_MAYBE_INPUT_PORT(state, argv, argc, 0, port);
 
@@ -207,6 +207,7 @@ AR_DEFUN("read-char", fn_read_char, 0, 1);
 
 Value fn_port_line(State& state, size_t argc, Value* argv, void *v) {
   static const char* fn_name = "port-line";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FILE_PORT);
 
   return Value::make_fixnum((ptrdiff_t) argv[0].as<FilePort>()->line);
@@ -215,6 +216,7 @@ AR_DEFUN("port-line", fn_port_line, 1, 1);
 
 Value fn_port_column(State& state, size_t argc, Value* argv, void *v) {
   static const char* fn_name = "port-line";
+  AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FILE_PORT);
 
   return Value::make_fixnum((ptrdiff_t) argv[0].as<FilePort>()->column);
@@ -224,7 +226,7 @@ AR_DEFUN("port-column", fn_port_column, 1, 1);
 Value fn_peek_char(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "peek-char";
 
-  AR_FN_ARGC_LTE(state, argc, 1);
+  AR_FN_ARGC_GTE(state, argc, 1);
   AR_MAYBE_INPUT_PORT(state, argv, argc, 0, port);
 
   std::istream* is = port.file_port_input_handle();
@@ -238,7 +240,7 @@ AR_DEFUN("peek-char", fn_peek_char, 0, 1);
 Value fn_read(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "read";
 
-  AR_FN_ARGC_LTE(state, argc, 1);
+  AR_FN_ARGC_GTE(state, argc, 1);
   AR_MAYBE_INPUT_PORT(state, argv, argc, 0, port);
 
   std::istream* is = port.file_port_input_handle();

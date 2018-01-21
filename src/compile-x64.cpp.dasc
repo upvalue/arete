@@ -97,10 +97,11 @@ void load_native_compiler(State&) {}
 
 // Stack
 // rsp+0 = pointer to previous stack frame
-// rsp+8 = closure pointer (if any)
+// rsp+8 = size_t count of gc'd values
 // rsp+16 = vmfunction pointer
-// rsp+24 = count of gc'd values
-// 24 - a = local variables
+// rsp+24 = closure pointer (if any)
+// rsp+32 = gc scratch for debugging purposes
+// 32 - a = local variables
 // a - b = upvalues
 // b - c = computation stack
 
@@ -370,6 +371,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   unsigned local_count = vmf->local_count;
   unsigned stack_max = vmf->stack_max;
+  unsigned upvalue_count = vmf->upvalue_count;
   unsigned label = 0;
 
   // Using the otherwise not-used-in-this codebase kBlah style to denote things that will become
