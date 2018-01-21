@@ -356,7 +356,8 @@ tail:
           closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
           stack -= upvalue_count;
           closure.as_unsafe<Closure>()->function = *(stack - 1);
-          closure.procedure_install(apply_vm);
+          // We have to extract procedure_addr because this function may be native-compiled
+          closure.procedure_install(*(stack-1)->as_unsafe<Procedure>()->procedure_addr);
 
           AR_ASSERT(closure.as_unsafe<Closure>()->function.heap_type_equals(VMFUNCTION));
           AR_ASSERT(closure.heap_type_equals(CLOSURE));
@@ -368,52 +369,6 @@ tail:
           *(stack - 1) = closure;
         }
 
-#if 0
-        Value storage, closure;
-        {
-          AR_FRAME(state, storage, closure);
-
-          storage = state.make_vector_storage(upvalue_count);
-
-          VM2_RESTORE_GC();
-          // VM ALLOCATION
-
-          Value* upvalues = &state.gc.vm_stack[sff_offset + vfn->local_count];
-
-          for(size_t i = 0; i != upvalue_count; i++) {
-            size_t is_enclosed = VM_NEXT_INSN();
-            size_t idx = VM_NEXT_INSN();
-
-            if(is_enclosed) {
-              AR_LOG_VM2("enclosing free variable " << i << " from closure idx " << idx);
-              state.vector_storage_append(storage, f.closure.as<Closure>()->upvalues->data[idx]);
-            } else {
-              AR_LOG_VM2("enclosing local variable " << idx);
-              AR_ASSERT(upvalues[idx].heap_type_equals(UPVALUE));
-              state.vector_storage_append(storage, upvalues[idx]);
-            }
-            // VM ALLOCATION
-
-            VM2_RESTORE_GC();
-
-            AR_LOG_VM2("upvalue " << i << " = " << storage.as_unsafe<VectorStorage>()->data[i] << " " << storage.as_unsafe<VectorStorage>()->data[i].upvalue())
-          }
-          closure = state.gc.allocate(CLOSURE, sizeof(Closure));
-
-          //closure.procedure_install(&State::apply_vm);
-          closure.procedure_install((c_closure_t) & arete::apply_vm);
-
-          closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
-
-          closure.as_unsafe<Closure>()->function = *(stack-1);
-
-          AR_ASSERT(closure.as_unsafe<Closure>()->function.heap_type_equals(VMFUNCTION));
-
-          // VM ALLOCATION
-
-          *(stack-1) = closure;
-        }
-      #endif
         VM2_RESTORE_GC();
         VM_DISPATCH();  
       }

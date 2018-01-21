@@ -277,8 +277,11 @@ std::ostream& operator<<(std::ostream& os, Value v) {
         os << ' ' << v.exception_irritants();
       }
       return os << '>';
+    case VECTOR_STORAGE: {
+      return os << "#<vector-storage " << v.as<VectorStorage>()->length << '>';
+    }
     default: 
-      return os << "#<unknown value type " << v.type() << " bits: " << v.bits << ">";
+      return os << "#<unknown value type " << v.type() << " (" << v.heap->get_type() << ") bits: " << v.bits << ">";
   }
   return os;
 }

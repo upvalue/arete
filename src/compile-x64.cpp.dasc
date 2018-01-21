@@ -258,12 +258,12 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
     << " arg2: " << exc->arg2);
 
 	Value function(exc->function1);
+
   AR_ASSERT(function.type() == VMFUNCTION);
 
   std::ostringstream os;
 
   Value stag;
-
 
   if(exc->tag == E_TYPE) {
     stag = exc->state->globals[State::S_TYPE_ERROR];
@@ -360,10 +360,12 @@ struct NativeFrameSize {
 Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   const char* fn_name = "vmfunction->native";
 
-  AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
-  Value bv, nfn, vfn;
+  AR_FN_ASSERT_ARG(state, 0, "to be a closure or vm function", argv[0].heap_type_equals(CLOSURE) || argv[0].heap_type_equals(VMFUNCTION));
+  //AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
+  Value bv, nfn, vfn, closure;
 
-  vfn = argv[0];
+  closure = argv[0];
+  vfn = closure.closure_unbox();
 
   AR_LOG_JIT("vmfunction_to_native called");
 
@@ -680,6 +682,25 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | mov rArg3, rArg2
 	|.endif
 
+  // Extract closure, if there is one
+
+  // TODO: We know at compile time whether or not a VMFunction is a closure.
+
+  | mov rax, sFrameFunction
+  | mov rax, [rax]
+  | and rax, 255
+  | cmp rax, (CLOSURE)
+  | jne ->past_closure_check
+
+  | mov rax, sFrameFunction
+  | mov sFrameClosure, rax
+
+  | add rax, (&((Closure*)0)->function)
+  | mov rax, [rax]
+  | mov sFrameFunction, rax
+
+  | ->past_closure_check:
+
   // NativeFrame.previous = state->gc.native_frames
   | mov rArg1, rState
   | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
@@ -780,6 +801,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
       case OP_UPVALUE_SET:
       case OP_LOCAL_GET:
       case OP_LOCAL_SET:
+      case OP_UPVALUE_FROM_LOCAL:
+      case OP_UPVALUE_FROM_CLOSURE:
+      case OP_CLOSE_OVER:
       case OP_ARGC_EQ:
       case OP_ARGC_GTE:
       case OP_PUSH_CONSTANT:
@@ -898,6 +922,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         break;
       }
 
+
       case OP_LOCAL_SET: {
         size_t idx = code[code_offset++];
         size_t stack_offset = (kLocalsOffset + (8 * idx));
@@ -922,6 +947,40 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         | popStackTop rArg2
         | mov [rArg1], rArg2
+
+        break;
+      }
+
+      case OP_UPVALUE_GET: {
+        size_t idx = code[code_offset++];
+
+        AR_LOG_JIT("upvalue-get " << idx);
+
+        | mov rax, sFrameClosure
+        | mov [rStackI], rax
+        | add rax, (&((Closure*)0)->upvalues)
+        | mov rax, [rax]
+        | add rax, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
+        | mov rax, [rax]
+
+        // Check upvalue header
+        | mov rArg1, [rax]
+        | and rArg1, (Value::UPVALUE_CLOSED_BIT)
+        | cmp rArg1, (Value::UPVALUE_CLOSED_BIT)
+        | je >1
+        // Native locals not yet supported
+        | mov qword [rStackI], 0
+        | jmp >2
+        | 1:
+        // If the upvalue is closed
+        | mov rArg1, [rax]
+        | add rax, (ptrdiff_t)(&((Upvalue*)0)->U.converted)
+        | mov rax, [rax]
+        | mov [rStackI], rax
+        | 2:
+
+        | incStack
+        //| incStack
 
         break;
       }
@@ -1322,7 +1381,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   dasm_link(&d, &size);
 
-  AR_FRAME(state, bv, nfn);
+  AR_FRAME(state, bv, nfn, vfn, closure);
 
   bv = state.make_bytevector<unsigned char>(size);
 
@@ -1337,7 +1396,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   vfn.as_unsafe<VMFunction>()->native_code = bv.as_unsafe<Bytevector>();
   vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
 
-  vfn.as_unsafe<VMFunction>()->procedure_addr = (c_closure_t)(void*)bv.as_unsafe<Bytevector>()->data;
+  vfn.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)bv.as_unsafe<Bytevector>()->data;
+
+  // PROBLEM: A closure cannot have all procedure_addrs replaced in-place by the JIT compiler.
+
+  closure.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)bv.as_unsafe<Bytevector>()->data;
 
   return vfn;
 }
