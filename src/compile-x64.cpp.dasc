@@ -1086,55 +1086,40 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | je >1
         |.endmacro
 
+        |.macro upvalueExtract
+        | mov rArg2, rax
+        | add rArg2, (ptrdiff_t)(&((Upvalue*)0)->U.local)
+        | mov rArg2, [rArg2]
+        |.endmacro
+
         | getUpvalue rax, idx
 
-        // TODO: This is a lot of code! 
-        // We could perhaps put it in some kind of separate place, and jump back to it, so we're
-        // not generating this giant block of code each time
+        // TODO: This adds a LOT of code. 
 
-        // Check upvalue header
-        | mov rArg1, [rax]
-        | and rArg1, (Value::UPVALUE_CLOSED_BIT)
-        | cmp rArg1, (Value::UPVALUE_CLOSED_BIT)
-        | je >2
-        // Native locals not yet supported
-        | mov rArg1, [rax]
-        | and rArg1, (Value::UPVALUE_POINTER_BIT)
-        | cmp rArg1, (Value::UPVALUE_POINTER_BIT)
-        | je >1
+        // Extract upvalue contents, which may either be a pointer, a stack offset, or a value
+        // to be used immediately
+
+        | upvalueExtract
+
+        | upvalueDispatch
         // The upvalue is an offset into the VM stack
-        | mov rArg1, rax
-        | add rArg1, (ptrdiff_t)(&((Upvalue*)0)->U.vm_local_idx)
-        | mov rArg1, [rArg1]
         // Get pointer to VM stack
-        | mov rArg2, rState
-        | add rArg2, (ptrdiff_t)(&((arete::State*)0)->gc.vm_stack)
-        | mov rArg2, [rArg2]
+        | mov rArg1, rState
+        | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.vm_stack)
+        | mov rArg1, [rArg1]
         // Get offset of VM stack
-        | imul rArg1, 8
-        | add rArg2, rArg1
-        | mov rArg1, [rArg2]
+        | imul rArg2, 8
+        | add rArg1, rArg2
+        | mov rArg1, [rArg1]
         | mov [rStackI], rArg1
         | jmp >3
         | 1:
-        | throwNativeException 0, E_EVAL, E_UPVALUES_NOT_SUPPORTED, 0, 0
-        /*
-        | add rax, (ptrdiff_t)(&((Upvalue*)0)->U.local)
-        | mov rax, [rax] // get Upvalue::U.local
-        | mov rax, [rax] // dereference U.local to get stack pointer
-        | mov rStackI, [rax] // finally get the actual value
-        */
-        | jmp >3
-        | 2:
-        // If the upvalue is closed
-        | mov rArg1, [rax]
-        | add rax, (ptrdiff_t)(&((Upvalue*)0)->U.converted)
-        | mov rax, [rax]
-        | mov [rStackI], rax
-        | 3:
+        | mov rArg2, [rArg2]
+        | 2: 
+        | mov [rStackI], rArg2
+        | 3: 
 
         | incStack
-        //| incStack
 
         break;
       }
