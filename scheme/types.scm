@@ -205,19 +205,29 @@
 
     (syntax-assert args (identifier? (car args)) "with-record first element (expression evaluating to record) must be an identifier")
     (syntax-assert (cdr args) (identifier? (cadr args)) "with-record second element (expression evaluating to record type) must be an identifier")
-    (syntax-assert args (every identifier? (cddr args)) "with-record elements must all be valid identifiers")
+    ;(syntax-assert args (every identifier? (cddr args)) "with-record elements must all be valid identifiers")
+    (syntax-assert args (list? args) "with-record elements must be a list")
 
     (define var (car args))
     (define record-type (cadr args))
-    (define fields (cddr args))
+
+    (for-each1
+      (lambda (x)
+        (if (identifier? x)
+          x
+          (begin
+            (syntax-assert (cddr args) (and (list? x) (fx= (length x) 2) (every identifier? x)) "with-record binding must be either an identifier or a list with two identifiers")
+            (car x))))
+      (cddr args))
+
     (define body (cddr x))
 
     (define bindings
-      (map
-        (lambda (name)
-          (list name #`(,record-type getter: ,var ,name)))
-          ;(list name #`(record-ref ,record-type ,var (,record-type get: ,name))))
-        fields))
+      (map1
+        (lambda (item)
+          (define name (if (pair? item) (cadr item) item))
+          (list (if (pair? item) (car item) item) #`(,record-type getter: ,var ,name)))
+        (cddr args)))
 
     #`(let ,bindings
         (let-syntax ((,'set! 

@@ -1092,16 +1092,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | mov rArg2, [rArg2]
         |.endmacro
 
-        | getUpvalue rax, idx
 
         // TODO: This adds a LOT of code. 
 
         // Extract upvalue contents, which may either be a pointer, a stack offset, or a value
         // to be used immediately
 
+        | getUpvalue rax, idx
         | upvalueExtract
-
         | upvalueDispatch
+
         // The upvalue is an offset into the VM stack
         // Get pointer to VM stack
         | mov rArg1, rState
