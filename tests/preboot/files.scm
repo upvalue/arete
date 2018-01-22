@@ -13,4 +13,4 @@
 
 (close-input-port port)
 (set! port #f)
-(gc:collect) ;; trigger finalization
+(gc-collect) ;; trigger finalization

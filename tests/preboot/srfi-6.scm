@@ -7,4 +7,3 @@
 
 (close-output-port thing)
 
-;(gc:collect)

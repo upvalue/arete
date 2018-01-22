@@ -219,6 +219,7 @@ static void gc_free(void* ptr, size_t size) {
 #endif
 
 void* State::allocate_native_code(size_t size) {
+  // TODO: Do a better job of this.
   AR_ASSERT(size < 4096);
   if(!native_code.size() || ((native_code_cursor + size) > 4096)) {
     Block* b = new Block(4096, true);

@@ -1457,7 +1457,8 @@ Value fn_gc_collect(State& state, size_t argc, Value* argv, void* v) {
   state.gc.collect();
   return C_UNSPECIFIED;
 }
-AR_DEFUN("gc:collect", fn_gc_collect, 0);
+AR_DEFUN("gc-collect", fn_gc_collect, 0);
+
 
 Value fn_exit(State& state, size_t argc, Value* argv, void* v) {
   if(argv[1] == C_TRUE) {

@@ -240,8 +240,9 @@ void GCCommon::visit_roots(T& walker) {
     std::cout << "native frame " << (ptrdiff_t) native << std::endl;
     std::cout << "native frame previous " << (ptrdiff_t) native->previous << " count: " << (ptrdiff_t)native->value_count << std::endl;
     for(size_t i = 0; i != native->value_count; i++) {
-      std::cout << "native frame ptr " << i << ": " << (ptrdiff_t)native->values[i].bits << " stack address: " << (ptrdiff_t)(void*)&native->values[i] << std::endl;
+      size_t saved = native->values[i].bits;
       walker.touch((HeapValue**) &native->values[i].bits);
+      std::cout << "native frame ptr " << (native->values[i].immediatep() ? (Type)0 : (Type)native->values[i].type_unsafe()) << ' ' << i << ": " << saved << " => " << (ptrdiff_t)native->values[i].bits << " stack address: " << (ptrdiff_t)(void*)&native->values[i] << std::endl;
     }
     native = native->previous;
     break;

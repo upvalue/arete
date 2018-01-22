@@ -205,6 +205,9 @@ std::ostream& operator<<(std::ostream& os, Value v) {
         os << "#<vmfunction ";
       }
       os << v.vm_function_name();
+      if(v.heap->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
+        os << " (native)";
+      }
       if(v.vm_function_min_arity() == v.vm_function_max_arity() && !v.vm_function_variable_arity()) {
         os << ' ' << v.vm_function_min_arity();
       } else {

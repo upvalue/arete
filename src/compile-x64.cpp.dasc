@@ -121,7 +121,7 @@ void load_native_compiler(State&) {}
 
 namespace arete {
 
-static const bool dbg = true;
+static const bool dbg = false;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
@@ -201,7 +201,7 @@ void print_stack_frame(NativeFrame* frame) {
   std::cout << "vmfunction " << (ptrdiff_t) frame->values[0].bits << std::endl;
   std::cout << "closure " << (ptrdiff_t) frame->values[1].bits << std::endl;
   std::cout << "scratch " << (ptrdiff_t) frame->values[2].bits << std::endl;
-  for(size_t i = 3; i <= frame->value_count; i++) {
+  for(size_t i = 3; i < frame->value_count; i++) {
     std::cout << "values[" << i << "]: " << (ptrdiff_t) frame->values[i].bits << std::endl;
   }
   std::cout << ">>" << std::endl;;
@@ -223,6 +223,10 @@ enum {
 // Exception source codes
 enum {
   E_UPVALUES_NOT_SUPPORTED,
+  E_UPVALUE_CLOSED,
+  E_UPVALUE_NATIVE,
+  E_UPVALUE_VM,
+  E_UNDEFINED,
   E_ARITY_CHECK_EQ,
   E_ARITY_CHECK_GTE,
   E_APPLY_CHECK,
@@ -284,12 +288,23 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
       os << "closures not supported :(";
       break;
     }
+
     case E_APPLY_CHECK: {
       check_code = false;
-      //Value varg1(exc->arg1);
-      os << "attempt to apply non-applicable value " << exc->arg1;
+      os << "attempt to apply non-applicable value " << Value(exc->arg1);
       break;
     }
+
+    case E_UNDEFINED: {
+      check_code = false;
+      os << "attempt to access undefined variable " << Value(exc->arg1);
+      break;
+    }
+
+    case E_UPVALUE_NATIVE: check_code = false; os << "native upvalue"; break;
+    case E_UPVALUE_CLOSED: check_code = false; os << "closed upvalue"; break;
+    case E_UPVALUE_VM: check_code = false; os << "vm upvalue"; break;
+
     case E_ARITY_CHECK_EQ: {
       check_code = false;
       os << "expected exactly " << exc->arg1 << " arguments but got " << exc->arg2;
@@ -315,6 +330,8 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
       default: break;
     }
   }
+
+  std::cout << os.str() << std::endl;
 
   exc->state->trace_function(function, 0, exc->code_offset);
   
@@ -368,6 +385,7 @@ struct NativeFrameSize {
 };
 
 void upvalue_close(State* state, Value upval) {
+  std::cout << "closing upvalue " << upval.bits <<  ' ' << upval.type() << std::endl;
   AR_ASSERT(state->gc.live(upval.heap));
   AR_ASSERT(upval.type() == UPVALUE);
   upval.upvalue_close();
@@ -392,6 +410,7 @@ size_t make_closure(State* state, size_t upvalues, Value* stack_start) {
   storage = state->make_vector_storage(upvalues);
   for(size_t i = 0; i != upvalues; i++) {
     state->vector_storage_append(storage, stack_start[1+i]);
+    AR_ASSERT(stack_start[i+1].heap_type_equals(UPVALUE));
   }
 
   closure = state->gc.allocate(CLOSURE, sizeof(Closure));
@@ -399,6 +418,7 @@ size_t make_closure(State* state, size_t upvalues, Value* stack_start) {
 
   closure.as_unsafe<Closure>()->function = vmf;
   closure.procedure_install(vmf.as_unsafe<Procedure>()->procedure_addr);
+  AR_ASSERT(closure.type() == CLOSURE);
 
   return closure.bits;
 }
@@ -406,12 +426,14 @@ size_t make_closure(State* state, size_t upvalues, Value* stack_start) {
 Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   const char* fn_name = "vmfunction->native";
 
+  AR_FN_ARGC_GTE(state, argc, 1);
   AR_FN_ASSERT_ARG(state, 0, "to be a closure or vm function", argv[0].heap_type_equals(CLOSURE) || argv[0].heap_type_equals(VMFUNCTION));
-  //AR_FN_EXPECT_TYPE(state, argv, 0, VMFUNCTION);
-  Value bv, nfn, vfn, closure;
+  Value nfn, vfn, closure;
 
   closure = argv[0];
   vfn = closure.closure_unbox();
+
+  AR_FRAME(state, nfn, vfn, closure);
 
   AR_LOG_JIT("vmfunction_to_native called");
 
@@ -426,7 +448,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   // constants in the compiled code
 
   unsigned total_stack = local_count + stack_max + upvalue_count;
-  unsigned kFrameValues = local_count + stack_max + 3;
+  unsigned kFrameValues = total_stack + 3;
   // Locals + computation stack + pointer to VMFunction and Closure and scratch
 
   size_t kFrameSize = sizeof(NativeFrameSize);
@@ -450,6 +472,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kLocalsOffset " << kLocalsOffset << 
+    " kUpvaluesOffset " << kUpvaluesOffset << \
     " kCompStackOffset " << kCompStackOffset \
 		<< " kFrameValues " << kFrameValues << " kFrameSize " << kFrameSize);
 
@@ -495,6 +518,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	| .endif
   | pop rArg4; pop rArg3; pop rArg2; pop rArg1
   |.endmacro
+  
+  // Call without saving any registers
+  | .macro callNoSave, fun
+  | push rbp; push rsp; mov64 rax, (ptrdiff_t) fun; call rax; pop rsp; pop rbp
+  | .endmacro
 
   // Call a function which takes arete::State as its first argument
   // and returns a Value
@@ -573,7 +601,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   // bits == 0 is #f
   | test store, store
   | je >1
-  //| je >1
+  // bits & 3
   | test store, 3
   | jnz >1
   |.endmacro
@@ -595,8 +623,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   // Check whether a value in STORE is applicable and extract its procedure address if so
   |.macro extractProcedureAddr, store
-  | immediateJmpTo1 store
   // This is now guaranteed to be a heapvalue pointer, test it for VALUE_PROCEDURE_BIT
+  | immediateJmpTo1 store
   | test qword [store], Value::VALUE_PROCEDURE_BIT
   | jnz >2
   | 1:
@@ -807,24 +835,27 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | cmp rArg1, rArg2
   | jne ->gc_zero
 
+
   if(upvalue_count) {
     for(size_t i = 0; i != upvalue_count; i++) {
       size_t idx = vmf->free_variables->bv_ref<size_t>(i);
 
       AR_LOG_JIT("allocating upvalue[" << i << "] from local idx " << idx);
-      // TODO: This depends on GCC not smashing the argument registers, which it doesn't seem to.
-      // Probably not portable though.
+
       | mov rArg1, rState
       | mov rArg2, rsp
       | add rArg2, (kLocalsOffset + (idx * 8))
-      | mov64 rax, (size_t) allocate_upvalue
-      | call rax
+
+      | push rArg3; push rArg4;
+      | push rbp; push rsp;
+      | mov64 rax, (size_t) allocate_upvalue; call rax
+      | pop rsp; pop rbp;
+      | pop rArg4; pop rArg3
 
       | mov rArg1, rsp
       | add rArg1, (kUpvaluesOffset + (i * 8))
       | mov [rArg1], rax
     }
-
 
     if(dbg) {
       | mov rArg1, rsp
@@ -963,7 +994,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         break;
       }
 
-      // TODO undefined
       case OP_GLOBAL_GET: {
         size_t idx = code[code_offset++];
 
@@ -973,6 +1003,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | add rArg1, (ptrdiff_t)(&(((Symbol*)0)->value))
         | mov rArg1, [rArg1]
 
+        | cmp rArg1, (size_t)C_UNDEFINED
+        | jne >1
+        | storeConstant rArg1, idx
+        | throwNativeException (size_t) current_insn, E_EVAL, E_UNDEFINED, rArg1, 0
+        | 1:
         | mov [rStackI], rArg1
         | incStack
 
@@ -994,7 +1029,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | incStack
         break;
       }
-
 
       case OP_LOCAL_SET: {
         size_t idx = code[code_offset++];
@@ -1029,14 +1063,34 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         AR_LOG_JIT("upvalue-get " << idx);
 
-        | mov rax, sFrameClosure
-        | mov [rStackI], rax
-        | add rax, (&((Closure*)0)->upvalues)
-        | mov rax, [rax]
-        | add rax, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
-        | mov rax, [rax]
+        |.macro getUpvalue, store, idx
+        | mov store, sFrameClosure
+        | add store, (&((Closure*)0)->upvalues)
+        | mov store, [rax]
+        | add store, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
+        | mov store, [rax]
+        |.endmacro
 
-        // How to simplify this?
+        // Jumps to labels based on type of upvalue in rax
+        // If upvalue is closed, jumps to >2
+        // If upvalue is native, jumps to >1
+        // If upvalue is VM, code immediately afterwards is executed
+        |.macro upvalueDispatch
+        | mov rArg1, [rax]
+        | and rArg1, (Value::UPVALUE_CLOSED_BIT)
+        | cmp rArg1, (Value::UPVALUE_CLOSED_BIT)
+        | je >2
+        | mov rArg1, [rax]
+        | and rArg1, (Value::UPVALUE_POINTER_BIT)
+        | cmp rArg1, (Value::UPVALUE_POINTER_BIT)
+        | je >1
+        |.endmacro
+
+        | getUpvalue rax, idx
+
+        // TODO: This is a lot of code! 
+        // We could perhaps put it in some kind of separate place, and jump back to it, so we're
+        // not generating this giant block of code each time
 
         // Check upvalue header
         | mov rArg1, [rax]
@@ -1085,8 +1139,29 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         break;
       }
 
+      case OP_UPVALUE_SET: {
+        size_t idx = code[code_offset++];
+        AR_LOG_JIT("upvalue-set " << idx);
+
+        | getUpvalue rax, idx
+        | upvalueDispatch
+        //
+        | throwNativeException 0, E_EVAL, E_UPVALUE_VM, 0, 0
+        | jmp >1
+        | 2:
+        | throwNativeException 0, E_EVAL, E_UPVALUE_CLOSED, 0, 0
+        | 1:
+        | throwNativeException 0, E_EVAL, E_UPVALUE_VM, 0, 0
+        | 3:
+        | incStack
+
+        break;
+      }
+
       case OP_UPVALUE_FROM_CLOSURE: {
         size_t idx = code[code_offset++];
+
+        | throwNativeException 0, E_EVAL, E_UPVALUES_NOT_SUPPORTED, 0, 0
         break;
       }
 
@@ -1132,7 +1207,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         AR_LOG_JIT("apply " << argc);
 
-        // Get pointer to beginning of what we need on the stack (function)
 
         // Pointer to function on stack
         | mov rArg4, rStackI
@@ -1473,7 +1547,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | mov rStackI, rax
 	| add rsp, 48
   | add rsp, sizeof(NativeException) // Reset stack
-
+  
   |->unwind: 
 
   // Protect return value
@@ -1535,9 +1609,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   dasm_link(&d, &size);
 
-  AR_FRAME(state, bv, nfn, vfn, closure);
-
-  char* proc_addr = state.allocate_native_code(size);
+  char* proc_addr = (char*) state.allocate_native_code(size);
   std::cout << (ptrdiff_t) proc_addr << std::endl;
 
   //bv = state.make_bytevector<unsigned char>(size);
@@ -1558,6 +1630,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   vfn.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)proc_addr;
   closure.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)proc_addr;
+
+  AR_ASSERT(vfn.procedurep());
+  AR_ASSERT(closure.procedurep());
 
   return vfn;
 }
