@@ -240,7 +240,7 @@ AR_DEFUN("peek-char", fn_peek_char, 0, 1);
 Value fn_read(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "read";
 
-  AR_FN_ARGC_GTE(state, argc, 1);
+  AR_FN_ARGC_GTE(state, argc, 0);
   AR_MAYBE_INPUT_PORT(state, argv, argc, 0, port);
 
   std::istream* is = port.file_port_input_handle();

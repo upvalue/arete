@@ -3,8 +3,9 @@
 
 // Major todos
 
-// TODO: Full closure support
-// TODO: Allocate off of GC heap
+// DONE: Full closure support
+// DONE: Allocate off of GC heap
+// TODO: Extended argument functionality, VM primitives
 
 #include <algorithm>
 #include <functional>
@@ -115,7 +116,6 @@ void load_native_compiler(State&) {}
 
 // TODO: There is no need to store Closure pointer, we could store the VectorStorage of upvalues
 // directly in the frame pointer
-
 
 #include "dasm_proto.h"
 #include "dasm_x86.h"
@@ -238,13 +238,16 @@ enum {
   E_FX_ADD,
   E_FX_SUB,
   E_FX_LT,
+  E_CAR,
 };
 
 // Exception message codes
 enum {
   E_EXPECTED_FIXNUM_1,
   E_EXPECTED_FIXNUM_2,
+  E_EXPECTED_TYPE_1,
 };
+
 
 struct NativeException {
   State* state1;
@@ -325,9 +328,14 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
     }
     case E_FX_ADD: os << "primitive fx+ "; break;
     case E_FX_SUB: os << "primitive fx- "; break;
-    case E_ADD: os << "primitive + "; break;
+    case E_ADD: {
+      check_code = false;
+      os << "primitive + expected argument to be numeric but got " << Value(exc->arg1).type();
+      break;
+    }
     case E_SUB: os << "primitive - "; break;
     case E_FX_LT: os << "primitive fx< "; break;
+    case E_CAR: os << "primitive car "; break;
     default: break;
   }
 
@@ -335,6 +343,7 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
     switch(exc->arg1) {
       case E_EXPECTED_FIXNUM_1: os << "expected argument 1 to be a fixnum"; break;
       case E_EXPECTED_FIXNUM_2: os << "expected argument 2 to be a fixnum"; break;
+      case E_EXPECTED_TYPE_1: os << "expected argument 1 to be a " << (Type) exc->arg2;
       default: break;
     }
   }
@@ -369,15 +378,18 @@ Value generic_apply(State* state, size_t argc, Value* argv, Value fn) {
   return result;
 }
 
+void* allocate_flonum(State* state, double flo) {
+  return (void*) state->make_flonum(flo).heap;
+}
+
 void* allocate_rest_arguments(State* state, size_t arity, size_t argc, Value* argv) {
-  std::cout << "allocating rest arguments list " << (ptrdiff_t) state << " arity: " << arity << ' ' << "rest_argc_begin: " << (ptrdiff_t) argc <<
-    ' ' << (ptrdiff_t) argv << std::endl;
+  // std::cout << "allocating rest arguments list " << (ptrdiff_t) state << " arity: " << arity << ' ' << "rest_argc_begin: " << (ptrdiff_t) argc << ' ' << (ptrdiff_t) argv << std::endl;
 
   AR_ASSERT(arity <= argc);
 
   state->temps.clear();
   for(size_t i = arity; i != argc; i++ ) {
-    std::cout << argv[i] << std::endl;
+    //std::cout << argv[i] << std::endl;
     state->temps.push_back(argv[i]);
   }
 
@@ -393,7 +405,7 @@ struct NativeFrameSize {
 };
 
 void upvalue_close(State* state, Value upval) {
-  std::cout << "closing upvalue " << upval.bits <<  ' ' << upval.type() << std::endl;
+  //std::cout << "closing upvalue " << upval.bits <<  ' ' << upval.type() << std::endl;
   AR_ASSERT(state->gc.live(upval.heap));
   AR_ASSERT(upval.type() == UPVALUE);
   upval.upvalue_close();
@@ -601,7 +613,18 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | throwNativeException E_TYPE, src, code, 0
   |1:
   |.endmacro
+
   |.macro checkNumberP, store, src, code
+  |.endmacro
+
+  |.macro checkHeapTypeEquals, store, src, code, tipe
+  | test store, store
+  | je >1
+  | test store, 3
+  | jz >2
+  |1:
+  | throwNativeException E_TYPE, src, E_EXPECTED_TYPE_1, tipe
+  |2:
   |.endmacro
 
   // jmp to label >1 if value in STORE is immediate
@@ -907,11 +930,14 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
     switch(code[code_offset++]) {
       case OP_NOT:
+      case OP_CAR:
+      case OP_CDR:
       case OP_FX_ADD: case OP_FX_SUB: 
       case OP_FX_LT:
       case OP_POP:
       case OP_RETURN: 
-      case OP_ARGV_REST: continue;
+      case OP_ARGV_REST:
+      case OP_EQ: continue;
 
       case OP_APPLY:
       case OP_APPLY_TAIL:
@@ -941,7 +967,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
       }
       default: {
         AR_LOG_JIT("label generation unknown bytecode " << code[code_offset-1]);
-        return state.eval_error("unknown bytecode during label generation");
+        std::ostringstream os; os << "unknown bytecode during label generation " << code[code_offset-1];
+        return state.eval_error(os.str());
       }
     }
 
@@ -1392,6 +1419,40 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         break;
       }
 
+      case OP_EQ: {
+        AR_LOG_JIT("eq");
+        | decStack
+        | mov rArg1, [rStackI]
+        | decStack
+        | cmp rArg1, [rStackI]
+        | je >1
+        | mov qword [rStackI], C_FALSE
+        | jmp >2
+        | 1:
+        | mov qword [rStackI], C_TRUE
+        | 2:
+        | incStack
+
+        break;
+      }
+
+      case OP_CAR:
+      case OP_CDR: {
+        bool car = code[current_insn] == OP_CAR;
+        AR_LOG_JIT((car ? "car" : "cdr"));
+
+        | decStack
+        | mov rax, [rStackI]
+
+        | checkHeapTypeEquals rax, E_CAR, E_EXPECTED_TYPE, PAIR
+        | add rax, (car ? (ptrdiff_t)(&((Pair*)0)->data_car) : (ptrdiff_t)(&((Pair*)0)->data_cdr))
+        | mov rax, [rax]
+        | mov [rStackI], rax
+        | incStack
+
+        break;
+      }
+
       case OP_NOT: {
         | decStack
 
@@ -1486,66 +1547,152 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         break;
       }
 
+      // TODO: This is insane.
       case OP_ADD:
       case OP_SUB: {
         size_t argc = code[code_offset++];
-        AR_LOG_JIT("add " << argc);
-        // for i = 0 to argc
-
-        // while fixnum, accumulate in a register
-        // if end of fixnump loop is reached, push value of register onto stack
-        | mov rArg1, rStackI
+        size_t insn = code[current_insn];
         
-        | sub rArg1, (((argc) * 8)) 
-        | mov rArg2, [rArg1]
-        | shr rArg2, 1
-        | add rArg1, 8
+        if(insn == OP_ADD) {
+          AR_LOG_JIT("add " << argc);
+        } else if(insn == OP_SUB) {
+          AR_LOG_JIT("sub" << argc);
+        }
 
-        | ->add_fixnum:
-
-        | mov rax, [rArg1]
-        | and rax, 1
-        | cmp rax, 1
-        | jne ->add_flonum
-
-        | mov rax, [rArg1]
-        | shr rax, 1
-
-        switch(code[current_insn]) {
-          case OP_ADD: {
-            | add rArg2, rax
+        if(argc == 0) {
+          | mov qword [rStackI], Value::make_fixnum(0).bits
+          break;
+        } else if(argc == 1) {
+          if(insn == OP_ADD) {
+            // Unary plus (does nothing)
             break;
-          }
-          case OP_SUB: {
-            | sub rArg2, rax
+          } else if(insn == OP_SUB) {
+            // Unary minus (negation)
+            | decStack
+            | mov rax, [rStackI]
+            | shr rax, 1
+            | neg rax
+            | shl rax, 1
+            | inc rax
+            | mov [rStackI], rax
+            | incStack
+
             break;
           }
         }
 
-        | add rArg1, 8
-        | cmp rArg1, rStackI
-        | jne ->add_fixnum
+        // TODO: Add optimized binary forms
+        
+        // N-ary addition
+        // rArg1 = current value
+        // rArg2 = fixnum result accumulator
+        // xmm0 = flonum result accumulator
+        | mov rArg2, 0
+        // rArg3 = loop limit 
+        | mov rArg3, rStackI
+        | mov rax, (size_t)(argc)
+        | imul rax, 8
+        | sub rStackI, rax
 
-        | jmp ->good
+        // 1: Iterate over and add fixnum arguments
+        |1:
+        | mov rArg1, [rStackI]
+        // Check for fixnum, if not fixnum, break out of this loop and check for numeric types
+        | test rArg1, 1
+        | jz >2
+        
+        // This is a fixnum, add to accumulator
+        | shr rArg1, 1
+        | add rArg2, rArg1
 
-        | ->add_flonum:
-        | sub rStackI, 8
-        | mov qword [rArg1], 0
-        | jmp ->done
+        // Increment loop and check again
+        | add rStackI, 8
+        | cmp rStackI, rArg3
+        | jne <1
 
-        | ->good:
+        // Fixnum addition succeeded, return
+        | jmp >8
+
+        // 2: Simple fixnum operation failed
+        | 2: 
+        // This is a flonum. Convert fixnum to flonum and continue
+        | cvtsi2sd xmm0, rArg2
+        // 3: Beginning of fixnum/flonum loop
+        | 3: 
+        | mov rArg1, [rStackI]
+        // Check for fixnum
+        | test rArg1, 1
+        | jnz >4
+        // Check for non-fixnum constant or #f
+        | test rArg1, rArg1
+        | je >6
+        | test rArg1, 3
+        | jnz >6
+        // Check for flonum
+        | mov rArg1, [rArg1]
+        | and rArg2, 255
+        | cmp rArg2, (FLONUM)
+        | jne >5
+
+        // This is not a flonum, save the pointer and jump to exception
+        | mov rArg1, [rStackI]
+        | jmp >6
+
+        // Add flonum
+
+        // 4: Add fixnum to flonum and continue
+        | 4:
+        | cvtsi2sd xmm1, rArg1
+
+        | add rStackI, 8
+        | cmp rStackI, rArg3
+        | je <3
+        // Finished adding, return floating point value
+        | jmp >7
+
+        // 5: Add flonum to flonum and continue
+        | 5:
+        
+        | mov rArg1, [rStackI]
+        //| mov rArg1, [rArg1]
+        | mov rArg1, 0
+        | movsd xmm0, qword rArg1
+
+        | jmp >7
+
+        // 6: Throw type exception
+        | 6:
+        | throwNativeException E_TYPE, E_ADD, rArg1, 0
+
+        // 7: Allocate and return flonum result
+        | 7:
+
+        | mov rax, (size_t)(argc * 8)
+        | sub rStackI, rax
+
+        | mov rArg1, rState
+        | mov64 rax, (size_t) allocate_flonum
+        | call rax
+
+        | mov [rStackI], rax
+
+        | jmp >9
+
+        // 8: Return fixnum result
+        | 8:
+
+        | mov rax, (size_t)(argc * 8)
+        | sub rStackI, rax
 
         | shl rArg2, 1
         | inc rArg2
-
-        | sub rStackI, ((argc) * 8)
         | mov [rStackI], rArg2
-        | add rStackI, 8
 
-        | ->done:
+        //| mov [rStackI], rArg1
+        | 9:
 
-        // otherwise, check for fixnum or flonum, accumulate in flonum register
-        // when end of loop is reached, push value of register onto stack
+        | incStack
+
         break;
       }
 
@@ -1638,7 +1785,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   dasm_link(&d, &size);
 
   char* proc_addr = (char*) state.allocate_native_code(size);
-  std::cout << (ptrdiff_t) proc_addr << std::endl;
+  //std::cout << (ptrdiff_t) proc_addr << std::endl;
 
   //bv = state.make_bytevector<unsigned char>(size);
 

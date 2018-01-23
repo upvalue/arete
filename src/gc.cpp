@@ -237,18 +237,22 @@ void GCCommon::visit_roots(T& walker) {
 
   NativeFrame* native = native_frames;
   while(native != nullptr) {
-    std::cout << "native frame " << (ptrdiff_t) native << std::endl;
-    std::cout << "native frame previous " << (ptrdiff_t) native->previous << " count: " << (ptrdiff_t)native->value_count << std::endl;
+    if(ARETE_LOG_TAGS & ARETE_LOG_TAG_JIT) {
+      std::cout << "native frame " << (ptrdiff_t) native << std::endl;
+      std::cout << "native frame previous " << (ptrdiff_t) native->previous << " count: " << (ptrdiff_t)native->value_count << std::endl;
+    }
     for(size_t i = 0; i != native->value_count; i++) {
       size_t saved = native->values[i].bits;
       walker.touch((HeapValue**) &native->values[i].bits);
-      std::cout << "native frame ptr ";
-      if(native->values[i].immediatep()) {
-        std::cout << "immediate";
-      } else {
-        std::cout << (Type)native->values[i].type_unsafe();
-       }
-       std::cout << ' ' << i << ": " << saved << " => " << (ptrdiff_t)native->values[i].bits << " stack address: " << (ptrdiff_t)(void*)&native->values[i] << std::endl;
+      if(ARETE_LOG_TAGS & ARETE_LOG_TAG_JIT) {
+        std::cout << "native frame ptr ";
+        if(native->values[i].immediatep()) {
+          std::cout << "immediate";
+        } else {
+          std::cout << (Type)native->values[i].type_unsafe();
+        }
+        std::cout << ' ' << i << ": " << saved << " => " << (ptrdiff_t)native->values[i].bits << " stack address: " << (ptrdiff_t)(void*)&native->values[i] << std::endl;
+      }
     }
     native = native->previous;
   }

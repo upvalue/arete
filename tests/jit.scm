@@ -139,5 +139,18 @@
 
 (test-equals 12 (lambda () (define cl (make-closure4 8)) (cl) (cl) (cl)))
 
+;; primitives written in direct assembly
+
+(test-equals asdf (lambda () (car '(asdf))))
+(test-equals bsdf (lambda () (cdr '(asdf . bsdf))))
+(test-equals 'exception (lambda () (car #f)))
+(test-equals 'exception (lambda () (cdr #f)))
+(test-equals 'exception (lambda () (car 5)))
+(test-equals 'exception (lambda () (car 5)))
+
+(test-equals #t (lambda () (not #f)))
+(test-equals #f (lambda () (not #t)))
+(test-equals #f (lambda () (not 5)))
+(test-equals #f (lambda () (not "thing")))
 
 (for-each print test-results)
