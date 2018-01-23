@@ -191,33 +191,6 @@ Value State::load_file(const std::string& path) {
   return x;
 }
 
-#if AR_OS == AR_POSIX
-
-static void* gc_allocate(size_t size) {
-  return mmap(NULL, size, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-}
-
-static void gc_free(void* ptr, size_t length) {
-  munmap(ptr, length);
-}
-
-#else 
-
-static void* gc_allocate(size_t size) {
-	void* mem = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-	DWORD w;
-	VirtualProtect(mem, size, PAGE_EXECUTE_READWRITE, &w);
-	// TODO: FlushInstructionCache (?)
-	return mem;
-}
-
-static void gc_free(void* ptr, size_t size) {
-	(void) size;
-	VirtualFree(ptr, size, MEM_DECOMMIT);
-}
-
-#endif
-
 void* State::allocate_native_code(size_t size_) {
   // TODO: Do a better job of this.
   size_t size = size_ > 4096 ? size_ : 4096;

@@ -4,6 +4,8 @@
 # define NOMINMAX
 #endif
 
+#include <algorithm>
+
 #include "arete.hpp"
 
 #define VM_NEXT_INSN() (*cp++)

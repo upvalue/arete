@@ -227,7 +227,7 @@ Value NumberReader::read() {
     if(string[i] == '-') {
       exp_negative = true;
       if(!is_float) {
-        flonum = fixnum;
+        flonum = (double) fixnum;
         is_float = true;
       }
       i++;

@@ -1,3 +1,4 @@
+// vim: set ft=cpp
 // compile-x64.cpp.dasc - Compile bytecode to native amd64 code
 // This is a DynASM file. Must be run through DynASM to produce a C++ file
 
@@ -124,7 +125,7 @@ void load_native_compiler(State&) {}
 
 namespace arete {
 
-static const bool dbg = false;
+static const bool dbg = true;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
@@ -145,7 +146,18 @@ void state_collect(State* state) {
   std::cout << "COLLECTION RETURNING" << std::endl;
 }
 
-static ptrdiff_t rsp = 0;
+static size_t vfn_ptr = 0;
+
+void find_vfn_ptr(ptrdiff_t* rsp) {
+	std::cout << (ptrdiff_t) rsp << std::endl;
+
+	for(size_t i = 0; i != 20; i++) {
+		ptrdiff_t p = rsp[i];
+		std::cout << p << std::endl;
+	}
+}
+
+ptrdiff_t rsp = 0;
 
 void sanity_log_1(ptrdiff_t rsp_) {
   rsp = rsp_;
@@ -534,7 +546,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	|.endif
   |.type state, State, STATE
 
-
   // Defined separately in case calling conventions changed
 
   |.define sFramePrev, [rsp]
@@ -547,7 +558,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   |.macro simpCall, fun
   | push ARG1; push ARG2; push ARG3; push ARG4;
 	| .if WINDOWS
-	| push rbp; mov rbp, rsp; mov64 rax, (ptrdiff_t) fun; call rax; mov rsp, rbp; pop rbp
+	// Allocate shadow space
+	| push rbp; mov rbp, rsp; sub rsp, 32; mov64 rax, (ptrdiff_t) fun; call rax; add rsp, 32; mov rsp, rbp; pop rbp
 	| .else
   | push rbp; push rsp; mov64 rax, (ptrdiff_t) fun; call rax; pop rsp; pop rbp;
 	| .endif
@@ -758,7 +770,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   dasm_State** Dst = &d;
 
   |.code
-		//
   // Prologue
   // Save registers
 	| push rbp
@@ -778,7 +789,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	// 56 + (8*5) = register amount
 	|.if WINDOWS
 	// r14 = pointer to Closure/VMFunction
-	| mov r14, [rsp+56+(8*6)]
+	| mov r14, [rsp+40+(8*6)]
 	// r15 = location of return value on stack
 	| mov r15, ARG1
 	|.endif
@@ -805,8 +816,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
 	|.if WINDOWS
 	// Windows, args have already been shifted because of screwed up calling convention
-	| mov ARG3, ARG4
-	| mov ARG4, r14
+	//| mov ARG3, ARG4
+	//| mov ARG4, r14
 	|.else
   // Shuffle argc, argv into different registers so they can be processed in the function body
   // Shuffle argv into different register so we can use ARG2
@@ -855,13 +866,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
     | mov ARG1, rsp
     | simpCall sanity_log_1
 
-    | mov ARG1, STACK
-    | simpCall sanity_log_2
-
-    | mov ARG1, rsp
-    | add ARG1, kLocalsOffset
-    | simpCall sanity_log_3
-
     | mov ARG1, sFrameFunction
     | simpCall sanity_log_4
 
@@ -870,11 +874,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
     | mov ARG1, ARG4
     | simpCall sanity_log_6
-
-		| push ARG1; push ARG2; push ARG3; push ARG4;
-		| mov ARG1, STATE
-		| simpCall sanity_log_7
-		| pop ARG4; pop ARG3; pop ARG2; pop ARG2;
   }
 
   // Zero out GC frame
@@ -900,7 +899,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | add ARG1, 8
   | cmp ARG1, ARG2
   | jne ->gc_zero
-
 
   if(upvalue_count) {
     for(size_t i = 0; i != upvalue_count; i++) {
@@ -933,7 +931,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   if(dbg) {
     | mov ARG1, rsp
-    | simpCall print_stack_frame
+    //| simpCall print_stack_frame
   }
 
   // Execute function body
@@ -1379,6 +1377,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         size_t fargc = code[code_offset++];
 
         | cmp ARG3, (size_t) fargc
+
         if(code[current_insn] == OP_ARGC_EQ) {
           | je >1
         } else if(code[current_insn] == OP_ARGC_GTE) {
@@ -1965,12 +1964,23 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | mov ARG2, [rsp]
   | mov [ARG1], ARG2
 
+	| ->epilogue:
+
+	//| mov ARG1, rsp
+	//| simpCall find_vfn_ptr
+	//| mov STACK, sFrameFunction
+
   // Free stack space
   | add rsp, kTotalStackSizeAligned
 
   // Retrieve return value from STACK
+
+	// Windows requires us to allocate return space on the stack because Value is
+	// a struct with a constructor
 	| .if WINDOWS
 	|  mov rax, rsp
+	|  sub rax, 40
+	|  mov [rax], STACK
 	| .else
   |  mov rax, STACK
 	| .endif
@@ -1994,20 +2004,25 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   dasm_link(&d, &size);
 
   char* proc_addr = (char*) state.allocate_native_code(size);
-  //std::cout << (ptrdiff_t) proc_addr << std::endl;
-
-  //bv = state.make_bytevector<unsigned char>(size);
 
   AR_LOG_JIT("function size: " << size << "b vs " << (vfn.as_unsafe<VMFunction>()->code->size) << "b");
 
-  //dasm_encode(&d, bv.bv_data());
   dasm_encode(&d, proc_addr);
 
   dasm_free(&d);
 
   AR_LOG_JIT("vmfunction->native done; calling function");
 
-  //vfn.as_unsafe<VMFunction>()->native_code = bv.as_unsafe<Bytevector>();
+	Value (*proc)(State*, size_t, Value*, void*) = ((Value (*)(State*, size_t, Value*, void*))(proc_addr));
+
+	std::cout << "state pointer: " << (size_t) &state << std::endl;
+	std::cout << "vfn bits : " << (size_t) vfn.bits << std::endl;
+
+	vfn_ptr = vfn.bits;
+	Value asdf  = proc(&state, 0, (Value*) 456, (void*) vfn.bits);
+
+	std::cout << "return value bits: " << asdf.bits << std::endl;
+
   vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
 
   // PROBLEM: A closure cannot have all procedure_addrs replaced in-place by the JIT compiler.
@@ -2020,7 +2035,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   return vfn;
 }
-
 AR_DEFUN("vmfunction->native!", vmfunction_to_native, 1);
 
 Value fn_native_call(State& state, size_t argc, Value* argv, void* fn) {
