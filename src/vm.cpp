@@ -157,6 +157,9 @@ tail:
   // In addition, pointers to the VM stack (which is managed manually, but can be realloc) have to
   // be updated after anything that might result in another apply_vm call
   VMFunction* vfn = static_cast<VMFunction*>(f.fn.heap);
+
+  vfn->calls++;
+
   Value *locals, *stack = 0, *sbegin = 0;
   size_t  *code = 0;
 

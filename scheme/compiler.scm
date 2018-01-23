@@ -284,9 +284,9 @@
     #|
     (list-ref 2 2 #f)
     |#
-    (< 2 2 #t)
-    (+ 0 0 #t)
-    (- 1 1 #t)
+    ;(< 2 2 #t)
+    ;(+ 0 0 #t)
+    ;(- 1 1 #t)
     (car 1 1 #f)
     (cdr 1 1 #f)
     (not 1 1 #f)
@@ -1075,7 +1075,8 @@
       ;; Compiling a few key functions in-order speeds up compilation
       (for-each1
         (lambda (k) (compile-top-level k (top-level-value k)))
-        '(##arete#emit ##arete#fn-lookup ##arete#compile-expr ##arete#compile-constant ##arete#compile-apply
+        '(fixnum? symbol? table? constant?
+          ##arete#emit ##arete#fn-lookup ##arete#compile-expr ##arete#compile-constant ##arete#compile-apply
           ##arete#compile-identifier ##arete#special-form))
 
       (top-level-for-each

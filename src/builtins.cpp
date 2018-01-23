@@ -1489,6 +1489,65 @@ Value fn_repl(State& state, size_t argc, Value* argv, void* v) {
 }
 AR_DEFUN("repl", fn_repl, 0);
 
+static std::string nice_dequalify(const std::string& name) {
+  if(name.size() > 0 && name[0] == '#') {
+    std::ostringstream os;
+    std::string next(name.substr(2, name.size()));
+    for(size_t i = 0; i != next.size(); i++) {
+      if(next[i] == '#') {
+        next[i] = ' ';
+      }
+    }
+    os << '(' << next << ')';
+    return os.str();
+  } else {
+    return name;
+  }
+}
+
+Value fn_show_calls(State& state, size_t argc, Value* argv, void* v) {
+  static const char* fn_name = "show-calls";
+  AR_FN_ARGC_EQ(state, argc, 0);
+
+  Value fn = argv[0], key, value;
+  AR_FRAME(state, fn, key, value);
+
+  //std::vector<std::pair<std::string, unsigned> > calls;
+  std::unordered_map<std::string, unsigned> calls;
+  for(auto it = state.symbol_table->begin(); it != state.symbol_table->end(); it++) {
+    key = it->second;
+
+    value = key.symbol_value().closure_unbox();
+
+    if(value.heap_type_equals(VMFUNCTION)) {
+      std::string name(value.as<VMFunction>()->name.symbol_name_data());
+      auto it = calls.find(name);
+      if(it == calls.end()) {
+        calls.insert(std::make_pair(name, value.as<VMFunction>()->calls));
+      }
+    }
+  }
+
+  std::vector<std::pair<unsigned, std::string> > items;
+  for(auto it: calls) {
+    items.push_back(std::make_pair(it.second, it.first));
+  }
+
+  auto pred = [] (std::pair<unsigned, std::string> a, std::pair<unsigned, std::string> b) {
+    return a.first < b.first;
+  };
+
+  std::sort(items.begin(), items.end(), pred);
+
+  for(size_t i = 0; i != items.size(); i++) {
+    std::pair<unsigned, std::string> thing = items[i];
+    std::cout << nice_dequalify(thing.second) << ": " << thing.first << std::endl;
+  }
+
+  return C_UNSPECIFIED;
+}
+AR_DEFUN("show-calls", fn_show_calls, 0);
+
 void State::load_builtin_functions() {
   builtins.install(*this);
 }

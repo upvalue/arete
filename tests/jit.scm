@@ -55,7 +55,6 @@
                (let ((a 5))
                  a)))
 
-#|
 (test-equals #t (lambda () (if #t #t #f)))
 (test-equals #t (lambda () (if (if #t #t #f) #t #f)))
 (test-equals 'asdf (lambda (a) (if a a #f)) 'asdf) 
@@ -91,7 +90,6 @@
 
 (test-equals () (lambda (a b . c) c) 1 2)
 (test-equals (3) (lambda (a b . c) c) 1 2 3)
-|#
 
 ;; calling another native function
 (define (native-thing) (define a 'thing) a)

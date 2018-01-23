@@ -5,7 +5,10 @@
     n
     (+ (fib (- n 1)) (fib (- n 2)))))
 
-(vmfunction->native! fib)
+(cond-expand
+  ((and arete)
+   (vmfunction->native! fib))
+  (else #t))
 
-(display (fib 35)) (newline)
+(display (fib 36)) (newline)
 

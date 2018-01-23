@@ -124,7 +124,7 @@ void load_native_compiler(State&) {}
 
 namespace arete {
 
-static const bool dbg = true;
+static const bool dbg = false;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
