@@ -205,7 +205,7 @@ Value fn_make_bytevector(State& state, size_t argc, Value* argv, void* v) {
     size_t fill = static_cast<size_t>(argv[1].fixnum_value());
     if(fill != 0) {
       for(size_t i = 0; i != sz; i++) {
-        bv.bv_set<uint8_t>(i, fill);
+        bv.bv_set<uint8_t>((uint8_t)i, fill);
       }
     }
   }

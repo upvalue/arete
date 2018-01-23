@@ -159,6 +159,11 @@ void find_vfn_ptr(ptrdiff_t* rsp) {
 
 ptrdiff_t rsp = 0;
 
+Value simple_fn_pointer_check(State& state, size_t argc, Value* argv, void* fnp) {
+	std::cout << (size_t) fnp << std::endl;
+	return Value::make_fixnum((size_t) fnp);
+}
+
 void sanity_log_1(ptrdiff_t rsp_) {
   rsp = rsp_;
   std::cout << "sanity_log_1: rsp after stack allocation: " << rsp << std::endl;
@@ -502,11 +507,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   // size_t kValueSize = sizeof(void*);
 
   // Stack frame offsets
-  unsigned kLocalsOffset = kFrameSize;
-  unsigned kUpvaluesOffset = kFrameSize + (local_count * sizeof(void*));
-  unsigned kCompStackOffset = kFrameSize + ((local_count + upvalue_count) * sizeof(void*));
+  unsigned kLocalsOffset = (unsigned)kFrameSize;
+  unsigned kUpvaluesOffset = (unsigned)(kFrameSize + (local_count * sizeof(void*)));
+  unsigned kCompStackOffset = (unsigned)(kFrameSize + ((local_count + upvalue_count) * sizeof(void*)));
 
-  unsigned kTotalStackSize = kFrameSize + (total_stack * 8);
+  unsigned kTotalStackSize = (unsigned)(kFrameSize + (total_stack * 8));
   unsigned kTotalStackSizeAligned = kTotalStackSize;
 
   if(!((kTotalStackSizeAligned % 16) != 0)) {
@@ -570,36 +575,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | .macro callNoSave, fun
   | push rbp; push rsp; mov64 rax, (ptrdiff_t) fun; call rax; pop rsp; pop rbp
   | .endmacro
-
-  // Call a function which takes arete::State as its first argument
-  // and returns a Value
-	|.macro stateCallRetValue, method
-	// On Windows, a Value is returned as a pointer to a stack value. Can't find
-	// documentation for this anywhere, but both Clang and MSVC do it; which
-	// means a little dance is needed to get it into rax.
-  | .if WINDOWS
-  |  push rbp
-  |  mov rbp, rsp
-  |  mov ARG1, STATE
-  |  mov64 rax, (ptrdiff_t) method
-	|  sub rsp, 32
-  |  call rax
-	|  add rsp, 32
-	|  mov ARG1, [rax]
-	|  mov rax, ARG1
-	|  mov rsp, rbp
-  |  pop rbp
-  | .else
-  |  push rbp
-  |  push rsp
-  |  mov ARG1, STATE
-  |  mov64 rax, (ptrdiff_t) method
-  |  call rax
-  |  pop rsp
-  |  pop rbp
-  | .endif
-	|.endmacro
-
+	//
   // Call a function which takes arete::State as its first argument
   |.macro stateCall, method
   | .if WINDOWS
@@ -644,7 +620,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   |.macro checkNumberP, store, src, code
   |.endmacro
 
-  |.macro checkHeapTypeEquals, store, src, code, tipe
+  |.macro assertHeapTypeEquals, store, src, code, tipe
   | test store, store
   | je >1
   | test store, 3
@@ -1286,7 +1262,54 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         AR_LOG_JIT("apply " << argc);
 
+				|.if WINDOWS
+				// Windows calling convention handling
+				// We lose a register because ARG1 is used to communicate the address
+				// of the return value
+				| mov ARG2, STATE
 
+				| mov ARG4, STACK
+				| sub ARG4, ((argc * 8) + 8)
+
+				| mov ARG4, [ARG4]
+
+				| extractProcedureAddr ARG4
+
+				// [rsp+0] location of return value
+				// [rsp+8] location of function pointer
+				// [8-48] not used
+
+				| push rbp;
+				| mov rbp, rsp;
+
+				| sub rsp, 48
+
+				| mov ARG4, STACK
+				| sub ARG4, ((argc * 8) + 8)
+
+				| mov ARG4, [ARG4]
+				| mov [rsp+32], ARG4
+
+				| mov ARG4, STACK
+				| sub ARG4, ((argc * 8) + 8)
+				| add ARG4, 8
+
+				| mov ARG1, rsp
+				| mov ARG3, (size_t) argc
+
+				//| mov64 rax, (size_t) simple_fn_pointer_check
+				| call rax
+
+				| mov rax, [rsp]
+				| mov [STACK], rax
+				| incStack
+
+				| add rsp, 48
+
+				| mov rsp, rbp;
+				| pop rbp
+
+				|.else
         // Pointer to function on stack
         | mov ARG4, STACK
         | sub ARG4, ((argc * 8) + 8)
@@ -1317,6 +1340,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         | mov [STACK], ARG1
         | incStack
+				|.endif
 
         break;
       }
@@ -1468,7 +1492,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         | mov rax, [STACK-8]
 
-        | checkHeapTypeEquals rax, E_CAR, E_EXPECTED_TYPE, PAIR
+        | assertHeapTypeEquals rax, E_CAR, E_EXPECTED_TYPE, PAIR
         | add rax, (car ? (ptrdiff_t)(&((Pair*)0)->data_car) : (ptrdiff_t)(&((Pair*)0)->data_cdr))
         | mov rax, [rax]
         | mov [STACK-8], rax
@@ -2019,9 +2043,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	std::cout << "vfn bits : " << (size_t) vfn.bits << std::endl;
 
 	vfn_ptr = vfn.bits;
-	Value asdf  = proc(&state, 0, (Value*) 456, (void*) vfn.bits);
+	Value argvi[1] = {5};
+	Value asdf  = proc(&state, 0, (Value*) argvi, (void*) vfn.bits);
 
-	std::cout << "return value bits: " << asdf.bits << std::endl;
+	std::cout << "return value bits: " << Value(asdf) << std::endl;
 
   vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
 
