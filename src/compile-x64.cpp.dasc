@@ -44,7 +44,7 @@ void load_native_compiler(State&) {}
 // calling conventions on Windows
 
 // TODO: 
-// Keep rState in rArg1. Because all functions we call take State& as the first argument, this will
+// Keep STATE in ARG1. Because all functions we call take State& as the first argument, this will
 // remove the need for some MOV instructions. 
 
 // TODO: GC frames can be trivially omitted in certain cases; if a function
@@ -90,8 +90,8 @@ void load_native_compiler(State&) {}
 // Anatomy of a natively-compiled Scheme function
 
 // Registers:
-// rState = r12 = pointer to arete::State*
-// rStackI = r13 = during execution, stores stack index.
+// STATE = r12 = pointer to arete::State*
+// STACK = r13 = during execution, stores stack index.
 // after control ends (due to exception or return), stores return value
 
 // Stack:
@@ -188,12 +188,12 @@ void sanity_log_fourth_argument(void** rsp) {
 	*/
 }
 
-void sanity_log_ret(ptrdiff_t rStackI) {
-  std::cout << "sanity_log_ret: rStackI = " << rStackI << std::endl;
+void sanity_log_ret(ptrdiff_t STACK) {
+  std::cout << "sanity_log_ret: STACK = " << STACK << std::endl;
 }
 
-void sanity_log_end(ptrdiff_t rStackI) {
-  std::cout << "sanity_log_end: return value = " << rStackI << std::endl;
+void sanity_log_end(ptrdiff_t STACK) {
+  std::cout << "sanity_log_end: return value = " << STACK << std::endl;
 }
 
 void print_stack_frame(NativeFrame* frame) {
@@ -378,8 +378,17 @@ Value generic_apply(State* state, size_t argc, Value* argv, Value fn) {
   return result;
 }
 
+/*
+void* allocate_flonum(State* state, Flonum* flo) {
+  std::cout << "Allocate flonum called with argument " << flo->number << std::endl;
+  return (void*) state->make_flonum(flo->number).heap;
+}
+*/
+
 void* allocate_flonum(State* state, double flo) {
+  std::cout << "Allocate flonum called with argument " << (flo) << std::endl;
   return (void*) state->make_flonum(flo).heap;
+
 }
 
 void* allocate_rest_arguments(State* state, size_t arity, size_t argc, Value* argv) {
@@ -504,20 +513,20 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | .arch x64
   |.section code
 
-  |.define rState, r12
-  |.define rStackI, r13
+  |.define STATE, r12
+  |.define STACK, r13
 	|.if WINDOWS
-	| .define rArg1, rcx
-	| .define rArg2, rdx
-  | .define rArg3, r8
-  | .define rArg4, r9
+	| .define ARG1, rcx
+	| .define ARG2, rdx
+  | .define ARG3, r8
+  | .define ARG4, r9
 	|.else
-  | .define rArg1, rdi
-  | .define rArg2, rsi
-  | .define rArg3, rdx
-  | .define rArg4, rcx
+  | .define ARG1, rdi
+  | .define ARG2, rsi
+  | .define ARG3, rdx
+  | .define ARG4, rcx
 	|.endif
-  |.type state, State, rState
+  |.type state, State, STATE
 
 
   // Defined separately in case calling conventions changed
@@ -530,13 +539,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   // Call a simple FUN, for debugging only.
   |.macro simpCall, fun
-  | push rArg1; push rArg2; push rArg3; push rArg4;
+  | push ARG1; push ARG2; push ARG3; push ARG4;
 	| .if WINDOWS
 	| push rbp; mov rbp, rsp; mov64 rax, (ptrdiff_t) fun; call rax; mov rsp, rbp; pop rbp
 	| .else
   | push rbp; push rsp; mov64 rax, (ptrdiff_t) fun; call rax; pop rsp; pop rbp;
 	| .endif
-  | pop rArg4; pop rArg3; pop rArg2; pop rArg1
+  | pop ARG4; pop ARG3; pop ARG2; pop ARG1
   |.endmacro
   
   // Call without saving any registers
@@ -553,19 +562,19 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | .if WINDOWS
   |  push rbp
   |  mov rbp, rsp
-  |  mov rArg1, rState
+  |  mov ARG1, STATE
   |  mov64 rax, (ptrdiff_t) method
 	|  sub rsp, 32
   |  call rax
 	|  add rsp, 32
-	|  mov rArg1, [rax]
-	|  mov rax, rArg1
+	|  mov ARG1, [rax]
+	|  mov rax, ARG1
 	|  mov rsp, rbp
   |  pop rbp
   | .else
   |  push rbp
   |  push rsp
-  |  mov rArg1, rState
+  |  mov ARG1, STATE
   |  mov64 rax, (ptrdiff_t) method
   |  call rax
   |  pop rsp
@@ -578,7 +587,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | .if WINDOWS
   |  push rbp
   |  mov rbp, rsp
-  |  mov rArg1, rState
+  |  mov ARG1, STATE
   |  mov64 rax, (ptrdiff_t) method
 	|  sub rsp, 32
   |  call rax
@@ -588,7 +597,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | .else
   |  push rbp
   |  push rsp
-  |  mov rArg1, rState
+  |  mov ARG1, STATE
   |  mov64 rax, (ptrdiff_t) method
   |  call rax
   |  pop rsp
@@ -646,8 +655,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | cmp rax, (EXCEPTION + Value::EXCEPTION_ACTIVE_BIT)
   | jne >1
   // this is an exception, return immediately
-  | mov rArg3, code[current_insn]
-  | mov rStackI, store
+  | mov ARG3, code[current_insn]
+  | mov STACK, store
   | jmp ->trace_exception
   |1:
   |.endmacro
@@ -667,13 +676,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   |.endmacro
 
   |.macro popStackTop, store
-  | sub rStackI, 8
-  | mov store, rStackI
+  | sub STACK, 8
+  | mov store, STACK
   | mov store, [store]
   |.endmacro
 
   |.macro getStackTop, store
-  | mov store, rStackI
+  | mov store, STACK
   | sub store, 8
   | mov store, [store]
   |.endmacro
@@ -691,27 +700,27 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   // store a constant in a register
   |.macro storeConstant, reg, idx
-  | mov rArg2, [rsp+16]
+  | mov ARG2, [rsp+16]
   // Get &VMFunction::constants
-  | add rArg2, (ptrdiff_t)(&((VMFunction*)0)->constants)
+  | add ARG2, (ptrdiff_t)(&((VMFunction*)0)->constants)
   // Get &VMFunction->constants->data[idx]
-  | mov rArg2, [rArg2]
+  | mov ARG2, [ARG2]
   // Get VMFunction->constants->data[idx]
-  | add rArg2, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
-  | mov reg, [rArg2]
+  | add ARG2, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
+  | mov reg, [ARG2]
   |.endmacro
 
   |.macro incStack
-  | add rStackI, 8
+  | add STACK, 8
   |.endmacro
 
   |.macro decStack
-  | sub rStackI, 8
+  | sub STACK, 8
   |.endmacro
 
   |.macro pushConstant, idx
-  | storeConstant rArg2, idx
-  | mov [rStackI], rArg2
+  | storeConstant ARG2, idx
+  | mov [STACK], ARG2
   | incStack
   |.endmacro
 
@@ -737,14 +746,14 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	| push rbp
   | mov rbp, rsp
   | push rbx
-  | push rState
-  | push rStackI
+  | push STATE
+  | push STACK
 	|.if WINDOWS
 	| push r14
 	| push r15
-	| mov rState, rArg2
+	| mov STATE, ARG2
 	|.else
-  | mov rState, rArg1
+  | mov STATE, ARG1
 	|.endif
 
 	// Get fourth argument off weird place in stack, thanks Windows.
@@ -753,7 +762,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	// r14 = pointer to Closure/VMFunction
 	| mov r14, [rsp+56+(8*6)]
 	// r15 = location of return value on stack
-	| mov r15, rArg1
+	| mov r15, ARG1
 	|.endif
 
   // NOTE: At the boundary of any CALL, stack size must be a multiple of 16!
@@ -763,14 +772,14 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | sub rsp, kTotalStackSizeAligned
 
   // Get stack pointer
-  | mov rStackI, rsp
-  | add rStackI, kCompStackOffset
+  | mov STACK, rsp
+  | add STACK, kCompStackOffset
 
   // NativeFrame.values[0] = vfn
 	|.if WINDOWS
 	| mov qword sFrameFunction, r14
 	|.else
-  | mov sFrameFunction, rArg4
+  | mov sFrameFunction, ARG4
 	|.endif
   // NativeFrame.values[1] = closure
   | mov qword sFrameClosure, 18
@@ -778,13 +787,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
 	|.if WINDOWS
 	// Windows, args have already been shifted because of screwed up calling convention
-	| mov rArg3, rArg4
-	| mov rArg4, r14
+	| mov ARG3, ARG4
+	| mov ARG4, r14
 	|.else
   // Shuffle argc, argv into different registers so they can be processed in the function body
-  // Shuffle argv into different register so we can use rArg2
-  | mov rArg4, rArg3
-  | mov rArg3, rArg2
+  // Shuffle argv into different register so we can use ARG2
+  | mov ARG4, ARG3
+  | mov ARG3, ARG2
 	|.endif
 
   // Extract closure, if there is one
@@ -807,47 +816,47 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | ->past_closure_check:
 
   // NativeFrame.previous = state->gc.native_frames
-  | mov rArg1, rState
-  | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
-  | mov rArg2, [rArg1]
-  | mov sFramePrev, rArg2
-  | mov [rArg1], rsp
+  | mov ARG1, STATE
+  | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
+  | mov ARG2, [ARG1]
+  | mov sFramePrev, ARG2
+  | mov [ARG1], rsp
 
   // Temporarily protect argv
-  | mov rArg1, rState
-  | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argc)
-  | mov [rArg1], rArg3
-  | mov rArg1, rState
-  | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argv)
-  | mov [rArg1], rArg4
+  | mov ARG1, STATE
+  | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argc)
+  | mov [ARG1], ARG3
+  | mov ARG1, STATE
+  | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argv)
+  | mov [ARG1], ARG4
 
   // NativeFrame.value_count
   | mov qword sFrameCount, kFrameValues
 
   if(dbg && sanity_log) {
-    | mov rArg1, rsp
+    | mov ARG1, rsp
     | simpCall sanity_log_1
 
-    | mov rArg1, rStackI
+    | mov ARG1, STACK
     | simpCall sanity_log_2
 
-    | mov rArg1, rsp
-    | add rArg1, kLocalsOffset
+    | mov ARG1, rsp
+    | add ARG1, kLocalsOffset
     | simpCall sanity_log_3
 
-    | mov rArg1, sFrameFunction
+    | mov ARG1, sFrameFunction
     | simpCall sanity_log_4
 
-    | mov rArg1, rArg3
+    | mov ARG1, ARG3
     | simpCall sanity_log_5
 
-    | mov rArg1, rArg4
+    | mov ARG1, ARG4
     | simpCall sanity_log_6
 
-		| push rArg1; push rArg2; push rArg3; push rArg4;
-		| mov rArg1, rState
+		| push ARG1; push ARG2; push ARG3; push ARG4;
+		| mov ARG1, STATE
 		| simpCall sanity_log_7
-		| pop rArg4; pop rArg3; pop rArg2; pop rArg2;
+		| pop ARG4; pop ARG3; pop ARG2; pop ARG2;
   }
 
   // Zero out GC frame
@@ -861,17 +870,17 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   // TODO: Except what if a function call causes an exception e.g. an arity error?
   // In that case, we should pop the native_frame off?
 
-  | mov rArg1, rsp
-  | add rArg1, kFrameSize
-  // | add rArg1, kLocalsOffset + (vmf->max_arity * 8)
+  | mov ARG1, rsp
+  | add ARG1, kFrameSize
+  // | add ARG1, kLocalsOffset + (vmf->max_arity * 8)
 
-  | mov rArg2, rsp
-  | add rArg2, kTotalStackSizeAligned
+  | mov ARG2, rsp
+  | add ARG2, kTotalStackSizeAligned
 
   | ->gc_zero:
-  | mov qword [rArg1], 0
-  | add rArg1, 8
-  | cmp rArg1, rArg2
+  | mov qword [ARG1], 0
+  | add ARG1, 8
+  | cmp ARG1, ARG2
   | jne ->gc_zero
 
 
@@ -881,23 +890,23 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
       AR_LOG_JIT("allocating upvalue[" << i << "] from local idx " << idx);
 
-      | mov rArg1, rState
-      | mov rArg2, rsp
-      | add rArg2, (kLocalsOffset + (idx * 8))
+      | mov ARG1, STATE
+      | mov ARG2, rsp
+      | add ARG2, (kLocalsOffset + (idx * 8))
 
-      | push rArg3; push rArg4;
+      | push ARG3; push ARG4;
       | push rbp; push rsp;
       | mov64 rax, (size_t) allocate_upvalue; call rax
       | pop rsp; pop rbp;
-      | pop rArg4; pop rArg3
+      | pop ARG4; pop ARG3
 
-      | mov rArg1, rsp
-      | add rArg1, (kUpvaluesOffset + (i * 8))
-      | mov [rArg1], rax
+      | mov ARG1, rsp
+      | add ARG1, (kUpvaluesOffset + (i * 8))
+      | mov [ARG1], rax
     }
 
     if(dbg) {
-      | mov rArg1, rsp
+      | mov ARG1, rsp
       | simpCall print_stack_frame
     }
 
@@ -905,7 +914,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   }
 
   if(dbg) {
-    | mov rArg1, rsp
+    | mov ARG1, rsp
     | simpCall print_stack_frame
   }
 
@@ -1018,8 +1027,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
       case OP_PUSH_IMMEDIATE: {
         size_t value = code[code_offset++];
         AR_LOG_JIT("push-immediate " << Value(value) << " (" << (ptrdiff_t) value << ")");
-        | mov qword [rStackI], (size_t) value
-        | add rStackI, 8
+        | mov qword [STACK], (size_t) value
+        | add STACK, 8
         break;
       }
 
@@ -1033,7 +1042,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
       case OP_POP: {
         AR_LOG_JIT("pop");
-        | sub rStackI, 8
+        | sub STACK, 8
         break;
       }
 
@@ -1042,16 +1051,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         AR_LOG_JIT("global-get " << idx);
 
-        | storeConstant rArg1, idx
-        | add rArg1, (ptrdiff_t)(&(((Symbol*)0)->value))
-        | mov rArg1, [rArg1]
+        | storeConstant ARG1, idx
+        | add ARG1, (ptrdiff_t)(&(((Symbol*)0)->value))
+        | mov ARG1, [ARG1]
 
-        | cmp rArg1, (size_t)C_UNDEFINED
+        | cmp ARG1, (size_t)C_UNDEFINED
         | jne >1
-        | storeConstant rArg1, idx
-        | throwNativeException E_EVAL, E_UNDEFINED, rArg1, 0
+        | storeConstant ARG1, idx
+        | throwNativeException E_EVAL, E_UNDEFINED, ARG1, 0
         | 1:
-        | mov [rStackI], rArg1
+        | mov [STACK], ARG1
         | incStack
 
         break;
@@ -1062,12 +1071,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         size_t stack_offset = (kLocalsOffset + (8 * idx));
         AR_LOG_JIT("local-get " << idx << " at stack location " << stack_offset);
 
-        | mov rArg1, rsp
-        | add rArg1, stack_offset
+        | mov ARG1, rsp
+        | add ARG1, stack_offset
 
-        | mov rArg1, [rArg1]
+        | mov ARG1, [ARG1]
 
-        | mov [rStackI], rArg1
+        | mov [STACK], ARG1
    
         | incStack
         break;
@@ -1078,11 +1087,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         size_t stack_offset = (kLocalsOffset + (8 * idx));
         AR_LOG_JIT("local-set " << idx << " at stack location " << stack_offset);
 
-        | mov rArg1, rsp
-        | add rArg1, stack_offset
+        | mov ARG1, rsp
+        | add ARG1, stack_offset
 
-        | popStackTop rArg2
-        | mov [rArg1], rArg2
+        | popStackTop ARG2
+        | mov [ARG1], ARG2
 
         break;
       }
@@ -1092,11 +1101,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         size_t idx = code[code_offset++];
 
         AR_LOG_JIT("global-set " << error_on_undefined << " " << idx);
-        | storeConstant rArg1, idx
-        | add rArg1, (ptrdiff_t)(&(((Symbol*)0)->value))
+        | storeConstant ARG1, idx
+        | add ARG1, (ptrdiff_t)(&(((Symbol*)0)->value))
 
-        | popStackTop rArg2
-        | mov [rArg1], rArg2
+        | popStackTop ARG2
+        | mov [ARG1], ARG2
 
         break;
       }
@@ -1119,20 +1128,20 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         // If upvalue is native, jumps to >1
         // If upvalue is VM, code immediately afterwards is executed
         |.macro upvalueDispatch
-        | mov rArg1, [rax]
-        | and rArg1, (Value::UPVALUE_CLOSED_BIT)
-        | cmp rArg1, (Value::UPVALUE_CLOSED_BIT)
+        | mov ARG1, [rax]
+        | and ARG1, (Value::UPVALUE_CLOSED_BIT)
+        | cmp ARG1, (Value::UPVALUE_CLOSED_BIT)
         | je >2
-        | mov rArg1, [rax]
-        | and rArg1, (Value::UPVALUE_POINTER_BIT)
-        | cmp rArg1, (Value::UPVALUE_POINTER_BIT)
+        | mov ARG1, [rax]
+        | and ARG1, (Value::UPVALUE_POINTER_BIT)
+        | cmp ARG1, (Value::UPVALUE_POINTER_BIT)
         | je >1
         |.endmacro
 
         |.macro extractUpvaluePointer
-        | mov rArg2, rax
-        | add rArg2, (ptrdiff_t)(&((Upvalue*)0)->U.local)
-        //| mov rArg2, [rArg2]
+        | mov ARG2, rax
+        | add ARG2, (ptrdiff_t)(&((Upvalue*)0)->U.local)
+        //| mov ARG2, [ARG2]
         |.endmacro
 
 
@@ -1143,24 +1152,24 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         | getUpvalue rax, idx
         | extractUpvaluePointer
-        | mov rArg2, [rArg2]
+        | mov ARG2, [ARG2]
         | upvalueDispatch
 
         // The upvalue is an offset into the VM stack
         // Get pointer to VM stack
-        | mov rArg1, rState
-        | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.vm_stack)
-        | mov rArg1, [rArg1]
+        | mov ARG1, STATE
+        | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.vm_stack)
+        | mov ARG1, [ARG1]
         // Get offset of VM stack
-        | imul rArg2, 8
-        | add rArg1, rArg2
-        | mov rArg1, [rArg1]
-        | mov [rStackI], rArg1
+        | imul ARG2, 8
+        | add ARG1, ARG2
+        | mov ARG1, [ARG1]
+        | mov [STACK], ARG1
         | jmp >3
         | 1:
-        | mov rArg2, [rArg2]
+        | mov ARG2, [ARG2]
         | 2: 
-        | mov [rStackI], rArg2
+        | mov [STACK], ARG2
         | 3: 
 
         | incStack
@@ -1175,30 +1184,30 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | getUpvalue rax, idx
         | extractUpvaluePointer
         | decStack
-        | mov rArg3, [rStackI]
+        | mov ARG3, [STACK]
         | upvalueDispatch
         //
         // Get State::gc.vm_stack
-        | mov rArg1, rState
-        | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.vm_stack)
-        | mov rArg1, [rArg1]
+        | mov ARG1, STATE
+        | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.vm_stack)
+        | mov ARG1, [ARG1]
         // Get offset of VM stack
-        | mov rArg2, [rArg2]
-        | imul rArg2, 8
-        | add rArg1, rArg2
-        //| mov rax, [rStackI]
-        | mov [rArg1], rArg3
+        | mov ARG2, [ARG2]
+        | imul ARG2, 8
+        | add ARG1, ARG2
+        //| mov rax, [STACK]
+        | mov [ARG1], ARG3
         | jmp >3
         | 1:
         // Native: pointer to pointer
-        //| mov rax, [rStackI]
-        | mov rArg2, [rArg2]
-        | mov [rArg2], rArg3
+        //| mov rax, [STACK]
+        | mov ARG2, [ARG2]
+        | mov [ARG2], ARG3
         | jmp >3
         | 2:
         // Upvalue is closed, this is a pointer
-        //| mov rax, [rStackI]
-        | mov [rArg2], rArg3
+        //| mov rax, [STACK]
+        | mov [ARG2], ARG3
         | 3: 
         //| throwNativeException 0, E_EVAL, E_UPVALUE_CLOSED, 0, 0
 
@@ -1219,11 +1228,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         AR_LOG_JIT("upvalue-from-local " << idx);
 
-        | mov qword [rStackI], 18
-        | mov rArg1, rsp
-        | add rArg1, (kUpvaluesOffset + (idx * 8))
-        | mov rArg1, [rArg1]
-        | mov [rStackI], rArg1
+        | mov qword [STACK], 18
+        | mov ARG1, rsp
+        | add ARG1, (kUpvaluesOffset + (idx * 8))
+        | mov ARG1, [ARG1]
+        | mov [STACK], ARG1
         | incStack
 
         break;
@@ -1235,20 +1244,20 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         AR_LOG_JIT("make-closure " << upvalues);
 
         /*
-        | mov rArg1, rsp
+        | mov ARG1, rsp
         | simpCall print_stack_frame
         */
 
-        | mov rArg1, rState
-        | mov64 rArg2, (size_t) upvalues
-        | mov rArg3, rStackI
+        | mov ARG1, STATE
+        | mov64 ARG2, (size_t) upvalues
+        | mov ARG3, STACK
         // Stack position = stack - 8 - upvalues - 8 (for VMFunction at the beginning)
-        | sub rArg3, (((size_t)((upvalues * 8) + 8)))
+        | sub ARG3, (((size_t)((upvalues * 8) + 8)))
         | mov64 rax, (size_t) make_closure
         | call rax
 
-        | sub rStackI, (((size_t)((upvalues * 8) + 8)))
-        | mov [rStackI], rax
+        | sub STACK, (((size_t)((upvalues * 8) + 8)))
+        | mov [STACK], rax
         | incStack
 
 
@@ -1263,34 +1272,34 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
 
         // Pointer to function on stack
-        | mov rArg4, rStackI
-        | sub rArg4, ((argc * 8) + 8)
+        | mov ARG4, STACK
+        | sub ARG4, ((argc * 8) + 8)
 
         // Pointer to argv, if there is one
         if(argc > 0) {
-          | mov rArg3, rArg4
-          | add rArg3, 8
+          | mov ARG3, ARG4
+          | add ARG3, 8
         }
 
-        | mov rArg2, (size_t)argc
-        | mov rArg1, rState
+        | mov ARG2, (size_t)argc
+        | mov ARG1, STATE
 
         // update stack pointer to point to where function was
-        | mov rStackI, rArg4
+        | mov STACK, ARG4
 
         // Get pointer object from stack
-        | mov rArg4, [rArg4]
+        | mov ARG4, [ARG4]
 
         // Type check and get Procedure::procedure_addr
-        | extractProcedureAddr rArg4
+        | extractProcedureAddr ARG4
 
         | call rax
 
-        | mov rArg1, rax
+        | mov ARG1, rax
 
-        | checkExceptionP rArg1
+        | checkExceptionP ARG1
 
-        | mov [rStackI], rArg1
+        | mov [STACK], ARG1
         | incStack
 
         break;
@@ -1321,12 +1330,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         AR_LOG_JIT("jump-" << ((code[current_insn] == OP_JUMP_UNLESS) ? "unless" : "when") << ' ' << loc << " (label " << lbl << ")");
 
         if(code[current_insn] == OP_JUMP_WHEN_POP) {
-          | popStackTop rArg1
+          | popStackTop ARG1
         } else {
-          | getStackTop rArg1
+          | getStackTop ARG1
         }
 
-        | cmp rArg1, C_FALSE
+        | cmp ARG1, C_FALSE
         if(code[current_insn] == OP_JUMP_UNLESS) {
           | jne =>lbl
         } else {
@@ -1337,8 +1346,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
       case OP_RETURN: {
         AR_LOG_JIT("return");
-        | sub rStackI, 8
-        | mov rStackI, [rStackI]
+        | sub STACK, 8
+        | mov STACK, [STACK]
 
         | jmp ->unwind
 
@@ -1351,13 +1360,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
       case OP_ARGC_GTE: {
         size_t fargc = code[code_offset++];
 
-        | cmp rArg3, (size_t) fargc
+        | cmp ARG3, (size_t) fargc
         if(code[current_insn] == OP_ARGC_EQ) {
           | je >1
         } else if(code[current_insn] == OP_ARGC_GTE) {
           | jge >1
         }
-        | throwNativeException E_EVAL, (code[current_insn] == OP_ARGC_EQ ? E_ARITY_CHECK_EQ : E_ARITY_CHECK_GTE), fargc, rArg3
+        | throwNativeException E_EVAL, (code[current_insn] == OP_ARGC_EQ ? E_ARITY_CHECK_EQ : E_ARITY_CHECK_GTE), fargc, ARG3
         | 1:
 
         AR_LOG_JIT((code[current_insn] == OP_ARGC_EQ ? "argc-eq" : "argc-gte") << ' ' << fargc);
@@ -1367,25 +1376,25 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         // Initialize local variables
         if(fargc) {
           AR_LOG_JIT("initializing locals with loop to " << kLocalsOffset + (8 * fargc));
-          // rArg1 = &locals[0]
-          | mov rArg1, rsp
-          | add rArg1, (kLocalsOffset)
-          // rArg2 = &argv[0]
-          | mov rArg2, rArg4
+          // ARG1 = &locals[0]
+          | mov ARG1, rsp
+          | add ARG1, (kLocalsOffset)
+          // ARG2 = &argv[0]
+          | mov ARG2, ARG4
 
           // limit = &locals[max_arity]
-          | mov rax, rArg1
+          | mov rax, ARG1
           | add rax, (8 * fargc)
 
           |->local_init:
           // mov argv[i] into r10
-          | mov r10, [rArg2]
+          | mov r10, [ARG2]
           // mov r10 into locals[i]
-           | mov [rArg1], r10
+           | mov [ARG1], r10
           // Increment and check again
-          | add rArg2, 8
-          | add rArg1, 8
-          | cmp rArg1, rax
+          | add ARG2, 8
+          | add ARG1, 8
+          | cmp ARG1, rax
           | jne ->local_init
         }
 
@@ -1393,28 +1402,28 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
           if(gc_debug) {
             //| stateCall state_collect;
           }
-          | mov rArg1, rsp
+          | mov ARG1, rsp
           | simpCall print_stack_frame
         }
 
-        | mov rArg2, (size_t) fargc
+        | mov ARG2, (size_t) fargc
         
-        | mov rArg1, rState
-        | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argc)
-        | mov qword [rArg1], 0
+        | mov ARG1, STATE
+        | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argc)
+        | mov qword [ARG1], 0
 
         break;
       }
 
       case OP_ARGV_REST: {
         AR_LOG_JIT("argv-rest");
-        | mov rArg1, rState
+        | mov ARG1, STATE
         | mov64 rax, (size_t)allocate_rest_arguments
         | call rax
 
-        | mov rArg1, rsp
-        | add rArg1, (kLocalsOffset + (vmf->max_arity * 8))
-        | mov [rArg1], rax
+        | mov ARG1, rsp
+        | add ARG1, (kLocalsOffset + (vmf->max_arity * 8))
+        | mov [ARG1], rax
 
         break;
       }
@@ -1422,14 +1431,14 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
       case OP_EQ: {
         AR_LOG_JIT("eq");
         | decStack
-        | mov rArg1, [rStackI]
+        | mov ARG1, [STACK]
         | decStack
-        | cmp rArg1, [rStackI]
+        | cmp ARG1, [STACK]
         | je >1
-        | mov qword [rStackI], C_FALSE
+        | mov qword [STACK], C_FALSE
         | jmp >2
         | 1:
-        | mov qword [rStackI], C_TRUE
+        | mov qword [STACK], C_TRUE
         | 2:
         | incStack
 
@@ -1442,12 +1451,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         AR_LOG_JIT((car ? "car" : "cdr"));
 
         | decStack
-        | mov rax, [rStackI]
+        | mov rax, [STACK]
 
         | checkHeapTypeEquals rax, E_CAR, E_EXPECTED_TYPE, PAIR
         | add rax, (car ? (ptrdiff_t)(&((Pair*)0)->data_car) : (ptrdiff_t)(&((Pair*)0)->data_cdr))
         | mov rax, [rax]
-        | mov [rStackI], rax
+        | mov [STACK], rax
         | incStack
 
         break;
@@ -1456,13 +1465,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
       case OP_NOT: {
         | decStack
 
-        | mov rArg1, [rStackI]
-        | cmp rArg1, C_FALSE
+        | mov ARG1, [STACK]
+        | cmp ARG1, C_FALSE
         | je >1
-        | mov qword [rStackI], C_FALSE
+        | mov qword [STACK], C_FALSE
         | jmp >2
         | 1:
-        | mov qword [rStackI], C_TRUE
+        | mov qword [STACK], C_TRUE
         | 2:
 
         | incStack
@@ -1473,24 +1482,24 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
       case OP_FX_LT: {
         | decStack
 
-        | mov rArg2, rStackI
+        | mov ARG2, STACK
 
-        | mov rArg1, rStackI
-        | sub rArg1, 8
+        | mov ARG1, STACK
+        | sub ARG1, 8
 
-        | mov rArg1, [rArg1]
-        | mov rArg2, [rArg2]
+        | mov ARG1, [ARG1]
+        | mov ARG2, [ARG2]
 
-        | checkFixnumPReg rArg2, E_FX_LT, E_EXPECTED_FIXNUM_2
-        | checkFixnumPReg rArg1, E_FX_LT, E_EXPECTED_FIXNUM_1
+        | checkFixnumPReg ARG2, E_FX_LT, E_EXPECTED_FIXNUM_2
+        | checkFixnumPReg ARG1, E_FX_LT, E_EXPECTED_FIXNUM_1
 
         | decStack
-        | mov qword [rStackI], C_FALSE
-        | cmp rArg1, rArg2
+        | mov qword [STACK], C_FALSE
+        | cmp ARG1, ARG2
         | jl >1
         | jmp >2
         | 1: 
-        | mov qword [rStackI], C_TRUE
+        | mov qword [STACK], C_TRUE
         | 2:
         | incStack
 
@@ -1507,41 +1516,41 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
           case OP_FX_SUB: src = E_FX_SUB; AR_LOG_JIT("fx-"); break;
         }
 
-        | sub rStackI, 8
-        | mov rArg2, rStackI
+        | sub STACK, 8
+        | mov ARG2, STACK
 
         // TODO: Why is the shifting necessary? It should be possible to add or subtract
         // two fixnum values and return them as-is
 
-        | mov rArg1, rArg2
-        | mov rArg2, [rArg2]
+        | mov ARG1, ARG2
+        | mov ARG2, [ARG2]
 
         // 2 labels: two for each type test
-        | checkFixnumPReg rArg2, src, E_EXPECTED_FIXNUM_2
+        | checkFixnumPReg ARG2, src, E_EXPECTED_FIXNUM_2
 
         // Extract fixnum argument 1 value
-        | shr rArg2, 1
+        | shr ARG2, 1
 
         // Get first stackvalu
-        | sub rArg1, 8
+        | sub ARG1, 8
 
-        | mov rax, [rArg1]
+        | mov rax, [ARG1]
         | checkFixnumPReg rax, src, E_EXPECTED_FIXNUM_1
         | shr rax, 1
 
         switch(code[current_insn]) {
           case OP_FX_ADD:
-            | add rax, rArg2
+            | add rax, ARG2
             break;
           case OP_FX_SUB:
-            | sub rax, rArg2
+            | sub rax, ARG2
             break;
         }
 
         | shl rax, 1
         | inc rax
 
-        | mov [rArg1], rax
+        | mov [ARG1], rax
 
         // set top of stack
         break;
@@ -1560,21 +1569,43 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         }
 
         if(argc == 0) {
-          | mov qword [rStackI], Value::make_fixnum(0).bits
+          | mov qword [STACK], Value::make_fixnum(0).bits
           break;
         } else if(argc == 1) {
           if(insn == OP_ADD) {
             // Unary plus (does nothing)
+
+            // Currently debugging: trying to successfully load a double and return
+            // a freshly allocated double
+
+            | decStack
+
+            | mov ARG2, [STACK]
+            | add ARG2, (ptrdiff_t)(&((Flonum*)0)->number)
+
+            | movdqu xmm0, [ARG2]
+            | movdqu xmm1, [ARG2]
+            | addsd xmm0, xmm1
+
+            | mov ARG1, STATE
+            | mov64 rax, (size_t) allocate_flonum
+            | call rax
+
+            | mov [STACK], rax
+            
+            //| mov qword [STACK], 0
+            | incStack
+
             break;
           } else if(insn == OP_SUB) {
             // Unary minus (negation)
             | decStack
-            | mov rax, [rStackI]
+            | mov rax, [STACK]
             | shr rax, 1
             | neg rax
             | shl rax, 1
             | inc rax
-            | mov [rStackI], rax
+            | mov [STACK], rax
             | incStack
 
             break;
@@ -1582,32 +1613,35 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         }
 
         // TODO: Add optimized binary forms
+
+        // TODO: Current problem is extracting a floating point number into a register. So drop all
+        // the extranous stuff and just make (+ 5.0) return a newly allocated 5.0.
         
         // N-ary addition
-        // rArg1 = current value
-        // rArg2 = fixnum result accumulator
+        // ARG1 = current value
+        // ARG2 = fixnum result accumulator
         // xmm0 = flonum result accumulator
-        | mov rArg2, 0
-        // rArg3 = loop limit 
-        | mov rArg3, rStackI
+        | mov ARG2, 0
+        // ARG3 = loop limit 
+        | mov ARG3, STACK
         | mov rax, (size_t)(argc)
         | imul rax, 8
-        | sub rStackI, rax
+        | sub STACK, rax
 
         // 1: Iterate over and add fixnum arguments
         |1:
-        | mov rArg1, [rStackI]
+        | mov ARG1, [STACK]
         // Check for fixnum, if not fixnum, break out of this loop and check for numeric types
-        | test rArg1, 1
+        | test ARG1, 1
         | jz >2
         
         // This is a fixnum, add to accumulator
-        | shr rArg1, 1
-        | add rArg2, rArg1
+        | shr ARG1, 1
+        | add ARG2, ARG1
 
         // Increment loop and check again
-        | add rStackI, 8
-        | cmp rStackI, rArg3
+        | add STACK, 8
+        | cmp STACK, ARG3
         | jne <1
 
         // Fixnum addition succeeded, return
@@ -1616,36 +1650,36 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         // 2: Simple fixnum operation failed
         | 2: 
         // This is a flonum. Convert fixnum to flonum and continue
-        | cvtsi2sd xmm0, rArg2
+        | cvtsi2sd xmm0, ARG2
         // 3: Beginning of fixnum/flonum loop
         | 3: 
-        | mov rArg1, [rStackI]
+        | mov ARG1, [STACK]
         // Check for fixnum
-        | test rArg1, 1
+        | test ARG1, 1
         | jnz >4
         // Check for non-fixnum constant or #f
-        | test rArg1, rArg1
+        | test ARG1, ARG1
         | je >6
-        | test rArg1, 3
+        | test ARG1, 3
         | jnz >6
         // Check for flonum
-        | mov rArg1, [rArg1]
-        | and rArg2, 255
-        | cmp rArg2, (FLONUM)
+        | mov ARG1, [ARG1]
+        | and ARG2, 255
+        | cmp ARG2, (FLONUM)
         | jne >5
 
         // This is not a flonum, save the pointer and jump to exception
-        | mov rArg1, [rStackI]
+        | mov ARG1, [STACK]
         | jmp >6
 
         // Add flonum
 
         // 4: Add fixnum to flonum and continue
         | 4:
-        | cvtsi2sd xmm1, rArg1
+        | cvtsi2sd xmm1, ARG1
 
-        | add rStackI, 8
-        | cmp rStackI, rArg3
+        | add STACK, 8
+        | cmp STACK, ARG3
         | je <3
         // Finished adding, return floating point value
         | jmp >7
@@ -1653,28 +1687,28 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         // 5: Add flonum to flonum and continue
         | 5:
         
-        | mov rArg1, [rStackI]
-        //| mov rArg1, [rArg1]
-        | mov rArg1, 0
-        | movsd xmm0, qword rArg1
+        | mov ARG1, [STACK]
+        //| mov ARG1, [ARG1]
+        | mov ARG1, 0
+        //| movsd xmm0, qword ARG1
 
         | jmp >7
 
         // 6: Throw type exception
         | 6:
-        | throwNativeException E_TYPE, E_ADD, rArg1, 0
+        | throwNativeException E_TYPE, E_ADD, ARG1, 0
 
         // 7: Allocate and return flonum result
         | 7:
 
         | mov rax, (size_t)(argc * 8)
-        | sub rStackI, rax
+        | sub STACK, rax
 
-        | mov rArg1, rState
+        | mov ARG1, STATE
         | mov64 rax, (size_t) allocate_flonum
         | call rax
 
-        | mov [rStackI], rax
+        | mov [STACK], rax
 
         | jmp >9
 
@@ -1682,13 +1716,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | 8:
 
         | mov rax, (size_t)(argc * 8)
-        | sub rStackI, rax
+        | sub STACK, rax
 
-        | shl rArg2, 1
-        | inc rArg2
-        | mov [rStackI], rArg2
+        | shl ARG2, 1
+        | inc ARG2
+        | mov [STACK], ARG2
 
-        //| mov [rStackI], rArg1
+        //| mov [STACK], ARG1
         | 9:
 
         | incStack
@@ -1713,13 +1747,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   |->exception:
 	// Add State* and VMFunction pointer to this
-	| mov rArg1, [rsp+(sizeof(NativeException)+16)]
-  | mov qword [rsp+16], rArg1
-	| mov qword [rsp+8], rState
-  | mov rArg1, rsp
+	| mov ARG1, [rsp+(sizeof(NativeException)+16)]
+  | mov qword [rsp+16], ARG1
+	| mov qword [rsp+8], STATE
+  | mov ARG1, rsp
 	| sub rsp, 48
   | simpCall native_throw_exception
-  | mov rStackI, rax
+  | mov STACK, rax
 	| add rsp, 48
   | add rsp, sizeof(NativeException) // Reset stack
   
@@ -1727,43 +1761,43 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   // Protect return value
   if(dbg && gc_debug) {
-    | mov sFrameScratch, rStackI
+    | mov sFrameScratch, STACK
     //| stateCall state_collect;
-    | mov rStackI, sFrameScratch
+    | mov STACK, sFrameScratch
   }
 
   if(dbg && sanity_log) {
-    | mov rArg1, rStackI
+    | mov ARG1, STACK
     | simpCall sanity_log_end
   }
 
   // Close over local upvalues
   if(upvalue_count) {
     for(size_t i = 0; i != upvalue_count; i++) {
-      | mov rArg2, rsp
-      | add rArg2, (kUpvaluesOffset + (i * 8))
-      | mov rArg2, [rArg2]
+      | mov ARG2, rsp
+      | add ARG2, (kUpvaluesOffset + (i * 8))
+      | mov ARG2, [ARG2]
       
-      | mov rArg1, rState
+      | mov ARG1, STATE
       | mov64 rax, (size_t) upvalue_close
       | call rax
     }
   }
 
   // state->gc.native_frames = NativeFrame.previous
-  | mov rArg1, rState
-  | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
-  | mov rArg2, [rsp]
-  | mov [rArg1], rArg2
+  | mov ARG1, STATE
+  | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
+  | mov ARG2, [rsp]
+  | mov [ARG1], ARG2
 
   // Free stack space
   | add rsp, kTotalStackSizeAligned
 
-  // Retrieve return value from rStackI
+  // Retrieve return value from STACK
 	| .if WINDOWS
 	|  mov rax, rsp
 	| .else
-  |  mov rax, rStackI
+  |  mov rax, STACK
 	| .endif
 
   // Restore registers
@@ -1771,8 +1805,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	| pop r15
 	| pop r14
 	|.endif
-  | pop rStackI
-	| pop rState
+  | pop STACK
+	| pop STATE
   | pop rbx
   | mov rsp, rbp
 	| pop rbp

@@ -240,3 +240,10 @@
                          )))
           ,@body))))
 
+;; TODO. What if this were a more generic macro, somewhat like pattern matching but rather having the effect of replacing
+;; identifier bindings with accessors, e.g.
+
+;; (with ((record p Point x y)
+;;        (pair asdf (x car) (y cdr))        
+;; Would it be more useful?
+
