@@ -113,6 +113,9 @@ void load_native_compiler(State&) {}
 // TODO: Use offsetof and other stuff instead of calling functions to retrieve information
 // about a particular State
 
+// TODO: There is no need to store Closure pointer, we could store the VectorStorage of upvalues
+// directly in the frame pointer
+
 
 #include "dasm_proto.h"
 #include "dasm_x86.h"
@@ -121,7 +124,7 @@ void load_native_compiler(State&) {}
 
 namespace arete {
 
-static const bool dbg = false;
+static const bool dbg = true;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
@@ -303,7 +306,12 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
 
     case E_UPVALUE_NATIVE: check_code = false; os << "native upvalue"; break;
     case E_UPVALUE_CLOSED: check_code = false; os << "closed upvalue"; break;
-    case E_UPVALUE_VM: check_code = false; os << "vm upvalue"; break;
+    case E_UPVALUE_VM: {
+      check_code = false;
+      os << (size_t) exc->state->gc.vm_stack << " -> " << (size_t) exc->arg1 << std::endl;
+      os << " !! vm upvalue";
+      break;
+    }
 
     case E_ARITY_CHECK_EQ: {
       check_code = false;
@@ -582,7 +590,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | test qword store, 1
   | jnz >1
   // Test failed. Set up registers for exception
-  | throwNativeException (code_offset-1), E_TYPE, src, code, 0
+  | throwNativeException E_TYPE, src, code, 0
   |1:
   |.endmacro
 
@@ -590,7 +598,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | test store, 1
   | jnz >1
   // Test failed. Set up registers for exception
-  | throwNativeException (code_offset-1), E_TYPE, src, code, 0
+  | throwNativeException E_TYPE, src, code, 0
   |1:
   |.endmacro
   |.macro checkNumberP, store, src, code
@@ -628,7 +636,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | test qword [store], Value::VALUE_PROCEDURE_BIT
   | jnz >2
   | 1:
-  | throwNativeException current_insn, E_EVAL, E_APPLY_CHECK, store, 0
+  | throwNativeException E_EVAL, E_APPLY_CHECK, store, 0
   | 2:
   | mov rax, store
   | add rax, (&((Procedure*)0)->procedure_addr)
@@ -647,10 +655,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | mov store, [store]
   |.endmacro
 
-  |.macro throwNativeException, offset, tag, src, arg1, arg2
+  |.macro throwNativeException, tag, src, arg1, arg2
   // See also ->exception2:
   | sub rsp, sizeof(NativeException)
-  | mov qword [rsp+24], offset
+  | mov qword [rsp+24], (size_t) current_insn
   | mov qword [rsp+32], tag
   | mov qword [rsp+40], src
   | mov qword [rsp+48], arg1
@@ -781,6 +789,14 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   | mov rArg2, [rArg1]
   | mov sFramePrev, rArg2
   | mov [rArg1], rsp
+
+  // Temporarily protect argv
+  | mov rArg1, rState
+  | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argc)
+  | mov [rArg1], rArg3
+  | mov rArg1, rState
+  | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argv)
+  | mov [rArg1], rArg4
 
   // NativeFrame.value_count
   | mov qword sFrameCount, kFrameValues
@@ -1006,7 +1022,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | cmp rArg1, (size_t)C_UNDEFINED
         | jne >1
         | storeConstant rArg1, idx
-        | throwNativeException (size_t) current_insn, E_EVAL, E_UNDEFINED, rArg1, 0
+        | throwNativeException E_EVAL, E_UNDEFINED, rArg1, 0
         | 1:
         | mov [rStackI], rArg1
         | incStack
@@ -1086,10 +1102,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | je >1
         |.endmacro
 
-        |.macro upvalueExtract
+        |.macro extractUpvaluePointer
         | mov rArg2, rax
         | add rArg2, (ptrdiff_t)(&((Upvalue*)0)->U.local)
-        | mov rArg2, [rArg2]
+        //| mov rArg2, [rArg2]
         |.endmacro
 
 
@@ -1099,7 +1115,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         // to be used immediately
 
         | getUpvalue rax, idx
-        | upvalueExtract
+        | extractUpvaluePointer
+        | mov rArg2, [rArg2]
         | upvalueDispatch
 
         // The upvalue is an offset into the VM stack
@@ -1129,24 +1146,44 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         AR_LOG_JIT("upvalue-set " << idx);
 
         | getUpvalue rax, idx
+        | extractUpvaluePointer
+        | decStack
+        | mov rArg3, [rStackI]
         | upvalueDispatch
         //
-        | throwNativeException 0, E_EVAL, E_UPVALUE_VM, 0, 0
-        | jmp >1
-        | 2:
-        | throwNativeException 0, E_EVAL, E_UPVALUE_CLOSED, 0, 0
+        // Get State::gc.vm_stack
+        | mov rArg1, rState
+        | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.vm_stack)
+        | mov rArg1, [rArg1]
+        // Get offset of VM stack
+        | mov rArg2, [rArg2]
+        | imul rArg2, 8
+        | add rArg1, rArg2
+        //| mov rax, [rStackI]
+        | mov [rArg1], rArg3
+        | jmp >3
         | 1:
-        | throwNativeException 0, E_EVAL, E_UPVALUE_VM, 0, 0
-        | 3:
-        | incStack
+        // Native: pointer to pointer
+        //| mov rax, [rStackI]
+        | mov rArg2, [rArg2]
+        | mov [rArg2], rArg3
+        | jmp >3
+        | 2:
+        // Upvalue is closed, this is a pointer
+        //| mov rax, [rStackI]
+        | mov [rArg2], rArg3
+        | 3: 
+        //| throwNativeException 0, E_EVAL, E_UPVALUE_CLOSED, 0, 0
+
 
         break;
       }
 
       case OP_UPVALUE_FROM_CLOSURE: {
         size_t idx = code[code_offset++];
+        (void) idx;
 
-        | throwNativeException 0, E_EVAL, E_UPVALUES_NOT_SUPPORTED, 0, 0
+        | throwNativeException E_EVAL, E_UPVALUES_NOT_SUPPORTED, 0, 0
         break;
       }
 
@@ -1168,6 +1205,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
       case OP_CLOSE_OVER: {
         size_t upvalues = code[code_offset++];
 
+        AR_LOG_JIT("make-closure " << upvalues);
+
+        /*
+        | mov rArg1, rsp
+        | simpCall print_stack_frame
+        */
+
         | mov rArg1, rState
         | mov64 rArg2, (size_t) upvalues
         | mov rArg3, rStackI
@@ -1180,8 +1224,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | mov [rStackI], rax
         | incStack
 
-        | mov rArg1, rsp
-        | simpCall print_stack_frame
 
         break;
       }
@@ -1288,7 +1330,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         } else if(code[current_insn] == OP_ARGC_GTE) {
           | jge >1
         }
-        | throwNativeException current_insn, E_EVAL, (code[current_insn] == OP_ARGC_EQ ? E_ARITY_CHECK_EQ : E_ARITY_CHECK_GTE), fargc, rArg3
+        | throwNativeException E_EVAL, (code[current_insn] == OP_ARGC_EQ ? E_ARITY_CHECK_EQ : E_ARITY_CHECK_GTE), fargc, rArg3
         | 1:
 
         AR_LOG_JIT((code[current_insn] == OP_ARGC_EQ ? "argc-eq" : "argc-gte") << ' ' << fargc);
@@ -1321,17 +1363,18 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         }
 
         if(dbg) {
-          | push rArg3; push rArg4;
           if(gc_debug) {
-            | stateCall state_collect;
+            //| stateCall state_collect;
           }
           | mov rArg1, rsp
           | simpCall print_stack_frame
-          | pop rArg4; pop rArg3
         }
 
         | mov rArg2, (size_t) fargc
-
+        
+        | mov rArg1, rState
+        | add rArg1, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argc)
+        | mov qword [rArg1], 0
 
         break;
       }
@@ -1524,7 +1567,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   |->exception:
 	// Add State* and VMFunction pointer to this
 	| mov rArg1, [rsp+(sizeof(NativeException)+16)]
-  | mov [rsp+16], rArg1
+  | mov qword [rsp+16], rArg1
 	| mov qword [rsp+8], rState
   | mov rArg1, rsp
 	| sub rsp, 48
@@ -1538,7 +1581,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   // Protect return value
   if(dbg && gc_debug) {
     | mov sFrameScratch, rStackI
-    | stateCall state_collect;
+    //| stateCall state_collect;
     | mov rStackI, sFrameScratch
   }
 

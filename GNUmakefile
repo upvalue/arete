@@ -146,7 +146,8 @@ clean:
 cleaner: clean
 	rm -f $(wildcard vendor/linenoise/*.d vendor/linenoise/*.o)
 
-install: arete heap.boot
+install: bin/arete heap.boot
 	install -d $(PREFIX)/bin
-	install -m 0755 arete $(PREFIX)/bin
+	install -m 0755 bin/arete $(PREFIX)/bin
+	install -d $(PREFIX)/share/arete
 	install -m 0644 heap.boot $(PREFIX)/share/arete

@@ -16,6 +16,24 @@
                 (print-string ":( expected expression" (quote ,(cons (caddr x) (cdddr x))) "to result in" (quote ,(cadr x)) "but got" result)
                 (print-string ":)" (quote ,(cons (caddr x) (cdddr x))) "=>" result))))))))
 
+;; same as above, but don't compile the function as it's done by hand for more complex situations (closures)
+(define-syntax test-equals-noc
+  (lambda (x)
+    #`(let ()
+        (define fn ,(caddr x))
+        (print ";; running already-compiled function" (quote ,(caddr x)))
+        (define result
+          (try (lambda () (apply native-call (cons fn (quote ,(cdddr x)))))
+               (lambda (exc) (print exc) ''exception)))
+        (set! test-results
+          (append 
+            test-results
+            (list 
+              (if (not (equal? result (quote ,(cadr x))))
+                (print-string ":( expected expression" (quote ,(cons (caddr x) (cdddr x))) "to result in" (quote ,(cadr x)) "but got" result)
+                (print-string ":)" (quote ,(cons (caddr x) (cdddr x))) "=>" result))))))))
+
+
 (define global 123)
 
 (define test-results '())
@@ -37,6 +55,7 @@
                (let ((a 5))
                  a)))
 
+#|
 (test-equals #t (lambda () (if #t #t #f)))
 (test-equals #t (lambda () (if (if #t #t #f) #t #f)))
 (test-equals 'asdf (lambda (a) (if a a #f)) 'asdf) 
@@ -72,6 +91,7 @@
 
 (test-equals () (lambda (a b . c) c) 1 2)
 (test-equals (3) (lambda (a b . c) c) 1 2 3)
+|#
 
 ;; calling another native function
 (define (native-thing) (define a 'thing) a)
@@ -79,5 +99,47 @@
 (vmfunction->native! native-thing)
 
 (test-equals thing (lambda () (native-thing)))
+
+;; first closure: access a native and closed variable from a VM closure
+
+(define (make-closure a)
+  (define (closure) a)
+  (closure)
+  closure)
+
+(test-equals 5
+             (lambda ()
+               (define cl (make-closure 5))
+               (cl)))
+
+(define (make-closure2)
+  (define (closure) a)
+  (vmfunction->native! closure)
+  (closure)
+  closure)
+
+(test-equals 6 (lambda () (define cl (make-closure 6)) (cl)))
+
+;; closure 2: access a native and closed upvalue from a native closure
+
+(define (make-closure3)
+  (define (closure) a)
+  (vmfunction->native! closure)
+  (closure)
+  closure)
+
+(vmfunction->native! make-closure3)
+
+(test-equals 7 (lambda () (define cl (make-closure 7)) (cl)))
+
+;; closure 3: setting varibles
+
+(define (make-closure4 a)
+  (define (closure) (set! a (+ a 1)) a)
+  (closure)
+  closure)
+
+(test-equals 12 (lambda () (define cl (make-closure4 8)) (cl) (cl) (cl)))
+
 
 (for-each print test-results)
