@@ -138,6 +138,7 @@ struct PointerUpdater {
         break;
 
       case VMFUNCTION: {
+        static_cast<VMFunction*>(heap)->calls = 0;
         static_cast<VMFunction*>(heap)->procedure_addr = apply_vm_;
         static_cast<VMFunction*>(heap)->name = update_value(static_cast<VMFunction*>(heap)->name);
         static_cast<VMFunction*>(heap)->constants = (VectorStorage*)update_heapvalue(static_cast<VMFunction*>(heap)->constants);

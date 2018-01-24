@@ -234,6 +234,7 @@ enum {
   E_ARITY_CHECK_GTE,
   E_APPLY_CHECK,
   E_ADD,
+  E_LT,
   E_SUB,
   E_FX_ADD,
   E_FX_SUB,
@@ -328,12 +329,17 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
     }
     case E_FX_ADD: os << "primitive fx+ "; break;
     case E_FX_SUB: os << "primitive fx- "; break;
-    case E_ADD: {
+    case E_LT: {
       check_code = false;
-      os << "primitive + expected argument to be numeric but got " << Value(exc->arg1).type();
+      os << "primitive numeric comparison expected argument to be numeric but got " << Value(exc->arg1).type();
       break;
     }
-    case E_SUB: os << "primitive - "; break;
+    case E_SUB:
+    case E_ADD: {
+      check_code = false;
+      os << "primitive arithmetic expected argument to be numeric but got " << Value(exc->arg1).type() << ": " << Value(exc->arg1);
+      break;
+    }
     case E_FX_LT: os << "primitive fx< "; break;
     case E_CAR: os << "primitive car "; break;
     default: break;
@@ -661,6 +667,18 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   |1:
   |.endmacro
 
+  |.macro cmpHeapType, store, tipe
+  | mov store, [store]
+  | and store, 255
+  | cmp store, tipe
+  |.endmacro
+
+  |.macro loadField, from, to, tname, fname
+  | mov to, from
+  | add to, ((ptrdiff_t)((&(tname*)0)->fname))
+  | mov to, [to]
+  |.endmacro
+
   // Check whether a value in STORE is applicable and extract its procedure address if so
   |.macro extractProcedureAddr, store
   // This is now guaranteed to be a heapvalue pointer, test it for VALUE_PROCEDURE_BIT
@@ -962,7 +980,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
       case OP_ARGC_EQ:
       case OP_ARGC_GTE:
       case OP_PUSH_CONSTANT:
-      case OP_ADD: case OP_SUB:
+      case OP_ADD: case OP_SUB: case OP_LT:
         code_offset++; continue;
 
       case OP_GLOBAL_SET: code_offset += 2; continue;
@@ -1430,17 +1448,16 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
       case OP_EQ: {
         AR_LOG_JIT("eq");
+
         | decStack
         | mov ARG1, [STACK]
-        | decStack
-        | cmp ARG1, [STACK]
+        | cmp ARG1, [STACK-8]
         | je >1
-        | mov qword [STACK], C_FALSE
+        | mov qword [STACK-8], C_FALSE
         | jmp >2
         | 1:
-        | mov qword [STACK], C_TRUE
+        | mov qword [STACK-8], C_TRUE
         | 2:
-        | incStack
 
         break;
       }
@@ -1450,31 +1467,27 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         bool car = code[current_insn] == OP_CAR;
         AR_LOG_JIT((car ? "car" : "cdr"));
 
-        | decStack
-        | mov rax, [STACK]
+        | mov rax, [STACK-8]
 
         | checkHeapTypeEquals rax, E_CAR, E_EXPECTED_TYPE, PAIR
         | add rax, (car ? (ptrdiff_t)(&((Pair*)0)->data_car) : (ptrdiff_t)(&((Pair*)0)->data_cdr))
         | mov rax, [rax]
-        | mov [STACK], rax
-        | incStack
+        | mov [STACK-8], rax
 
         break;
       }
 
       case OP_NOT: {
-        | decStack
 
-        | mov ARG1, [STACK]
+        | mov ARG1, [STACK-8]
         | cmp ARG1, C_FALSE
         | je >1
-        | mov qword [STACK], C_FALSE
+        | mov qword [STACK-8], C_FALSE
         | jmp >2
         | 1:
-        | mov qword [STACK], C_TRUE
+        | mov qword [STACK-8], C_TRUE
         | 2:
 
-        | incStack
         break;
       }
 
@@ -1556,7 +1569,70 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         break;
       }
 
-      // TODO: This is insane.
+      case OP_LT: {
+        size_t argc = code[code_offset++];
+        size_t insn = code[current_insn];
+
+        | mov ARG3, STACK
+        | sub STACK, (argc * 8)
+
+        | 1:
+        | mov rax, [STACK]
+        | test rax, 1
+        | jz >2
+        // Lhs is fixnum
+
+        | mov ARG1, [STACK+8]
+        | test ARG1, 1
+        | jz >3
+        // Lhs is fixnum and rhs is fixnum
+
+        | cmp rax, ARG1
+        if(insn == OP_LT) {
+          | jl >7
+        }
+        | jmp >8
+
+        | jmp >7
+
+        // 2: Lhs is flonum or error
+        | jmp >9
+
+        // 3: Lhs is fixnum and rhs is flonum or error
+        | 3: 
+        | jmp >9
+
+        // Loop restart
+        | 7:
+        | add STACK, 16
+        | cmp ARG3, STACK
+        | je >7
+        | sub STACK, 8
+        | jmp <1
+
+        // First 9: Exception
+        | 9:
+        | throwNativeException E_TYPE, E_LT, rax, 0
+
+        // 7: Return true
+        | 7:
+        | mov ARG2, 2
+        | jmp >9
+
+        // 8: Return false
+        | 8: 
+        | mov ARG2, 0
+
+        // Second 9: Fix stack and return
+        | 9:
+        | mov STACK, ARG3
+        | sub STACK, ((argc) * 8)
+        | mov [STACK], ARG2
+        | incStack
+
+        break;
+      }
+
       case OP_ADD:
       case OP_SUB: {
         size_t argc = code[code_offset++];
@@ -1569,54 +1645,29 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         }
 
         if(argc == 0) {
+          // No-argument plus (returns 0)
           | mov qword [STACK], Value::make_fixnum(0).bits
           break;
         } else if(argc == 1) {
           if(insn == OP_ADD) {
-            // Unary plus (does nothing)
-
-            // Currently debugging: trying to successfully load a double and return
-            // a freshly allocated double
-
-            | decStack
-
-            | mov ARG2, [STACK]
-            | add ARG2, (ptrdiff_t)(&((Flonum*)0)->number)
-
-            | movdqu xmm0, [ARG2]
-            | movdqu xmm1, [ARG2]
-            | addsd xmm0, xmm1
-
-            | mov ARG1, STATE
-            | mov64 rax, (size_t) allocate_flonum
-            | call rax
-
-            | mov [STACK], rax
-            
-            //| mov qword [STACK], 0
-            | incStack
-
+            // Unary plus (does nothing but return)
             break;
           } else if(insn == OP_SUB) {
             // Unary minus (negation)
-            | decStack
-            | mov rax, [STACK]
+
+            | mov rax, [STACK-8]
+
             | shr rax, 1
             | neg rax
             | shl rax, 1
             | inc rax
-            | mov [STACK], rax
-            | incStack
+
+            | mov [STACK-8], rax
 
             break;
           }
         }
 
-        // TODO: Add optimized binary forms
-
-        // TODO: Current problem is extracting a floating point number into a register. So drop all
-        // the extranous stuff and just make (+ 5.0) return a newly allocated 5.0.
-        
         // N-ary addition
         // ARG1 = current value
         // ARG2 = fixnum result accumulator
@@ -1624,9 +1675,32 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | mov ARG2, 0
         // ARG3 = loop limit 
         | mov ARG3, STACK
-        | mov rax, (size_t)(argc)
-        | imul rax, 8
-        | sub STACK, rax
+
+        //| mov rax, (insn == OP_ADD ? (argc * 8) : ((argc - 1) * 8))
+        //| mov rax, (argc * 8)
+        | sub STACK, (argc * 8)
+
+        // Subtraction: initialize accumulator with first value
+        if(insn == OP_SUB) {
+          | mov ARG2, [STACK]
+          | add STACK, 8
+          | test ARG2, 1
+          | jz >2
+          // 1: Initialize accumulator with value
+          | 1:
+          | shr ARG2, 1
+          | jmp >1
+          // 2: Test for float
+          | 2:
+          | cmpHeapType ARG2, FLONUM
+          | jne >6
+          | mov ARG2, [STACK-8]
+          | add ARG2, (ptrdiff_t)((&((Flonum*)0)->number))
+          | movsd xmm0, qword [ARG2]
+          | jmp >3
+          //| loadField ARG1, [STACK], Flonum, number
+
+        }
 
         // 1: Iterate over and add fixnum arguments
         |1:
@@ -1637,7 +1711,12 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         
         // This is a fixnum, add to accumulator
         | shr ARG1, 1
-        | add ARG2, ARG1
+
+        if(insn == OP_SUB) {
+          | sub ARG2, ARG1
+        } else {
+          | add ARG2, ARG1
+        }
 
         // Increment loop and check again
         | add STACK, 8
@@ -1651,7 +1730,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | 2: 
         // This is a flonum. Convert fixnum to flonum and continue
         | cvtsi2sd xmm0, ARG2
-        // 3: Beginning of fixnum/flonum loop
+        // 3: Beginning of fixnum/flonum loop dispatch
         | 3: 
         | mov ARG1, [STACK]
         // Check for fixnum
@@ -1664,9 +1743,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | jnz >6
         // Check for flonum
         | mov ARG1, [ARG1]
-        | and ARG2, 255
-        | cmp ARG2, (FLONUM)
-        | jne >5
+        | and ARG1, 255
+        | cmp ARG1, (FLONUM)
+        | je >5
 
         // This is not a flonum, save the pointer and jump to exception
         | mov ARG1, [STACK]
@@ -1676,20 +1755,46 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         // 4: Add fixnum to flonum and continue
         | 4:
+
+        | shr ARG1, 1
         | cvtsi2sd xmm1, ARG1
+
+        if(insn == OP_ADD) {
+          | addsd xmm0, xmm1
+        } else if(insn == OP_SUB) {
+          | subsd xmm0, xmm1
+        }
 
         | add STACK, 8
         | cmp STACK, ARG3
-        | je <3
+        | jne <3
         // Finished adding, return floating point value
         | jmp >7
 
         // 5: Add flonum to flonum and continue
         | 5:
-        
+
         | mov ARG1, [STACK]
+        | add ARG1, (ptrdiff_t)(&((Flonum*)0)->number)
+        | movsd xmm1, qword [ARG1]
+
+        if(insn == OP_ADD) {
+          | addsd xmm0, xmm1
+        } else if(insn == OP_SUB) {
+          | subsd xmm0, xmm1
+        }
+
+        | add STACK, 8
+        | cmp STACK, ARG3
+        | jne <3
+
+        /*
+        | mov ARG1, [STACK]
+        | add ARG1, (ptrdiff_t)(&((Flonum*)0)->number)
+        | movdqu xmm0, [ARG1]
+        */
         //| mov ARG1, [ARG1]
-        | mov ARG1, 0
+        //| mov ARG1, 0
         //| movsd xmm0, qword ARG1
 
         | jmp >7
@@ -1823,7 +1928,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   //bv = state.make_bytevector<unsigned char>(size);
 
-  AR_LOG_JIT("function size: " << size << " vs " << (0 * 8));
+  AR_LOG_JIT("function size: " << size << "b vs " << (vfn.as_unsafe<VMFunction>()->code->size) << "b");
 
   //dasm_encode(&d, bv.bv_data());
   dasm_encode(&d, proc_addr);
