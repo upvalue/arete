@@ -326,7 +326,6 @@ TODO: Casting
       (vector-set! copy i (vector-ref vec i))))
   copy)
 
-
 (define (vector->list vec)
   (if (fx= (vector-length vec) 0)
     '()

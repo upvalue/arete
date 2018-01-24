@@ -71,8 +71,6 @@
   labels ;; 16
   ;; #t if this is top-level code and variables are therefore global
   toplevel? ;; 17
-  ;; function body after analysis pass
-  body ;; 18
   )
 
 (define %OpenFn/make OpenFn/make)
@@ -80,7 +78,7 @@
 (set! OpenFn/make
   (lambda (name)
     (%OpenFn/make name (make-vector) (make-vector) (make-vector) 0 0 0 #f (make-table) 0 0 #f 0 #f 0 #f (make-table)
-                  #f #f)))
+                  #f)))
 
 ;; Although this is called Var, it might be more proper to think of it as a Binding that can be propagated through the
 ;; call stack
@@ -96,13 +94,11 @@
   upvalue?
   ;; If not #f, index in f.fn->upvalues. Mutually exclusive with upvalue?
   free-variable-id
-  ;; OpenFn/depth the variable was defined at.
-  scope
   )
 
 (define %Var/make Var/make)
 (set! Var/make
-  (lambda (id name) (%Var/make id name #f #f  #f)))
+  (lambda (id name) (%Var/make id name #f #f)))
 
 (define AVar/make
   (lambda (id name fn)

@@ -127,7 +127,7 @@ Value fn_cons_star(State& state, size_t argc, Value* argv, void* v) {
 AR_DEFUN("cons*", fn_cons_star, 1, 1, true);
 
 Value fn_append1(State& state, size_t argc, Value* argv, void* v) {
-  static const char* fn_name = "append1";
+  //static const char* fn_name = "append1";
 
   Value lst1 = argv[0], lst2 = argv[1];
   ListAppender nlst;
@@ -135,7 +135,6 @@ Value fn_append1(State& state, size_t argc, Value* argv, void* v) {
   AR_FRAME(state, lst1, lst2, nlst.head, nlst.tail);
 
   if(!lst1.heap_type_equals(PAIR)) {
-    std::cout << "failed before append: " << lst1 << ' ' << lst2 << std::endl;
     return state.type_error("append1: argument 1 is not a proper list");
   }
 
@@ -145,7 +144,6 @@ Value fn_append1(State& state, size_t argc, Value* argv, void* v) {
   }
 
   if(lst1 != C_NIL) {
-    std::cout << "failed after append " << lst1 << std::endl;
     return state.type_error("append1: argument 1 is not a proper list");
   }
 

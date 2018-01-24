@@ -1,6 +1,6 @@
 // reader.cpp - S-Expression reader.
 
-#define ARETE_LOG_READ(msg) ARETE_LOG((ARETE_LOG_TAG_READER), "read", msg)
+#define AR_LOG_READ(msg) AR_LOG((AR_LOG_TAG_READER), "read", msg)
 
 #include <math.h>
 
@@ -288,7 +288,7 @@ XReader::XReader(State& state_, std::istream& is_, bool slurp_source, const std:
 
 
 unsigned State::register_source(const std::string& path, std::istream& is) {
-  ARETE_LOG_READ("registering source " << path);
+  AR_LOG_READ("registering source " << path);
   std::ostringstream contents;
   contents << is.rdbuf();
   is.seekg(0, std::ios::beg);
@@ -335,7 +335,7 @@ Value XReader::make_src_pair(Value kar, Value kdr, unsigned line, unsigned posit
 Value XReader::read_error(const std::string& message, unsigned start_line, unsigned start_position,
     unsigned end_position) {
 
-  ARETE_LOG_READ("read_error " << start_line << ' ' << start_position << ' ' << message << std::endl);
+  AR_LOG_READ("read_error " << start_line << ' ' << start_position << ' ' << message << std::endl);
   SourceLocation src;
   src.source = source;
   src.line = start_line;
@@ -667,7 +667,7 @@ XReader::TokenType XReader::next_token() {
       tokenize_symbol();
       return TK_SYMBOL;
     } else {
-      ARETE_LOG_READ("unknown character " << c << ' ' << (ptrdiff_t) c);
+      AR_LOG_READ("unknown character " << c << ' ' << (ptrdiff_t) c);
       std::ostringstream os;
       os << "unknown character '" << c << "' (int = " << (ptrdiff_t) c << ")";
       read_error(os.str(), token_start_line, position, position+1);
@@ -1007,7 +1007,7 @@ Value XReader::read_expr(TokenType tk) {
     }
 
     default: {
-      ARETE_LOG_READ("unknown token " << tk);
+      AR_LOG_READ("unknown token " << tk);
       std::cerr << tk << std::endl;
       AR_ASSERT(!"unknown token");
     }

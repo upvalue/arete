@@ -12,10 +12,14 @@ int do_main(int argc, char* argv[]) {
 }
 
 #ifndef __EMSCRIPTEN__
+#ifndef AR_DISTILLED
+
 int main(int argc, char *argv[]) {
   int result = do_main(argc, argv);
   return result;
 }
+
+#endif
 #else
 
 #include <emscripten.h>

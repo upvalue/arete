@@ -854,7 +854,7 @@ Value State::expand_expr(Value exp) {
 
     if(get_global_value(G_EXPANDER_PRINT) != C_UNDEFINED &&
         get_global_value(G_EXPANDER_PRINT) != C_FALSE) {
-      print_src_pair(std::cout, saved, ARETE_COLOR_BLUE);
+      print_src_pair(std::cout, saved, AR_COLOR_BLUE);
       std::cout << std::endl;
       std::cout << "Expanded to: " << std::endl;// << exp << std::endl;
       pretty_print(std::cout, exp);

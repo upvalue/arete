@@ -58,7 +58,7 @@ struct VMFrame2 {
     fn = closure.closure_unbox();
     AR_ASSERT(state.gc.live(closure.heap));
     AR_ASSERT(state.gc.live(fn.heap));
-    ARETE_ASSERT_LIVE(fn.heap);
+    AR_ASSERT_LIVE(fn.heap);
     VMFunction* vfn = fn.as_unsafe<VMFunction>();
     vm_stack_used = vfn->local_count + vfn->upvalue_count + vfn->stack_max;
     state.vm_depth++;
@@ -111,8 +111,8 @@ struct VMFrame2 {
   code = vfn->code_pointer();
 
 #define AR_LOG_VM2(msg) \
-  if(((ARETE_LOG_TAGS & ARETE_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || vfn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
-    ARETE_LOG((ARETE_LOG_TAG_VM), "vm", msg); \
+  if(((AR_LOG_TAGS & AR_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || vfn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
+    AR_LOG((AR_LOG_TAG_VM), "vm", msg); \
   }
 
 Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {

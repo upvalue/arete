@@ -335,7 +335,7 @@ void State::print_src_line(std::ostream& os, const SourceLocation& src, const ch
       if(seek_line == src.line) {
         unsigned line_position = (unsigned)ss.tellg();
         std::getline(ss, source_line);
-        os << color << source_line << ARETE_COLOR_RESET << std::endl;
+        os << color << source_line << AR_COLOR_RESET << std::endl;
 
         unsigned i, j;
         // Print whitespace for each char in source line until the beginning of this element
@@ -398,7 +398,7 @@ void State::print_exception(std::ostream& os, Value exc) {
       os << "Error in macro syntax: ";
     }
 
-    os << ARETE_COLOR_BLUE << exc.exception_message().string_data() << ARETE_COLOR_RESET << std::endl;
+    os << AR_COLOR_BLUE << exc.exception_message().string_data() << AR_COLOR_RESET << std::endl;
   } else if(exc.exception_tag() == globals[State::S_READ_ERROR]) {
     os << exc.exception_message().string_data() << std::endl;
   } else {

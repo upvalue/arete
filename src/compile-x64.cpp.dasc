@@ -121,11 +121,11 @@ void load_native_compiler(State&) {}
 #include "dasm_proto.h"
 #include "dasm_x86.h"
 
-#define AR_LOG_JIT(msg) ARETE_LOG((ARETE_LOG_TAG_JIT), "jit", msg)
+#define AR_LOG_JIT(msg) AR_LOG((AR_LOG_TAG_JIT), "jit", msg)
 
 namespace arete {
 
-static const bool dbg = true;
+static const bool dbg = false;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
@@ -1209,9 +1209,17 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
       case OP_UPVALUE_FROM_CLOSURE: {
         size_t idx = code[code_offset++];
-        (void) idx;
 
-        | throwNativeException E_EVAL, E_UPVALUES_NOT_SUPPORTED, 0, 0
+        AR_LOG_JIT("upvalue-from-closure " << idx);
+
+        | mov ARG1, sFrameClosure
+        | add ARG1, (&((Closure*)0)->upvalues)
+        | mov ARG1, [ARG1]
+        | add ARG1, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
+        | mov ARG1, [ARG1]
+        | mov [STACK], ARG1
+        | incStack
+
         break;
       }
 
@@ -1220,7 +1228,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         AR_LOG_JIT("upvalue-from-local " << idx);
 
-        | mov qword [STACK], 18
         | mov ARG1, rsp
         | add ARG1, (kUpvaluesOffset + (idx * 8))
         | mov ARG1, [ARG1]
@@ -1311,23 +1318,19 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
 				|.else
         // Pointer to function on stack
-        | mov ARG4, STACK
-        | sub ARG4, ((argc * 8) + 8)
+        | sub STACK, ((argc * 8) + 8)
 
         // Pointer to argv, if there is one
         if(argc > 0) {
-          | mov ARG3, ARG4
+          | mov ARG3, STACK
           | add ARG3, 8
         }
 
         | mov ARG2, (size_t)argc
         | mov ARG1, STATE
 
-        // update stack pointer to point to where function was
-        | mov STACK, ARG4
-
         // Get pointer object from stack
-        | mov ARG4, [ARG4]
+        | mov ARG4, [STACK]
 
         // Type check and get Procedure::procedure_addr
         | extractProcedureAddr ARG4
@@ -2039,6 +2042,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
 	Value (*proc)(State*, size_t, Value*, void*) = ((Value (*)(State*, size_t, Value*, void*))(proc_addr));
 
+  /*
 	std::cout << "state pointer: " << (size_t) &state << std::endl;
 	std::cout << "vfn bits : " << (size_t) vfn.bits << std::endl;
 
@@ -2047,8 +2051,11 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	Value asdf  = proc(&state, 0, (Value*) argvi, (void*) vfn.bits);
 
 	std::cout << "return value bits: " << Value(asdf) << std::endl;
+  */
 
-  vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
+  if(!vfn.heap->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
+    vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
+  }
 
   // PROBLEM: A closure cannot have all procedure_addrs replaced in-place by the JIT compiler.
 

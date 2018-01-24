@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <list>
 #include <iostream>
 #include <sstream>
@@ -25,34 +26,33 @@
 ///// PRE! Preprocessor macros and compile-time configuration macros
 
 #ifdef ARETE_DEV
-# define ARETE_GC_DEBUG 1
-# ifndef ARETE_ASSERTION_LEVEL
-#  define ARETE_ASSERTION_LEVEL 2
+# define AR_GC_DEBUG 1
+# ifndef AR_ASSERTION_LEVEL
+#  define AR_ASSERTION_LEVEL 2
 # endif
-# define ARETE_BENCH_GC 1
+# define AR_BENCH_GC 1
 #endif
 
 #if UINTPTR_MAX == 0xffffffff
-# define ARETE_64_BIT 0
+# define AR_64_BIT 0
 # define AR_ALIGN // __attribute__((aligned(8)))
 #elif UINTPTR_MAX == 0xffffffffffffffff
-# define ARETE_64_BIT 1
+# define AR_64_BIT 1
 # define AR_ALIGN 
 #endif
 
 // 0 = Do not evaluate assertions, internal assertions
 // 1 = Print warnings when assertions fail, disable some internal assertions
 // 2 = Exit program when assertions fail, enable all assertions
-#ifndef ARETE_ASSERTION_LEVEL
-# define ARETE_ASSERTION_LEVEL 0
+#ifndef AR_ASSERTION_LEVEL
+# define AR_ASSERTION_LEVEL 0
 #endif
 
-#if ARETE_ASSERTION_LEVEL == 2
+#if AR_ASSERTION_LEVEL == 2
 # define AR_ASSERT assert
 # define AR_TYPE_ASSERT assert
-#elif ARETE_ASSERTION_LEVEL == 1
+#elif AR_ASSERTION_LEVEL == 1
 # define AR_TYPE_ASSERT(x) if(!(x)) { std::cerr << "arete:assert: " << #x << " at " << __FILE__ << ':' << __LINE__ << " failed" << std::endl; stri}
-# define AR_ASSERT(x) ((void) 0)
 #else
 # define AR_ASSERT(x) ((void) 0)
 # define AR_TYPE_ASSERT(x) ((void) 0)
@@ -83,79 +83,76 @@
 
 #define AR_FRAME(state, ...) _AR_FRAME(state, __COUNTER__, __VA_ARGS__)
 
-#ifndef ARETE_BLOCK_SIZE
-# define ARETE_BLOCK_SIZE 4096
+#ifndef AR_BLOCK_SIZE
+# define AR_BLOCK_SIZE 4096
 #endif
 
-#ifndef ARETE_HEAP_SIZE 
-# define ARETE_HEAP_SIZE (1024 * 1024 * 8)
+#ifndef AR_HEAP_SIZE 
+# define AR_HEAP_SIZE (1024 * 1024 * 8)
 #endif 
 
-#ifndef ARETE_GC_LOAD_FACTOR
-# define ARETE_GC_LOAD_FACTOR 80
+#ifndef AR_GC_LOAD_FACTOR
+# define AR_GC_LOAD_FACTOR 80
 #endif
 
-#define ARETE_GC_SEMISPACE 0
-#define ARETE_GC_INCREMENTAL 1
-
-#ifndef ARETE_GC_DEBUG
-# define ARETE_GC_DEBUG 0
+#ifndef AR_GC_DEBUG
+# define AR_GC_DEBUG 0
 #endif
 
-#if ARETE_GC_DEBUG == 1
-# define ARETE_ASSERT_LIVE(obj) \
+#if AR_GC_DEBUG == 1
+# define AR_ASSERT_LIVE(obj) \
    AR_ASSERT("attempt to invoke method on non-live object" && (arete::current_state->gc.live((obj)) == true));
 #endif
 
-#ifndef ARETE_ASSERT_LIVE
-# define ARETE_ASSERT_LIVE(obj) 
+#ifndef AR_ASSERT_LIVE
+# define AR_ASSERT_LIVE(obj) 
 #endif
 
-#ifndef ARETE_LOG_TAGS
-# define ARETE_LOG_TAGS 0
+#ifndef AR_LOG_TAGS
+# define AR_LOG_TAGS 0
 #endif 
 
 // Various internal log tags for debugging
 
-#define ARETE_LOG_TAG_GC (1 << 0)
-#define ARETE_LOG_TAG_READER (1 << 1)
-#define ARETE_LOG_TAG_VM (1 << 2)
-#define ARETE_LOG_TAG_IMAGE (1 << 3)
-#define ARETE_LOG_TAG_DEFUN (1 << 4)
-#define ARETE_LOG_TAG_JIT (1 << 5)
+#define AR_LOG_TAG_GC (1 << 0)
+#define AR_LOG_TAG_READER (1 << 1)
+#define AR_LOG_TAG_VM (1 << 2)
+#define AR_LOG_TAG_IMAGE (1 << 3)
+#define AR_LOG_TAG_DEFUN (1 << 4)
+#define AR_LOG_TAG_JIT (1 << 5)
 
 #define AR_POSIX 0
 #define AR_WINDOWS 1
 
 #ifdef _MSC_VER
 # define AR_OS AR_WINDOWS
-# define ARETE_COLOR 0
+# define AR_COLOR 0
 #else
 # define AR_OS AR_POSIX
 #endif
 
 #ifdef __EMSCRIPTEN__
-# define ARETE_COLOR 0
+# define AR_COLOR 0
 #endif
 
-#if ARETE_COLOR
-# define ARETE_COLOR_BLUE "\033[1;34m"
-# define ARETE_COLOR_YELLOW "\33[1;33m"
-# define ARETE_COLOR_GREEN "\033[1;32m"
-# define ARETE_COLOR_RED "\033[1;31m"
-# define ARETE_COLOR_RESET "\033[0m"
+#if AR_COLOR
+# define AR_COLOR_BLUE "\033[1;34m"
+# define AR_COLOR_YELLOW "\33[1;33m"
+# define AR_COLOR_GREEN "\033[1;32m"
+# define AR_COLOR_RED "\033[1;31m"
+# define AR_COLOR_RESET "\033[0m"
 #else
-# define ARETE_COLOR_BLUE ""
-# define ARETE_COLOR_YELLOW ""
-# define ARETE_COLOR_GREEN ""
-# define ARETE_COLOR_RED ""
-# define ARETE_COLOR_RESET ""
+# define AR_COLOR_BLUE ""
+# define AR_COLOR_YELLOW ""
+# define AR_COLOR_GREEN ""
+# define AR_COLOR_RED ""
+# define AR_COLOR_RESET ""
 #endif
 
-#ifndef ARETE_LOG
-# define ARETE_LOG(tag, prefix, msg) \
-  if((ARETE_LOG_TAGS) & (tag)) { \
-    std::cerr << ARETE_COLOR_RED << "arete:" << prefix << ": " << ARETE_COLOR_RESET << msg << std::endl; \
+#ifndef AR_LOG
+# define AR_LOG(tag, prefix, msg) \
+  if((AR_LOG_TAGS) & (tag)) { \
+    std::cerr << AR_COLOR_RED << "arete:" << prefix << ": " << AR_COLOR_RESET << msg << std::endl; \
   }
 #endif 
 
@@ -186,6 +183,10 @@ extern size_t gc_collect_timer;
 
 // For debugging purposes only: a global instance of the current state
 extern State* current_state;
+
+// For distilled distributions of Arete
+extern unsigned char heap_boot[];
+extern unsigned heap_boot_len;
 
 // We have to use (void*) here to make Emscripten happy.
 typedef Value (*c_closure_t)(State&, size_t, Value*, void*);
@@ -312,7 +313,7 @@ struct HeapValue {
   }
 
   void flip_mark_bit() { header += get_mark_bit() ? -256 : 256; }
-#if ARETE_64_BIT
+#if AR_64_BIT
   static const size_t HEADER_INT_SHIFT = 32;
 #else
   static const size_t HEADER_INT_SHIFT = 16;
@@ -507,7 +508,7 @@ struct Value {
 
   // CONSTANTS
   unsigned constant_value() const {
-    AR_ASSERT(type() == CONSTANT);
+    AR_TYPE_ASSERT(type() == CONSTANT);
     return (unsigned) bits;
   }
 
@@ -775,7 +776,7 @@ struct Value {
   bool record_finalized() const { return heap->get_header_bit(RECORD_FINALIZED_BIT); }
 
   void record_set_finalized() {
-    AR_ASSERT(type() == RECORD) ;
+    AR_TYPE_ASSERT(type() == RECORD) ;
     if(!record_finalized()) heap->set_header_bit(RECORD_FINALIZED_BIT);
   }
 
@@ -1172,13 +1173,16 @@ struct Upvalue : HeapValue {
   static const unsigned CLASS_TYPE = UPVALUE;
 };
 
+// Note: use AR_ASSERT instead of AR_TYPE_ASSERT here; user code
+// will never use Upvalues
+
 inline bool Value::upvalue_closed() const {
-  AR_TYPE_ASSERT(type() == UPVALUE);
+  AR_ASSERT(type() == UPVALUE);
   return heap->get_header_bit(UPVALUE_CLOSED_BIT);
 }
 
 inline void Value::upvalue_set(const Value rhs) {
-  AR_TYPE_ASSERT(type() == UPVALUE);
+  AR_ASSERT(type() == UPVALUE);
   if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
     static_cast<Upvalue*>(heap)->U.converted = rhs;
   } else {
@@ -1188,7 +1192,7 @@ inline void Value::upvalue_set(const Value rhs) {
 }
 
 inline Value Value::upvalue() {
-  AR_TYPE_ASSERT(type() == UPVALUE);
+  AR_ASSERT(type() == UPVALUE);
   if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
     return as<Upvalue>()->U.converted;
   } else {
@@ -1197,8 +1201,8 @@ inline Value Value::upvalue() {
 }
 
 inline void Value::upvalue_close() {
-  AR_TYPE_ASSERT(type() == UPVALUE);
-  AR_TYPE_ASSERT(!upvalue_closed());
+  AR_ASSERT(type() == UPVALUE);
+  AR_ASSERT(!upvalue_closed());
   heap->set_header_bit(UPVALUE_CLOSED_BIT);
   as<Upvalue>()->U.converted = (*as<Upvalue>()->U.local);
   AR_ASSERT(upvalue_closed());
@@ -1257,7 +1261,7 @@ inline Value Value::vector_ref(size_t i) const {
 inline void Value::vector_set(size_t i, Value val) {
   AR_TYPE_ASSERT(type() == VECTOR);
   VectorStorage* store = static_cast<VectorStorage*>(static_cast<Vector*>(heap)->storage.heap);
-  AR_ASSERT(i < store->length && "vector out of bounds error");
+  AR_TYPE_ASSERT(i < store->length && "vector out of bounds error");
   store->data[i] = val;
 }
 
@@ -1361,8 +1365,8 @@ struct Record : HeapValue {
 template <class T>
 inline T* Value::record_data() {
   Value rtd = record_type();
-  AR_ASSERT(rtd.type() == RECORD_TYPE);
-  AR_ASSERT(record_isa(rtd));
+  AR_TYPE_ASSERT(rtd.type() == RECORD_TYPE);
+  AR_TYPE_ASSERT(record_isa(rtd));
   size_t data_offset = sizeof(Record) + (rtd.record_type_field_count() * sizeof(Value)) - sizeof(Value);
   return ((T*) (((char*) heap) + data_offset));
  }
@@ -1381,7 +1385,7 @@ inline Value Value::record_type() const {
 }
 
 inline Value Value::record_ref(unsigned i) const {
-  AR_ASSERT(record_type().as<RecordType>()->field_count > i && "record out of bounds error");
+  AR_TYPE_ASSERT(record_type().as<RecordType>()->field_count > i && "record out of bounds error");
   return as<Record>()->fields[i];
 }
 
@@ -1390,7 +1394,7 @@ inline unsigned Value::record_field_count() const {
 }
 
 inline void Value::record_set(unsigned i, Value v) {
-  AR_ASSERT(record_type().as<RecordType>()->field_count > i && "record out of bounds error");
+  AR_TYPE_ASSERT(record_type().as<RecordType>()->field_count > i && "record out of bounds error");
   as<Record>()->fields[i] = v;
 }
 
@@ -1981,7 +1985,7 @@ struct State {
    * Print information about an erroneous pair
    * @return true if argument's source was successfully printed
    */
-  bool print_src_pair(std::ostream& os, Value pair, const char* color = ARETE_COLOR_RED);
+  bool print_src_pair(std::ostream& os, Value pair, const char* color = AR_COLOR_RED);
 
   /**
    * Attempt to lazily load source code information
@@ -1992,7 +1996,7 @@ struct State {
    * Print an line of source code with a specific source object highlighted
    */
   void print_src_line(std::ostream& os, const SourceLocation& src,
-    const char* color = ARETE_COLOR_RED);
+    const char* color = AR_COLOR_RED);
   
   /**
    * Special-cased exception printing: this pretty-prints an exception, but also handles 
@@ -2147,6 +2151,8 @@ struct State {
 
   /** Load an image. Cannot be called after boot(). */
   const char* boot_from_image(const std::string& path);
+  const char* boot_from_image(FILE* f);
+  const char* boot_from_memory_image(unsigned char* img, size_t size);
   bool file_is_image(const std::string& path);
 
   // Native code memory management
@@ -2374,7 +2380,7 @@ enum {
 inline Type Value::type() const {
 #if ARETE_DEV
   if(!immediatep()) {
-    ARETE_ASSERT_LIVE(heap);
+    AR_ASSERT_LIVE(heap);
   }
 #endif
   return type_unsafe();

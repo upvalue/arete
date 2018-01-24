@@ -32,7 +32,7 @@
 # include <Windows.h>
 #endif
 
-#define ARETE_LOG_GC(msg) ARETE_LOG((ARETE_LOG_TAG_GC), "gc", msg)
+#define AR_LOG_GC(msg) AR_LOG((AR_LOG_TAG_GC), "gc", msg)
 
 namespace arete {
 
@@ -237,14 +237,14 @@ void GCCommon::visit_roots(T& walker) {
 
   NativeFrame* native = native_frames;
   while(native != nullptr) {
-    if(ARETE_LOG_TAGS & ARETE_LOG_TAG_JIT) {
+    if(AR_LOG_TAGS & AR_LOG_TAG_JIT) {
       std::cout << "native frame " << (ptrdiff_t) native << std::endl;
       std::cout << "native frame previous " << (ptrdiff_t) native->previous << " count: " << (ptrdiff_t)native->value_count << std::endl;
     }
     for(size_t i = 0; i != native->value_count; i++) {
       size_t saved = native->values[i].bits;
       walker.touch((HeapValue**) &native->values[i].bits);
-      if(ARETE_LOG_TAGS & ARETE_LOG_TAG_JIT) {
+      if(AR_LOG_TAGS & AR_LOG_TAG_JIT) {
         std::cout << "native frame ptr ";
         if(native->values[i].immediatep()) {
           std::cout << "immediate";
@@ -339,7 +339,7 @@ void GCSemispace::run_finalizers(bool finalize_all) {
 
   finalizers2.clear();
 
-  ARETE_LOG_GC("checking " << finalizers.size() << " finalizable objects");
+  AR_LOG_GC("checking " << finalizers.size() << " finalizable objects");
   for(size_t i = 0; i != finalizers.size(); i++) {
     Value f = finalizers[i];
     // This object is dead, finalize it
@@ -355,7 +355,7 @@ void GCSemispace::run_finalizers(bool finalize_all) {
     // This object is dead, finalize it
     state.finalize((Type)f.heap->get_type(), f.heap, true);
   }
-  ARETE_LOG_GC(finalizers2.size() << " finalizable objects survived collection");
+  AR_LOG_GC(finalizers2.size() << " finalizable objects survived collection");
 
   finalizers = finalizers2;
 }
@@ -370,9 +370,9 @@ void GCSemispace::collect(size_t request, bool force) {
   size_t pressure = (live_memory_after_collection * 100) / heap_size;
   bool gc_grew = false;
 
-  ARETE_LOG_GC("gc pressure " << pressure);
+  AR_LOG_GC("gc pressure " << pressure);
   // If we need to grow
-  if((pressure >= ARETE_GC_LOAD_FACTOR) || force) {
+  if((pressure >= AR_GC_LOAD_FACTOR) || force) {
     gc_grew = true;
     new_heap_size *= 2;
     if(new_heap_size <= request) {
@@ -380,16 +380,16 @@ void GCSemispace::collect(size_t request, bool force) {
     }
   }
 
-  heap_size = new_heap_size = align(ARETE_BLOCK_SIZE, new_heap_size);
+  heap_size = new_heap_size = align(AR_BLOCK_SIZE, new_heap_size);
 
   if(other == 0 || gc_grew) {
     // If we need to grow the heap, delete the existing semispace.
     if(other != 0) {
-      ARETE_LOG_GC("deleting existing space");
+      AR_LOG_GC("deleting existing space");
       delete other;
       other = 0;
     }
-    ARETE_LOG_GC("allocating new space of " << new_heap_size << "b");
+    AR_LOG_GC("allocating new space of " << new_heap_size << "b");
     other = new Block(new_heap_size, 0);
   }
 
@@ -535,7 +535,7 @@ void GCSemispace::collect(size_t request, bool force) {
     }
   }
 
-  ARETE_LOG_GC("collects " << symbols_collected << " symbols");
+  AR_LOG_GC("collects " << symbols_collected << " symbols");
 
   // TODO: Currently, Arete holds onto both semispaces during program execution; it's not clear
   // whether this is the best course of action in terms of performance and memory usage.
@@ -567,7 +567,7 @@ struct SemispaceRootVisitor {
 };
 
 void GCSemispace::copy_roots() {
-  ARETE_LOG_GC(state.symbol_table->size() << " live symbols");
+  AR_LOG_GC(state.symbol_table->size() << " live symbols");
   SemispaceRootVisitor visitor(*this);
 
   visit_roots(visitor);

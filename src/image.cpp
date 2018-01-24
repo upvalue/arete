@@ -23,7 +23,7 @@
 
 #include "arete.hpp"
 
-#define AR_IMG_LOG(expr) ARETE_LOG(ARETE_LOG_TAG_IMAGE, "img", expr)
+#define AR_IMG_LOG(expr) AR_LOG(AR_LOG_TAG_IMAGE, "img", expr)
 
 // Image structure:
 
@@ -382,7 +382,7 @@ void State::save_image(const std::string& path) {
   memset(&hdr, 0, sizeof(ImageHeader));
   strncpy((char*) &hdr.magic, (char*)MAGIC_STRING, sizeof(MAGIC_STRING));
   hdr.heap_size = gc.block_cursor;
-  hdr.is_64_bit = ARETE_64_BIT;
+  hdr.is_64_bit = AR_64_BIT;
   hdr.global_count = globals.size();
   hdr.gensym_counter = gensym_counter;
 
@@ -404,13 +404,26 @@ void State::save_image(const std::string& path) {
 }
 
 const char* State::boot_from_image(const std::string& path) {
+  FILE* f = fopen(path.c_str(), "rb");
+
+  AR_IMG_LOG("loading " << path);
+
+  return boot_from_image(f);
+}
+
+const char* State::boot_from_memory_image(unsigned char* img, size_t size) {
+#if AR_OS == AR_POSIX
+  FILE* f = fmemopen((void*) img, size, "rb");
+
+#endif
+  return boot_from_image(f);
+}
+
+const char* State::boot_from_image(FILE* f) {
   AR_ASSERT(!booted);
 
   // TODO: Grow heap to fit boot image. Just delete the existing block and
   // allocate a new one.
-  FILE* f = fopen(path.c_str(), "rb");
-
-  AR_IMG_LOG("loading " << path);
 
   if(!f) return "failed to load image file";
   assert(f);
@@ -422,7 +435,7 @@ const char* State::boot_from_image(const std::string& path) {
     return "failed to read image header";
   }
 
-  if(hdr.is_64_bit != ARETE_64_BIT) {
+  if(hdr.is_64_bit != AR_64_BIT) {
     return "attempted to load image with wrong word size (64-bit on 32-bit or vice versa)";
   }
 

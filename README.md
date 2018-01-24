@@ -39,6 +39,7 @@ Arete uses the C++ STL, and optionally
 - linenoise-ng from ArangoDB (for nice cross-platform REPL, included in the repository)
 - DynASM (for native compilation, included in the repository)
 - SDL2
+- Python (for building & testing only)
 
 # R?RS/SRFI compliance.
 

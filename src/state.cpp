@@ -13,13 +13,14 @@ namespace arete {
 
 State* current_state = 0;
 
+extern void load_table_functions(State&);
 extern void load_string_functions(State&);
 extern void load_platform_functions(State&);
 extern void load_sdl(State&);
 extern void load_native_compiler(State&);
 
 State::State():
-  gc(*this, ARETE_HEAP_SIZE),
+  gc(*this, AR_HEAP_SIZE),
   gensym_counter(0),
   tco_enabled(true),
   booted(false),
@@ -135,6 +136,7 @@ void State::boot() {
   load_builtin_functions();
   load_file_functions();
   load_numeric_functions();
+  load_table_functions(*this);
   load_string_functions(*this);
   load_platform_functions(*this);
   load_native_compiler(*this);

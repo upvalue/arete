@@ -4,6 +4,8 @@
 
 namespace arete {
 
+DefunGroup table_fns("table");
+
 bool TableIterator::operator++() {
 try_again:
   // If we have a current chain
@@ -325,5 +327,9 @@ Value fn_table_copy(State& state, size_t argc, Value* argv, void* v) {
   return C_UNSPECIFIED;
 }
 AR_DEFUN("table-copy", fn_table_copy, 2);
+
+void load_table_functions(State& state) {
+  table_fns.install(state);
+}
 
 }

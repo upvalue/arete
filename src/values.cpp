@@ -280,7 +280,7 @@ Value State::make_record(size_t tag) {
 // from where they're defined, but the main point is assigning each function a unique ID for the
 // purpose of image serialization.
 
-#define AR_DEFUN_LOG(expr) ARETE_LOG(ARETE_LOG_TAG_DEFUN, "defun", expr)
+#define AR_DEFUN_LOG(expr) AR_LOG(AR_LOG_TAG_DEFUN, "defun", expr)
 
 std::vector<c_closure_t>* id_to_function = 0;
 std::unordered_map<ptrdiff_t, size_t> *function_to_id = 0;
@@ -293,12 +293,14 @@ c_closure_t function_id_to_ptr(size_t id) {
 
 c_closure_t function_ptr_to_id(ptrdiff_t addr) {
   auto i = function_to_id->find(addr);
+
   if(i == function_to_id->end()) {
     std::cerr << "arete: function_ptr_to_id failed to find ID for function " << (ptrdiff_t) addr <<
       std::endl;
 
     return nullptr;
   }
+
   return (c_closure_t) i->second;
 }
 
