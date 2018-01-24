@@ -1573,6 +1573,8 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         size_t argc = code[code_offset++];
         size_t insn = code[current_insn];
 
+        // TODO: Optimize redundant type checks.
+
         | mov ARG3, STACK
         | sub STACK, (argc * 8)
 
@@ -1593,14 +1595,84 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         }
         | jmp >8
 
-        | jmp >7
-
+        | 2:
         // 2: Lhs is flonum or error
-        | jmp >9
+        | test rax, rax
+        | je >9
+        | test rax, 3
+        | jnz >9
+        | cmpHeapType rax, FLONUM
+        | mov rax, [STACK]
+        | jne >9
+
+        // Lhs is flonum
+        | add rax, (&((Flonum*)0)->number)
+        | movsd xmm0, qword [rax]
+
+        | mov rax, [STACK+8]
+        | test rax, 1
+        | jnz >4
+
+        | test rax, rax
+        | je >9
+        | test rax, 3
+        | jnz >9
+        | cmpHeapType rax, FLONUM
+        | mov rax, [STACK+8]
+        | jne >9
+        // Lhs is flonum and rhs is flonum
+
+        | add rax, (&((Flonum*)0)->number)
+        | movsd xmm1, qword [rax]
+
+        | ucomisd xmm0, xmm1
+
+        if(insn == OP_LT) {
+          | jb >7
+        }
+        | jmp >8
+
+        // 4: Lhs is flonum and rhs is fixnum
+        | 4: 
+
+        | shr rax, 1
+        | cvtsi2sd xmm1, rax
+        | ucomisd xmm0, xmm1
+
+        if(insn == OP_LT) {
+          | jb >7
+        }
+
+        | jmp >8
 
         // 3: Lhs is fixnum and rhs is flonum or error
         | 3: 
-        | jmp >9
+
+        | mov rax, [STACK+8]
+
+        // Test for #f and other constants
+        | test rax, rax
+        | je >9
+        | test rax, 3
+        | jnz >9
+        | cmpHeapType rax, FLONUM
+        | mov rax, [STACK+8]
+        | jne >9
+
+        // Lhs is fixnum and rhs is flonum
+        | mov ARG1, [STACK]
+        | shr ARG1, 1
+        | cvtsi2sd xmm0, ARG1
+
+        //| mov rax, [STACK+8]
+        | add rax, (&((Flonum*)0)->number)
+        | movsd xmm1, qword [rax]
+        | ucomisd xmm0, xmm1
+
+        if(insn == OP_LT) {
+          | jb >7
+        }
+        | jmp >8
 
         // Loop restart
         | 7:
@@ -1742,9 +1814,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | test ARG1, 3
         | jnz >6
         // Check for flonum
-        | mov ARG1, [ARG1]
-        | and ARG1, 255
-        | cmp ARG1, (FLONUM)
+        | cmpHeapType ARG1, FLONUM
         | je >5
 
         // This is not a flonum, save the pointer and jump to exception
