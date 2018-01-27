@@ -1766,6 +1766,8 @@ struct State {
     // stdin/stdout
     G_CURRENT_INPUT_PORT,
     G_CURRENT_OUTPUT_PORT,
+    // Builtin table
+    G_BUILTIN_TABLE,
     // Modules
     G_MODULE_TABLE,
     G_CURRENT_MODULE,
@@ -2044,7 +2046,6 @@ struct State {
 
   /** Defines a built-in function */
   void defun_core(const std::string& cname, c_closure_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
-  void defun_core_closure(const std::string& cname, Value closure, c_closure_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
 
   std::ostream& warn(Value src = C_FALSE);
  

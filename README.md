@@ -12,16 +12,16 @@ Hyper-alpha software. Show stopping bugs not only likely, but guaranteed OR YOUR
 Currently:
 
     make heap.boot
-    bin/arete --load-image heap.boot
+    bin/arete heap.boot
 
 Will bootstrap the expander and compiler, then save them into a loadable image. Prepending --load-image heap.boot will
 make the files in examples/ and REPL work as expected, for example:
 
-    bin/arete --load-image heap.boot --repl
+    bin/arete heap.boot --repl
 
 Will run the read-eval-print loop.
 
-    bin/arete --load-image heap.boot examples/life.scm 
+    bin/arete heap.boot examples/life.scm 
 
 Will run a simple Conway's Game of Life simulation.
 
@@ -29,9 +29,6 @@ Will run a simple Conway's Game of Life simulation.
 
 Will run all tests. Since Arete has not been tested on a wide variety of systems, doing this before
 attempting to use it is probably a good idea.
-
-For development, scheme/expand.scm, scheme/syntax.scm and scheme/compiler.scm must be loaded in order. See the files
-for details on the various side-effecting things they do in order to bootstrap the system.
 
 # Dependencies
 

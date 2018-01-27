@@ -204,6 +204,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
 }
 
 int State::enter_cli(int argc_, char* argv[]) {
+  AR_ASSERT(!booted);
   unsigned argc = (unsigned) argc_;
   static const std::string read("--read");
   static const std::string help("--help");

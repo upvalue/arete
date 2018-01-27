@@ -97,6 +97,7 @@ void State::boot() {
     // I/O
     "*current-input-port*",
     "*current-output-port*",
+    "builtin-table",
     // modules
     "module-table",
     "*current-module*",
@@ -131,6 +132,7 @@ void State::boot() {
 
   boot_common();
 
+  set_global_value(G_BUILTIN_TABLE, make_table());
   set_global_value(G_MODULE_TABLE, make_table());
 
   load_builtin_functions();

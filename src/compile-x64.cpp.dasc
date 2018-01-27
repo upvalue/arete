@@ -13,10 +13,12 @@
 
 #include "arete.hpp"
 
-#if ARETE_64_BIT == 0
+#if AR_64_BIT == 0
 
 namespace arete {
-void load_native_compiler(State&) {}
+void load_native_compiler(State&) {
+  std::cout << "load native compiler" << std::endl;
+}
 }
 
 #else
@@ -38,8 +40,8 @@ void load_native_compiler(State&) {}
 // seem to use a different calling convention
 // https://msdn.microsoft.com/en-us/library/7572ztz4.aspx
 
-// This seems to be limited to structs with constructors/destructors; a simple struct, even one with a union of 
-// pointer and ptrdiff_t, is returned in rax as it should be
+// This seems to be limited to structs with constructors/destructors; a simple struct, even one with
+// a union of pointer and ptrdiff_t, is returned in rax as it should be
 
 // Whatever the reason for this, we need to follow the different struct
 // calling conventions on Windows

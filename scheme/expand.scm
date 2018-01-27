@@ -1147,4 +1147,3 @@
   (if (fx= (length x) 1)
     unspecified
     (expand-cond-clause x env params (cadr x) (cddr x))))
-

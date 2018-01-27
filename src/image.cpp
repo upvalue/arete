@@ -414,7 +414,6 @@ const char* State::boot_from_image(const std::string& path) {
 const char* State::boot_from_memory_image(unsigned char* img, size_t size) {
 #if AR_OS == AR_POSIX
   FILE* f = fmemopen((void*) img, size, "rb");
-
 #endif
   return boot_from_image(f);
 }

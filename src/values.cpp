@@ -356,14 +356,6 @@ void DefunGroup::install(State& state) {
   }
 }
 
-void DefunGroup::install_closure(State& state, Value closure) {
-  AR_FRAME(state, closure);
-  for(size_t i = 0; i != data.size(); i++) {
-    state.defun_core_closure(data[i]->fn_name, closure, (c_closure_t)data[i]->fn,
-      data[i]->min_arity, data[i]->max_arity, data[i]->var_arity);
-  }
-}
-
 Value State::make_module(const std::string& name) {
   Value key, val;
   Value module = make_table();
@@ -405,18 +397,22 @@ void State::module_define(Value module, const std::string& ckey, Value value) {
 }
 
 void DefunGroup::install_module(State& state, const std::string& cname, Value closure) {
-  Value module, cfn, sym, name, exports;
+  Value module, cfn, sym, name, exports, builtins;
   bool found;
-  AR_FRAME(state, module, closure, exports, cfn, sym, name);
+  AR_FRAME(state, module, closure, exports, builtins, cfn, sym, name);
   module = state.make_module(cname);
 
   exports = state.table_get(module, state.get_global_value(State::G_STR_MODULE_EXPORTS), found);
+  builtins = state.get_global_value(State::G_BUILTIN_TABLE);
   AR_ASSERT(found);
 
   for(size_t i = 0; i != data.size(); i++) {
     const Defun* defun = data.at(i);
 
     std::ostringstream qname;
+    // Name of the key in the builtins table, used for reading and writing references to builtin
+    // functions
+    std::ostringstream bltname;
 
     name = state.make_string(defun->fn_name);
     AR_ASSERT(defun->fn);
@@ -428,10 +424,15 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
     qname << "##" << cname << "#" << name;
 
     sym = state.get_symbol(qname.str());
+    // Set value of qualified symbol to point to this
     sym.set_symbol_value(cfn);
 
     state.table_set(module, name, sym);
     state.table_set(exports, name, name);
+
+    bltname << cname << ":" << name;
+    sym = state.get_symbol(bltname.str());
+    state.table_set(builtins, sym, cfn);
   }
 }
 
@@ -444,7 +445,6 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
 
   //cfn->set_header_bit(Value::VALUE_PROCEDURE_BIT);
   //cfn->procedure_addr = (c_closure_t)addr;
-
 
   cfn->name = name;
 
@@ -465,28 +465,22 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
   return cfn;
 }
 
-void State::defun_core_closure(const std::string& cname, Value closure, c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
-  Value cfn, sym, name;
-
-  AR_FRAME(this, cfn, sym, name, closure);
-  name = make_string(cname);
-  AR_ASSERT(addr);
-  cfn = make_c_function(name, closure, (c_closure_t)addr, min_arity, max_arity, variable_arity);
-
-  sym = get_symbol(name);
-  sym.set_symbol_value(cfn);
-}
-
 void State::defun_core(const std::string& cname, c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
-  Value cfn, sym, name;
+  Value cfn, sym, name, builtins;
 
-  AR_FRAME(this, cfn, sym, name);
+  AR_FRAME(this, cfn, sym, name, builtins);
   AR_ASSERT(addr);
   name = make_string(cname);
   cfn = make_c_function(name, C_FALSE, addr, min_arity, max_arity, variable_arity);
 
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);
+
+
+  builtins = get_global_value(G_BUILTIN_TABLE);
+  table_set(builtins, sym, cfn);
+
+
 }
 
 ///// PAIRS
