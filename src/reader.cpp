@@ -6,7 +6,6 @@
 
 #include "arete.hpp"
 
-// TODO: Table literals
 // TODO: Record literals
 // TODO: Read shared structure
 
@@ -596,8 +595,52 @@ XReader::TokenType XReader::next_token() {
             unexpected_eof("in #| multiline comment", token_start_line, token_start_position);
             return TK_ERROR;
           }
+        } else if(c2 == '&') {
+          // Support for image serialization
+          unsigned ts = token_start_line, tp = token_start_position;
+          tokenize_symbol(true);
+          if(buffer.compare("cfn") == 0) {
+            getc(c2);
+
+            if(is.eof()) {
+              unexpected_eof("in #&cfn", ts, tp);
+              return TK_ERROR;
+            } else if(c2 != '(') {
+              read_error("#&cfn must be followed by (", ts, tp, position);
+              return TK_ERROR;
+            }
+
+            buffer.clear();
+            tokenize_symbol(false);
+            std::cout << buffer << std::endl;
+
+            getc(c2);
+
+            if(is.eof()) {
+              unexpected_eof("in #&cfn", ts, tp);
+              return TK_ERROR;
+            } else if(c2 != ')') {
+              read_error("#&builtin must be followed by )", ts, tp, position);
+              return TK_ERROR;
+            }
+
+            Value sym = state.get_symbol(buffer);
+            Value builtins = state.get_global_value(State::G_BUILTIN_TABLE);
+
+            bool found;
+            Value res = state.table_get(builtins, sym, found);
+            if(!found) {
+              read_error("builtin not defined", ts, tp, position);
+              return TK_ERROR;
+            }
+
+            return_constant = res;
+            return TK_CONSTANT;
+          } else {
+            read_error("unknown builtin type", ts, tp, position);
+            return TK_ERROR;
+          }
         } else {
-          eatc();
           (void) read_error("unknown # syntax", token_start_line, token_start_position, position);
           return TK_ERROR;
         }

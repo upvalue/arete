@@ -59,6 +59,7 @@
 (define (identifier? v) (or (rename? v) (symbol? v)))
 (define (function? v) (eq? (value-type v) 13))
 (define (vmfunction? v) (eq? (value-type v) 19))
+(define (cfunction? v) (eq? (value-type v) 14))
 
 (define (list . lst) lst)
 
@@ -75,7 +76,9 @@
 
 (define (self-evaluating? v)
   (or (keyword? v) (char? v) (fixnum? v) (constant? v) (string? v) (vector? v) (flonum? v) (table? v)
-      (record? v) (record-type? v)))
+      (record? v) (record-type? v) (cfunction? v)
+      
+      ))
 
 (define unspecified (if #f #f))
 
@@ -904,7 +907,7 @@
 (define (expand-delayed x)
   (if (pair? x)
     (map-improper expand-delayed x)
-    (if (procedure? x)
+    (if (and (procedure? x) (not (cfunction? x)))
       (expand-delayed (x))
       x)))
 

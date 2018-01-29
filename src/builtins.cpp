@@ -985,6 +985,9 @@ Value fn_set_top_level_value(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "set-top-level-value!";
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
+  if(!argv[0].heap->get_header_bit(Value::SYMBOL_ROOT_BIT)) {
+    argv[0].heap->set_header_bit(Value::SYMBOL_ROOT_BIT);
+  }
   argv[0].set_symbol_value(argv[1]);
   return C_UNSPECIFIED;
 }

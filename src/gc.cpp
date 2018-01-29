@@ -530,7 +530,7 @@ void GCSemispace::collect(size_t request, bool force) {
       ++x;
     } else {
       //std::cout << "collting symbol " << Value(x->second).as_unsafe<Symbol>()->name.as_unsafe<String>()->data << std::endl;
-      ++symbols_collected;
+      //++symbols_collected;
       state.symbol_table->erase(x++);
     }
   }

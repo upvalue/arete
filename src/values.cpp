@@ -414,12 +414,14 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
     // functions
     std::ostringstream bltname;
 
-    name = state.make_string(defun->fn_name);
+    bltname << cname << ":" << defun->fn_name;
+    name = state.make_string(bltname.str());
+
     AR_ASSERT(defun->fn);
     cfn = state.make_c_function(name, closure, (c_closure_t) defun->fn, defun->min_arity,
       defun->max_arity, defun->var_arity);
 
-    name = state.get_symbol(name);
+    name = state.get_symbol(defun->fn_name);
 
     qname << "##" << cname << "#" << name;
 
@@ -430,7 +432,6 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
     state.table_set(module, name, sym);
     state.table_set(exports, name, name);
 
-    bltname << cname << ":" << name;
     sym = state.get_symbol(bltname.str());
     state.table_set(builtins, sym, cfn);
   }

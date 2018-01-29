@@ -221,8 +221,7 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       return os << '>';
     }
     case CFUNCTION: {
-      os << "#<cfunction ";
-      return os << v.c_function_name().string_data() << '>';
+      return os << "#&cfn(" << v.c_function_name().string_data() << ')';
     }
     case VECTOR:
       os << "#(";

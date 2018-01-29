@@ -163,6 +163,17 @@ TODO: Casting
 (define (string-ci=? a b)
   (string=? (string-map char-case-fold a) (string-map char-case-fold b)))
 
+(define (string-for-each-i s i fn end)
+  (if (fx= i end)
+    unspecified
+    (begin
+      (fn (string-ref s i))
+      (string-for-each-i s (fx+ i 1) fn end))))
+
+(define (string-for-each fn s)
+  (string-for-each-i s 0 fn (string-length s))
+  unspecified)
+
 (define (string-sum s1)
   (let loop ((i 0)
              (sum 0))
