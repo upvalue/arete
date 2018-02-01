@@ -42,6 +42,8 @@
 #include <fstream>
 #include <math.h>
 
+#include "base64.h"
+
 #include "arete.hpp"
 
 namespace arete {
@@ -230,6 +232,15 @@ std::ostream& operator<<(std::ostream& os, Value v) {
         if(i != v.vector_length() - 1) os << ' ';
       }
       return os << ')';
+    case VECTOR_STORAGE:  {
+      os << "#&vs(";
+      for(size_t i = 0; i != v.as_unsafe<VectorStorage>()->length; i++) {
+        os << v.as_unsafe<VectorStorage>()->data[i];
+        if(i != v.as_unsafe<VectorStorage>()->length - 1) os << ' ';
+      }
+      return os << ")";
+    }
+
     case FILE_PORT: {
       Value path = v.file_port_path();
       os << "#<";
@@ -279,9 +290,6 @@ std::ostream& operator<<(std::ostream& os, Value v) {
         os << ' ' << v.exception_irritants();
       }
       return os << '>';
-    case VECTOR_STORAGE: {
-      return os << "#<vector-storage " << v.as<VectorStorage>()->length << '>';
-    }
     default: 
       return os << "#<unknown value type " << v.type() << " (" << v.heap->get_type() << ") bits: " << v.bits << ">";
   }
@@ -545,6 +553,22 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
         os2 << " " << type.as_unsafe<RecordType>()->data_size << "b udata";
       }
       os2 << "\b" << '>';
+    } else if(v.heap_type_equals(VMFUNCTION)) {
+      if(state.get_global_value(State::G_PRINT_READABLY) != C_FALSE) {
+        VMFunction* vfn = v.as<VMFunction>();
+        os2 << "#&vfn(";
+        os2 << vfn->name << ' ';
+        os2 << vfn->min_arity << ' ' << vfn->max_arity << ' ' << vfn->stack_max << ' ' << vfn->local_count << ' ' << vfn->upvalue_count;
+        os2 << ' ';
+        std::string ins(vfn->code->data, vfn->code->length);
+        std::string outs;
+        (void) Base64::Encode(ins, &outs);
+        os2 << '"' << outs << "\" ";
+        os2 << Value(vfn->constants);
+        os2 << ')';
+      } else {
+        os2 << v;
+      }
     } else if(v.type() == VECTOR) {
       // VECTORS
 
@@ -683,26 +707,35 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
     AR_ASSERT(v.heap->get_header_int() == ps.shared_objects_i - 1);
   }
 
-  if(v.type() == PAIR) {
-    (void) pretty_print_mark(state, v.car(), ps);
-    (void) pretty_print_mark(state, v.cdr(), ps);
-  } else if(v.type() == RECORD) {
-    for(unsigned i = 0; i != v.record_field_count(); i++) {
-      (void) pretty_print_mark(state, v.record_ref(i), ps);
+  switch(v.type()) {
+    case PAIR: {
+      (void) pretty_print_mark(state, v.car(), ps);
+      (void) pretty_print_mark(state, v.cdr(), ps);
+      break;
     }
-  } else if(v.type() == VECTOR) {
-    // std::cout << "marking a vector" << std::endl;
-    for(size_t i = 0; i != v.vector_length(); i++) {
-      (void) pretty_print_mark(state, v.vector_ref(i), ps);
+    case VECTOR: {
+      for(size_t i = 0; i != v.vector_length(); i++) {
+        (void) pretty_print_mark(state, v.vector_ref(i), ps);
+      }
+      break;
     }
-  } else if(v.type() == TABLE) {
-    TableIterator ti(v);
-    while(++ti) {
-      pretty_print_mark(state, ti.value(), ps);
+    case RECORD: {
+      for(unsigned i = 0; i != v.record_field_count(); i++) {
+        (void) pretty_print_mark(state, v.record_ref(i), ps);
+      }
+      break;
     }
-  } else {
-    std::cerr << "pretty printer doesn't know how to mark object of type " << v.type() << std::endl;
-    AR_ASSERT(!"pretty printer doesn't know how to mark object");
+    case TABLE: {
+      TableIterator ti(v);
+      while(++ti) {
+        (void) pretty_print_mark(state, ti.value(), ps);
+      } 
+    }
+    case VMFUNCTION: break;
+    default: {
+      std::cerr << "pretty printer doesn't know how to mark object of type " << v.type() << std::endl;
+      AR_ASSERT(!"pretty printer doesn't know how to mark object");
+    }
   }
 
   return C_UNSPECIFIED;

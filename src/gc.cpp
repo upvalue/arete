@@ -460,7 +460,7 @@ void GCSemispace::collect(size_t request, bool force) {
         AR_COPY(VMFunction, sources);
         AR_COPY(VMFunction, macro_env);
         AR_COPY(VMFunction, code);
-        AR_COPY(VMFunction, native_code);
+        // AR_COPY(VMFunction, native_code);
         // Update pointer into offset of GC space
         if(obj->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
           //((Procedure*)obj)->procedure_addr = (c_closure_t)((VMFunction* )obj)->native_code->data;

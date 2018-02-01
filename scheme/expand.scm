@@ -19,6 +19,8 @@
 
 ;; TODO could avoid allocations by renaming special forms up front
 
+;; TODO: Have to create something with a rename to represent delayed expansion rather than just straight functions.
+
 (define (caar x) (car (car x)))
 (define (cadr x) (car (cdr x)))
 (define (cdar x) (cdr (car x)))

@@ -1,10 +1,5 @@
-#define ARETE_GC_DEBUG 1
+#define AR_GC_DEBUG 1
 
-#ifdef ARETE_GC_STRATEGY
-# undef ARETE_GC_STRATEGY
-#endif
-
-#define ARETE_GC_STRATEGY ARETE_GC_SEMISPACE
 //#define ARETE_LOG_TAGS (ARETE_LOG_TAG_GC)
 
 #include "test-begin.cpp"

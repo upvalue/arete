@@ -103,7 +103,7 @@ TEST_CASE("handles work") {
 
 TEST_CASE("heap values work") {
   HeapValue v;
-  v.initialize(FLONUM, 0, sizeof(Flonum));
+  v.initialize(FLONUM, sizeof(Flonum));
 
   CHECK(v.get_type() == FLONUM);
   CHECK(v.get_mark_bit() == 0);
@@ -114,4 +114,4 @@ TEST_CASE("heap values work") {
   CHECK(v.get_mark_bit() == 1);
 }
 
-#define FLONUMS_PER_BLOCK (ARETE_BLOCK_SIZE / GCCommon::align(8, sizeof(Flonum)))
+#define FLONUMS_PER_BLOCK (AR_BLOCK_SIZE / GCCommon::align(8, sizeof(Flonum)))

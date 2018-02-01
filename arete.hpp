@@ -404,7 +404,7 @@ struct Value {
   /** Returns true if object's visible representation may have shared structure */
   bool print_recursive() const {
     switch(type()) {
-      case PAIR: case RECORD: case VECTOR: case TABLE:
+      case PAIR: case RECORD: case VECTOR: case TABLE: case VMFUNCTION:
         return true;
       default:
         return false;
@@ -1120,7 +1120,6 @@ struct VMFunction : Procedure {
    * A pointer to a VMFunction's code. Can be either VM wordcode or a natively-compiled function.
    */
   Bytevector* code;
-  Bytevector* native_code;
 
   unsigned min_arity, max_arity, stack_max, local_count, upvalue_count, calls;
 
@@ -1128,7 +1127,6 @@ struct VMFunction : Procedure {
 
   size_t* code_pointer() {
     return (size_t*)&code->data;
-    //return (size_t*)(((char*)((size_t) this)) + sizeof(VMFunction));
   }
 };
 
@@ -1157,7 +1155,7 @@ inline VectorStorage* Value::vm_function_constants() const {
 }
 
 /**
- * An free variable. When the function it is in is still alive on the stack, the upvalue contains
+ * A free variable. When the function it is in is still alive on the stack, the upvalue contains
  * an index into the stack noting where that variable can be found.
  * After that function exits, it is converted into a freestanding garbage-collected variable
  */

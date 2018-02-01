@@ -620,7 +620,7 @@ XReader::TokenType XReader::next_token() {
               unexpected_eof("in #&cfn", ts, tp);
               return TK_ERROR;
             } else if(c2 != ')') {
-              read_error("#&builtin must be followed by )", ts, tp, position);
+              read_error("#&cfn must be followed by )", ts, tp, position);
               return TK_ERROR;
             }
 
@@ -630,12 +630,15 @@ XReader::TokenType XReader::next_token() {
             bool found;
             Value res = state.table_get(builtins, sym, found);
             if(!found) {
-              read_error("builtin not defined", ts, tp, position);
+              read_error("cfn not defined", ts, tp, position);
               return TK_ERROR;
             }
 
             return_constant = res;
             return TK_CONSTANT;
+          } else if(buffer.compare("vfn") == 0) {
+            read_error("vfn not supported", ts, tp, position);
+            return TK_ERROR;
           } else {
             read_error("unknown builtin type", ts, tp, position);
             return TK_ERROR;

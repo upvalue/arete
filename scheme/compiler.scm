@@ -280,11 +280,8 @@
     #|
     (list-ref 2 2 #f)
     |#
-		#|
     (< 2 2 #t)
     (+ 0 0 #t)
-    (- 1 1 #t)
-		|#
     (car 1 1 #f)
     (cdr 1 1 #f)
     (not 1 1 #f)
@@ -692,17 +689,7 @@
                   (emit fn 'upvalue-from-closure (Var/idx var))
                   (emit fn 'upvalue-from-local (Var/free-variable-id var))))
               (loop (fx+ i 1))))
-          (emit fn 'close-over (vector-length it)))
-        #;(begin
-          (emit fn 'close-over (vector-length it))
-
-          (let loop ((i 0))
-            (unless (eq? i (vector-length it))
-              (let ((var (vector-ref it i)))
-                (if (Var/upvalue? var)
-                  (emit fn 'words 1 (Var/idx var))
-                  (emit fn 'words 0 (Var/free-variable-id var))))
-              (loop (fx+ i 1)))))))
+          (emit fn 'close-over (vector-length it)))))
       procedure)
 )
 
@@ -879,7 +866,7 @@
   (define key-const (register-constant fn (list-ref x 2)))
   (define local-idx (list-ref x 1))
 
-  ;; local-idx of key variables is incremented by one because we create a local variable to store the keys table
+  ;; local-idx of key variables is offset by one because we create a local variable to store the keys table
 
   (emit fn 'arg-key (fx+ local-idx 1) key-const key-label)
   (compile-expr fn (car (list-ref x 3)) #f x #f)
@@ -891,9 +878,6 @@
   (compiler-log fn "compiling special form" type x)
   (case type
     (lambda (compile-lambda fn x))
-    ;; TODO: Define and set cannot have tail-applications currently, because the global-set instructions are
-    ;; generated after them.
-    ;; So something like (set! var (fn)) should not destroy the stack frame.
     (define (compile-define fn x #f))
     (set! (compile-set! fn x src #f))
     (if (compile-if fn x (if tail? #t cd) tail?))

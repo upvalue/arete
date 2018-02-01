@@ -345,6 +345,15 @@ TODO: Casting
         lst
         (loop (fx- i 1) (cons (vector-ref vec (fx- i 1)) lst))))))
 
+(define (vector-for-each fn vec)
+  (define len (vector-length vec))
+  (let loop ((i 0))
+    (if (fx= i len)
+      unspecified
+      (begin
+        (fn (vector-ref vec i))
+        (loop (fx+ i 1))))))
+
 (define (vector-map fn vec)
   (define len (vector-length vec))
   (define vec2 (make-vector len))
