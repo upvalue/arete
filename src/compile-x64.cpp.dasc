@@ -1,4 +1,5 @@
 // vim: set ft=cpp
+
 // compile-x64.cpp.dasc - Compile bytecode to native amd64 code
 // This is a DynASM file. Must be run through DynASM to produce a C++ file
 
@@ -968,6 +969,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         loc = code[code_offset++];
         break;
       }
+
       default: {
         AR_LOG_JIT("label generation unknown bytecode " << code[code_offset-1]);
         std::ostringstream os; os << "unknown bytecode during label generation " << code[code_offset-1];
@@ -1535,6 +1537,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         | checkFixnumPReg ARG1, E_FX_LT, E_EXPECTED_FIXNUM_1
 
         | decStack
+        // Probably move this down
         | mov qword [STACK], C_FALSE
         | cmp ARG1, ARG2
         | jl >1

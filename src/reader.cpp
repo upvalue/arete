@@ -643,6 +643,42 @@ XReader::TokenType XReader::next_token() {
             read_error("unknown builtin type", ts, tp, position);
             return TK_ERROR;
           }
+        } else if(c2 >= '0' && c2 <= '9') {
+          // Shared object syntax
+          // e.g. '(#0=#t #0#) => '(#t #t)
+          buffer += c2;
+          bool define = false;
+          while(true) {
+            if(!peekc(c)) {
+              unexpected_eof("in shared object syntax", token_start_line, token_start_position);
+              return TK_ERROR;
+            };
+
+            if(c >= '0' && c <= '9') {
+              getc(c);
+              buffer += c;
+            } else if(c == '=') {
+              eatc();
+              define = true;
+              break;
+            } else if(c == '#') {
+              eatc();
+              break;
+            } else {
+              read_error("expect either # or = after number indicating a shared object",
+                line, position - 1, position);
+              return TK_ERROR;
+            }
+          }
+
+          // Read decimal number
+          /*
+          std::cout << buffer << std::endl;
+          read_error("shared object syntax not supported", token_start_line, token_start_position, position);
+          return TK_ERROR;
+          */
+          return define ? TK_SHARED_DEFINE : TK_SHARED_REF;
+          // Check for = definition
         } else {
           (void) read_error("unknown # syntax", token_start_line, token_start_position, position);
           return TK_ERROR;
@@ -864,6 +900,41 @@ Value XReader::read_expr(TokenType tk) {
     case TK_UNQUOTE_SPLICING:
      return read_aux("after ,@", 2, state.globals[State::S_UNQUOTE_SPLICING]);
 
+    case TK_SHARED_DEFINE: {
+      ptrdiff_t number = std::stoi(buffer);
+
+      if(shared_objects == C_FALSE) {
+        shared_objects = state.make_vector();
+      }
+
+      if(number > shared_objects.vector_length()) {
+        std::ostringstream os;
+        os << "shared objects were enumerated out of order (got " << number << " but only " <<
+          shared_objects.vector_length() << " objects have been defined)";
+        return read_error(os.str(), token_start_line, token_start_position, position);
+      }
+
+      Value expr = read_expr(TK_READ_NEXT);
+
+      if(expr.is_active_exception()) return expr;
+
+      state.vector_append(shared_objects, expr);
+
+      return expr;
+    }
+
+    case TK_SHARED_REF: {
+      ptrdiff_t number = std::stoi(buffer);
+
+      if(shared_objects == C_FALSE || number >= shared_objects.vector_length()) {
+        std::ostringstream os;
+        os << "shared object #" << number << "# has not been defined yet (or this is recursive shared object, not supported yet)";
+        return read_error(os.str(), token_start_line, token_start_position, position);
+      }
+
+      return shared_objects.vector_ref(number);
+    }
+
     case TK_VECTOR_OPEN: {
       Value vec, x, tmp;
 
@@ -1065,7 +1136,7 @@ Value XReader::read_expr(TokenType tk) {
 }
 
 Value XReader::read() {
-  AR_FRAME(state, shared_object_table);
+  AR_FRAME(state, shared_objects);
   return read_expr(TK_READ_NEXT);
 }
 
