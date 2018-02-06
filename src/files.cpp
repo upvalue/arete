@@ -19,8 +19,8 @@ Value State::make_input_file_port(const char* cpath, std::istream* fs) {
   port->path = path;
   // Although we'll never close stdin, it's necessary to do this in case (read) is called
   // against it as an XReader will be allocated on the heap
-  gc.finalizers.push_back(port);
-  return port;
+  gc.finalizers.push_back(SValue(port));
+  return SValue(port);
 }
 
 Value State::make_output_file_port(const char* cpath, std::ostream* fs) {
@@ -31,8 +31,8 @@ Value State::make_output_file_port(const char* cpath, std::ostream* fs) {
   port->set_header_bit(Value::FILE_PORT_NEVER_CLOSE_BIT);
   port->output_handle = fs;
   port->path = path;
-  gc.finalizers.push_back(port);
-  return port;
+  gc.finalizers.push_back(SValue(port));
+  return SValue(port);
 }
 
 Value State::make_input_file_port(Value path) {
@@ -50,7 +50,7 @@ Value State::make_input_file_port(Value path) {
   port->set_header_bit(Value::FILE_PORT_INPUT_BIT);
   port->path = string_copy(path);
   port->input_handle = fs;
-  gc.finalizers.push_back(port);
+  gc.finalizers.push_back(SValue(port));
   SValue res = port;
   AR_ASSERT(res.file_port_readable());
   return res;
@@ -71,7 +71,7 @@ Value State::make_output_file_port(Value path) {
   port->set_header_bit(Value::FILE_PORT_OUTPUT_BIT);
   port->path = string_copy(path);
   port->output_handle = fs;
-  gc.finalizers.push_back(port);
+  gc.finalizers.push_back(SValue(port));
   SValue res = port;
   AR_ASSERT(res.file_port_writable());
   return res;
@@ -89,8 +89,8 @@ Value fn_open_output_string(State& state, size_t argc, Value* argv, void* v) {
   port->set_header_bit(Value::FILE_PORT_STRING_BIT);
   port->path = path;
   port->output_handle = os;
-  state.gc.finalizers.push_back(port);
-  return port;
+  state.gc.finalizers.push_back(SValue(port));
+  return SValue(port);
 }
 AR_DEFUN("open-output-string", fn_open_output_string, 0);
 
@@ -106,8 +106,8 @@ Value fn_open_input_string(State& state, size_t argc, Value* argv, void* v) {
   port->set_header_bit(Value::FILE_PORT_STRING_BIT);
   port->path = path;
   port->input_handle = is;
-  state.gc.finalizers.push_back(port);
-  return port;
+  state.gc.finalizers.push_back(SValue(port));
+  return SValue(port);
 }
 AR_DEFUN("open-input-string", fn_open_input_string, 0);
 
@@ -149,7 +149,7 @@ Value fn_close_port(State& state, size_t argc, Value* argv, void* v) {
 
   state.finalize(FILE_PORT, argv[0], false);
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("close-output-port", fn_close_port, 1);
 AR_DEFUN("close-input-port", fn_close_port, 1);
@@ -164,14 +164,14 @@ Value fn_flush_port(State& state, size_t argc, Value* argv, void* v) {
     handle->flush();
   }
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("flush-output-port", fn_flush_port, 1);
 
 // Extract a file port from an argument, or return *current-input-port* if that argument was not
 // provided
 #define  AR_MAYBE_INPUT_PORT(state, argv, argc, argi, name) \
-  Value name ; \
+  SValue name ; \
   if(((argc) > (argi)) && ((argv)[(argi)].type() != FILE_PORT || !(argv[(argi)].file_port_readable()))) { \
     std::ostringstream os; os << fn_name << " expected an input-file-port but got " << \
       (argv)[(argi)].type(); \
@@ -190,7 +190,7 @@ Value fn_read_char(State& state, size_t argc, Value* argv, void* v) {
 
   char c;
   std::istream* is = port.file_port_input_handle();
-  if(!is && is->eof()) return C_EOF;
+  if(!is && is->eof()) return Value::c(C_EOF);
   is->read(&c, 1);
 
   if(c == '\n') {
@@ -200,7 +200,7 @@ Value fn_read_char(State& state, size_t argc, Value* argv, void* v) {
     port.as_unsafe<FilePort>()->column++;
   }
 
-  if(is->eof()) return C_EOF;
+  if(is->eof()) return Value::c(C_EOF);
   return state.make_char(c);
 }
 AR_DEFUN("read-char", fn_read_char, 0, 1);
@@ -230,9 +230,9 @@ Value fn_peek_char(State& state, size_t argc, Value* argv, void* v) {
   AR_MAYBE_INPUT_PORT(state, argv, argc, 0, port);
 
   std::istream* is = port.file_port_input_handle();
-  if(!is && is->eof()) return C_EOF;
+  if(!is && is->eof()) return Value::c(C_EOF);
   char c = is->peek();
-  if(is->eof()) return C_EOF;
+  if(is->eof()) return Value::c(C_EOF);
   return state.make_char(c);
 }
 AR_DEFUN("peek-char", fn_peek_char, 0, 1);
@@ -245,7 +245,7 @@ Value fn_read(State& state, size_t argc, Value* argv, void* v) {
 
   std::istream* is = port.file_port_input_handle();
 
-  if(!is) return C_EOF;
+  if(!is) return Value::c(C_EOF);
 
   FilePort* fp = port.as_unsafe<FilePort>();
   if(!fp->reader) {
@@ -258,7 +258,7 @@ AR_DEFUN("read", fn_read, 0, 1);
 
 // Extract a file port from an argument, or return *current-input-port*
 #define  AR_MAYBE_OUTPUT_PORT(state, argv, argc, argi, name) \
-  Value name ; \
+  SValue name ; \
   if(((argc) > (argi)) && ((argv)[(argi)].type() != FILE_PORT || !(argv[(argi)].file_port_writable()))) { \
     std::ostringstream os; os << fn_name << " expected an output-file-port but got " << \
       (argv)[(argi)].type(); \
@@ -292,7 +292,7 @@ Value fn_write_char(State& state, size_t argc, Value* argv, void* v) {
   char c = argv[0].character();
   os->write(&c, 1);
   
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED); 
 }
 AR_DEFUN("write-char", fn_write_char, 1, 2);
 
@@ -304,7 +304,7 @@ Value fn_write(State& state, size_t argc, Value* argv, void* v) {
   std::ostream& os = *port.file_port_output_handle();
   os << argv[0];
   if(&os == &std::cout) os.flush();
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("write", fn_write, 1, 2);
 
@@ -318,7 +318,7 @@ Value fn_display(State& state, size_t argc, Value* argv, void* v) {
     os << argv[0].string_data();
   else
     os << argv[0];
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("display", fn_display, 1, 2);
 
@@ -332,7 +332,7 @@ Value fn_newline(State& state, size_t argc, Value* argv, void* v) {
   os.flush();
   if(&os == &std::cout) os.flush();
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("newline", fn_newline, 0, 1);
 
@@ -353,7 +353,7 @@ Value fn_print_impl(State& state, size_t argc, Value* argv, std::ostream& os, bo
     }
   }
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 
 Value fn_print_source(State& state, size_t argc, Value* argv, void* v) {
@@ -368,7 +368,7 @@ Value fn_print_source(State& state, size_t argc, Value* argv, void* v) {
     std::cerr << argv[0] << std::endl;
     fn_print_impl(state, argc-1, &argv[1], std::cerr, true, false);
   }
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("print-source", fn_print_source, 1, 1, true);
 
@@ -381,7 +381,7 @@ Value fn_source_name(State& state, size_t argc, Value* argv, void* v) {
       return state.make_string(state.source_names[loc.source]);
     }
   }
-  return C_FALSE;
+  return Value::c(C_FALSE);
 }
 AR_DEFUN("source-name", fn_source_name, 1);
 
@@ -478,7 +478,7 @@ Value fn_print_table_verbose(State& state, size_t argc, Value* argv, void* v) {
 
   state.print_table_verbose(argv[0]);
   
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("print-table-verbose", fn_print_table_verbose, 1);
 
@@ -499,7 +499,7 @@ Value fn_load_file(State& state, size_t argc, Value* argv, void* v) {
   // and install the user module in which interaction happens by default
   if(state.get_global_value(State::G_PUSH_MODULE) != C_UNDEFINED) {
     state.set_global_value(State::G_CURRENT_MODULE, state.get_global_value(State::G_PUSH_MODULE));
-    state.set_global_value(State::G_PUSH_MODULE, C_UNDEFINED);
+    state.set_global_value(State::G_PUSH_MODULE, Value::c(C_UNDEFINED));
   }
   return res;
 }

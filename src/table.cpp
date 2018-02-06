@@ -79,7 +79,7 @@ void State::table_setup(Value table, size_t size_log2) {
   // Fill entries with #f
   chains->length = size;
   for(size_t i = 0; i != chains->length; i++) {
-    chains->data[i] = C_FALSE;
+    chains->data[i] = Value::c(C_FALSE);
   } 
   heap->chains = chains;
   // Pre-calculate max entries
@@ -127,7 +127,7 @@ Value State::table_get_cell(Value table, Value key) {
     }
     chain = chain.cdr();
   }
-  return C_FALSE;
+  return Value::c(C_FALSE);
 }
 
 Value State::table_set(Value table, Value key, Value value) {
@@ -135,11 +135,11 @@ Value State::table_set(Value table, Value key, Value value) {
   if(cell.is_active_exception()) return cell;
   if(cell != C_FALSE) {
     cell.set_cdr(value);
-    return C_TRUE;
+    return Value::c(C_TRUE);
   } else {
     return table_insert(table, key, value);
   }
-  return C_FALSE;
+  return Value::c(C_FALSE);
 }
 
 Value State::table_get(Value table, Value key, bool& found) {
@@ -149,7 +149,7 @@ Value State::table_get(Value table, Value key, bool& found) {
     return cell.cdr();
   } else {
     found = false;
-    return C_FALSE;
+    return Value::c(C_FALSE);
   }
 }
 
@@ -181,7 +181,7 @@ Value State::table_insert(Value table, Value key, Value value) {
   if(htable->chains->data[index] != C_FALSE) {
     chain = make_pair(chain, htable->chains->data[index]);
   } else {
-    chain = make_pair(chain, C_NIL);
+    chain = make_pair(chain, Value::c(C_NIL));
   }
 
   // Insert chain
@@ -189,7 +189,7 @@ Value State::table_insert(Value table, Value key, Value value) {
   htable->chains->data[index] = chain;
   htable->entries++;
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 
 
@@ -224,7 +224,7 @@ Value fn_table_ref(State& state, size_t argc, Value* argv, void* v) {
 
   bool found;
   SValue result = state.table_get(argv[0], argv[1], found);
-  if(!found) return argc == 3 ? argv[2] : C_FALSE;
+  if(!found) return argc == 3 ? argv[2] : Value::c(C_FALSE);
   return result;
 }
 AR_DEFUN("table-ref", fn_table_ref, 2, 3);
@@ -268,7 +268,7 @@ Value fn_table_delete(State& state, size_t argc, Value* argv, void* v) {
     chain = chain.cdr();
   }
   
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("table-delete!", fn_table_delete, 2);
 
@@ -324,7 +324,7 @@ Value fn_table_copy(State& state, size_t argc, Value* argv, void* v) {
 
   //for(size_t i = 0; )
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("table-copy", fn_table_copy, 2);
 

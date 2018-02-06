@@ -126,7 +126,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
 tail:
   AR_ASSERT(state.gc.live((HeapValue*) fnp));
-  VMFrame2 f(state, Value((HeapValue*) fnp));
+  VMFrame2 f(state, SValue((HeapValue*) fnp));
 
   // If argv points to somewhere on the existing stack, we need to update it
   if(state.gc.stack_needs_realloc(f.vm_stack_used) && ((size_t)argv >= (size_t)state.gc.vm_stack && (size_t)argv <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*))))) {
@@ -197,7 +197,7 @@ tail:
     //AR_LOG_VM2("allocating space for " << vfn->free_variables->length << " upvalues");
 
     for(size_t i = 0; i != f.fn.as_unsafe<VMFunction>()->free_variables->length; i++) {
-      upvalues[i] = state.gc.allocate(UPVALUE, sizeof(Upvalue));
+      upvalues[i] = SValue(state.gc.allocate(UPVALUE, sizeof(Upvalue)));
       AR_ASSERT(state.gc.live(f.fn));
       AR_ASSERT(state.gc.live(upvalues[i]));
       size_t idx = ((size_t*) f.fn.as_unsafe<VMFunction>()->free_variables->data)[i];
@@ -262,7 +262,7 @@ tail:
       VM_CASE(OP_PUSH_IMMEDIATE): {
         AR_LOG_VM2("push-immediate " << (size_t) *cp);
         // std::cout << (size_t) stack << ' ' << (size_t) sbegin << std::endl;
-        (*stack++) = VM_NEXT_INSN();
+        (*stack++) = SValue(VM_NEXT_INSN());
         VM_DISPATCH();
       }
 
@@ -324,7 +324,7 @@ tail:
           (*stack++) = upval->U.converted;
         } else {
           if(upval->get_header_bit(Value::UPVALUE_POINTER_BIT)) {
-            (*stack++) = upval->U.local->bits;
+            (*stack++) = SValue(upval->U.local->bits);
           } else {
             (*stack++) = state.gc.vm_stack[upval->U.vm_local_idx];
           }
@@ -544,7 +544,7 @@ tail:
 
       VM_CASE(OP_ARGV_REST): {
         if(argc <= vfn->max_arity) {
-          locals[vfn->max_arity] = C_NIL;
+          locals[vfn->max_arity] = Value::c(C_NIL);
         } else {
           // argv may be &temps[0] if this is a tail call
           if(argv == &state.temps[0]) {
@@ -714,23 +714,23 @@ tail:
           }
           if(n.fixnump()) {
             if(n2.fixnump() && !(n.fixnum_value() < n2.fixnum_value())) {
-              *(stack - argc) = C_FALSE;
+              *(stack - argc) = Value::c(C_FALSE);
               goto fals;
             } else if(n2.heap_type_equals(FLONUM) && !(n.fixnum_value() < n2.flonum_value())) {
-              *(stack - argc) = C_FALSE;
+              *(stack - argc) = Value::c(C_FALSE);
               goto fals;
             } 
           } else {
             if(n2.fixnump() && !(n.flonum_value() < n2.fixnum_value())) {
-              *(stack - argc) = C_FALSE;
+              *(stack - argc) = Value::c(C_FALSE);
               goto fals;
             } else if(n2.heap_type_equals(FLONUM) && !(n.flonum_value() < n2.flonum_value())) {
-              *(stack - argc) = C_FALSE;
+              *(stack - argc) = Value::c(C_FALSE);
               goto fals;
             } 
           }
         }
-        *(stack - argc) = C_TRUE;
+        *(stack - argc) = Value::c(C_TRUE);
         fals:
         stack -= (argc - 1);
         VM_DISPATCH();
@@ -759,7 +759,7 @@ tail:
       }
 
       VM_CASE(OP_NOT): {
-        *(stack - 1) = (*(stack - 1) == C_FALSE ? C_TRUE : C_FALSE);
+        *(stack - 1) = Value::c((*(stack - 1) == C_FALSE ? C_TRUE : C_FALSE));
         VM_DISPATCH();
       }
       
@@ -776,7 +776,7 @@ tail:
 
       VM_CASE(OP_FX_LT): {
         VM_FX_CHECK("fx<");
-        *(stack - 2) = STACK_PICK(2).bits < STACK_PICK(1).bits ? C_TRUE : C_FALSE;
+        *(stack - 2) = Value::make_boolean(STACK_PICK(2).bits < STACK_PICK(1).bits);
         stack--;
         //*(stack--) = ((*(stack - 1)).fixnump() && (*(stack - 2)).fixnump() && (*(stack - 2)).bits < *(stack -)
         VM_DISPATCH();

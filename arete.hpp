@@ -382,16 +382,12 @@ struct Value {
     ptrdiff_t bits;
   };
 
-  /** Default constructor: set Value to C_FALSE */
-  Value(): bits(0) {}
-  Value(HeapValue* heap_): heap(heap_) {}
-  Value(ptrdiff_t bits_): bits(bits_) {}
-
   /** Returns true if this value is immediate */
   bool immediatep() const { return (bits & 3) != 0 || bits == 0; }
 
   /** Static immediate checker, used by garbage collector */
   static bool immediatep(Value v) { return (v.bits & 3) != 0 || v.bits == 0; }
+  static bool immediatep(ptrdiff_t v) { return (v & 3) != 0 || v == 0; }
 
   /** Returns true if the value contains no pointers. */
   bool atomic() const {
@@ -502,19 +498,20 @@ struct Value {
   }
 
   /** Create a fixnum */
-  static Value make_fixnum(ptrdiff_t fixnum) {
-    return Value(((fixnum << 1) + 1));
-  }
+  static Value make_fixnum(ptrdiff_t fixnum);
 
   // CONSTANTS
+  static Value c(Constant c) {
+    Value v = {{.bits = (ptrdiff_t) c}};
+    return v;
+  }
+
   unsigned constant_value() const {
     AR_TYPE_ASSERT(type() == CONSTANT);
     return (unsigned) bits;
   }
 
-  static Value make_boolean(ptrdiff_t cmp) {
-    return cmp == 0 ? C_FALSE : C_TRUE;
-  }
+  static Value make_boolean(ptrdiff_t cmp);
 
   bool boolean_value() const {
     return bits != C_FALSE;
@@ -816,12 +813,20 @@ struct Value {
 
   // OPERATORS
 
+  // TODO: operator= constant ok?
+
   /** Identity comparison */
   inline bool operator==(const Value& other) const {
     return bits == other.bits;
   }
 
+  inline bool operator==(const Constant c) const {
+    return bits == (ptrdiff_t) c;
+  }
+
   inline bool operator!=(const Value& other) const { return bits != other.bits; }
+
+  inline bool operator!=(const Constant& c) const { return bits != (ptrdiff_t) c; }
 
   // CASTING
   template <class T> T* as() const {
@@ -844,11 +849,11 @@ struct Value {
  * have constructors because it must be a POD type for ABI purposes.
  */
 struct SValue : Value {
-  SValue(): Value((ptrdiff_t) 0) {}
-  SValue(ptrdiff_t bits_): Value(bits_) {}
-  SValue(HeapValue* hv): Value(hv) {}
-  SValue(const Value& v): Value(v.bits) {}
-  SValue(Constant&c): Value((ptrdiff_t) c) {}
+  SValue(ptrdiff_t bits_) { bits = bits_; }
+  SValue(HeapValue* hv) { heap = hv; }
+  SValue() { bits = 0; }
+  SValue(const Value& v) { bits = v.bits; }
+  SValue(Constant&c) { bits = (ptrdiff_t) c; }
 
   ~SValue() {}
 
@@ -858,6 +863,14 @@ struct SValue : Value {
     bits = v.bits;
   }
 };
+
+inline Value Value::make_fixnum(ptrdiff_t fixnum) {
+  return SValue(((fixnum << 1) + 1));
+}
+
+inline Value Value::make_boolean(ptrdiff_t cmp) {
+  return SValue(cmp == 0 ? C_FALSE : C_TRUE);
+}
 
 // Below here: inline definitions of things that need Value to be declared
 struct Symbol : HeapValue {
@@ -1167,7 +1180,7 @@ inline Value Value::vm_function_name() const {
 }
 
 inline Value Value::vm_function_code() const {
-  return as<VMFunction>()->code;
+  return SValue(as<VMFunction>()->code);
 }
 
 inline VectorStorage* Value::vm_function_constants() const {
@@ -1181,7 +1194,7 @@ inline VectorStorage* Value::vm_function_constants() const {
  */
 struct Upvalue : HeapValue {
   union U {
-    U(): converted(C_FALSE) {}
+    U(): converted(SValue(C_FALSE)) {}
 
     Value* local;
     size_t vm_local_idx;
@@ -1237,7 +1250,7 @@ inline Value Value::closure_unbox() const {
   if(heap_type_equals(CLOSURE)) {
     return as_unsafe<Closure>()->function;
   }
-  return heap;
+  return SValue(heap);
 }
 
 inline VMFunction* Value::closure_function() const {
@@ -1399,7 +1412,7 @@ struct CRecord : HeapValue {
 };
 
 inline Value Value::record_type() const {
-  return as<Record>()->type;
+  return SValue(as<Record>()->type);
 }
 
 inline Value Value::record_ref(unsigned i) const {
@@ -1858,7 +1871,7 @@ struct State {
 
   Value make_rename(Value expr, Value env);
 
-  Value make_pair(Value car = C_FALSE, Value cdr = C_FALSE,
+  Value make_pair(Value car = SValue(C_FALSE), Value cdr = SValue(C_FALSE),
     size_t size = sizeof(Pair) - sizeof(SourceLocation));
   Value make_src_pair(Value car, Value cdr, SourceLocation& loc);
   Value make_src_pair(Value car, Value cdr, Value src);
@@ -1933,7 +1946,7 @@ struct State {
 
   /** Register a new type of record. Returns an index into the globals array. */
   size_t register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
-      Value field_names = C_FALSE, Value parent = C_FALSE);
+      Value field_names = SValue(C_FALSE), Value parent = SValue(C_FALSE));
 
   void record_type_set_finalizer(size_t global_id, c_closure_t finalizer);
 
@@ -1956,19 +1969,19 @@ struct State {
     Bytevector* heap = static_cast<Bytevector*>(gc.allocate(BYTEVECTOR,
       sizeof(Bytevector) + (count * sizeof(T))));
     heap->length = count;
-    return heap;
+    return SValue(heap);
   }
 
   /** Make an exception from Scheme values */
-  Value make_exception(Value tag, Value message, Value irritants = C_UNSPECIFIED);
+  Value make_exception(Value tag, Value message, Value irritants = Value::c(C_UNSPECIFIED));
   /** Make an exception with a C++ std::string message */
-  Value make_exception(Value tag, const std::string& cmessage, Value irritants = C_UNSPECIFIED);
+  Value make_exception(Value tag, const std::string& cmessage, Value irritants = SValue(C_UNSPECIFIED));
   /** Make an exception with a C++ std::string message and tag */
   Value make_exception(const std::string& ctag, const std::string& cmessage,
-    Value irritants = C_UNSPECIFIED);
+    Value irritants = SValue(C_UNSPECIFIED));
   /** Make an exception with a builtin tag */
-  Value make_exception(Global s, const std::string& cmessage, Value irritants = C_UNSPECIFIED);
-  Value make_record(Value tipe);
+  Value make_exception(Global s, const std::string& cmessage, Value irritants = SValue(C_UNSPECIFIED));
+  Value make_record(SValue tipe);
 
   Value make_record(size_t tag);
 
@@ -2036,7 +2049,7 @@ struct State {
    * @param from_eval True if this was called from interpreter; string will be prepended with eval:
    * in that case.
    */
-  std::string source_info(const SourceLocation loc, Value fn_name = C_FALSE,
+  std::string source_info(const SourceLocation loc, Value fn_name = Value::c(C_FALSE),
     bool from_eval = false);
 
   /** Return a description of the source location of a pair */
@@ -2065,7 +2078,7 @@ struct State {
   /** Defines a built-in function */
   void defun_core(const std::string& cname, c_closure_t addr, size_t min_arity, size_t max_arity = 0, bool variable_arity = false);
 
-  std::ostream& warn(Value src = C_FALSE);
+  std::ostream& warn(Value src = Value::c(C_FALSE));
  
   // Environments are just vectors containing the parent environment in the first position
   // and variable names/values in the even/odd positions afterwards e.g.
@@ -2075,7 +2088,7 @@ struct State {
 
   static const size_t VECTOR_ENV_FIELDS = 1;
 
-  Value make_env(Value parent = C_FALSE, size_t size = 0);
+  Value make_env(Value parent = Value::c(C_FALSE), size_t size = 0);
 
   void env_set(Value env, Value name, Value val);
 
@@ -2110,12 +2123,12 @@ struct State {
     return make_exception(type, msg);
   }
 
-  Value eval_error(const std::string& msg, Value exp = C_FALSE);
+  Value eval_error(const std::string& msg, Value exp = Value::c(C_FALSE));
   Value eval_form(EvalFrame frame, Value exp, unsigned);
   Value eval_body(EvalFrame frame, Value exp, bool single = false);
   Value eval_exp(Value exp);
   /** The primary application function */
-  Value eval_list(Value lst, bool expand = true, Value env = C_FALSE);
+  Value eval_list(Value lst, bool expand = true, Value env = Value::c(C_FALSE));
 
   // Build a list of out of temps[limit:]
   Value temps_to_list(size_t limit = 0);
@@ -2217,7 +2230,7 @@ struct XReader {
    * A vector mapping numbers to shared objects; for reading objects with shared structure.
    * Created lazily.
    */
-  Value shared_objects;
+  SValue shared_objects;
   /** Instance of the Arete runtime */
   State& state;
   /** Open stream */
@@ -2226,8 +2239,8 @@ struct XReader {
   unsigned source, position, line, column;
   /** Either C_FALSE or an exception that has been encountered during reading; necessary because 
    * the tokenizer does not return Values. read should never be called after this has been set */
-  Value active_error;
-  Value return_constant;
+  SValue active_error;
+  SValue return_constant;
 
   /** A temporary buffer that the tokenizer will fill with atomic data (strings, numbers, etc) */
   std::string buffer;
@@ -2423,7 +2436,7 @@ inline Frame::~Frame() {
   state.gc.frames = previous;
 }
 
-inline Handle::Handle(State& state_): state(state_), ref(C_FALSE) { initialize(); }
+inline Handle::Handle(State& state_): state(state_), ref(Value::c(C_FALSE)) { initialize(); }
 inline Handle::Handle(State& state_, Value ref_): state(state_), ref(ref_) { initialize(); }
 inline Handle::Handle(const Handle& cpy): state(cpy.state), ref(cpy.ref) {
   it = state.gc.handles.insert(state.gc.handles.end(), this);
@@ -2489,11 +2502,12 @@ struct Defun {
 struct ListAppender {
   ListAppender(): head(C_NIL) {}
 
-  Value head, tail;
+  SValue head, tail;
 
   void append_cell(Value v) {
     if(head == C_NIL) {
-      head = tail = v;
+      head = v;
+      tail = v;
     } else {
       tail.set_cdr(v);
       tail = v;
@@ -2501,7 +2515,7 @@ struct ListAppender {
   }
 
   void append(State& state, Value v) {
-    append_cell(state.make_pair(v, C_NIL));
+    append_cell(state.make_pair(v, Value::c(C_NIL)));
   }
 };
 
@@ -2524,7 +2538,7 @@ struct TableIterator {
   Value value() const { AR_ASSERT(cell != C_FALSE); return cell.cdr(); }
 
   size_t i;
-  Value table, chain, cell;
+  SValue table, chain, cell;
 };
 
 } // namespace arete
@@ -2532,7 +2546,7 @@ struct TableIterator {
 // Handy macros for writing CFunctions
 
 #define AR_FN_CLOSURE(state, fn_pointer, kast, name) \
-  kast name = (kast) Value((ptrdiff_t)(fn_pointer)).c_function_closure_data().bits;
+  kast name = (kast) SValue((ptrdiff_t)(fn_pointer)).c_function_closure_data().bits;
 
 #define AR_FN_ARGC_EQ(state, argc, expect) \
   if((argc) != (expect)) { \

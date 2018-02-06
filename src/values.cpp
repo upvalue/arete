@@ -112,7 +112,7 @@ Value State::get_symbol(const std::string& name) {
 
     string = make_string(name);
 
-    sym.as<Symbol>()->value = C_UNDEFINED;
+    sym.as<Symbol>()->value = Value::c(C_UNDEFINED);
     sym.as<Symbol>()->name = string;
 
     if(name.size() > 2 && name[0] == '#' && name[1] == '#') {
@@ -124,7 +124,7 @@ Value State::get_symbol(const std::string& name) {
     return sym;
   } else {
     AR_ASSERT(symbol_table->size() > 0);
-    return x->second;
+    return SValue(x->second);
   }
 }
 
@@ -170,8 +170,8 @@ Value State::make_rename(Value expr, Value env) {
   Rename* heap = static_cast<Rename*>(gc.allocate(RENAME, sizeof(Rename)));
   heap->expr = expr;
   heap->env = env;
-  heap->gensym = C_FALSE;
-  return heap;
+  heap->gensym = Value::c(C_FALSE);
+  return SValue(heap);
 }
 
 size_t State::register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
@@ -184,8 +184,8 @@ size_t State::register_record_type(const std::string& cname, unsigned field_coun
   name = make_string(cname);
 
   tipe.as<RecordType>()->name = name;
-  tipe.as<RecordType>()->print = C_FALSE;
-  tipe.as<RecordType>()->apply = C_FALSE;
+  tipe.as<RecordType>()->print = Value::c(C_FALSE);
+  tipe.as<RecordType>()->apply = Value::c(C_FALSE);
   tipe.as<RecordType>()->parent = parent;
   tipe.as<RecordType>()->field_count = field_count;
   tipe.as<RecordType>()->field_names = field_names;
@@ -219,7 +219,7 @@ Value State::make_exception(Value tag, Value message, Value irritants) {
   heap->tag = tag;
   heap->message = message;
   heap->irritants = irritants;
-  return heap;
+  return SValue(heap);
 }
 
 /** Make an exception with a C++ std::string message */
@@ -246,7 +246,7 @@ Value State::make_exception(Global s, const std::string& cmessage, Value irritan
   return make_exception(get_symbol(s), cmessage, irritants);
 }
 
-Value State::make_record(Value tipe) {
+Value State::make_record(SValue tipe) {
   AR_FRAME(this, tipe);
 
   unsigned field_count = tipe.as<RecordType>()->field_count;
@@ -259,7 +259,7 @@ Value State::make_record(Value tipe) {
 
   record.as<Record>()->type = tipe.as<RecordType>();
   for(unsigned i = 0; i != field_count; i++) {
-    record.as<Record>()->fields[i] = C_FALSE;
+    record.as<Record>()->fields[i] = Value::c(C_FALSE);
   }
 
   if(tipe.as_unsafe<RecordType>()->finalizer) {
@@ -463,7 +463,7 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
   SValue v(cfn);
   v.procedure_install(addr);
 
-  return cfn;
+  return SValue(cfn);
 }
 
 void State::defun_core(const std::string& cname, c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
@@ -472,7 +472,7 @@ void State::defun_core(const std::string& cname, c_closure_t addr, size_t min_ar
   AR_FRAME(this, cfn, sym, name, builtins);
   AR_ASSERT(addr);
   name = make_string(cname);
-  cfn = make_c_function(name, C_FALSE, addr, min_arity, max_arity, variable_arity);
+  cfn = make_c_function(name, Value::c(C_FALSE), addr, min_arity, max_arity, variable_arity);
 
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);
@@ -492,7 +492,7 @@ Value State::make_pair(Value car, Value cdr, size_t size) {
 
   heap->data_car = car;
   heap->data_cdr = cdr;
-  return heap;
+  return SValue(heap);
 }
 
 Value State::make_src_pair(Value car, Value cdr, SourceLocation& loc) {
@@ -542,7 +542,7 @@ Value Value::list_ref(size_t n) const {
     check = check.cdr();
     if(check.type() != PAIR && check != C_NIL) {
       AR_TYPE_ASSERT(!"list-ref in non-list");
-      return C_NIL;
+      return Value::c(C_NIL);
     }
   }
   return check.car();
@@ -552,7 +552,7 @@ Value Value::list_ref(size_t n) const {
 Value State::make_char(int c) {
   Char* heap = static_cast<Char*>(gc.allocate(CHARACTER, sizeof(Char)));
   heap->datum = c;
-  return heap;
+  return SValue(heap);
 }
 
 ///// VECTORS
@@ -562,7 +562,7 @@ Value State::make_vector_storage(size_t capacity) {
   size_t size = (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity);
   VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE, size));
 
-  return storage;
+  return SValue(storage);
 }
 
 Value State::make_vector(size_t capacity) {

@@ -10,7 +10,7 @@ Value State::make_string(const std::string& body) {
   strncpy(heap->data, body.c_str(), body.size());
   AR_ASSERT(heap->data[heap->bytes] == '\0');
 
-  return heap;
+  return SValue(heap);
 }
 
 Value State::make_string(size_t length) {
@@ -18,7 +18,7 @@ Value State::make_string(size_t length) {
   heap->bytes = length;
   memset(heap->data, 'a', length);
   AR_ASSERT(heap->data[heap->bytes] == '\0');
-  return heap;
+  return SValue(heap);
 }
 
 Value State::string_copy(Value x) {
@@ -27,7 +27,7 @@ Value State::string_copy(Value x) {
   strncpy(heap->data, x.string_data(), x.string_bytes());
   heap->bytes = x.string_bytes();
   heap->data[x.string_bytes()] = '\0';
-  return heap;
+  return SValue(heap);
 }
 
 ///// SCHEME FUNCTIONS
@@ -135,7 +135,7 @@ Value fn_string_set(State& state, size_t argc, Value* argv, void* v) {
 
   argv[0].string_data_mod()[(size_t) argv[1].fixnum_value()] = argv[2].character();
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 AR_DEFUN("string-set!", fn_string_set, 3);
 
@@ -178,9 +178,11 @@ Value fn_string_equals(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
-  if(argv[0].string_bytes() != argv[1].string_bytes()) return C_FALSE;
+  if(argv[0].string_bytes() != argv[1].string_bytes()) return Value::c(C_FALSE);
 
-  return Value::make_boolean(strncmp(argv[0].string_data(), argv[1].string_data(), argv[0].string_bytes()) == 0);
+  return Value::make_boolean(
+    strncmp(argv[0].string_data(), argv[1].string_data(), argv[0].string_bytes()) == 0
+  );
 }
 AR_DEFUN("string=?", fn_string_equals, 2);
 
@@ -217,7 +219,7 @@ Value fn_bytevector_length(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "bytevector-length";
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, BYTEVECTOR);
-  return argv[0].bv_length();
+  return Value::make_fixnum(argv[0].bv_length());
 }
 AR_DEFUN("bytevector-length", fn_bytevector_length, 1);
 
@@ -244,7 +246,7 @@ Value fn_bytevector_u8_set(State& state, size_t argc, Value* argv, void* v) {
 
   argv[0].bv_set<uint8_t>((size_t) argv[1].fixnum_value(), static_cast<uint8_t>(value));
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 
 AR_DEFUN("bytevector-u8-set!", fn_bytevector_u8_set, 3);

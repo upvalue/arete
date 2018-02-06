@@ -177,7 +177,7 @@ struct PointerUpdater {
         break;
       }
       case FILE_PORT:
-        static_cast<FilePort*>(heap)->path = C_FALSE;
+        static_cast<FilePort*>(heap)->path = Value::c(C_FALSE);
         static_cast<FilePort*>(heap)->input_handle = 0;
         static_cast<FilePort*>(heap)->reader = 0;
         break;

@@ -109,14 +109,14 @@ Value NumberReader::read() {
   bool is_exponent = false;
   bool negative = false;
 
-  if(!consume_numeric_directive(i)) return C_FALSE;
-  if(!consume_numeric_directive(i)) return C_FALSE;
+  if(!consume_numeric_directive(i)) return Value::c(C_FALSE);
+  if(!consume_numeric_directive(i)) return Value::c(C_FALSE);
 
   if(i == string.size()) {
     std::ostringstream os;
     os << "no number found after numeric directives " << string;
     error_desc = os.str();
-    return C_FALSE;
+    return Value::c(C_FALSE);
   }
 
   if(string[i] == '-') {
@@ -138,11 +138,11 @@ Value NumberReader::read() {
     if(string[j] == '.') {
       if(!flonum_allowed) {
         error_desc = "floating point numbers must be decimals";
-        return C_FALSE;
+        return Value::c(C_FALSE);
       } 
       if(exact_set) {
         error_desc = "implementation error: exact fractions not supported";
-        return C_FALSE;
+        return Value::c(C_FALSE);
       }
       is_float = true;
     }
@@ -159,7 +159,7 @@ Value NumberReader::read() {
       if(!isdigit(string[i]) && string[i] != '.') {
         error_desc = "invalid numeric syntax ";
         error_desc += string[i];
-        return C_FALSE;
+        return Value::c(C_FALSE);
       }
       ss << string[i];
     }
@@ -173,18 +173,18 @@ Value NumberReader::read() {
       switch(c) {
         case '0': place = 0; break;
         case '1': place = 1; break;
-        case '2': place = 2; if(!check_radix_gte(8, c)) return C_FALSE; break;
-        case '3': place = 3; if(!check_radix_gte(8, c)) return C_FALSE; break; 
-        case '4': place = 4; if(!check_radix_gte(8, c)) return C_FALSE; break; 
-        case '5': place = 5; if(!check_radix_gte(8, c)) return C_FALSE; break; 
-        case '6': place = 6; if(!check_radix_gte(8, c)) return C_FALSE; break; 
-        case '7': place = 7; if(!check_radix_gte(8, c)) return C_FALSE; break; 
-        case '8': place = 8; if(!check_radix_gte(10, c)) return C_FALSE; break;
-        case '9': place = 9; if(!check_radix_gte(10, c)) return C_FALSE; break;
-        case 'A': case 'a': place = 10; if(!check_radix_gte(10, c)) return C_FALSE; break;
-        case 'B': case 'b': place = 11; if(!check_radix_gte(16, c)) return C_FALSE; break;
-        case 'C': case 'c': place = 12; if(!check_radix_gte(16, c)) return C_FALSE; break;
-        case 'D': case 'd': place = 13; if(!check_radix_gte(16, c)) return C_FALSE; break;
+        case '2': place = 2; if(!check_radix_gte(8, c)) return Value::c(C_FALSE); break;
+        case '3': place = 3; if(!check_radix_gte(8, c)) return Value::c(C_FALSE); break; 
+        case '4': place = 4; if(!check_radix_gte(8, c)) return Value::c(C_FALSE); break; 
+        case '5': place = 5; if(!check_radix_gte(8, c)) return Value::c(C_FALSE); break; 
+        case '6': place = 6; if(!check_radix_gte(8, c)) return Value::c(C_FALSE); break; 
+        case '7': place = 7; if(!check_radix_gte(8, c)) return Value::c(C_FALSE); break; 
+        case '8': place = 8; if(!check_radix_gte(10, c)) return Value::c(C_FALSE); break;
+        case '9': place = 9; if(!check_radix_gte(10, c)) return Value::c(C_FALSE); break;
+        case 'A': case 'a': place = 10; if(!check_radix_gte(10, c)) return Value::c(C_FALSE); break;
+        case 'B': case 'b': place = 11; if(!check_radix_gte(16, c)) return Value::c(C_FALSE); break;
+        case 'C': case 'c': place = 12; if(!check_radix_gte(16, c)) return Value::c(C_FALSE); break;
+        case 'D': case 'd': place = 13; if(!check_radix_gte(16, c)) return Value::c(C_FALSE); break;
         case 'E': case 'e': {
           if(radix != 16) {
             // This is an exponent
@@ -194,15 +194,15 @@ Value NumberReader::read() {
           }
           place = 14;
           if(!check_radix_gte(16, c))
-            return C_FALSE;
+            return Value::c(C_FALSE);
           break;
         }
-        case 'F': case 'f': place = 15; if(!check_radix_gte(16, c)) return C_FALSE; break;
+        case 'F': case 'f': place = 15; if(!check_radix_gte(16, c)) return Value::c(C_FALSE); break;
         default: {
           std::ostringstream os;
           os << "number reader encountered unknown character " << c << " while reading number " << string;
           error_desc = os.str();
-          return C_FALSE;
+          return Value::c(C_FALSE);
         }
       }
 
@@ -239,7 +239,7 @@ Value NumberReader::read() {
         std::ostringstream os;
         os << "number reader encountered " << string[i] << " after e in exponent notation but only 0-9 allowed";
         error_desc = os.str();
-        return C_FALSE;
+        return Value::c(C_FALSE);
       }
       exponent_amount *= 10;
       exponent_amount += (string[i] - '0');
@@ -349,7 +349,8 @@ Value XReader::read_error(const std::string& message, unsigned start_line, unsig
   std::ostringstream os;
   os << "Reader error: " << message << std::endl;
   state.print_src_line(os, src);
-  return active_error = state.make_exception(state.globals[State::S_READ_ERROR], os.str());
+  active_error = state.make_exception(state.globals[State::S_READ_ERROR], os.str());
+  return active_error;
 }
 
 Value XReader::unexpected_eof(const std::string& message, unsigned start_line,
@@ -624,11 +625,11 @@ XReader::TokenType XReader::next_token() {
               return TK_ERROR;
             }
 
-            Value sym = state.get_symbol(buffer);
-            Value builtins = state.get_global_value(State::G_BUILTIN_TABLE);
+            SValue sym = state.get_symbol(buffer);
+            SValue builtins = state.get_global_value(State::G_BUILTIN_TABLE);
 
             bool found;
-            Value res = state.table_get(builtins, sym, found);
+            SValue res = state.table_get(builtins, sym, found);
             if(!found) {
               read_error("cfn not defined", ts, tp, position);
               return TK_ERROR;
@@ -765,7 +766,7 @@ Value XReader::read_aux(const std::string& text, unsigned highlight_size, Value 
     bool renaming) {
 
   unsigned cline = token_start_line, cposition = token_start_position;
-  Value x;
+  SValue x;
   AR_FRAME(state, x, symbol);
 
   bool qq_saved = quasiquote_renaming;
@@ -780,7 +781,7 @@ Value XReader::read_aux(const std::string& text, unsigned highlight_size, Value 
     return x;
   }
 
-  x = state.make_pair(x, C_NIL);
+  x = state.make_pair(x, Value::c(C_NIL));
   return make_src_pair(symbol, x, cline, cposition, position - cposition);
 }
 
@@ -788,7 +789,7 @@ Value XReader::read_aux2(const std::string& text, unsigned highlight_size, Value
     Value symbol2) {
   unsigned cline = token_start_line, cposition = token_start_position;
 
-  Value x;
+  SValue x;
   
   AR_FRAME(state, x, symbol, symbol2);
   bool qq_saved = quasiquote_renaming;
@@ -799,7 +800,7 @@ Value XReader::read_aux2(const std::string& text, unsigned highlight_size, Value
     return x;
   }
 
-  x = state.make_pair(x, C_NIL);
+  x = state.make_pair(x, Value::c(C_NIL));
   return make_src_pair(symbol2, x, cline, cposition, position - cposition);
 }
 
@@ -811,7 +812,7 @@ Value XReader::read_expr(TokenType tk) {
     NEXT_TOKEN(tk);
   }
 
-  if(tk == TK_EOF) return C_EOF;
+  if(tk == TK_EOF) return Value::c(C_EOF);
   
   switch(tk) {
     case TK_RBRACKET: 
@@ -821,7 +822,7 @@ Value XReader::read_expr(TokenType tk) {
     case TK_CONSTANT: return return_constant;
 
     case TK_EXPRESSION_COMMENT: {
-      Value x = read_expr(TK_READ_NEXT);
+      SValue x = read_expr(TK_READ_NEXT);
       if(x.is_active_exception()) return x;
       // Check next token
       return read_expr(TK_READ_NEXT);
@@ -830,7 +831,7 @@ Value XReader::read_expr(TokenType tk) {
     // Atomic stuff
     case TK_NUMBER: {
       NumberReader nreader(state, buffer); 
-      Value v = nreader.read();
+      SValue v = nreader.read();
       if(v == C_FALSE) {
         return read_error(nreader.error_desc, token_start_line, token_start_position, position);
       }
@@ -840,7 +841,7 @@ Value XReader::read_expr(TokenType tk) {
     case TK_STRING: 
       return state.make_string(buffer);
     case TK_SYMBOL: {
-      Value sym = state.get_symbol(buffer);
+      SValue sym = state.get_symbol(buffer);
       // Set symbol bits
       if(!sym.symbol_was_read()) {
         sym.heap->set_header_bit(Value::SYMBOL_READ_BIT);
@@ -854,11 +855,11 @@ Value XReader::read_expr(TokenType tk) {
       // #`asdf => (quasiquote (rename 'asdf))
       if(quasiquote_renaming && !sym.symbol_keyword()) {
         AR_FRAME(state, sym);
-        sym = state.make_pair(sym, C_NIL);
+        sym = state.make_pair(sym, Value::c(C_NIL));
         sym = state.make_pair(state.globals[State::S_QUOTE], sym);
-        sym = state.make_pair(sym, C_NIL);
+        sym = state.make_pair(sym, Value::c(C_NIL));
         sym = state.make_pair(state.globals[State::S_RENAME], sym);
-        sym = state.make_pair(sym, C_NIL);
+        sym = state.make_pair(sym, Value::c(C_NIL));
         sym = make_src_pair(state.globals[State::S_UNQUOTE], sym,
           token_start_line, token_start_position, position);
       }
@@ -889,7 +890,7 @@ Value XReader::read_expr(TokenType tk) {
     case TK_QUASIQUOTE_RENAMING: {
       bool saved = quasiquote_renaming;
       quasiquote_renaming = true;
-      Value x = read_aux("after #`", 1, state.globals[State::S_QUASIQUOTE], true);
+      SValue x = read_aux("after #`", 1, state.globals[State::S_QUASIQUOTE], true);
       quasiquote_renaming = saved;
       return x;
 
@@ -1037,7 +1038,7 @@ Value XReader::read_expr(TokenType tk) {
       NEXT_TOKEN(tk2);
 
       if(tk2 == TK_RPAREN) {
-        return C_NIL;
+        return Value::c(C_NIL);
       } else if(tk2 == TK_DOT) {
         return read_error("unexpected . at beginning of list", line, cposition, position);
       }
@@ -1075,10 +1076,10 @@ Value XReader::read_expr(TokenType tk) {
         // If an elt is another pair, it already has as much source information as it's going
         // to get
         if(elt.type() == PAIR) {
-          swap = state.make_pair(elt, C_NIL);
+          swap = state.make_pair(elt, Value::c(C_NIL));
         } else {
           // std::cout << "ELT " << elt << " from " << token_start_position << " to " << position << std::endl;
-          swap = make_src_pair(elt, C_NIL, token_start_line, token_start_position, position - token_start_position); // -1 ?
+          swap = make_src_pair(elt, Value::c(C_NIL), token_start_line, token_start_position, position - token_start_position); // -1 ?
         }
 
         if(tail != C_FALSE) {
@@ -1132,7 +1133,7 @@ Value XReader::read_expr(TokenType tk) {
 
 #undef NEXT_TOKEN
 
-  return C_EOF;
+  return Value::c(C_EOF);
 }
 
 Value XReader::read() {

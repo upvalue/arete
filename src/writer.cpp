@@ -564,7 +564,7 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
         std::string outs;
         (void) Base64::Encode(ins, &outs);
         os2 << '"' << outs << "\" ";
-        os2 << Value(vfn->constants);
+        os2 << SValue(vfn->constants);
         os2 << ')';
       } else {
         os2 << v;
@@ -633,14 +633,14 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
 
   // go through os2's string
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 
 static Value pretty_print_clear_mark(State& state, Value v, PrintState& ps) {
-  if(!v.print_recursive()) return C_UNSPECIFIED;
+  if(!v.print_recursive()) return Value::c(C_UNSPECIFIED);
 
   if(v.heap->get_header_int() == 0) {
-    return C_UNSPECIFIED;
+    return Value::c(C_UNSPECIFIED);
   }
 
   v.heap->set_header_int(0);
@@ -664,12 +664,12 @@ static Value pretty_print_clear_mark(State& state, Value v, PrintState& ps) {
     }
   }
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 
 static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
   if(!v.print_recursive()) {
-    return C_UNSPECIFIED;
+    return Value::c(C_UNSPECIFIED);
   }
 
   unsigned cyc = v.heap->get_header_int();
@@ -701,7 +701,7 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
       printed->insert(std::make_pair(cyc, std::make_pair(printed_count++, false)));
     }
     */
-    return C_UNSPECIFIED;
+    return Value::c(C_UNSPECIFIED);
   } else {
     v.heap->set_header_int(ps.shared_objects_i++);
     AR_ASSERT(v.heap->get_header_int() == ps.shared_objects_i - 1);
@@ -738,7 +738,7 @@ static Value pretty_print_mark(State& state, Value v, PrintState& ps) {
     }
   }
 
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 
 Value State::pretty_print(std::ostream& os, Value v) {

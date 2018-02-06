@@ -136,7 +136,7 @@ DefunGroup jit("jit");
 
 ///// A bunch of silly debugging code
 Value state_make_pair(State* state) {
-  Value pare(state->make_pair(C_FALSE, C_FALSE));
+  SValue pare(state->make_pair());
   std::cout << "state_make_pair returning " << (size_t) pare.bits << std::endl;
   return pare;
 }
@@ -294,13 +294,13 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
     << " tag: " << exc->tag << " src: " << exc->src << " arg1: " << exc->arg1
     << " arg2: " << exc->arg2);
 
-	Value function(exc->function1);
+	SValue function(exc->function1);
 
   AR_ASSERT(function.type() == VMFUNCTION);
 
   std::ostringstream os;
 
-  Value stag;
+  SValue stag;
 
   if(exc->tag == E_TYPE) {
     stag = exc->state->globals[State::S_TYPE_ERROR];
@@ -318,13 +318,13 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
 
     case E_APPLY_CHECK: {
       check_code = false;
-      os << "attempt to apply non-applicable value " << Value(exc->arg1);
+      os << "attempt to apply non-applicable value " << SValue(exc->arg1);
       break;
     }
 
     case E_UNDEFINED: {
       check_code = false;
-      os << "attempt to access undefined variable " << Value(exc->arg1);
+      os << "attempt to access undefined variable " << SValue(exc->arg1);
       break;
     }
 
@@ -351,13 +351,13 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
     case E_FX_SUB: os << "primitive fx- "; break;
     case E_LT: {
       check_code = false;
-      os << "primitive numeric comparison expected argument to be numeric but got " << Value(exc->arg1).type();
+      os << "primitive numeric comparison expected argument to be numeric but got " << SValue(exc->arg1).type();
       break;
     }
     case E_SUB:
     case E_ADD: {
       check_code = false;
-      os << "primitive arithmetic expected argument to be numeric but got " << Value(exc->arg1).type() << ": " << Value(exc->arg1);
+      os << "primitive arithmetic expected argument to be numeric but got " << SValue(exc->arg1).type() << ": " << SValue(exc->arg1);
       break;
     }
     case E_FX_LT: os << "primitive fx< "; break;
@@ -397,7 +397,7 @@ Value generic_apply(State* state, size_t argc, Value* argv, Value fn) {
     std::cout << "argv[0] " << (ptrdiff_t) argv[0].bits << std::endl;
   }
 
-  Value result(state->apply(fn, argc, argv));
+  SValue result(state->apply(fn, argc, argv));
 
   std::cout << state->get_symbol("print").symbol_value().bits << std::endl;
 
@@ -447,7 +447,7 @@ void upvalue_close(State* state, Value upval) {
 }
 
 size_t allocate_upvalue(State* state, Value* local) {
-  Value upvalue = state->gc.allocate(UPVALUE, sizeof(Upvalue));
+  SValue upvalue = state->gc.allocate(UPVALUE, sizeof(Upvalue));
   upvalue.heap->set_header_bit(Value::UPVALUE_POINTER_BIT);
   upvalue.as_unsafe<Upvalue>()->U.local = local;
   AR_LOG_JIT("allocating upvalue " << upvalue.bits << " to stack location " << (size_t) local);
@@ -457,7 +457,7 @@ size_t allocate_upvalue(State* state, Value* local) {
 }
 
 size_t make_closure(State* state, size_t upvalues, Value* stack_start) {
-  Value storage, closure, vmf(stack_start[0]);
+  SValue storage, closure, vmf(stack_start[0]);
   AR_FRAME(*state, vmf, storage, closure, vmf);
   AR_LOG_JIT("make-closure upvalues: " << upvalues << " function: " << vmf);
 
@@ -483,7 +483,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   AR_FN_ARGC_GTE(state, argc, 1);
   AR_FN_ASSERT_ARG(state, 0, "to be a closure or vm function", argv[0].heap_type_equals(CLOSURE) || argv[0].heap_type_equals(VMFUNCTION));
-  Value nfn, vfn, closure;
+  SValue nfn, vfn, closure;
 
   closure = argv[0];
   vfn = closure.closure_unbox();
@@ -1022,7 +1022,7 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
     switch(code[code_offset++]) {
       case OP_PUSH_IMMEDIATE: {
         size_t value = code[code_offset++];
-        AR_LOG_JIT("push-immediate " << Value(value) << " (" << (ptrdiff_t) value << ")");
+        AR_LOG_JIT("push-immediate " << SValue(value) << " (" << (ptrdiff_t) value << ")");
         | mov qword [STACK], (size_t) value
         | add STACK, 8
         break;

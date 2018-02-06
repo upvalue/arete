@@ -171,7 +171,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
         continue;
       }
 
-      tmp = make_pair(x, C_NIL);
+      tmp = make_pair(x, Value::c(C_NIL));
       tmp = eval_list(tmp);
 
       if(tmp.is_active_exception()) {
@@ -319,7 +319,7 @@ int State::enter_cli(int argc_, char* argv[]) {
 
         if(x == C_EOF) break;
 
-        x = make_src_pair(x, C_NIL, x);
+        x = make_src_pair(x, Value::c(C_NIL), x);
         x = eval_list(x);
 
         if(x.is_active_exception()) 

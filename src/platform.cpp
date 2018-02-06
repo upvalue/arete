@@ -56,18 +56,18 @@ Value fn_file_exists(State& state, size_t argc, Value* argv, void* _) {
 #if AR_OS == AR_POSIX
   struct stat st;
   if(stat(argv[0].string_data(), &st) != -1) {
-		return C_TRUE;
+		return Value::c(C_TRUE);
   }
 #else
 	WIN32_FIND_DATA find;
 	HANDLE handle = FindFirstFile(argv[0].string_data(), &find);
 	if(handle != INVALID_HANDLE_VALUE) {
 		FindClose(handle);
-		return C_TRUE;
+		return Value::c(C_TRUE);
 	}
 #endif
 
-  return C_FALSE;
+  return Value::c(C_FALSE);
 }
 AR_DEFUN("file-exists?", fn_file_exists, 1);
 

@@ -36,7 +36,7 @@ Value State::make_env(Value parent, size_t size) {
   AR_FRAME(this, vec, parent);
   vec = make_vector(3 + size);
   vector_append(vec, parent);
-  vector_append(vec, C_FALSE);
+  vector_append(vec, Value::c(C_FALSE));
   return vec;
 }
 
@@ -163,7 +163,7 @@ static State::Global get_form(State& state, Value sym) {
  }
 
 Value State::temps_to_list(size_t limit) {
-  if(temps.size() == 0) return C_NIL;
+  if(temps.size() == 0) return Value::c(C_NIL);
   SValue ret = C_NIL;
   AR_FRAME(this, ret);
   AR_ASSERT(temps.size() >= limit);
@@ -272,7 +272,7 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
       EVAL_CHECK(tmp, exp.cddr());
       env_set(frame.env, name, tmp);
 
-      return C_UNSPECIFIED;
+      return Value::c(C_UNSPECIFIED);
     }
     case S_AND: {
     case S_OR: 
@@ -312,10 +312,10 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
 
       // (lambda () ...)
       if(args == C_NIL) {
-        fn->arguments = C_NIL;
+        fn->arguments = Value::c(C_NIL);
       } else if(args.identifierp()) {
         // Second case: (lambda rest ...)
-        fn->arguments = C_NIL;
+        fn->arguments = Value::c(C_NIL);
         fn->rest_arguments = args;
       } else {
         // Third case: normal arguments list
@@ -355,7 +355,7 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
       return saved_fn;
     }
   }
-  return C_UNSPECIFIED;
+  return Value::c(C_UNSPECIFIED);
 }
 
 /** Generic arity check */
@@ -377,13 +377,13 @@ static Value eval_check_arity(State& state, Value fn, Value exp,
     return state.eval_error(os.str(), exp);
   }
 
-  return C_FALSE;
+  return Value::c(C_FALSE);
 }
 
 // Apply a function. Not used by the interpreter itself but used for generic apply and calls from
 // C/VM functions
 Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
-  Value fn((ptrdiff_t) fnp);
+  SValue fn((ptrdiff_t) fnp);
   AR_TYPE_ASSERT(fn.heap_type_equals(FUNCTION));
 	State::EvalFrame frame;
   SValue fn_args, fn_rest_args, tmp, new_env;
@@ -396,7 +396,7 @@ Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
   // Check argc against args length
   size_t arity = fn_args.list_length();
 
-  tmp = eval_check_arity(state, fn, C_FALSE, argc, arity, arity, fn_rest_args != C_FALSE);
+  tmp = eval_check_arity(state, fn, Value::c(C_FALSE), argc, arity, arity, fn_rest_args != C_FALSE);
   if(tmp.is_active_exception()) return tmp;
 
   state.temps.clear();
@@ -411,7 +411,7 @@ Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
     AR_ASSERT(state.temps.size() > arity);
     actual_args++;
   } else {
-    state.temps.push_back(C_NIL);
+    state.temps.push_back(Value::c(C_NIL));
   }
 
   new_env = state.make_env(fn.function_parent_env(), actual_args);
@@ -456,7 +456,7 @@ tail_call:
       cell = body;
       exp = body;
       single = false;
-      body = C_FALSE;
+      body = Value::c(C_FALSE);
     } else {
       cell = body;
       exp = body.car();
