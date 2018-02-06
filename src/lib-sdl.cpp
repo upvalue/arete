@@ -101,7 +101,7 @@ Value sdl_make_event(State& state, size_t argc, Value* argv, void* closure) {
   AR_FN_ARGC_EQ(state, argc, 0);
   std::cerr << "sdl:make-event" << std::endl;
   std::cerr << module->data.event_tag << std::endl;
-  Value v = state.make_record(module->data.event_tag);
+  SValue v = state.make_record(module->data.event_tag);
   return v;
 }
 AR_DEFUN("make-event", sdl_make_event, 0);
@@ -355,7 +355,7 @@ AR_DEFUN("delay", sdl_delay, 1);
 //
 
 Value ttf_font_finalizer(State& state, size_t argc, Value* argv, void* sfontp) {
-  Value sfont((HeapValue*) sfontp);
+  SValue sfont((HeapValue*) sfontp);
   TTF_Font** font = sfont.record_data<TTF_Font*>();
   if(*font) {
     TTF_CloseFont(*font);
@@ -380,7 +380,7 @@ Value sdl_open_font(State& state, size_t argc, Value* argv, void* closure) {
   TTF_Font* cfont = TTF_OpenFont(path.c_str(), (int)argv[1].fixnum_value());
 
   //Value v = state.make_record(sdl_ttf_font_tag);
-  Value v = state.make_record(font_tag);
+  SValue v = state.make_record(font_tag);
 
   (*state.record_data<TTF_Font*>(font_tag, v)) = cfont;
 
@@ -477,7 +477,7 @@ Value sdl_add_timer(State& state, size_t argc, Value* argv, void* closure) {
 
   CHECK_SDL(id);
 
-  Value rec = state.make_record(timer_tag);
+  SValue rec = state.make_record(timer_tag);
 
   TimerData* data = state.record_data<TimerData>(timer_tag, rec);
   data->symbol = symbol_handle;
@@ -516,7 +516,7 @@ Value sdl_remove_timer(State& state, size_t argc, Value* argv, void* closure) {
 AR_DEFUN("remove-timer", sdl_remove_timer, 1);
 
 Value timer_finalizer(State& state, size_t argc, Value* argv, void* timerp) {
-  Value timer((HeapValue*) timerp);
+  SValue timer((HeapValue*) timerp);
   TimerData* timer_data = timer.record_data<TimerData>();
   if(timer_data->symbol != nullptr) {
     delete timer_data->symbol;
@@ -546,7 +546,7 @@ void load_sdl(State& state) {
   state.record_type_set_finalizer(timer_tag, timer_finalizer);
 
   // Set up module information
-  Value module = state.make_record(state.globals[sdl_module_tag]);
+  SValue module = state.make_record(state.globals[sdl_module_tag]);
   SDLModuleData* data = state.record_data<SDLModuleData>(sdl_module_tag, module);
   data->font_tag = font_tag;
   data->event_tag = event_tag;

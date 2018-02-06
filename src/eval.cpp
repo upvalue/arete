@@ -32,7 +32,7 @@
 namespace arete {
 
 Value State::make_env(Value parent, size_t size) {
-  Value vec;
+  SValue vec;
   AR_FRAME(this, vec, parent);
   vec = make_vector(3 + size);
   vector_append(vec, parent);
@@ -130,8 +130,7 @@ Value State::eval_error(const std::string& msg, Value exp) {
 struct State::EvalFrame {
   EvalFrame(): tco_lost(0) {}
 
-  Value env;
-  Value fn_name;
+  SValue env, fn_name;
   /** count of frames lost due to tail call optimization, for stack traces */
   size_t tco_lost;
 };
@@ -165,7 +164,7 @@ static State::Global get_form(State& state, Value sym) {
 
 Value State::temps_to_list(size_t limit) {
   if(temps.size() == 0) return C_NIL;
-  Value ret = C_NIL;
+  SValue ret = C_NIL;
   AR_FRAME(this, ret);
   AR_ASSERT(temps.size() >= limit);
   for(size_t i = temps.size(); i != limit; i--) {
@@ -178,7 +177,7 @@ Value State::temps_to_list(size_t limit) {
 Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
   size_t length = exp.list_length();
 
-  Value tmp;
+  SValue tmp;
 
   AR_FRAME(this, frame.env, frame.fn_name, exp, tmp);
 
@@ -192,7 +191,7 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
       if(length < 3)
         return eval_error("define expects at least two arguments", exp);
 
-      Value name = exp.cadr(), body = exp.caddr(), args;
+      SValue name = exp.cadr(), body = exp.caddr(), args;
       AR_FRAME(this, name, body, args);
     define_lambda:
       // Special case: define lambda, build lambda in place
@@ -251,7 +250,7 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
       if(length != 3) 
         return eval_error("set! expects exactly three arguments", exp);
 
-      Value name = exp.cadr(), body = exp.caddr(), env_search = frame.env;
+      SValue name = exp.cadr(), body = exp.caddr(), env_search = frame.env;
       AR_FRAME(this, name, body, env_search);
 
       if(!name.heap_type_equals(SYMBOL)) {
@@ -297,7 +296,7 @@ Value State::eval_form(EvalFrame frame, Value exp, unsigned type) {
       return tmp;
     }
     case S_LAMBDA: {
-      Value fn_env, args, saved_fn, argi, arg;
+      SValue fn_env, args, saved_fn, argi, arg;
       AR_FRAME(this, fn_env, args, argi, saved_fn, arg);
       Function* fn = static_cast<Function*>(gc.allocate(FUNCTION, sizeof(Function)));
 
@@ -387,7 +386,7 @@ Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
   Value fn((ptrdiff_t) fnp);
   AR_TYPE_ASSERT(fn.heap_type_equals(FUNCTION));
 	State::EvalFrame frame;
-  Value fn_args, fn_rest_args, tmp, new_env;
+  SValue fn_args, fn_rest_args, tmp, new_env;
 
   frame.fn_name = fn.function_name();
   fn_args = fn.function_arguments();
@@ -442,7 +441,7 @@ Value State::eval_body(EvalFrame frame, Value body, bool single) {
 
     return eval_error(os.str());
   }
-  Value exp, cell, tmp;
+  SValue exp, cell, tmp;
 
 tail_call:
   bool tail = false, tco_enabled = get_global_value(G_TCO_ENABLED) != C_FALSE;
@@ -454,7 +453,8 @@ tail_call:
   while(single || body.heap_type_equals(PAIR)) {
     EVAL_CHECK(exp, exp);
     if(single) { 
-      exp = cell = body;
+      cell = body;
+      exp = body;
       single = false;
       body = C_FALSE;
     } else {
@@ -473,13 +473,13 @@ tail_call:
           continue;
         } else {
 
-        Value res = env_lookup(frame.env, exp);
+        SValue res = env_lookup(frame.env, exp);
 
           if(res == C_UNDEFINED) {
             std::ostringstream os;
             os << "reference to undefined variable " << exp;
             // EVAL_TRACE(car, fn_name);
-            Value ret = eval_error(os.str(), cell);
+            SValue ret = eval_error(os.str(), cell);
             return ret;
           } else if(res == C_SYNTAX) {
             std::stringstream os;
@@ -501,7 +501,7 @@ tail_call:
         // First we look it up in the env 
         // In case a renamed variable has been introduced as a binding
         // e.g (lambda ((rename 'var )) (rename 'var))
-        Value chk = env_lookup(frame.env, exp);
+        SValue chk = env_lookup(frame.env, exp);
 
         if(exp.rename_env() != C_FALSE) {
           std::cerr << "interpreter encountered a non-toplevel rename, but this should be gensymed " << exp << std::endl;
@@ -528,7 +528,7 @@ tail_call:
           return eval_error("dotted list in source code", exp);
         }
 
-        Value kar = exp.car(), res;
+        SValue kar = exp.car(), res;
         Type kar_type = kar.type();
 
         if(kar_type == RENAME)
@@ -578,7 +578,7 @@ tail_call:
               continue;
             }
             case S_COND: {
-              Value pred, then, lst = exp.cdr();
+              SValue pred, then, lst = exp.cdr();
               AR_FRAME(this, pred, then, lst);
               exp = C_UNSPECIFIED;
               while(lst.heap_type_equals(PAIR)) {
@@ -640,7 +640,7 @@ tail_call:
           if(AR_LIKELY(tmp.procedurep())) {
             if(tmp.heap_type_equals(FUNCTION)) {
               EvalFrame frame2;
-              Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body;
+              SValue fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body;
               AR_ASSERT(fn.as_unsafe<Function>()->procedure_addr);
               ListAppender rest;
               frame2.fn_name = tmp.function_name();
@@ -705,7 +705,7 @@ tail_call:
                 continue;
               }
             } else {
-              Value fn = tmp, fn_args, args = exp.cdr();
+              SValue fn = tmp, fn_args, args = exp.cdr();
               AR_FRAME(this, fn, fn_args, args);
 
               size_t argc = args.list_length();
@@ -713,7 +713,7 @@ tail_call:
               if(argc <= 10) {
                 // Allocate arguments on stack if possible
                 // This actually reduces collections during bootstrap from 40 to 30.
-                Value argv[10];
+                SValue argv[10];
                 {
                   AR_FRAME(this, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6],
                     argv[7], argv[8], argv[9]);
@@ -767,7 +767,7 @@ Value State::eval_exp(Value exp) {
 }
 
 Value State::eval_list(Value lst, bool expand, Value env) {
-  Value elt, lst_top, tmp, compiler, expander, vfn;
+  SValue elt, lst_top, tmp, compiler, expander, vfn;
   EvalFrame frame;
   frame.env = env;
   lst_top = lst;
@@ -788,7 +788,7 @@ Value State::eval_list(Value lst, bool expand, Value env) {
       tmp = eval_body(frame, tmp, true);
       if(lst.cdr() == C_NIL) return tmp;
     } else {
-      Value argv[1] = {tmp};
+      SValue argv[1] = {tmp};
       tmp = apply(compiler, 1, argv);
       if(tmp.is_active_exception()) return tmp;
 
@@ -827,13 +827,13 @@ Value State::apply_vector_storage(Value fn, Value vector_storage) {
 }
 
 Value State::expand_expr(Value exp) {
-  Value expand = get_global_value(G_EXPANDER);
+  SValue expand = get_global_value(G_EXPANDER);
 
   // Comment out to disable macroexpansion
   if(expand != C_UNDEFINED) {
-    Value sym, mod, saved = C_FALSE;
+    SValue sym, mod, saved = C_FALSE;
     AR_FRAME(this, expand, exp, sym, saved);
-    Value argv[2] = {exp, get_global_value(G_CURRENT_MODULE)};
+    SValue argv[2] = {exp, get_global_value(G_CURRENT_MODULE)};
 
     // Save the original expression for source code information
     saved = exp;

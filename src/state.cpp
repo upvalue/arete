@@ -113,7 +113,7 @@ void State::boot() {
 
     // TODO: This is suitably confusing and there should probably be multiple vectors:
     // for symbols used directly, for symbols used to store values, and for other values (strings)
-  Value s;
+  SValue s;
   for(size_t i = 0; i != G_END; i++) {
     if(i >= G_END) {
       s = make_string(_symbols[i]);
@@ -175,7 +175,7 @@ std::string State::source_info(const SourceLocation loc, Value fn_name,
 }
 
 void State::register_feature(const std::string& name) {
-  Value pare, sym;
+  SValue pare, sym;
   AR_FRAME(*this, pare, sym);
   pare = get_global_value(G_FEATURES);
   sym = get_symbol(name);
@@ -183,7 +183,7 @@ void State::register_feature(const std::string& name) {
 }
 
 Value State::load_file(const std::string& path) {
-  Value x, tmp;
+  SValue x, tmp;
   AR_FRAME(this, x, tmp);
 
   x = slurp_file(path);

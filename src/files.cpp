@@ -10,7 +10,7 @@ namespace arete {
 DefunGroup files("files");
 
 Value State::make_input_file_port(const char* cpath, std::istream* fs) {
-  Value path = make_string(cpath);
+  SValue path = make_string(cpath);
   AR_FRAME(this, path);
   FilePort* port = static_cast<FilePort*>(gc.allocate(FILE_PORT, sizeof(FilePort)));
   port->set_header_bit(Value::FILE_PORT_INPUT_BIT);
@@ -24,7 +24,7 @@ Value State::make_input_file_port(const char* cpath, std::istream* fs) {
 }
 
 Value State::make_output_file_port(const char* cpath, std::ostream* fs) {
-  Value path = make_string(cpath);
+  SValue path = make_string(cpath);
   AR_FRAME(this, path);
   FilePort* port = static_cast<FilePort*>(gc.allocate(FILE_PORT, sizeof(FilePort)));
   port->set_header_bit(Value::FILE_PORT_OUTPUT_BIT);
@@ -51,7 +51,7 @@ Value State::make_input_file_port(Value path) {
   port->path = string_copy(path);
   port->input_handle = fs;
   gc.finalizers.push_back(port);
-  Value res = port;
+  SValue res = port;
   AR_ASSERT(res.file_port_readable());
   return res;
 }
@@ -72,7 +72,7 @@ Value State::make_output_file_port(Value path) {
   port->path = string_copy(path);
   port->output_handle = fs;
   gc.finalizers.push_back(port);
-  Value res = port;
+  SValue res = port;
   AR_ASSERT(res.file_port_writable());
   return res;
 }
@@ -83,7 +83,7 @@ Value fn_open_output_string(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 0);
 
   std::ostringstream* os = new std::ostringstream;
-  Value path = state.make_string("<string>");
+  SValue path = state.make_string("<string>");
   FilePort* port = static_cast<FilePort*>(state.gc.allocate(FILE_PORT, sizeof(FilePort)));
   port->set_header_bit(Value::FILE_PORT_OUTPUT_BIT);
   port->set_header_bit(Value::FILE_PORT_STRING_BIT);
@@ -100,7 +100,7 @@ Value fn_open_input_string(State& state, size_t argc, Value* argv, void* v) {
 
 
   std::istringstream* is = new std::istringstream;
-  Value path = state.make_string("<string>");
+  SValue path = state.make_string("<string>");
   FilePort* port = static_cast<FilePort*>(state.gc.allocate(FILE_PORT, sizeof(FilePort)));
   port->set_header_bit(Value::FILE_PORT_INPUT_BIT);
   port->set_header_bit(Value::FILE_PORT_STRING_BIT);
@@ -284,7 +284,7 @@ Value fn_write_char(State& state, size_t argc, Value* argv, void* v) {
 
   std::ostream* os = port.file_port_output_handle();
 
-	Value v2(state.globals[State::S_FILE_ERROR]);
+	SValue v2(state.globals[State::S_FILE_ERROR]);
 
   if(!os)
     return state.make_exception(v2, "write-char called against closed port");
@@ -386,7 +386,7 @@ Value fn_source_name(State& state, size_t argc, Value* argv, void* v) {
 AR_DEFUN("source-name", fn_source_name, 1);
 
 Value fn_print(State& state, size_t argc, Value* argv, void* v) {
-  Value chk = fn_print_impl(state, argc, argv, std::cout, true, false);
+  SValue chk = fn_print_impl(state, argc, argv, std::cout, true, false);
   std::cout << std::endl;
   return chk;
 }
@@ -394,7 +394,7 @@ AR_DEFUN("print", fn_print, 0, 0, true);
 
 Value fn_print_string(State& state, size_t argc, Value* argv, void* v) {
   std::ostringstream os;
-  Value chk = fn_print_impl(state, argc, argv, os, true, false);
+  SValue chk = fn_print_impl(state, argc, argv, os, true, false);
   if(chk.is_active_exception()) return chk;
   return state.make_string(os.str());
 }
@@ -402,7 +402,7 @@ AR_DEFUN("print-string", fn_print_string, 0, 0, true);
 
 Value fn_print_string_no_space(State& state, size_t argc, Value* argv, void* v) {
   std::ostringstream os;
-  Value chk = fn_print_impl(state, argc, argv, os, false, false);
+  SValue chk = fn_print_impl(state, argc, argv, os, false, false);
   if(chk.is_active_exception()) return chk;
   return state.make_string(os.str());
 }
@@ -410,14 +410,14 @@ AR_DEFUN("print-string-no-space", fn_print_string_no_space, 0, 0, true);
 
 Value fn_print_symbol(State& state, size_t argc, Value* argv, void* v) {
   std::ostringstream os;
-  Value chk = fn_print_impl(state, argc, argv, os, false, false);
+  SValue chk = fn_print_impl(state, argc, argv, os, false, false);
   if(chk.is_active_exception()) return chk;
   return state.get_symbol(os.str());
 }
 AR_DEFUN("print-symbol", fn_print_symbol, 0, 0, true);
 
 static Value fn_pretty_print(State& state, size_t argc, Value* argv, void* v) {
-  Value chk = fn_print_impl(state, argc, argv, std::cout, true, true);
+  SValue chk = fn_print_impl(state, argc, argv, std::cout, true, true);
   std::cout << std::endl;
   return chk;
 }
@@ -432,7 +432,7 @@ Value State::slurp_file(const std::string& path) {
     return make_exception(globals[State::S_READ_ERROR], os.str());
   }
 
-  Value x, lst = C_NIL;
+  SValue x, lst = C_NIL;
 
   AR_FRAME(*this, x, lst);
 
@@ -489,7 +489,7 @@ Value fn_load_file(State& state, size_t argc, Value* argv, void* v) {
   
   std::string path(argv[0].string_data());
 
-  Value mod, res;
+  SValue mod, res;
   AR_FRAME(state, mod, res);
   
   mod = state.get_global_value(State::G_CURRENT_MODULE);

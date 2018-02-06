@@ -190,7 +190,7 @@ std::ostream& operator<<(std::ostream& os, Value v) {
     case FUNCTION: {
       // TODO this should include source information
       os << "#<" << (v.function_is_macro() ? "macro" : "function") << ' ';
-      Value name = v.function_name();
+      SValue name = v.function_name();
       if(name == C_FALSE) {
         os << (void*) v.bits;
       } else {
@@ -242,7 +242,7 @@ std::ostream& operator<<(std::ostream& os, Value v) {
     }
 
     case FILE_PORT: {
-      Value path = v.file_port_path();
+      SValue path = v.file_port_path();
       os << "#<";
       if(v.file_port_readable()) {
         os << "input-file-port";
@@ -263,7 +263,7 @@ std::ostream& operator<<(std::ostream& os, Value v) {
     }
       return os << "#< " << v.bits << ">";
     case RENAME: {
-      Value env = v.rename_env(),
+      SValue env = v.rename_env(),
         sym = v.rename_gensym() == C_FALSE ? v.rename_expr() : v.rename_gensym();
 
       if(env == C_FALSE) {
@@ -395,7 +395,7 @@ void State::print_exception(std::ostream& os, Value exc) {
   } else if(exc.exception_tag() == globals[State::S_EXPAND_ERROR]
     || exc.exception_tag() == globals[State::S_SYNTAX_ERROR]) {
 
-    Value irritants = exc.exception_irritants();
+    SValue irritants = exc.exception_irritants();
 
     (void) irritants;
 
@@ -467,11 +467,11 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
       // LISTS
 
       os2 << '(';
-      Value v2;
+      SValue v2;
 
       unsigned indent_after = 0, attempt_indent = 0;
 
-      Value kar = v.car();
+      SValue kar = v.car();
       if(kar.heap_type_equals(RENAME)) {
         kar = kar.rename_expr();
       }
@@ -532,7 +532,7 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
       // RECORDS
       os2 << "#<";
 
-      Value type = v.record_type();
+      SValue type = v.record_type();
 
       os2 << type.record_type_name().string_data();
 
@@ -751,7 +751,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
   ps.row_width = 120;
   ps.indent = 0;
 
-  Value table_max = get_global_value(G_PRINT_TABLE_MAX);
+  SValue table_max = get_global_value(G_PRINT_TABLE_MAX);
 
   if(table_max.fixnump() && table_max.fixnum_value() > 0) {
     ps.table_max = (size_t) table_max.fixnum_value();
@@ -759,7 +759,7 @@ Value State::pretty_print(std::ostream& os, Value v) {
 
   ps.printed = printed;
   // Right now printing can't return an exception, but it might if we allow users to extend this
-  Value _;
+  SValue _;
 
   _ = pretty_print_mark(*this, v, ps);
 
@@ -793,7 +793,7 @@ void State::print_table_verbose(Value tbl) {
     " max_entries: " << table->max_entries << std::endl;
 
   for(size_t i = 0; i != table->chains->length; i++) {
-    Value chain = table->chains->data[i];
+    SValue chain = table->chains->data[i];
     if(chain != C_FALSE) {
       std::cout << "  chain " << i << ": ";
       std::cout << chain << std::endl;

@@ -92,7 +92,7 @@ ptrdiff_t State::hash_index(Value table, Value key, bool& unhashable) {
 }
   
 void State::table_grow(Value table) {
-  Value old_chains_ref, chain;
+  SValue old_chains_ref, chain;
   AR_FRAME(this, table, old_chains_ref, chain);
   old_chains_ref = table.as<Table>()->chains;
   table_setup(table, table.as<Table>()->size_log2 + 1);
@@ -119,7 +119,7 @@ Value State::table_get_cell(Value table, Value key) {
   bool unhashable;
   ptrdiff_t index = hash_index(table, key, unhashable);
   if(unhashable) return unhashable_error(key);
-  Value chain = C_FALSE;
+  SValue chain = C_FALSE;
   chain = table.as<Table>()->chains->data[index];
   while(chain.heap_type_equals(PAIR)) {
     if(equals(chain.caar(), key)) {
@@ -131,7 +131,7 @@ Value State::table_get_cell(Value table, Value key) {
 }
 
 Value State::table_set(Value table, Value key, Value value) {
-  Value cell = table_get_cell(table, key);
+  SValue cell = table_get_cell(table, key);
   if(cell.is_active_exception()) return cell;
   if(cell != C_FALSE) {
     cell.set_cdr(value);
@@ -143,7 +143,7 @@ Value State::table_set(Value table, Value key, Value value) {
 }
 
 Value State::table_get(Value table, Value key, bool& found) {
-  Value cell = table_get_cell(table, key);
+  SValue cell = table_get_cell(table, key);
   if(cell != C_FALSE) {
     found = true;
     return cell.cdr();
@@ -155,7 +155,7 @@ Value State::table_get(Value table, Value key, bool& found) {
 
 Value State::table_insert(Value table, Value key, Value value) {
   AR_TYPE_ASSERT(table.type() == TABLE);
-  Value chain;
+  SValue chain;
   AR_FRAME(this, table, key, value, chain);
 
   Table* htable = table.as<Table>();
@@ -194,7 +194,7 @@ Value State::table_insert(Value table, Value key, Value value) {
 
 
 Value State::make_table(size_t size_log2 ) {
-  Value table = static_cast<Table*>(gc.allocate(TABLE, sizeof(Table)));
+  SValue table = static_cast<Table*>(gc.allocate(TABLE, sizeof(Table)));
   AR_FRAME(this, table);
 
   table_setup(table, size_log2);
@@ -223,7 +223,7 @@ Value fn_table_ref(State& state, size_t argc, Value* argv, void* v) {
   }
 
   bool found;
-  Value result = state.table_get(argv[0], argv[1], found);
+  SValue result = state.table_get(argv[0], argv[1], found);
   if(!found) return argc == 3 ? argv[2] : C_FALSE;
   return result;
 }
@@ -247,11 +247,11 @@ Value fn_table_delete(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
   AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
 
-  Value tbl = argv[0], key = argv[1];
+  SValue tbl = argv[0], key = argv[1];
   bool unhashable;
 
   ptrdiff_t index = state.hash_index(tbl, key, unhashable);
-  Value chain = C_FALSE, prev = C_FALSE;
+  SValue chain = C_FALSE, prev = C_FALSE;
 
   chain = tbl.as<Table>()->chains->data[index];
   
@@ -285,12 +285,12 @@ static Value fn_table_map_impl(const char* fn_name, bool map, State& state, size
   AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
   AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
 
-  Value fn = argv[0], lst = C_NIL, tmp;
+  SValue fn = argv[0], lst = C_NIL, tmp;
   TableIterator ti(argv[1]);
   AR_FRAME(state, tmp, fn, lst, ti.table, ti.chain, ti.cell);
 
   while(++ti) {
-    Value argv[2] = {ti.key(), ti.value()};
+    SValue argv[2] = {ti.key(), ti.value()};
     tmp = state.apply(fn, 2, argv);
     if(tmp.is_active_exception()) return tmp;
     if(map) {
@@ -315,8 +315,8 @@ Value fn_table_copy(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
 
-  Value table = argv[0];
-  Value copy, chain;
+  SValue table = argv[0];
+  SValue copy, chain;
 
   AR_FRAME(state, table, copy);
 

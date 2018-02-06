@@ -914,7 +914,7 @@ Value XReader::read_expr(TokenType tk) {
         return read_error(os.str(), token_start_line, token_start_position, position);
       }
 
-      Value expr = read_expr(TK_READ_NEXT);
+      SValue expr = read_expr(TK_READ_NEXT);
 
       if(expr.is_active_exception()) return expr;
 
@@ -936,7 +936,7 @@ Value XReader::read_expr(TokenType tk) {
     }
 
     case TK_VECTOR_OPEN: {
-      Value vec, x, tmp;
+      SValue vec, x, tmp;
 
       unsigned cline = line, cposition = position - 2;
 
@@ -976,7 +976,7 @@ Value XReader::read_expr(TokenType tk) {
         return read_error("unexpected , at beginning of table", line, cposition, position);
       }
 
-      Value table, key, value;
+      SValue table, key, value;
       AR_FRAME(state, table, key, value)
 
       table = state.make_table();
@@ -1042,7 +1042,7 @@ Value XReader::read_expr(TokenType tk) {
         return read_error("unexpected . at beginning of list", line, cposition, position);
       }
 
-      Value head = C_NIL, tail = C_FALSE, elt = C_FALSE, swap = C_FALSE, tmp = C_FALSE;
+      SValue head = C_NIL, tail = C_FALSE, elt = C_FALSE, swap = C_FALSE, tmp = C_FALSE;
       AR_FRAME(state, head, tail, elt, swap);
 
       // (a b c)

@@ -33,13 +33,13 @@ bool Value::procedure_arity_equals(size_t argc) const {
 }
 
 Value State::get_symbol(Global sym) {
-  Value sym2 = (globals.at((size_t) sym));
+  SValue sym2 = (globals.at((size_t) sym));
   AR_ASSERT(sym2.type() == SYMBOL);
   return sym2;
 }
 
 Value State::get_global_value(Global sym) {
-  Value s = globals.at((size_t) sym);
+  SValue s = globals.at((size_t) sym);
   return s.as<Symbol>()->value;
 }
 
@@ -106,7 +106,7 @@ Value State::get_symbol(const std::string& name) {
     Symbol* heap = static_cast<Symbol*>(gc.allocate(SYMBOL, sizeof(Symbol)));
     AR_ASSERT(heap->get_type() == SYMBOL);
 
-    Value sym = heap, string;
+    SValue sym = heap, string;
     AR_FRAME(this, sym, string);
 
 
@@ -131,7 +131,7 @@ Value State::get_symbol(const std::string& name) {
 Value State::get_symbol(Value name) {
   AR_TYPE_ASSERT(name.type() == STRING);
   std::string cname(name.string_data());
-  Value ret= get_symbol(cname);
+  SValue ret = get_symbol(cname);
   AR_ASSERT(ret.type() == SYMBOL);
   return ret;
 }
@@ -140,7 +140,7 @@ Value State::gensym(Value sym) {
   std::ostringstream os;
   os << "#:" << sym.symbol_name_data() << gensym_counter;
   gensym_counter++;
-  Value sym2 = get_symbol(os.str());
+  SValue sym2 = get_symbol(os.str());
   sym2.heap->set_header_bit(Value::SYMBOL_GENSYM_BIT);
   return sym2;
 }
@@ -176,7 +176,7 @@ Value State::make_rename(Value expr, Value env) {
 
 size_t State::register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
     Value field_names, Value parent) {
-  Value name = C_FALSE, tipe = C_FALSE;
+  SValue name = C_FALSE, tipe = C_FALSE;
 
   AR_FRAME(this, tipe, name, field_names, parent);
 
@@ -210,7 +210,7 @@ void State::record_set(Value rec_, unsigned field, Value value) {
 
 /** Make an exception from Scheme values */
 Value State::make_exception(Value tag, Value message, Value irritants) {
-  Value exc;
+  SValue exc;
   AR_FRAME(this, tag, message, irritants, exc);
   Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
   exc.heap = heap;
@@ -224,7 +224,7 @@ Value State::make_exception(Value tag, Value message, Value irritants) {
 
 /** Make an exception with a C++ std::string message */
 Value State::make_exception(Value tag, const std::string& cmessage, Value irritants) {
-  Value message;
+  SValue message;
   AR_FRAME(this, tag, message, irritants);
   AR_ASSERT(gc.live(tag));
   AR_ASSERT(gc.live(irritants));
@@ -235,7 +235,7 @@ Value State::make_exception(Value tag, const std::string& cmessage, Value irrita
 /** Make an exception with a C++ std::string message and tag */
 Value State::make_exception(const std::string& ctag, const std::string& cmessage,
     Value irritants) { 
-  Value tag;
+  SValue tag;
   AR_FRAME(this, tag, irritants);
   tag = get_symbol(ctag);
   return make_exception(tag, cmessage, irritants);
@@ -252,7 +252,7 @@ Value State::make_record(Value tipe) {
   unsigned field_count = tipe.as<RecordType>()->field_count;
   unsigned data_size = tipe.as<RecordType>()->data_size;
 
-  Value record = static_cast<Record*>(
+  SValue record = static_cast<Record*>(
     gc.allocate(RECORD, sizeof(Record) + 
       ((field_count * sizeof(Value)) - sizeof(Value))
       + data_size));
@@ -357,8 +357,8 @@ void DefunGroup::install(State& state) {
 }
 
 Value State::make_module(const std::string& name) {
-  Value key, val;
-  Value module = make_table();
+  SValue key, val;
+  SValue module = make_table();
   
   // Create "module-stage" field and mark module as fully expanded
   key = make_string("module-stage");
@@ -384,7 +384,7 @@ Value State::make_module(const std::string& name) {
 void State::module_define(Value module, const std::string& ckey, Value value) {
   AR_TYPE_ASSERT(module.heap_type_equals(TABLE));
 
-  Value key, exports;
+  SValue key, exports;
   AR_FRAME(this, module, key, exports, value);
 
   key = make_string("module-exports");
@@ -397,7 +397,7 @@ void State::module_define(Value module, const std::string& ckey, Value value) {
 }
 
 void DefunGroup::install_module(State& state, const std::string& cname, Value closure) {
-  Value module, cfn, sym, name, exports, builtins;
+  SValue module, cfn, sym, name, exports, builtins;
   bool found;
   AR_FRAME(state, module, closure, exports, builtins, cfn, sym, name);
   module = state.make_module(cname);
@@ -460,14 +460,14 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
   if(variable_arity)
     cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
 
-  Value v(cfn);
+  SValue v(cfn);
   v.procedure_install(addr);
 
   return cfn;
 }
 
 void State::defun_core(const std::string& cname, c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
-  Value cfn, sym, name, builtins;
+  SValue cfn, sym, name, builtins;
 
   AR_FRAME(this, cfn, sym, name, builtins);
   AR_ASSERT(addr);
@@ -496,7 +496,7 @@ Value State::make_pair(Value car, Value cdr, size_t size) {
 }
 
 Value State::make_src_pair(Value car, Value cdr, SourceLocation& loc) {
-  Value pare = C_FALSE;
+  SValue pare = C_FALSE;
   AR_FRAME(this, pare, car, cdr);
   pare = make_pair(car, cdr, sizeof(Pair));
   pare.heap->set_header_bit(Value::PAIR_SOURCE_BIT);
@@ -518,7 +518,7 @@ Value State::make_src_pair(Value car, Value cdr, Value src) {
 }
 
 size_t Value::list_length() {
-  Value check(bits);
+  SValue check(bits);
   if(check == C_NIL || !check.heap_type_equals(PAIR)) return 0;
   size_t len = 0;
   while(true) {
@@ -536,7 +536,7 @@ bool Value::listp() {
 }
 
 Value Value::list_ref(size_t n) const {
-  Value check(bits);
+  SValue check(bits);
   size_t i = 0;
   while(check.type() == PAIR && i++ != n) {
     check = check.cdr();
@@ -566,11 +566,11 @@ Value State::make_vector_storage(size_t capacity) {
 }
 
 Value State::make_vector(size_t capacity) {
-  Value storage(C_FALSE);
+  SValue storage(C_FALSE);
 
   AR_FRAME(this, storage);
   storage = make_vector_storage(capacity);
-  Value vec = gc.allocate(VECTOR, sizeof(Vector));
+  SValue vec = gc.allocate(VECTOR, sizeof(Vector));
   vec.as_unsafe<Vector>()->storage = storage;
   vec.as_unsafe<Vector>()->capacity = capacity;
 
@@ -580,7 +580,7 @@ Value State::make_vector(size_t capacity) {
 Value State::make_vector(Value vector_storage) {
   AR_FRAME(this, vector_storage);
 
-  Value vec = gc.allocate(VECTOR, sizeof(Vector));
+  SValue vec = gc.allocate(VECTOR, sizeof(Vector));
 
   vec.as_unsafe<Vector>()->storage = vector_storage;
   vec.as_unsafe<Vector>()->capacity = vector_storage.as_unsafe<VectorStorage>()->length;
@@ -606,7 +606,7 @@ void State::vector_append(Value vector, Value value) {
   AR_ASSERT(store->length <= vector.as_unsafe<Vector>()->capacity);
   if(store->length == vector.as_unsafe<Vector>()->capacity) {
 
-    Value storage = store, new_storage;
+    SValue storage = store, new_storage;
     AR_FRAME(this, vector, value, storage, new_storage);
 
     size_t ncap = vector.as_unsafe<Vector>()->capacity * 2;

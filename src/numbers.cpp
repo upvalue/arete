@@ -95,7 +95,7 @@ AR_DEFUN("/", fn_div, 2, 2, true);
         } \
       } \
     } \
-    Value lhs = argv[argc-2], rhs = argv[argc-1]; \
+    SValue lhs = argv[argc-2], rhs = argv[argc-1]; \
     if(lhs.type() == FLONUM && rhs.type() == FLONUM) \
       return Value::make_boolean(lhs.flonum_value() operator rhs.flonum_value()); \
     else if(lhs.type() == FLONUM && rhs.type() == FIXNUM) \
@@ -421,7 +421,7 @@ Value fn_string_to_number(State& state, size_t argc, Value* argv, void* _) {
   }
 
 
-  Value v = reader.read();
+  SValue v = reader.read();
   if(v == C_FALSE) {
     return state.make_exception("read", reader.error_desc);
   }

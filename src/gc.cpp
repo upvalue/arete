@@ -341,7 +341,7 @@ void GCSemispace::run_finalizers(bool finalize_all) {
 
   AR_LOG_GC("checking " << finalizers.size() << " finalizable objects");
   for(size_t i = 0; i != finalizers.size(); i++) {
-    Value f = finalizers[i];
+    SValue f = finalizers[i];
     // This object is dead, finalize it
     // The pointer itself in finalizers is not updated, but if the object is dead, its
     // heap-allocated type should now be reserved

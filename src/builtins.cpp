@@ -84,7 +84,7 @@ AR_DEFUN("cons", fn_cons, 2);
 Value fn_cons_source(State& state, size_t argc, Value* argv, void* v) {
   const char* fn_name = "cons-source";
   AR_FN_ARGC_EQ(state, argc, 3);
-  Value pare, src;
+  SValue pare, src;
   src = argv[0];
   Type type = src.type();
 
@@ -115,7 +115,7 @@ Value fn_cons_star(State& state, size_t argc, Value* argv, void* v) {
     state.temps.push_back(argv[i]);
   }
 
-  Value lst, elt;
+  SValue lst, elt;
   AR_FRAME(state, lst, elt);
   elt = argv[argc-1];
   for(size_t i = state.temps.size(); i != 0; i--) {
@@ -129,7 +129,7 @@ AR_DEFUN("cons*", fn_cons_star, 1, 1, true);
 Value fn_append1(State& state, size_t argc, Value* argv, void* v) {
   //static const char* fn_name = "append1";
 
-  Value lst1 = argv[0], lst2 = argv[1];
+  SValue lst1 = argv[0], lst2 = argv[1];
   ListAppender nlst;
   if(lst1 == C_NIL) return lst2;
   AR_FRAME(state, lst1, lst2, nlst.head, nlst.tail);
@@ -166,7 +166,7 @@ Value fn_list_source(State& state, size_t argc, Value* argv, void* v) {
     loc = argv[0].pair_src();
     have_source = true;
   }
-  Value lst = state.temps_to_list();
+  SValue lst = state.temps_to_list();
 
   if(have_source) {
     lst = state.make_src_pair(lst.car(), lst.cdr(), loc);
@@ -187,7 +187,7 @@ Value fn_length(State& state, size_t argc, Value* argv, void* v) {
 
   size_t length = 0;
 
-  Value next = argv[0];
+  SValue next = argv[0];
   while(true) {
     next = next.cdr();
     length++;
@@ -205,7 +205,7 @@ Value fn_listp(State& state, size_t argc, Value* argv, void* v) {
   // return argv[0] == C_NIL || (argv[0].type() == PAIR && argv[0].list_length() > 
   static const char* fn_name = "list?";
   AR_FN_ARGC_EQ(state, argc, 1);
-  Value start = argv[0];
+  SValue start = argv[0];
   if(argv[0] == C_NIL) return C_TRUE;
   while(argv[0].heap_type_equals(PAIR)) {
     if(argv[0].cdr() == C_NIL) return C_TRUE;
@@ -223,7 +223,7 @@ Value fn_list_ref(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
   AR_FN_ASSERT_ARG(state, 1, "to be a positive number", argv[1].fixnum_value() >= 0);
 
-  Value h = argv[0];
+  SValue h = argv[0];
   size_t idx = argv[1].fixnum_value();
   
   while(idx--) {
@@ -246,7 +246,7 @@ Value fn_list_join(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
   AR_FN_ASSERT_ARG(state, 0, "to be a list", (argv[0].list_length() > 0));
 
-  Value lst = argv[0], join_char = argv[1];
+  SValue lst = argv[0], join_char = argv[1];
   std::ostringstream ss;
 
   while(lst.type() == PAIR) {
@@ -278,7 +278,7 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
     AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
   }
 
-  Value tmp, lst = argv[1], fn = argv[0], arg;
+  SValue tmp, lst = argv[1], fn = argv[0], arg;
   ListAppender nlst;
   AR_FRAME(state, nlst.head, nlst.tail, lst, fn, arg, tmp);
   
@@ -286,10 +286,10 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
 
   while(lst.heap_type_equals(PAIR)) {
     if(indice) {
-      Value argv[2] = {Value::make_fixnum(i), lst.car()};
+      SValue argv[2] = {Value::make_fixnum(i), lst.car()};
       tmp = state.apply(fn, 2, argv);
     } else {
-      Value argv[1] = {lst.car()};
+      SValue argv[1] = {lst.car()};
       tmp = state.apply(fn, 1, argv);
     }
 
@@ -313,10 +313,10 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
   if(lst != C_NIL) {
     if(improper) {
       if(indice) {
-        Value argv[2] = {Value::make_fixnum(i), lst};
+        SValue argv[2] = {Value::make_fixnum(i), lst};
         tmp = state.apply(fn, 2, argv);
       } else {
-        Value argv[1] = {lst};
+        SValue argv[1] = {lst};
         tmp = state.apply(fn, 1, argv);
       }
 
@@ -380,12 +380,12 @@ Value fn_filter(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ASSERT_ARG(state, 0, "to be applicable", (argv[0].applicable()));
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
   
-  Value fn = argv[0], lst = argv[1], result = C_NIL, tmp;
+  SValue fn = argv[0], lst = argv[1], result = C_NIL, tmp;
   ListAppender a;
   AR_FRAME(state, fn, lst, result, tmp, a.head, a.tail);
 
   while(lst.heap_type_equals(PAIR)) {
-    Value argv[1] = {lst.car()};
+    SValue argv[1] = {lst.car()};
     tmp = state.apply(fn, 1, argv);
 
     if(tmp.is_active_exception()) return tmp;
@@ -413,7 +413,7 @@ Value fn_mem_impl(const char* fn_name, Mem method, State& state, size_t argc, Va
     return C_FALSE;
   }
 
-  Value lst = argv[1], obj = argv[0];
+  SValue lst = argv[1], obj = argv[0];
   while(lst.heap_type_equals(PAIR)) {
     switch(method) {
       case MEMQ:
@@ -441,7 +441,7 @@ Value fn_memv(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "memv";
   AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
 
-  Value lst = argv[1], obj = argv[0];
+  SValue lst = argv[1], obj = argv[0];
   while(lst.heap_type_equals(PAIR)) {
     if(lst.car().eqv(obj)) return lst;
     lst = lst.cdr();
@@ -560,7 +560,7 @@ Value fn_make_vector(State& state, size_t argc, Value* argv, void* v) {
   const char* fn_name = "make-vector";
   AR_FN_ARGC_LTE(state, argc, 2);
   size_t size = 0, capacity = 2;
-  Value vec, fill = C_FALSE;
+  SValue vec, fill = C_FALSE;
   AR_FRAME(state, vec, fill);
   if(argc > 0) {
     AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
@@ -696,7 +696,7 @@ Value fn_function_name(State& state, size_t argc, Value* argv, void* v) {
 
   AR_FN_EXPECT_APPLICABLE(state, argv, 0);
 
-  Value fn = argv[0].closure_unbox();
+  SValue fn = argv[0].closure_unbox();
 
   switch(fn.type()) {
     case FUNCTION: return argv[0].as_unsafe<Function>()->name;
@@ -714,7 +714,7 @@ Value fn_set_function_macro_env(State& state, size_t argc, Value* argv, void* v)
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_ENV(state, 1);
 
-  Value fn = argv[0].closure_unbox();
+  SValue fn = argv[0].closure_unbox();
 
   switch(fn.type()) {
     case VMFUNCTION: {
@@ -740,7 +740,7 @@ Value fn_set_vmfunction_log(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 1, CONSTANT);
 
-  Value fn = argv[0];
+  SValue fn = argv[0];
 
   if(argv[0].type() == CLOSURE) {
     fn = fn.closure_function();
@@ -762,7 +762,7 @@ AR_DEFUN("set-vmfunction-log!", fn_set_vmfunction_log, 2);
 Value fn_function_env(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "function-env";
   AR_FN_ARGC_EQ(state, argc, 1);
-  Value fn(argv[0].closure_unbox());
+  SValue fn(argv[0].closure_unbox());
   switch(fn.type()) {
     case FUNCTION: return fn.as<Function>()->macro_env;
     case CLOSURE:
@@ -782,7 +782,7 @@ Value fn_set_function_macro_bit(State& state, size_t argc, Value* argv, void* _)
       break;
     case CLOSURE:
     case VMFUNCTION: {
-      Value fn = argv[0].closure_unbox();
+      SValue fn = argv[0].closure_unbox();
       if(fn.heap->get_header_bit(Value::VMFUNCTION_MACRO_BIT)) return argv[0];
       fn.heap->set_header_bit(Value::VMFUNCTION_MACRO_BIT);
       break;
@@ -797,7 +797,7 @@ Value fn_function_is_macro(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "function-macro?";
   AR_FN_ARGC_EQ(state, argc, 1);
 
-  Value fn(argv[0].closure_unbox());
+  SValue fn(argv[0].closure_unbox());
   switch(fn.type()) {
     case FUNCTION:
       return Value::make_boolean(
@@ -819,7 +819,7 @@ AR_DEFUN("function-macro?", fn_function_is_macro, 1);
 Value fn_function_procedural_macro_bit(State& state, size_t argc, Value* argv, void* _) {
   static const char* fn_name = "function-procedural-macro?";
   AR_FN_ARGC_EQ(state, argc, 1);
-  Value fn(argv[0].closure_unbox());
+  SValue fn(argv[0].closure_unbox());
   switch(fn.type()) {
     case FUNCTION:
       return Value::make_boolean(fn.heap->get_header_bit(Value::FUNCTION_MACRO_BIT));
@@ -842,7 +842,7 @@ Value fn_function_is_identifier_macro(State& state, size_t argc, Value* argv, vo
       return Value::make_boolean(argv[0].heap->get_header_bit(Value::FUNCTION_IDENTIFIER_MACRO_BIT));
     case CLOSURE:
     case VMFUNCTION: {
-      Value fn = argv[0].closure_unbox();
+      SValue fn = argv[0].closure_unbox();
       return Value::make_boolean(fn.heap->get_header_bit(Value::VMFUNCTION_IDENTIFIER_MACRO_BIT));
     }
     default: break;
@@ -862,7 +862,7 @@ Value fn_set_function_identifier_macro_bit(State& state, size_t argc, Value* arg
       break;
     case CLOSURE:
     case VMFUNCTION: {
-      Value fn = argv[0].closure_unbox();
+      SValue fn = argv[0].closure_unbox();
       if(fn.heap->get_header_bit(Value::VMFUNCTION_IDENTIFIER_MACRO_BIT)) return argv[0];
       fn.heap->set_header_bit(Value::VMFUNCTION_IDENTIFIER_MACRO_BIT);
       break;
@@ -882,7 +882,7 @@ Value fn_function_min_arity(State& state, size_t argc, Value* argv, void* v) {
     }
     case CLOSURE:
     case VMFUNCTION: {
-      Value x = argv[0].closure_unbox();
+      SValue x = argv[0].closure_unbox();
 
       return Value::make_fixnum(x.vm_function_min_arity());
     }
@@ -924,7 +924,7 @@ Value fn_top_level_value(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
 
-  Value r = argv[0].symbol_value();
+  SValue r = argv[0].symbol_value();
   if(r == C_UNDEFINED || r == C_UNSPECIFIED) {
     if(argc == 2) {
       return argv[1];
@@ -951,7 +951,7 @@ Value fn_top_level_for_each(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_APPLICABLE(state, argv, 0);
   size_t count = 0;
 
-  Value fn = argv[0], key, value;
+  SValue fn = argv[0], key, value;
   AR_FRAME(state, fn, key, value);
 
   std::vector<std::string> keys;
@@ -967,9 +967,9 @@ Value fn_top_level_for_each(State& state, size_t argc, Value* argv, void* v) {
     if(value == C_UNDEFINED || value == C_SYNTAX)
       value = C_UNSPECIFIED;
 
-    Value argv[2] = {key, value};
+    SValue argv[2] = {key, value};
     
-    Value tst = state.apply(fn, 2, argv);
+    SValue tst = state.apply(fn, 2, argv);
 
     if(tst.is_active_exception()) return tst;
     if(tst == C_TRUE) count++;
@@ -1008,7 +1008,7 @@ Value fn_rename_set_gensym(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, RENAME);
 
-  Value renam = argv[0], sym;
+  SValue renam = argv[0], sym;
   AR_FRAME(state, renam, sym);
 
   sym = state.gensym(renam.rename_expr());
@@ -1045,7 +1045,7 @@ AR_DEFUN("rename-gensym", fn_rename_gensym, 1);
 Value fn_eval(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "eval";
   AR_FN_ARGC_BETWEEN(state, argc, 1, 2);
-  Value env = argc == 2 ? argv[1] : C_FALSE, exp = argv[0];
+  SValue env = argc == 2 ? argv[1] : C_FALSE, exp = argv[0];
   if(argv[0].applicable()) return argv[0];
   AR_FRAME(state, env, exp);
   exp = state.make_pair(exp, C_NIL);
@@ -1060,7 +1060,7 @@ Value fn_raise(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_BETWEEN(state, argc, 2, 3);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
-  Value tag = argv[0], message = argv[1], irritants = argc == 3 ? argv[2] : C_FALSE, exc;
+  SValue tag = argv[0], message = argv[1], irritants = argc == 3 ? argv[2] : C_FALSE, exc;
   AR_FRAME(state, tag, message, irritants, exc);
   exc = state.make_exception(tag, message, irritants);
   AR_ASSERT(exc.is_active_exception());
@@ -1072,7 +1072,7 @@ Value fn_raise_continuation(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "raise-continuation";
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, SYMBOL);
-  Value exc = state.make_exception(state.globals[State::S_CONTINUATION], argv[0], argv[1]);
+  SValue exc = state.make_exception(state.globals[State::S_CONTINUATION], argv[0], argv[1]);
   exc.heap->unset_header_bit(Value::EXCEPTION_TRACE_BIT);
   return exc;
 }
@@ -1085,7 +1085,7 @@ Value fn_raise_source(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_TYPE(state, argv, 1, SYMBOL);
   AR_FN_EXPECT_TYPE(state, argv, 2, STRING);
 
-  Value tag = argv[1], message = argv[2], irritants = argv[3], exc;
+  SValue tag = argv[1], message = argv[2], irritants = argv[3], exc;
 
   std::ostringstream os;
 
@@ -1132,13 +1132,13 @@ Value fn_try(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_APPLICABLE_ARITY(state, argv, 0, 0);
   AR_FN_EXPECT_APPLICABLE_ARITY(state, argv, 1, 1);
 
-  Value body = argv[0], handler = argv[1], ret, exc;
+  SValue body = argv[0], handler = argv[1], ret, exc;
   AR_FRAME(state, ret, handler, body, exc);
 
   ret = state.apply(body, 0, nullptr);
 
   if(ret.is_active_exception()) {
-    Value args[1] = {ret};
+    SValue args[1] = {ret};
     exc = ret;
     exc.exception_deactivate();
     AR_ASSERT(!exc.is_active_exception());
@@ -1163,12 +1163,12 @@ Value fn_unwind_protect(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ASSERT_ARG(state, 1, "to be an applicable value that takes no arguments",
     argv[1].applicable() && argv[1].procedure_arity_equals(0));
 
-  Value body = argv[0], protection = argv[1], ret;
+  SValue body = argv[0], protection = argv[1], ret;
   AR_FRAME(state, body, protection, ret);
 
   ret = state.apply(body, 0, nullptr);
 
-  Value ret2 = state.apply(protection, 0, nullptr);
+  SValue ret2 = state.apply(protection, 0, nullptr);
   if(ret2.is_active_exception())  {
     return ret2;
   }
@@ -1186,7 +1186,7 @@ Value fn_register_record_type(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_POSITIVE(state, argv, 1);
   AR_FN_EXPECT_TYPE(state, argv, 2, FIXNUM);
 
-  Value name = argv[0], data = argv[2], fields = argv[3], parent = argv[4];
+  SValue name = argv[0], data = argv[2], fields = argv[3], parent = argv[4];
   ptrdiff_t field_count = argv[1].fixnum_value();
 
   if(parent != C_FALSE) {
@@ -1311,7 +1311,7 @@ Value fn_list_get_source(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "list-get-source";
   AR_FN_ARGC_EQ(state, argc, 1);
   if(argv[0].type() == PAIR && argv[0].pair_has_source()) {
-    Value storage;
+    SValue storage;
     AR_FRAME(state, storage);
 
     SourceLocation src(argv[0].pair_src());
@@ -1335,7 +1335,7 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_TYPE(state, argv, 0, RECORD);
   // TODO: Could type check more thoroughly here.
 
-  Value name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob = C_FALSE,
+  SValue name, insns, constants, sources, stack_size, rec = argv[0], fn, free_vars, free_vars_blob = C_FALSE,
      sources_blob, code;
   AR_FRAME(state, name, insns, constants, sources, stack_size, rec, fn, free_vars, free_vars_blob,
     sources_blob, code);
@@ -1510,7 +1510,7 @@ Value fn_show_calls(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "show-calls";
   AR_FN_ARGC_EQ(state, argc, 0);
 
-  Value fn = argv[0], key, value;
+  SValue fn = argv[0], key, value;
   AR_FRAME(state, fn, key, value);
 
   //std::vector<std::pair<std::string, unsigned> > calls;

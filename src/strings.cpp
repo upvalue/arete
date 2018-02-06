@@ -117,7 +117,7 @@ Value fn_make_string(State& state, size_t argc, Value* argv, void* v) {
     AR_FN_EXPECT_TYPE(state, argv, 1, CHARACTER);
     fill = (char) argv[1].character();
   }
-  Value str = state.make_string((size_t) argv[0].fixnum_value());
+  SValue str = state.make_string((size_t) argv[0].fixnum_value());
 
   memset(str.as_unsafe<String>()->data, fill, str.string_bytes());
 
@@ -160,11 +160,11 @@ Value fn_substring(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_CHECK_BOUNDS(state, "string", argv[0].string_bytes(), argv[1].fixnum_value());
   AR_FN_CHECK_BOUNDS(state, "string", argv[0].string_bytes() + 1, argv[2].fixnum_value());
 
-  Value str = argv[0];
+  SValue str = argv[0];
   size_t end = (size_t) argv[2].fixnum_value(), start = (size_t)argv[1].fixnum_value();
   AR_FRAME(state, str);
 
-  Value substr = state.make_string(end - start);
+  SValue substr = state.make_string(end - start);
   const char* substring = (str.string_data() + start);
 
   memcpy(substr.string_data_mod(), substring, end - start);
@@ -198,7 +198,7 @@ Value fn_make_bytevector(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
 
   size_t sz = static_cast<size_t>(argv[0].fixnum_value());
-  Value bv = state.make_bytevector<uint8_t>(sz);
+  SValue bv = state.make_bytevector<uint8_t>(sz);
 
   if(argc == 2) {
     AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);

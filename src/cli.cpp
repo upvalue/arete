@@ -55,7 +55,7 @@ static bool do_repl(State& state, bool read_only) {
 }
 
 bool do_file(State& state, std::string path, bool read_only) {
-  Value x = C_FALSE, tmp = C_FALSE;
+  SValue x = C_FALSE, tmp = C_FALSE;
 
   AR_FRAME(state, x, tmp);
 
@@ -88,7 +88,7 @@ static int cli_exception(State* state, Value exc, const std::string& desc) {
 }
 
 bool State::enter_repl(bool read_only, const char* history_file) {
-  Value x = C_FALSE, tmp;
+  SValue x = C_FALSE, tmp;
   AR_FRAME(*this, x, tmp);
 
   std::ostringstream hist_file;
@@ -115,7 +115,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
 
     if(get_global_value(G_CURRENT_MODULE).heap_type_equals(TABLE)) {
       bool found;
-      Value mname = 
+      SValue mname = 
         table_get(get_global_value(G_CURRENT_MODULE), get_global_value(G_STR_MODULE_NAME), found);
 
       if(found) {// && !mname.string_equals("user")) {
@@ -247,7 +247,7 @@ int State::enter_cli(int argc_, char* argv[]) {
   for(unsigned i = 1; i != argc; i++) {
     if(rest.compare(argv[i]) == 0) {
 
-      Value lst = C_NIL, tmp;
+      SValue lst = C_NIL, tmp;
       AR_FRAME(*this, lst, tmp);
       for(unsigned j = argc - 1; j != i; j--) {
         tmp = make_string(argv[j]);
@@ -262,7 +262,7 @@ int State::enter_cli(int argc_, char* argv[]) {
   }
 
   // Prepend program name to *command-line*
-  Value tmp = make_string(argv[0]);
+  SValue tmp = make_string(argv[0]);
   tmp = make_pair(tmp, get_global_value(G_COMMAND_LINE));
   set_global_value(G_COMMAND_LINE, tmp);
 
@@ -308,7 +308,7 @@ int State::enter_cli(int argc_, char* argv[]) {
       src_name << "eval argument " << argc;
       XReader reader(*this, ss, false, src_name.str());
 
-      Value x;
+      SValue x;
 
       AR_FRAME(this, x);
 
@@ -341,7 +341,7 @@ int State::enter_cli(int argc_, char* argv[]) {
       i += 2;
 
       XReader reader(*this, ss, "set variable");
-      Value name, value;
+      SValue name, value;
 
       AR_FRAME(this, name, value);
 

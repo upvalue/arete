@@ -251,7 +251,7 @@ std::ostream& operator<<(std::ostream& os, Type type);
 
 // Constants:
 
-enum {
+enum Constant {
   C_FALSE = 0,            // 0000 0000 #f
   C_TRUE = 2,             // 0000 0010 #t
   C_NIL = 10,             // 0000 1010 ()
@@ -836,6 +836,26 @@ struct Value {
   template <class T> T* as() {
     AR_TYPE_ASSERT(type() == T::CLASS_TYPE);
     return static_cast<T*>(heap);
+  }
+};
+
+/**
+ * Stack value. This is the primary method of interacting with Values on the stack. Value cannot
+ * have constructors because it must be a POD type for ABI purposes.
+ */
+struct SValue : Value {
+  SValue(): Value((ptrdiff_t) 0) {}
+  SValue(ptrdiff_t bits_): Value(bits_) {}
+  SValue(HeapValue* hv): Value(hv) {}
+  SValue(const Value& v): Value(v.bits) {}
+  SValue(Constant&c): Value((ptrdiff_t) c) {}
+
+  ~SValue() {}
+
+  void operator=(HeapValue* hv) { heap = hv; }
+  void operator=(Constant c) { bits = (ptrdiff_t) c; }
+  void operator=(const Value& v) {
+    bits = v.bits;
   }
 };
 
