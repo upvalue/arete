@@ -79,8 +79,8 @@ struct VMFrame2 {
   }
 
   State& state;
-  SValue closure;
-  SValue fn;
+  Value closure;
+  Value fn;
   size_t vm_stack_used;
   size_t depth;
 };
@@ -122,11 +122,11 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
   // Function frame, allocated on stack
   size_t sff_offset = state.gc.vm_stack_used;
-  SValue exception;
+  Value exception;
 
 tail:
   AR_ASSERT(state.gc.live((HeapValue*) fnp));
-  VMFrame2 f(state, SValue((HeapValue*) fnp));
+  VMFrame2 f(state, Value((HeapValue*) fnp));
 
   // If argv points to somewhere on the existing stack, we need to update it
   if(state.gc.stack_needs_realloc(f.vm_stack_used) && ((size_t)argv >= (size_t)state.gc.vm_stack && (size_t)argv <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*))))) {
@@ -197,7 +197,7 @@ tail:
     //AR_LOG_VM2("allocating space for " << vfn->free_variables->length << " upvalues");
 
     for(size_t i = 0; i != f.fn.as_unsafe<VMFunction>()->free_variables->length; i++) {
-      upvalues[i] = SValue(state.gc.allocate(UPVALUE, sizeof(Upvalue)));
+      upvalues[i] = state.gc.allocate(UPVALUE, sizeof(Upvalue));
       AR_ASSERT(state.gc.live(f.fn));
       AR_ASSERT(state.gc.live(upvalues[i]));
       size_t idx = ((size_t*) f.fn.as_unsafe<VMFunction>()->free_variables->data)[i];
@@ -262,7 +262,7 @@ tail:
       VM_CASE(OP_PUSH_IMMEDIATE): {
         AR_LOG_VM2("push-immediate " << (size_t) *cp);
         // std::cout << (size_t) stack << ' ' << (size_t) sbegin << std::endl;
-        (*stack++) = SValue(VM_NEXT_INSN());
+        (*stack++) = VM_NEXT_INSN();
         VM_DISPATCH();
       }
 
@@ -274,8 +274,8 @@ tail:
 
       VM_CASE(OP_GLOBAL_GET): {
         size_t idx = VM_NEXT_INSN();
-        SValue global = vfn->constants->data[idx];
-        SValue value = global.symbol_value();
+        Value global = vfn->constants->data[idx];
+        Value value = global.symbol_value();
         if(value == C_UNDEFINED) {
           VM2_EXCEPTION("eval", "reference to undefined variable " << global);
         }
@@ -288,8 +288,8 @@ tail:
         size_t constant_id = VM_NEXT_INSN();
 
         //Value val = f.stack[f.stack_i - 2], key = f.stack[f.stack_i - 1];
-        SValue val = (*--stack);
-        SValue key = vfn->constants->data[constant_id];
+        Value val = (*--stack);
+        Value key = vfn->constants->data[constant_id];
         AR_LOG_VM2("global-set (" << (err_on_undefined ? "set!" : "define") << ") " << key << " = " << val);
 
         if(err_on_undefined && key.symbol_value() == C_UNDEFINED) {
@@ -324,7 +324,7 @@ tail:
           (*stack++) = upval->U.converted;
         } else {
           if(upval->get_header_bit(Value::UPVALUE_POINTER_BIT)) {
-            (*stack++) = SValue(upval->U.local->bits);
+            (*stack++) = upval->U.local->bits;
           } else {
             (*stack++) = state.gc.vm_stack[upval->U.vm_local_idx];
           }
@@ -336,7 +336,7 @@ tail:
       VM_CASE(OP_UPVALUE_SET): {
         size_t idx = VM_NEXT_INSN();
         Upvalue* upval = f.closure.as_unsafe<Closure>()->upvalues->data[idx].as_unsafe<Upvalue>();
-        SValue val = (*--stack);
+        Value val = (*--stack);
         if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
           upval->U.converted = val;
         } else {
@@ -352,7 +352,7 @@ tail:
         AR_LOG_VM2("close-over " << upvalue_count);
 
         {
-          SValue storage, closure;
+          Value storage, closure;
           AR_FRAME(state, storage, closure);
           storage = state.make_vector_storage(upvalue_count);
           for(size_t i = upvalue_count; i != 0; i--) {
@@ -402,10 +402,10 @@ tail:
 
       VM_CASE(OP_APPLY): {
         size_t fargc = VM_NEXT_INSN();
-        SValue afn = *(stack - (fargc + 1));
+        Value afn = *(stack - (fargc + 1));
         AR_LOG_VM2("apply " << fargc << " " << afn);
         if(AR_LIKELY(afn.procedurep())) {
-          SValue ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, afn.heap);
+          Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, afn.heap);
           VM2_RESTORE();
           *(stack - (fargc + 1)) = ret;
           stack -= fargc;
@@ -425,8 +425,8 @@ tail:
       VM_CASE(OP_APPLY_TAIL): {
         size_t fargc = VM_NEXT_INSN();
 
-        SValue afn = *(stack - fargc - 1);
-        SValue to_apply = afn;
+        Value afn = *(stack - fargc - 1);
+        Value to_apply = afn;
         AR_LOG_VM2("apply-tail fargc " << fargc << " fn: " << afn);
 
         if(AR_LIKELY(afn.procedurep())) {
@@ -444,7 +444,7 @@ tail:
 
             goto tail;
           } else {
-            SValue ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) to_apply.heap);
+            Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) to_apply.heap);
             VM2_RESTORE();
             *(stack - (fargc + 1)) = ret;
             stack -= fargc;
@@ -474,7 +474,7 @@ tail:
 
       VM_CASE(OP_JUMP_WHEN): {
         size_t jmp_offset = VM_NEXT_INSN();
-        SValue val = *(stack-1);
+        Value val = *(stack-1);
 
         if(val == C_FALSE) {
           AR_LOG_VM2("jump-if-false jumping " << jmp_offset);
@@ -497,7 +497,7 @@ tail:
 
       VM_CASE(OP_JUMP_UNLESS): {
         size_t jmp_offset = VM_NEXT_INSN();
-        SValue val = *(stack-1);
+        Value val = *(stack-1);
 
         if(val == C_FALSE) {
           AR_LOG_VM2("jump-if-true not jumping " << jmp_offset);
@@ -544,7 +544,7 @@ tail:
 
       VM_CASE(OP_ARGV_REST): {
         if(argc <= vfn->max_arity) {
-          locals[vfn->max_arity] = Value::c(C_NIL);
+          locals[vfn->max_arity] = C_NIL;
         } else {
           // argv may be &temps[0] if this is a tail call
           if(argv == &state.temps[0]) {
@@ -566,12 +566,12 @@ tail:
         size_t label = VM_NEXT_INSN();
 
         // Attempt to find key in #!keys table
-        SValue keys = locals[vfn->max_arity];
-        SValue constant = vfn->constants->data[key_constant];
+        Value keys = locals[vfn->max_arity];
+        Value constant = vfn->constants->data[key_constant];
         AR_LOG_VM2("arg-key " << local_idx << " " << constant)
 
         bool found;
-        SValue result = state.table_get(keys, constant, found);
+        Value result = state.table_get(keys, constant, found);
 
         std::cout << "keys: " << keys << std::endl;
         std::cout << "constant: " << constant << std::endl;
@@ -587,7 +587,7 @@ tail:
 
       VM_CASE(OP_ARGV_KEYS): {
         // Convert argv to table containing keywords
-        SValue table;
+        Value table;
         {
           AR_FRAME(state, table);
 
@@ -603,7 +603,7 @@ tail:
               VM2_EXCEPTION("eval", "odd number of arguments to keyword-accepting function");
             }
 
-            SValue k = argv[i], v = argv[i+1];
+            Value k = argv[i], v = argv[i+1];
 
             if(!(k.heap_type_equals(SYMBOL) && k.symbol_keyword())) {
               VM2_EXCEPTION("eval", "expected keyword as argument " << i << " but got " << k.type());
@@ -621,7 +621,7 @@ tail:
         size_t i;
         ptrdiff_t fx = 0;
         for(i = argc; i != 0; i--) {
-          SValue n(*(stack - i));
+          Value n(*(stack - i));
           if(n.fixnump()) {
             fx += n.fixnum_value();
           } else {
@@ -634,7 +634,7 @@ tail:
         } else {
           double fl = (double) fx;
           for(; i != 0; i--) {
-            SValue n(*(stack - i));
+            Value n(*(stack - i));
             if(n.fixnump()) {
               fl += (double) n.fixnum_value();
             } else if(n.heap_type_equals(FLONUM)) {
@@ -664,11 +664,11 @@ tail:
             VM2_EXCEPTION("type", "vm primitive - expected fixnum or flonum as argument but got " << STACK_PICK(1).type());
           }
         } else {
-          SValue n(*(stack - argc));
+          Value n(*(stack - argc));
           ptrdiff_t fx = 0;
           size_t i = 1;
           for(; i != argc; i++) {
-            SValue n2(*(stack - i));
+            Value n2(*(stack - i));
             if(n2.fixnump()) {
               fx += n2.fixnum_value();
             } else {
@@ -680,7 +680,7 @@ tail:
           } else {
             double fl = (double) fx;
             for(; i != argc; i++) {
-              SValue n2(STACK_PICK(i));
+              Value n2(STACK_PICK(i));
               if(n2.fixnump()) {
                 fl += n2.fixnum_value();
               } else if(n2.heap_type_equals(FLONUM)) {
@@ -705,8 +705,8 @@ tail:
       VM_CASE(OP_LT): {
         size_t argc = VM_NEXT_INSN();
         for(size_t i = 0; i != argc - 1; i++) {
-          SValue n(STACK_PICK(argc-i));
-          SValue n2(STACK_PICK(argc-i-1));
+          Value n(STACK_PICK(argc-i));
+          Value n2(STACK_PICK(argc-i-1));
           if(!n.numeric()) {
             VM2_EXCEPTION("type", "< expects all numeric arguments but argument " << i+1 << " is a " << n.type());
           } else if(!n2.numeric()) {
@@ -714,23 +714,23 @@ tail:
           }
           if(n.fixnump()) {
             if(n2.fixnump() && !(n.fixnum_value() < n2.fixnum_value())) {
-              *(stack - argc) = Value::c(C_FALSE);
+              *(stack - argc) = C_FALSE;
               goto fals;
             } else if(n2.heap_type_equals(FLONUM) && !(n.fixnum_value() < n2.flonum_value())) {
-              *(stack - argc) = Value::c(C_FALSE);
+              *(stack - argc) = C_FALSE;
               goto fals;
             } 
           } else {
             if(n2.fixnump() && !(n.flonum_value() < n2.fixnum_value())) {
-              *(stack - argc) = Value::c(C_FALSE);
+              *(stack - argc) = C_FALSE;
               goto fals;
             } else if(n2.heap_type_equals(FLONUM) && !(n.flonum_value() < n2.flonum_value())) {
-              *(stack - argc) = Value::c(C_FALSE);
+              *(stack - argc) = C_FALSE;
               goto fals;
             } 
           }
         }
-        *(stack - argc) = Value::c(C_TRUE);
+        *(stack - argc) = C_TRUE;
         fals:
         stack -= (argc - 1);
         VM_DISPATCH();
@@ -759,7 +759,7 @@ tail:
       }
 
       VM_CASE(OP_NOT): {
-        *(stack - 1) = Value::c((*(stack - 1) == C_FALSE ? C_TRUE : C_FALSE));
+        *(stack - 1) = (*(stack - 1) == C_FALSE ? C_TRUE : C_FALSE);
         VM_DISPATCH();
       }
       
@@ -776,7 +776,7 @@ tail:
 
       VM_CASE(OP_FX_LT): {
         VM_FX_CHECK("fx<");
-        *(stack - 2) = Value::make_boolean(STACK_PICK(2).bits < STACK_PICK(1).bits);
+        *(stack - 2) = STACK_PICK(2).bits < STACK_PICK(1).bits ? C_TRUE : C_FALSE;
         stack--;
         //*(stack--) = ((*(stack - 1)).fixnump() && (*(stack - 2)).fixnump() && (*(stack - 2)).bits < *(stack -)
         VM_DISPATCH();
@@ -810,7 +810,7 @@ tail:
 }
 
 void State::trace_function(Value fn, size_t frames_lost, size_t code_offset) {
-  SValue sources(fn.as<VMFunction>()->sources);
+  Value sources(fn.as<VMFunction>()->sources);
   if(sources.type() == BYTEVECTOR && sources.bv_length() > 0) {
     // Source code information is available
     size_t i = 0;

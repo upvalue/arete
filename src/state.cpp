@@ -113,7 +113,7 @@ void State::boot() {
 
     // TODO: This is suitably confusing and there should probably be multiple vectors:
     // for symbols used directly, for symbols used to store values, and for other values (strings)
-  SValue s;
+  Value s;
   for(size_t i = 0; i != G_END; i++) {
     if(i >= G_END) {
       s = make_string(_symbols[i]);
@@ -122,9 +122,9 @@ void State::boot() {
       s.heap->set_header_bit(Value::SYMBOL_ROOT_BIT);
 
       if(i <= S_LETREC_SYNTAX) {
-        s.as<Symbol>()->value = Value::c(C_SYNTAX);
+        s.as<Symbol>()->value = C_SYNTAX;
       } else {
-        s.as<Symbol>()->value = Value::c(C_UNDEFINED);
+        s.as<Symbol>()->value = C_UNDEFINED;
       }
     }
     globals.push_back(s);
@@ -149,10 +149,10 @@ void State::boot() {
 #endif
 
   set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(1500));
-  set_global_value(G_COMMAND_LINE, Value::c(C_NIL));
-  set_global_value(G_FEATURES, Value::c(C_NIL));
-  set_global_value(G_TCO_ENABLED, Value::c(C_TRUE));
-  set_global_value(G_PRINT_READABLY, Value::c(C_FALSE));
+  set_global_value(G_COMMAND_LINE, C_NIL);
+  set_global_value(G_FEATURES, C_NIL);
+  set_global_value(G_TCO_ENABLED, C_TRUE);
+  set_global_value(G_PRINT_READABLY, C_FALSE);
   set_global_value(G_PRINT_TABLE_MAX, Value::make_fixnum(0));
 
   register_feature("arete");
@@ -175,7 +175,7 @@ std::string State::source_info(const SourceLocation loc, Value fn_name,
 }
 
 void State::register_feature(const std::string& name) {
-  SValue pare, sym;
+  Value pare, sym;
   AR_FRAME(*this, pare, sym);
   pare = get_global_value(G_FEATURES);
   sym = get_symbol(name);
@@ -183,7 +183,7 @@ void State::register_feature(const std::string& name) {
 }
 
 Value State::load_file(const std::string& path) {
-  SValue x, tmp;
+  Value x, tmp;
   AR_FRAME(this, x, tmp);
 
   x = slurp_file(path);

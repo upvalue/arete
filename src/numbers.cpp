@@ -11,7 +11,8 @@ DefunGroup numbers("numbers");
 Value State::make_flonum(double number) {
   Flonum* heap = (Flonum*) gc.allocate(FLONUM, sizeof(Flonum));
   heap->number = number;
-  return SValue(heap);
+  Value v(heap);
+  return v;
 }
 
 ///// FUNCTIONS  
@@ -82,19 +83,19 @@ AR_DEFUN("/", fn_div, 2, 2, true);
       AR_FN_ASSERT_ARG(state, (i+1), "to be numeric", argv[i+1].numeric()); \
       if(argv[i].type() == FIXNUM) { \
         if(argv[i+1].type() == FIXNUM) { \
-          if(!(argv[i].bits operator argv[i+1].bits)) return Value::c(C_FALSE); \
+          if(!(argv[i].bits operator argv[i+1].bits)) return C_FALSE; \
         } else { \
-          if(!(argv[i].fixnum_value() operator argv[i+1].flonum_value())) return Value::c(C_FALSE); \
+          if(!(argv[i].fixnum_value() operator argv[i+1].flonum_value())) return C_FALSE; \
         } \
       } else if(argv[i].type() == FLONUM) { \
         if(argv[i+1].type() == FLONUM) { \
-          if(!(argv[i].flonum_value() operator argv[i+1].flonum_value())) return Value::c(C_FALSE); \
+          if(!(argv[i].flonum_value() operator argv[i+1].flonum_value())) return C_FALSE; \
         } else { \
-          if(!(argv[i].flonum_value() operator (double) argv[i+1].fixnum_value())) return Value::c(C_FALSE); \
+          if(!(argv[i].flonum_value() operator (double) argv[i+1].fixnum_value())) return C_FALSE; \
         } \
       } \
     } \
-    SValue lhs = argv[argc-2], rhs = argv[argc-1]; \
+    Value lhs = argv[argc-2], rhs = argv[argc-1]; \
     if(lhs.type() == FLONUM && rhs.type() == FLONUM) \
       return Value::make_boolean(lhs.flonum_value() operator rhs.flonum_value()); \
     else if(lhs.type() == FLONUM && rhs.type() == FIXNUM) \
@@ -103,7 +104,7 @@ AR_DEFUN("/", fn_div, 2, 2, true);
       return Value::make_boolean(lhs.fixnum_value() operator rhs.flonum_value()); \
     else if(lhs.type() == FLONUM && rhs.type() == FIXNUM) \
       return Value::make_boolean(lhs.flonum_value() operator rhs.fixnum_value()); \
-    return Value::c(C_TRUE); \
+    return C_TRUE; \
   } \
   AR_DEFUN(cname, name, 2, 2, true);
 
@@ -420,7 +421,7 @@ Value fn_string_to_number(State& state, size_t argc, Value* argv, void* _) {
   }
 
 
-  SValue v = reader.read();
+  Value v = reader.read();
   if(v == C_FALSE) {
     return state.make_exception("read", reader.error_desc);
   }

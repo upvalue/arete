@@ -288,7 +288,7 @@ GCSemispace::~GCSemispace() {
 
 void GCSemispace::copy(HeapValue** ref) {
   // If this is a null ptr or immediate value, nothing is necessary
-  if(ref == 0 || Value::immediatep((ptrdiff_t)*ref))
+  if(ref == 0 || Value::immediatep(*ref))
     return;
   
   HeapValue* obj = *ref;
@@ -341,7 +341,7 @@ void GCSemispace::run_finalizers(bool finalize_all) {
 
   AR_LOG_GC("checking " << finalizers.size() << " finalizable objects");
   for(size_t i = 0; i != finalizers.size(); i++) {
-    SValue f = finalizers[i];
+    Value f = finalizers[i];
     // This object is dead, finalize it
     // The pointer itself in finalizers is not updated, but if the object is dead, its
     // heap-allocated type should now be reserved
@@ -353,7 +353,7 @@ void GCSemispace::run_finalizers(bool finalize_all) {
       }
     }
     // This object is dead, finalize it
-    state.finalize((Type)f.heap->get_type(), SValue(f.heap), true);
+    state.finalize((Type)f.heap->get_type(), f.heap, true);
   }
   AR_LOG_GC(finalizers2.size() << " finalizable objects survived collection");
 

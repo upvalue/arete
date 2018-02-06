@@ -33,13 +33,13 @@ bool Value::procedure_arity_equals(size_t argc) const {
 }
 
 Value State::get_symbol(Global sym) {
-  SValue sym2 = (globals.at((size_t) sym));
+  Value sym2 = (globals.at((size_t) sym));
   AR_ASSERT(sym2.type() == SYMBOL);
   return sym2;
 }
 
 Value State::get_global_value(Global sym) {
-  SValue s = globals.at((size_t) sym);
+  Value s = globals.at((size_t) sym);
   return s.as<Symbol>()->value;
 }
 
@@ -106,13 +106,13 @@ Value State::get_symbol(const std::string& name) {
     Symbol* heap = static_cast<Symbol*>(gc.allocate(SYMBOL, sizeof(Symbol)));
     AR_ASSERT(heap->get_type() == SYMBOL);
 
-    SValue sym = heap, string;
+    Value sym = heap, string;
     AR_FRAME(this, sym, string);
 
 
     string = make_string(name);
 
-    sym.as<Symbol>()->value = Value::c(C_UNDEFINED);
+    sym.as<Symbol>()->value = C_UNDEFINED;
     sym.as<Symbol>()->name = string;
 
     if(name.size() > 2 && name[0] == '#' && name[1] == '#') {
@@ -124,14 +124,14 @@ Value State::get_symbol(const std::string& name) {
     return sym;
   } else {
     AR_ASSERT(symbol_table->size() > 0);
-    return SValue(x->second);
+    return x->second;
   }
 }
 
 Value State::get_symbol(Value name) {
   AR_TYPE_ASSERT(name.type() == STRING);
   std::string cname(name.string_data());
-  SValue ret = get_symbol(cname);
+  Value ret= get_symbol(cname);
   AR_ASSERT(ret.type() == SYMBOL);
   return ret;
 }
@@ -140,7 +140,7 @@ Value State::gensym(Value sym) {
   std::ostringstream os;
   os << "#:" << sym.symbol_name_data() << gensym_counter;
   gensym_counter++;
-  SValue sym2 = get_symbol(os.str());
+  Value sym2 = get_symbol(os.str());
   sym2.heap->set_header_bit(Value::SYMBOL_GENSYM_BIT);
   return sym2;
 }
@@ -170,13 +170,13 @@ Value State::make_rename(Value expr, Value env) {
   Rename* heap = static_cast<Rename*>(gc.allocate(RENAME, sizeof(Rename)));
   heap->expr = expr;
   heap->env = env;
-  heap->gensym = Value::c(C_FALSE);
-  return SValue(heap);
+  heap->gensym = C_FALSE;
+  return heap;
 }
 
 size_t State::register_record_type(const std::string& cname, unsigned field_count, unsigned data_size,
     Value field_names, Value parent) {
-  SValue name = C_FALSE, tipe = C_FALSE;
+  Value name = C_FALSE, tipe = C_FALSE;
 
   AR_FRAME(this, tipe, name, field_names, parent);
 
@@ -184,8 +184,8 @@ size_t State::register_record_type(const std::string& cname, unsigned field_coun
   name = make_string(cname);
 
   tipe.as<RecordType>()->name = name;
-  tipe.as<RecordType>()->print = Value::c(C_FALSE);
-  tipe.as<RecordType>()->apply = Value::c(C_FALSE);
+  tipe.as<RecordType>()->print = C_FALSE;
+  tipe.as<RecordType>()->apply = C_FALSE;
   tipe.as<RecordType>()->parent = parent;
   tipe.as<RecordType>()->field_count = field_count;
   tipe.as<RecordType>()->field_names = field_names;
@@ -210,7 +210,7 @@ void State::record_set(Value rec_, unsigned field, Value value) {
 
 /** Make an exception from Scheme values */
 Value State::make_exception(Value tag, Value message, Value irritants) {
-  SValue exc;
+  Value exc;
   AR_FRAME(this, tag, message, irritants, exc);
   Exception* heap = static_cast<Exception*>(gc.allocate(EXCEPTION, sizeof(Exception)));
   exc.heap = heap;
@@ -219,12 +219,12 @@ Value State::make_exception(Value tag, Value message, Value irritants) {
   heap->tag = tag;
   heap->message = message;
   heap->irritants = irritants;
-  return SValue(heap);
+  return heap;
 }
 
 /** Make an exception with a C++ std::string message */
 Value State::make_exception(Value tag, const std::string& cmessage, Value irritants) {
-  SValue message;
+  Value message;
   AR_FRAME(this, tag, message, irritants);
   AR_ASSERT(gc.live(tag));
   AR_ASSERT(gc.live(irritants));
@@ -235,7 +235,7 @@ Value State::make_exception(Value tag, const std::string& cmessage, Value irrita
 /** Make an exception with a C++ std::string message and tag */
 Value State::make_exception(const std::string& ctag, const std::string& cmessage,
     Value irritants) { 
-  SValue tag;
+  Value tag;
   AR_FRAME(this, tag, irritants);
   tag = get_symbol(ctag);
   return make_exception(tag, cmessage, irritants);
@@ -246,20 +246,20 @@ Value State::make_exception(Global s, const std::string& cmessage, Value irritan
   return make_exception(get_symbol(s), cmessage, irritants);
 }
 
-Value State::make_record(SValue tipe) {
+Value State::make_record(Value tipe) {
   AR_FRAME(this, tipe);
 
   unsigned field_count = tipe.as<RecordType>()->field_count;
   unsigned data_size = tipe.as<RecordType>()->data_size;
 
-  SValue record = static_cast<Record*>(
+  Value record = static_cast<Record*>(
     gc.allocate(RECORD, sizeof(Record) + 
       ((field_count * sizeof(Value)) - sizeof(Value))
       + data_size));
 
   record.as<Record>()->type = tipe.as<RecordType>();
   for(unsigned i = 0; i != field_count; i++) {
-    record.as<Record>()->fields[i] = Value::c(C_FALSE);
+    record.as<Record>()->fields[i] = C_FALSE;
   }
 
   if(tipe.as_unsafe<RecordType>()->finalizer) {
@@ -357,8 +357,8 @@ void DefunGroup::install(State& state) {
 }
 
 Value State::make_module(const std::string& name) {
-  SValue key, val;
-  SValue module = make_table();
+  Value key, val;
+  Value module = make_table();
   
   // Create "module-stage" field and mark module as fully expanded
   key = make_string("module-stage");
@@ -384,7 +384,7 @@ Value State::make_module(const std::string& name) {
 void State::module_define(Value module, const std::string& ckey, Value value) {
   AR_TYPE_ASSERT(module.heap_type_equals(TABLE));
 
-  SValue key, exports;
+  Value key, exports;
   AR_FRAME(this, module, key, exports, value);
 
   key = make_string("module-exports");
@@ -397,7 +397,7 @@ void State::module_define(Value module, const std::string& ckey, Value value) {
 }
 
 void DefunGroup::install_module(State& state, const std::string& cname, Value closure) {
-  SValue module, cfn, sym, name, exports, builtins;
+  Value module, cfn, sym, name, exports, builtins;
   bool found;
   AR_FRAME(state, module, closure, exports, builtins, cfn, sym, name);
   module = state.make_module(cname);
@@ -460,19 +460,19 @@ void DefunGroup::install_module(State& state, const std::string& cname, Value cl
   if(variable_arity)
     cfn->set_header_bit(Value::CFUNCTION_VARIABLE_ARITY_BIT);
 
-  SValue v(cfn);
+  Value v(cfn);
   v.procedure_install(addr);
 
-  return SValue(cfn);
+  return cfn;
 }
 
 void State::defun_core(const std::string& cname, c_closure_t addr, size_t min_arity, size_t max_arity, bool variable_arity) {
-  SValue cfn, sym, name, builtins;
+  Value cfn, sym, name, builtins;
 
   AR_FRAME(this, cfn, sym, name, builtins);
   AR_ASSERT(addr);
   name = make_string(cname);
-  cfn = make_c_function(name, Value::c(C_FALSE), addr, min_arity, max_arity, variable_arity);
+  cfn = make_c_function(name, C_FALSE, addr, min_arity, max_arity, variable_arity);
 
   sym = get_symbol(name);
   sym.set_symbol_value(cfn);
@@ -492,11 +492,11 @@ Value State::make_pair(Value car, Value cdr, size_t size) {
 
   heap->data_car = car;
   heap->data_cdr = cdr;
-  return SValue(heap);
+  return heap;
 }
 
 Value State::make_src_pair(Value car, Value cdr, SourceLocation& loc) {
-  SValue pare = C_FALSE;
+  Value pare = C_FALSE;
   AR_FRAME(this, pare, car, cdr);
   pare = make_pair(car, cdr, sizeof(Pair));
   pare.heap->set_header_bit(Value::PAIR_SOURCE_BIT);
@@ -518,7 +518,7 @@ Value State::make_src_pair(Value car, Value cdr, Value src) {
 }
 
 size_t Value::list_length() {
-  SValue check(bits);
+  Value check(bits);
   if(check == C_NIL || !check.heap_type_equals(PAIR)) return 0;
   size_t len = 0;
   while(true) {
@@ -536,13 +536,13 @@ bool Value::listp() {
 }
 
 Value Value::list_ref(size_t n) const {
-  SValue check(bits);
+  Value check(bits);
   size_t i = 0;
   while(check.type() == PAIR && i++ != n) {
     check = check.cdr();
     if(check.type() != PAIR && check != C_NIL) {
       AR_TYPE_ASSERT(!"list-ref in non-list");
-      return Value::c(C_NIL);
+      return C_NIL;
     }
   }
   return check.car();
@@ -552,7 +552,7 @@ Value Value::list_ref(size_t n) const {
 Value State::make_char(int c) {
   Char* heap = static_cast<Char*>(gc.allocate(CHARACTER, sizeof(Char)));
   heap->datum = c;
-  return SValue(heap);
+  return heap;
 }
 
 ///// VECTORS
@@ -562,15 +562,15 @@ Value State::make_vector_storage(size_t capacity) {
   size_t size = (sizeof(VectorStorage) - sizeof(Value)) + (sizeof(Value) * capacity);
   VectorStorage* storage = static_cast<VectorStorage*>(gc.allocate(VECTOR_STORAGE, size));
 
-  return SValue(storage);
+  return storage;
 }
 
 Value State::make_vector(size_t capacity) {
-  SValue storage(C_FALSE);
+  Value storage(C_FALSE);
 
   AR_FRAME(this, storage);
   storage = make_vector_storage(capacity);
-  SValue vec = gc.allocate(VECTOR, sizeof(Vector));
+  Value vec = gc.allocate(VECTOR, sizeof(Vector));
   vec.as_unsafe<Vector>()->storage = storage;
   vec.as_unsafe<Vector>()->capacity = capacity;
 
@@ -580,7 +580,7 @@ Value State::make_vector(size_t capacity) {
 Value State::make_vector(Value vector_storage) {
   AR_FRAME(this, vector_storage);
 
-  SValue vec = gc.allocate(VECTOR, sizeof(Vector));
+  Value vec = gc.allocate(VECTOR, sizeof(Vector));
 
   vec.as_unsafe<Vector>()->storage = vector_storage;
   vec.as_unsafe<Vector>()->capacity = vector_storage.as_unsafe<VectorStorage>()->length;
@@ -606,7 +606,7 @@ void State::vector_append(Value vector, Value value) {
   AR_ASSERT(store->length <= vector.as_unsafe<Vector>()->capacity);
   if(store->length == vector.as_unsafe<Vector>()->capacity) {
 
-    SValue storage = store, new_storage;
+    Value storage = store, new_storage;
     AR_FRAME(this, vector, value, storage, new_storage);
 
     size_t ncap = vector.as_unsafe<Vector>()->capacity * 2;

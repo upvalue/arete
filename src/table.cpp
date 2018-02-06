@@ -79,7 +79,7 @@ void State::table_setup(Value table, size_t size_log2) {
   // Fill entries with #f
   chains->length = size;
   for(size_t i = 0; i != chains->length; i++) {
-    chains->data[i] = Value::c(C_FALSE);
+    chains->data[i] = C_FALSE;
   } 
   heap->chains = chains;
   // Pre-calculate max entries
@@ -92,7 +92,7 @@ ptrdiff_t State::hash_index(Value table, Value key, bool& unhashable) {
 }
   
 void State::table_grow(Value table) {
-  SValue old_chains_ref, chain;
+  Value old_chains_ref, chain;
   AR_FRAME(this, table, old_chains_ref, chain);
   old_chains_ref = table.as<Table>()->chains;
   table_setup(table, table.as<Table>()->size_log2 + 1);
@@ -119,7 +119,7 @@ Value State::table_get_cell(Value table, Value key) {
   bool unhashable;
   ptrdiff_t index = hash_index(table, key, unhashable);
   if(unhashable) return unhashable_error(key);
-  SValue chain = C_FALSE;
+  Value chain = C_FALSE;
   chain = table.as<Table>()->chains->data[index];
   while(chain.heap_type_equals(PAIR)) {
     if(equals(chain.caar(), key)) {
@@ -127,35 +127,35 @@ Value State::table_get_cell(Value table, Value key) {
     }
     chain = chain.cdr();
   }
-  return Value::c(C_FALSE);
+  return C_FALSE;
 }
 
 Value State::table_set(Value table, Value key, Value value) {
-  SValue cell = table_get_cell(table, key);
+  Value cell = table_get_cell(table, key);
   if(cell.is_active_exception()) return cell;
   if(cell != C_FALSE) {
     cell.set_cdr(value);
-    return Value::c(C_TRUE);
+    return C_TRUE;
   } else {
     return table_insert(table, key, value);
   }
-  return Value::c(C_FALSE);
+  return C_FALSE;
 }
 
 Value State::table_get(Value table, Value key, bool& found) {
-  SValue cell = table_get_cell(table, key);
+  Value cell = table_get_cell(table, key);
   if(cell != C_FALSE) {
     found = true;
     return cell.cdr();
   } else {
     found = false;
-    return Value::c(C_FALSE);
+    return C_FALSE;
   }
 }
 
 Value State::table_insert(Value table, Value key, Value value) {
   AR_TYPE_ASSERT(table.type() == TABLE);
-  SValue chain;
+  Value chain;
   AR_FRAME(this, table, key, value, chain);
 
   Table* htable = table.as<Table>();
@@ -181,7 +181,7 @@ Value State::table_insert(Value table, Value key, Value value) {
   if(htable->chains->data[index] != C_FALSE) {
     chain = make_pair(chain, htable->chains->data[index]);
   } else {
-    chain = make_pair(chain, Value::c(C_NIL));
+    chain = make_pair(chain, C_NIL);
   }
 
   // Insert chain
@@ -189,12 +189,12 @@ Value State::table_insert(Value table, Value key, Value value) {
   htable->chains->data[index] = chain;
   htable->entries++;
 
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 
 
 Value State::make_table(size_t size_log2 ) {
-  SValue table = static_cast<Table*>(gc.allocate(TABLE, sizeof(Table)));
+  Value table = static_cast<Table*>(gc.allocate(TABLE, sizeof(Table)));
   AR_FRAME(this, table);
 
   table_setup(table, size_log2);
@@ -223,8 +223,8 @@ Value fn_table_ref(State& state, size_t argc, Value* argv, void* v) {
   }
 
   bool found;
-  SValue result = state.table_get(argv[0], argv[1], found);
-  if(!found) return argc == 3 ? argv[2] : Value::c(C_FALSE);
+  Value result = state.table_get(argv[0], argv[1], found);
+  if(!found) return argc == 3 ? argv[2] : C_FALSE;
   return result;
 }
 AR_DEFUN("table-ref", fn_table_ref, 2, 3);
@@ -247,11 +247,11 @@ Value fn_table_delete(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
   AR_FN_ASSERT_ARG(state, 1, "to be hashable", argv[1].hashable());
 
-  SValue tbl = argv[0], key = argv[1];
+  Value tbl = argv[0], key = argv[1];
   bool unhashable;
 
   ptrdiff_t index = state.hash_index(tbl, key, unhashable);
-  SValue chain = C_FALSE, prev = C_FALSE;
+  Value chain = C_FALSE, prev = C_FALSE;
 
   chain = tbl.as<Table>()->chains->data[index];
   
@@ -268,7 +268,7 @@ Value fn_table_delete(State& state, size_t argc, Value* argv, void* v) {
     chain = chain.cdr();
   }
   
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("table-delete!", fn_table_delete, 2);
 
@@ -285,12 +285,12 @@ static Value fn_table_map_impl(const char* fn_name, bool map, State& state, size
   AR_FN_ASSERT_ARG(state, 0, "to be applicable", argv[0].applicable());
   AR_FN_EXPECT_TYPE(state, argv, 1, TABLE);
 
-  SValue fn = argv[0], lst = C_NIL, tmp;
+  Value fn = argv[0], lst = C_NIL, tmp;
   TableIterator ti(argv[1]);
   AR_FRAME(state, tmp, fn, lst, ti.table, ti.chain, ti.cell);
 
   while(++ti) {
-    SValue argv[2] = {ti.key(), ti.value()};
+    Value argv[2] = {ti.key(), ti.value()};
     tmp = state.apply(fn, 2, argv);
     if(tmp.is_active_exception()) return tmp;
     if(map) {
@@ -315,8 +315,8 @@ Value fn_table_copy(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, TABLE);
 
-  SValue table = argv[0];
-  SValue copy, chain;
+  Value table = argv[0];
+  Value copy, chain;
 
   AR_FRAME(state, table, copy);
 
@@ -324,7 +324,7 @@ Value fn_table_copy(State& state, size_t argc, Value* argv, void* v) {
 
   //for(size_t i = 0; )
 
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("table-copy", fn_table_copy, 2);
 

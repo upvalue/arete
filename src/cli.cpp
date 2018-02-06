@@ -55,7 +55,7 @@ static bool do_repl(State& state, bool read_only) {
 }
 
 bool do_file(State& state, std::string path, bool read_only) {
-  SValue x = C_FALSE, tmp = C_FALSE;
+  Value x = C_FALSE, tmp = C_FALSE;
 
   AR_FRAME(state, x, tmp);
 
@@ -88,7 +88,7 @@ static int cli_exception(State* state, Value exc, const std::string& desc) {
 }
 
 bool State::enter_repl(bool read_only, const char* history_file) {
-  SValue x = C_FALSE, tmp;
+  Value x = C_FALSE, tmp;
   AR_FRAME(*this, x, tmp);
 
   std::ostringstream hist_file;
@@ -115,7 +115,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
 
     if(get_global_value(G_CURRENT_MODULE).heap_type_equals(TABLE)) {
       bool found;
-      SValue mname = 
+      Value mname = 
         table_get(get_global_value(G_CURRENT_MODULE), get_global_value(G_STR_MODULE_NAME), found);
 
       if(found) {// && !mname.string_equals("user")) {
@@ -171,7 +171,7 @@ bool State::enter_repl(bool read_only, const char* history_file) {
         continue;
       }
 
-      tmp = make_pair(x, Value::c(C_NIL));
+      tmp = make_pair(x, C_NIL);
       tmp = eval_list(tmp);
 
       if(tmp.is_active_exception()) {
@@ -247,7 +247,7 @@ int State::enter_cli(int argc_, char* argv[]) {
   for(unsigned i = 1; i != argc; i++) {
     if(rest.compare(argv[i]) == 0) {
 
-      SValue lst = C_NIL, tmp;
+      Value lst = C_NIL, tmp;
       AR_FRAME(*this, lst, tmp);
       for(unsigned j = argc - 1; j != i; j--) {
         tmp = make_string(argv[j]);
@@ -262,7 +262,7 @@ int State::enter_cli(int argc_, char* argv[]) {
   }
 
   // Prepend program name to *command-line*
-  SValue tmp = make_string(argv[0]);
+  Value tmp = make_string(argv[0]);
   tmp = make_pair(tmp, get_global_value(G_COMMAND_LINE));
   set_global_value(G_COMMAND_LINE, tmp);
 
@@ -308,7 +308,7 @@ int State::enter_cli(int argc_, char* argv[]) {
       src_name << "eval argument " << argc;
       XReader reader(*this, ss, false, src_name.str());
 
-      SValue x;
+      Value x;
 
       AR_FRAME(this, x);
 
@@ -319,7 +319,7 @@ int State::enter_cli(int argc_, char* argv[]) {
 
         if(x == C_EOF) break;
 
-        x = make_src_pair(x, Value::c(C_NIL), x);
+        x = make_src_pair(x, C_NIL, x);
         x = eval_list(x);
 
         if(x.is_active_exception()) 
@@ -341,7 +341,7 @@ int State::enter_cli(int argc_, char* argv[]) {
       i += 2;
 
       XReader reader(*this, ss, "set variable");
-      SValue name, value;
+      Value name, value;
 
       AR_FRAME(this, name, value);
 

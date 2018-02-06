@@ -69,7 +69,7 @@ struct PointerUpdater {
 
   Value update_value(Value v) {
     if(v.immediatep()) return v;
-    SValue nv(update_heapvalue(v.heap));
+    Value nv(update_heapvalue(v.heap));
     //AR_IMG_LOG("updated pointer from " << (size_t)v.heap << " to " << (size_t) nv.heap);
     return nv;
   }
@@ -177,7 +177,7 @@ struct PointerUpdater {
         break;
       }
       case FILE_PORT:
-        static_cast<FilePort*>(heap)->path = Value::c(C_FALSE);
+        static_cast<FilePort*>(heap)->path = C_FALSE;
         static_cast<FilePort*>(heap)->input_handle = 0;
         static_cast<FilePort*>(heap)->reader = 0;
         break;
@@ -237,7 +237,7 @@ struct ImageWriter {
 
   void write_globals() {
     for(size_t i = 0; i != state.globals.size(); i++) {
-      SValue v = updater.update_value(state.globals[i]);
+      Value v = updater.update_value(state.globals[i]);
       fwrite(&v.heap, sizeof(HeapValue*), 1, f);
       //fwrite(&globals[i], sizeof(ptrdiff_t), 1, f);
     }
@@ -284,7 +284,7 @@ struct ImageReader {
 
   void read_globals() {
     for(size_t i = 0; i != hdr.global_count; i++) {
-      SValue ptr;
+      Value ptr;
       fread(&ptr.heap, sizeof(HeapValue*), 1, f);
       ptr = updater.update_value(ptr);
       state.globals.push_back(ptr);
@@ -348,7 +348,7 @@ struct ImageReader {
 
       updater.update_pointers(heap);
 
-      SValue valu(heap);
+      Value valu(heap);
 
       state.gc.block_cursor += v.size;
       sweep += v.size;
@@ -358,7 +358,7 @@ struct ImageReader {
     sweep = state.gc.active->data;
     size_t symbols_loaded = 0;
     while(sweep != (state.gc.active->data + state.gc.block_cursor)) {
-      SValue valu((HeapValue*) sweep);
+      Value valu((HeapValue*) sweep);
       if(valu.heap_type_equals(SYMBOL)) {
         std::string key(valu.symbol_name_data());
         state.symbol_table->insert(std::make_pair(key, valu.as<Symbol>()));

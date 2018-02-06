@@ -10,7 +10,7 @@ Value State::make_string(const std::string& body) {
   strncpy(heap->data, body.c_str(), body.size());
   AR_ASSERT(heap->data[heap->bytes] == '\0');
 
-  return SValue(heap);
+  return heap;
 }
 
 Value State::make_string(size_t length) {
@@ -18,7 +18,7 @@ Value State::make_string(size_t length) {
   heap->bytes = length;
   memset(heap->data, 'a', length);
   AR_ASSERT(heap->data[heap->bytes] == '\0');
-  return SValue(heap);
+  return heap;
 }
 
 Value State::string_copy(Value x) {
@@ -27,7 +27,7 @@ Value State::string_copy(Value x) {
   strncpy(heap->data, x.string_data(), x.string_bytes());
   heap->bytes = x.string_bytes();
   heap->data[x.string_bytes()] = '\0';
-  return SValue(heap);
+  return heap;
 }
 
 ///// SCHEME FUNCTIONS
@@ -117,7 +117,7 @@ Value fn_make_string(State& state, size_t argc, Value* argv, void* v) {
     AR_FN_EXPECT_TYPE(state, argv, 1, CHARACTER);
     fill = (char) argv[1].character();
   }
-  SValue str = state.make_string((size_t) argv[0].fixnum_value());
+  Value str = state.make_string((size_t) argv[0].fixnum_value());
 
   memset(str.as_unsafe<String>()->data, fill, str.string_bytes());
 
@@ -135,7 +135,7 @@ Value fn_string_set(State& state, size_t argc, Value* argv, void* v) {
 
   argv[0].string_data_mod()[(size_t) argv[1].fixnum_value()] = argv[2].character();
 
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("string-set!", fn_string_set, 3);
 
@@ -160,11 +160,11 @@ Value fn_substring(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_CHECK_BOUNDS(state, "string", argv[0].string_bytes(), argv[1].fixnum_value());
   AR_FN_CHECK_BOUNDS(state, "string", argv[0].string_bytes() + 1, argv[2].fixnum_value());
 
-  SValue str = argv[0];
+  Value str = argv[0];
   size_t end = (size_t) argv[2].fixnum_value(), start = (size_t)argv[1].fixnum_value();
   AR_FRAME(state, str);
 
-  SValue substr = state.make_string(end - start);
+  Value substr = state.make_string(end - start);
   const char* substring = (str.string_data() + start);
 
   memcpy(substr.string_data_mod(), substring, end - start);
@@ -178,11 +178,9 @@ Value fn_string_equals(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
-  if(argv[0].string_bytes() != argv[1].string_bytes()) return Value::c(C_FALSE);
+  if(argv[0].string_bytes() != argv[1].string_bytes()) return C_FALSE;
 
-  return Value::make_boolean(
-    strncmp(argv[0].string_data(), argv[1].string_data(), argv[0].string_bytes()) == 0
-  );
+  return Value::make_boolean(strncmp(argv[0].string_data(), argv[1].string_data(), argv[0].string_bytes()) == 0);
 }
 AR_DEFUN("string=?", fn_string_equals, 2);
 
@@ -200,7 +198,7 @@ Value fn_make_bytevector(State& state, size_t argc, Value* argv, void* v) {
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
 
   size_t sz = static_cast<size_t>(argv[0].fixnum_value());
-  SValue bv = state.make_bytevector<uint8_t>(sz);
+  Value bv = state.make_bytevector<uint8_t>(sz);
 
   if(argc == 2) {
     AR_FN_EXPECT_TYPE(state, argv, 1, FIXNUM);
@@ -246,7 +244,7 @@ Value fn_bytevector_u8_set(State& state, size_t argc, Value* argv, void* v) {
 
   argv[0].bv_set<uint8_t>((size_t) argv[1].fixnum_value(), static_cast<uint8_t>(value));
 
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 
 AR_DEFUN("bytevector-u8-set!", fn_bytevector_u8_set, 3);

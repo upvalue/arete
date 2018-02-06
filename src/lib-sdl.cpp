@@ -66,7 +66,7 @@ Value sdl_init(State& state, size_t argc, Value* argv, void* closure) {
   //SDL_RenderSetLogicalSize(renderer, (int) argv[0].fixnum_value(), (int) argv[1].fixnum_value());
   SDL_RenderSetLogicalSize(module->data.renderer, (int) argv[0].fixnum_value(), (int) argv[1].fixnum_value());
 
-  return Value::c(C_TRUE);
+  return C_TRUE;
 }
 AR_DEFUN("init", sdl_init, 2);
 
@@ -80,7 +80,7 @@ Value sdl_quit(State& state, size_t argc, Value* argv, void* closure) {
     module->data.window = 0;
   }
   SDL_Quit();
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("quit", sdl_quit, 0);
 
@@ -91,7 +91,7 @@ Value sdl_clear(State& state, size_t argc, Value* argv, void *closure) {
   SDL_SetRenderDrawColor(module->data.renderer, 0, 0, 0, 255);
   SDL_RenderClear(module->data.renderer);
 
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("clear", sdl_clear, 0);
 
@@ -101,7 +101,7 @@ Value sdl_make_event(State& state, size_t argc, Value* argv, void* closure) {
   AR_FN_ARGC_EQ(state, argc, 0);
   std::cerr << "sdl:make-event" << std::endl;
   std::cerr << module->data.event_tag << std::endl;
-  SValue v = state.make_record(module->data.event_tag);
+  Value v = state.make_record(module->data.event_tag);
   return v;
 }
 AR_DEFUN("make-event", sdl_make_event, 0);
@@ -138,9 +138,9 @@ Value sdl_event_type(State& state, size_t argc, Value* argv, void* closure) {
       }
     }
     default:
-      return Value::c(C_FALSE);
+      return C_FALSE;
   }
-  return Value::c(C_FALSE);
+  return C_FALSE;
 }
 AR_DEFUN("event-type", sdl_event_type, 1);
 
@@ -189,7 +189,7 @@ Value sdl_event_key_modifiers(State& state, size_t argc, Value* argv, void* clos
   // AR_FN_CLOSURE(state, closure, SDLModule*, module);
   static const char* fn_name = "sdl:event-key-modifiers";
   AR_FN_ARGC_EQ(state, argc, 1);
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("event-key-modifiers", sdl_event_key_modifiers, 1);
 
@@ -210,7 +210,7 @@ Value sdl_event_key(State& state, size_t argc, Value* argv, void* closure) {
   switch(e->key.keysym.scancode) {
     case SDL_SCANCODE_RETURN: return state.make_char('\r');
     case SDL_SCANCODE_BACKSPACE: return state.make_char('\b');
-    case SDL_SCANCODE_ESCAPE: return state.get_symbol("escape");
+    case SDL_SCANCODE_ESCAPE: return state.get_symbol(27);
     case SDL_SCANCODE_F1: return state.get_symbol("f1");
     case SDL_SCANCODE_F2: return state.get_symbol("f2");
     case SDL_SCANCODE_F3: return state.get_symbol("f3");
@@ -262,7 +262,7 @@ AR_DEFUN("event-key", sdl_event_key, 1);
 Value sdl_render(State& state, size_t argc, Value* argv, void* closure) {
   AR_FN_CLOSURE(state, closure, SDLModule*, module);
   SDL_RenderPresent(module->data.renderer);
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("render", sdl_render, 0);
 
@@ -284,7 +284,7 @@ Value sdl_set_color(State& state, size_t argc, Value* argv, void* closure) {
   SDL_Color draw_color = {r, g, b, a};
   module->data.draw_color = draw_color;
   SDL_SetRenderDrawColor(module->data.renderer, r,g,b,a);
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("set-color", sdl_set_color, 3, 4);
 
@@ -302,7 +302,7 @@ Value sdl_fill_rect(State& state, size_t argc, Value* argv, void* closure) {
 
   SDL_RenderFillRect(module->data.renderer, &rect);
 
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("fill-rect", sdl_fill_rect, 4);
 
@@ -320,7 +320,7 @@ Value sdl_draw_rect(State& state, size_t argc, Value* argv, void* closure) {
 
   SDL_RenderDrawRect(module->data.renderer, &rect);
 
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("draw-rect", sdl_draw_rect, 4);
 
@@ -336,7 +336,7 @@ Value sdl_draw_line(State& state, size_t argc, Value* argv, void* closure) {
   SDL_RenderDrawLine(module->data.renderer, (int)argv[0].fixnum_value(), (int)argv[1].fixnum_value(),
     (int) argv[2].fixnum_value(), (int) argv[3].fixnum_value());
   
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("draw-line", sdl_draw_line, 4);
 
@@ -346,7 +346,7 @@ Value sdl_delay(State& state, size_t argc, Value* argv, void* closure) {
   AR_FN_ARGC_EQ(state, argc, 1);
   AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
   SDL_Delay((unsigned) argv[0].fixnum_value());
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("delay", sdl_delay, 1);
 
@@ -355,13 +355,13 @@ AR_DEFUN("delay", sdl_delay, 1);
 //
 
 Value ttf_font_finalizer(State& state, size_t argc, Value* argv, void* sfontp) {
-  SValue sfont((HeapValue*) sfontp);
+  Value sfont((HeapValue*) sfontp);
   TTF_Font** font = sfont.record_data<TTF_Font*>();
   if(*font) {
     TTF_CloseFont(*font);
     (*font) = 0;
   }
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 
 Defun _font_finalizer((void*) ttf_font_finalizer);
@@ -380,7 +380,7 @@ Value sdl_open_font(State& state, size_t argc, Value* argv, void* closure) {
   TTF_Font* cfont = TTF_OpenFont(path.c_str(), (int)argv[1].fixnum_value());
 
   //Value v = state.make_record(sdl_ttf_font_tag);
-  SValue v = state.make_record(font_tag);
+  Value v = state.make_record(font_tag);
 
   (*state.record_data<TTF_Font*>(font_tag, v)) = cfont;
 
@@ -413,7 +413,7 @@ Value sdl_draw_text(State& state, size_t argc, Value* argv, void* closure) {
     SDL_FreeSurface(solid);
   }
 
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("draw-text", sdl_draw_text, 4, 6);
 
@@ -432,7 +432,7 @@ Value sdl_close_font(State& state, size_t argc, Value* argv, void* closure) {
 
   argv[0].record_set_finalized();
 
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 AR_DEFUN("close-font", sdl_close_font, 1);
 
@@ -477,7 +477,7 @@ Value sdl_add_timer(State& state, size_t argc, Value* argv, void* closure) {
 
   CHECK_SDL(id);
 
-  SValue rec = state.make_record(timer_tag);
+  Value rec = state.make_record(timer_tag);
 
   TimerData* data = state.record_data<TimerData>(timer_tag, rec);
   data->symbol = symbol_handle;
@@ -516,7 +516,7 @@ Value sdl_remove_timer(State& state, size_t argc, Value* argv, void* closure) {
 AR_DEFUN("remove-timer", sdl_remove_timer, 1);
 
 Value timer_finalizer(State& state, size_t argc, Value* argv, void* timerp) {
-  SValue timer((HeapValue*) timerp);
+  Value timer((HeapValue*) timerp);
   TimerData* timer_data = timer.record_data<TimerData>();
   if(timer_data->symbol != nullptr) {
     delete timer_data->symbol;
@@ -525,7 +525,7 @@ Value timer_finalizer(State& state, size_t argc, Value* argv, void* timerp) {
       SDL_RemoveTimer(timer_data->id);
     }
   }
-  return Value::c(C_UNSPECIFIED);
+  return C_UNSPECIFIED;
 }
 
 Defun _timer_finalizer((void*) timer_finalizer);
@@ -546,7 +546,7 @@ void load_sdl(State& state) {
   state.record_type_set_finalizer(timer_tag, timer_finalizer);
 
   // Set up module information
-  SValue module = state.make_record(state.globals[sdl_module_tag]);
+  Value module = state.make_record(state.globals[sdl_module_tag]);
   SDLModuleData* data = state.record_data<SDLModuleData>(sdl_module_tag, module);
   data->font_tag = font_tag;
   data->event_tag = event_tag;

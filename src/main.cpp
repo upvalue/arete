@@ -51,7 +51,7 @@ extern void ar_eval_and_print(const char* image, const char* str) {
   src_name << "repl-line-" << i++;
   XReader reader(*state, ss, false, src_name.str());
 
-  SValue x;
+  Value x;
   AR_FRAME(state, x);
   while(true) {
     x = reader.read();
