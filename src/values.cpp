@@ -271,6 +271,7 @@ Value State::make_record(Value tipe) {
 
 Value State::make_record(size_t tag) {
   AR_ASSERT(globals.size() > tag);
+  AR_TYPE_ASSERT("tag represents a valid record type " && globals.at(tag).type() == RECORD_TYPE);
   return make_record(globals.at(tag).as<RecordType>());
 }
 

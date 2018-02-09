@@ -37,7 +37,7 @@ ifeq ($(OS),Windows_NT)
 	DASMFLAGS := -D WINDOWS
 	MATH :=	
 else
-	ARETE_LIBS := sdl
+	ARETE_LIBS := sdl uv
 	DASMFLAGS :=
 	MATH := -lm
 endif
@@ -54,6 +54,13 @@ ifeq ($(findstring sdl,$(ARETE_LIBS)),sdl)
 	ELDFLAGS := $(ELDFLAGS) -s USE_SDL=2 -s USE_SDL_TTF=2 -s NO_EXIT_RUNTIME=1
 else
 	CXXFLAGS := $(CXXFLAGS) -DAR_LIB_SDL=0
+endif
+
+ifeq ($(findstring uv,$(ARETE_LIBS)),uv)
+	CXXFLAGS := $(CXXFLAGS) -DAR_LIB_UV=1
+	LDFLAGS := $(LDFLAGS) $(shell pkg-config --libs libuv)
+else
+	CXXFLAGS := $(CXXFLAGS) -DAR_LIB_UV=0
 endif
 
 # Fancy color compilation

@@ -17,6 +17,7 @@ extern void load_table_functions(State&);
 extern void load_string_functions(State&);
 extern void load_platform_functions(State&);
 extern void load_sdl(State&);
+extern void load_uv(State&);
 extern void load_native_compiler(State&);
 
 State::State():
@@ -143,14 +144,20 @@ void State::boot() {
   load_platform_functions(*this);
   load_native_compiler(*this);
 
+  set_global_value(G_FEATURES, C_NIL);
+
 #if AR_LIB_SDL
   load_sdl(*this);
   register_feature("sdl");
 #endif
 
+#if AR_LIB_UV
+  load_uv(*this);
+  register_feature("uv");
+#endif
+
   set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(1500));
   set_global_value(G_COMMAND_LINE, C_NIL);
-  set_global_value(G_FEATURES, C_NIL);
   set_global_value(G_TCO_ENABLED, C_TRUE);
   set_global_value(G_PRINT_READABLY, C_FALSE);
   set_global_value(G_PRINT_TABLE_MAX, Value::make_fixnum(0));
