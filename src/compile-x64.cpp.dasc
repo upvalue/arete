@@ -17,9 +17,10 @@
 #if AR_64_BIT == 0
 
 namespace arete {
+
 void load_native_compiler(State&) {
-  std::cout << "load native compiler" << std::endl;
 }
+
 }
 
 #else

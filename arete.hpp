@@ -780,7 +780,9 @@ struct Value {
     if(!record_finalized()) heap->set_header_bit(RECORD_FINALIZED_BIT);
   }
 
+  /** Returns the DATA of a record, not including fields */
   template <class T> T* record_data();
+  template <class T> T* record_body();
 
   static const unsigned RECORD_FINALIZED_BIT = 1 << 10;
 
@@ -1367,7 +1369,16 @@ inline T* Value::record_data() {
   AR_TYPE_ASSERT(record_isa(rtd));
   size_t data_offset = sizeof(Record) + (rtd.record_type_field_count() * sizeof(Value)) - sizeof(Value);
   return ((T*) (((char*) heap) + data_offset));
- }
+}
+
+template <class T>
+inline T* Value::record_body() {
+  Value rtd = record_type();
+  AR_TYPE_ASSERT(rtd.type() == RECORD_TYPE);
+  AR_TYPE_ASSERT(record_isa(rtd));
+  size_t data_offset = sizeof(Record)  - sizeof(Value);
+  return ((T*) (((char*) heap) + data_offset));
+}
 
 /** 
  * Dummy class to be extended by C++ code
@@ -1925,6 +1936,19 @@ struct State {
     AR_ASSERT(rtd.type() == RECORD_TYPE);
     AR_ASSERT(record.record_isa(rtd));
     size_t data_offset = sizeof(Record) + (rtd.record_type_field_count() * sizeof(Value)) - sizeof(Value);
+    return ((T*) (((char*) record.heap) + data_offset));
+  }
+
+  /**
+   * Returns Record::fields casted to a particular type, useful for Records containing both garbage-collected
+   * fields and C data.
+   */
+  template <class T>
+  T* record_body(size_t tag, Value record) {
+    Value rtd = globals.at(tag);
+    AR_ASSERT(rtd.type() == RECORD_TYPE);
+    AR_ASSERT(record.record_isa(rtd));
+    size_t data_offset = sizeof(Record) - sizeof(Value);
     return ((T*) (((char*) record.heap) + data_offset));
   }
 

@@ -72,7 +72,7 @@ AR_DEFUN("init", sdl_init, 2);
 
 Value sdl_quit(State& state, size_t argc, Value* argv, void* closure) {
   static const char* fn_name = "sdl:quit";
-  AR_FN_CLOSURE(state, closure, SDLModule*, module);
+  AR_FN_CLOSURE(state, closure,  SDLModule*, module);
   AR_FN_ARGC_EQ(state, argc, 0);
   if(module->data.window != 0) {
     SDL_DestroyRenderer(module->data.renderer);

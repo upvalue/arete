@@ -4,14 +4,14 @@
 CXX := g++
 CC := gcc
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-implicit-fallthrough -I. -Ivendor -Ivendor/linenoise -Ivendor/dynasm
-CFLAGS := $(CFLAGS) -g3 -O3 
+CFLAGS := $(CFLAGS) -g3 -O3
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) -fpermissive
 LDFLAGS := -fno-rtti -fno-exceptions
 
 # Emscripten
 ECXX := em++
 ECPPFLAGS := $(CPPFLAGS) 
-ECXXFLAGS := -s ASSERTIONS=1 -O3 $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -DAR_LINENOISE=0 -DARETE_LOG_TAGS="(ARETE_LOG_TAG_IMAGE|ARETE_LOG_TAG_DEFUN)"
+ECXXFLAGS := -s ASSERTIONS=1 -O3 $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions -DAR_LINENOISE=0 -DARETE_LOG_TAGS="(ARETE_LOG_TAG_IMAGE|ARETE_LOG_TAG_DEFUN)" -s WASM 1
 ELDFLAGS := -O3 -s ASSERTIONS=1 -s EXTRA_EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]'
 
 # Retrieve compilation targets
