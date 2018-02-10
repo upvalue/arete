@@ -3,10 +3,7 @@
 // compile-x64.cpp.dasc - Compile bytecode to native amd64 code
 // This is a DynASM file. Must be run through DynASM to produce a C++ file
 
-// Major todos
-
-// DONE: Full closure support
-// DONE: Allocate off of GC heap
+// TODO: Stack traces 
 // TODO: Extended argument functionality, VM primitives
 
 #include <algorithm>
@@ -18,8 +15,7 @@
 
 namespace arete {
 
-void load_native_compiler(State&) {
-}
+void load_native_compiler(State&) {}
 
 }
 
@@ -1999,8 +1995,7 @@ Value compile_native(State& state, Value vfn_) {
 	| sub rsp, 48
   | simpCall native_throw_exception
   | mov STACK, rax
-	| add rsp, 48
-  | add rsp, sizeof(NativeException) // Reset stack
+	| add rsp, (48+sizeof(NativeException)) // Reset stack
   
   |->unwind: 
 

@@ -25,8 +25,10 @@
 
 ;; so we need an additional thing to detect when a function is only used recursively and immediately after it...
 
-
 ;; perhaps if its only used once at a particular "level", then we know we can convert it to a label?
+
+;; We could also cheat and just introduce some kind of special marker in the LET macro. This is, after all, about
+;; getting low hanging fruit.
 
 ;; (?)
 
