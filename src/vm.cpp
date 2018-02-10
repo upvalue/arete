@@ -115,6 +115,8 @@ struct VMFrame2 {
     AR_LOG((AR_LOG_TAG_VM), "vm", msg); \
   }
 
+extern Value compile_native(State&, Value);
+
 Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
   //std::cout << "apply_vm called" << std::endl;
 
@@ -160,7 +162,11 @@ tail:
   // be updated after anything that might result in another apply_vm call
   VMFunction* vfn = static_cast<VMFunction*>(f.fn.heap);
 
-  vfn->calls++;
+  /*
+  if(vfn->calls++ >= 50 && !vfn->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
+    compile_native(state, vfn);
+  }
+  */
 
   Value *locals, *stack = 0, *sbegin = 0;
   size_t  *code = 0;

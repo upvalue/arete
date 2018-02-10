@@ -472,14 +472,10 @@ size_t make_closure(State* state, size_t upvalues, Value* stack_start) {
   return closure.bits;
 }
 
-Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
-  const char* fn_name = "vmfunction->native";
-
-  AR_FN_ARGC_GTE(state, argc, 1);
-  AR_FN_ASSERT_ARG(state, 0, "to be a closure or vm function", argv[0].heap_type_equals(CLOSURE) || argv[0].heap_type_equals(VMFUNCTION));
+Value compile_native(State& state, Value vfn_) {
   Value nfn, vfn, closure;
 
-  closure = argv[0];
+  closure = vfn_;
   vfn = closure.closure_unbox();
 
   AR_FRAME(state, nfn, vfn, closure);
@@ -1287,6 +1283,13 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
         // Set up arguments for function call, argv and function pointer handled by above
         | mov ARG1, STATE
+
+        // state->gc.native_frames = NativeFrame.previous
+        | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
+        | mov ARG2, [rsp]
+        | mov [ARG1], ARG2
+
+        | mov ARG1, STATE
         | mov ARG2, argc
 
         // Now undo all the stuff we've done to the stack
@@ -2081,6 +2084,30 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 
   AR_LOG_JIT("vmfunction->native done; calling function");
 
+  if(!vfn.heap->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
+    vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
+  }
+
+  vfn.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)proc_addr;
+  closure.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)proc_addr;
+
+  return vfn;
+}
+
+Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
+  const char* fn_name = "vmfunction->native";
+
+  AR_FN_ARGC_GTE(state, argc, 1);
+  AR_FN_ASSERT_ARG(state, 0, "to be a closure or vm function", argv[0].heap_type_equals(CLOSURE) || argv[0].heap_type_equals(VMFUNCTION));
+
+  Value closure = argv[0], vfn = argv[0].closure_unbox();
+
+  AR_FRAME(state, closure, vfn);
+
+  compile_native(state, closure);
+
+  char* proc_addr = (char*) closure.as_unsafe<Procedure>()->procedure_addr;
+
 	Value (*proc)(State*, size_t, Value*, void*) = ((Value (*)(State*, size_t, Value*, void*))(proc_addr));
 
   /*
@@ -2094,14 +2121,9 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 	std::cout << "return value bits: " << Value(asdf) << std::endl;
   */
 
-  if(!vfn.heap->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
-    vfn.heap->set_header_bit(Value::VMFUNCTION_NATIVE_BIT);
-  }
 
   // PROBLEM: A closure cannot have all procedure_addrs replaced in-place by the JIT compiler.
 
-  vfn.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)proc_addr;
-  closure.as_unsafe<Procedure>()->procedure_addr = (c_closure_t)(void*)proc_addr;
 
   AR_ASSERT(vfn.procedurep());
   AR_ASSERT(closure.procedurep());
