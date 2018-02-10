@@ -128,7 +128,7 @@ void load_native_compiler(State&) {}
 
 namespace arete {
 
-static const bool dbg = false;
+static const bool dbg = true;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
@@ -630,6 +630,7 @@ Value compile_native(State& state, Value vfn_) {
   |.endmacro
 
   // Check whether a value in STORE is an exception and return it if so
+  // NOTE: Uses RAX!
   |.macro checkExceptionP, store
   | immediateJmpTo1 store
   | mov rax, [store]
@@ -1329,9 +1330,6 @@ Value compile_native(State& state, Value vfn_) {
 
 				| extractProcedureAddr rax
         
-        // First argument register = location of return value 
-        | mov ARG1, rsp
-
         // Set up the frame for the function call
         | push rbp
         | mov rbp, rsp
@@ -1358,71 +1356,30 @@ Value compile_native(State& state, Value vfn_) {
         | sub STACK, ((argc * 8) + 8)
         | mov ARG2, [STACK]
         | mov [rsp+32], ARG2
-        // | mov qword [rsp+32], 18
         
         // Second argument register = first argument = State& state
         | mov ARG2, STATE
 
-        /*
-        | mov qword [STACK], 2
-        | incStack
-        */
+        // First argument register = location of return value on stack
+        | mov ARG1, rsp
+        | add ARG1, 40
 
         // Finally call function
         | call rax
 
+        // Save return value
+        | mov ARG1, [rsp+40]
 
+        // Undo stack adjustments
         | add rsp, 48
 
         | mov rsp, rbp
         | pop rbp
 
-        | mov rax, [rsp]
-        | mov [STACK], rax
+        // Check exception then push onto stack
+        | checkExceptionP ARG1
+        | mov [STACK], ARG1
         | incStack
-
-        #if 0
-
-				// [rsp+0] location of return value
-				// [rsp+8] location of function pointer (fourth argument to function)
-				// [8-16] not used
-        // [16-48] shadow space
-
-				| push rbp;
-				| mov rbp, rsp;
-
-				| sub rsp, 48
-
-        // Get function pointer
-				| mov ARG4, STACK
-				| sub ARG4, ((argc * 8) + 8)
-
-        // Set function pointer
-				| mov ARG4, [ARG4]
-				| mov [rsp+32], ARG4
-
-        // Get argv pointer
-				| mov ARG4, STACK
-				| sub ARG4, (argc * 8)
-        
-        // Set location of return value
-				| mov ARG1, rsp
-        // Set argc
-				| mov ARG3, (size_t) argc
-
-				| call rax
-
-				| mov rax, [rsp]
-				| mov [STACK], rax
-				| incStack
-
-				| add rsp, 48
-
-				| mov rsp, rbp;
-				| pop rbp
-
-        #endif
-
 
 				|.else
         // Pointer to function on stack
@@ -2233,6 +2190,8 @@ Value fn_native_call(State& state, size_t argc, Value* argv, void* fn) {
 	vfn_bits = (size_t) vfn.bits;
 	//for(size_t i= 0; i != 50; i++) { std::cout <<i<<std::endl;}
   Value result = ptr((State*) &state, argc-1, (size_t)argv+8, (size_t)vfn.bits);
+
+  std::cout << "REturned " << std::endl;
 
   if(dbg) {
     std::cout << "result int: " << (ptrdiff_t)(result.bits) << std::endl;
