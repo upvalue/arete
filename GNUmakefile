@@ -1,8 +1,8 @@
 # Variables
 
 # Normal compilation flags
-CXX := g++
-CC := gcc
+CXX := clang++
+CC := clang
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-implicit-fallthrough -I. -Ivendor -Ivendor/linenoise -Ivendor/dynasm
 CFLAGS := $(CFLAGS) -g3 -O3
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) -fpermissive
@@ -37,7 +37,7 @@ ifeq ($(OS),Windows_NT)
 	DASMFLAGS := -D WINDOWS
 	MATH :=	
 else
-	ARETE_LIBS := sdl uv
+	ARETE_LIBS := sdl 
 	DASMFLAGS :=
 	MATH := -lm
 endif

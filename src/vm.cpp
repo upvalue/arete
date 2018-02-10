@@ -127,6 +127,7 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
   Value exception;
 
 tail:
+  AR_ASSERT(fnp != (void*) C_EOF); // for debugging native code
   AR_ASSERT(state.gc.live((HeapValue*) fnp));
   VMFrame2 f(state, Value((HeapValue*) fnp));
 

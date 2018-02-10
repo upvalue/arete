@@ -751,11 +751,13 @@ Value compile_native(State& state, Value vfn_) {
 	|.endif
 
 	// Get fourth argument off weird place in stack, thanks Windows.
-	// 56 + (8*5) = register amount
 	|.if WINDOWS
 	// r14 = pointer to Closure/VMFunction
+  // rsp+40+(8*6) to compensate for the registers we've just pushed
 	| mov r14, [rsp+40+(8*6)]
 	// r15 = location of return value on stack
+  // TODO: Don't waste a register on this, store it at the beginning of the
+  // stack
 	| mov r15, ARG1
 	|.endif
 
@@ -1254,6 +1256,7 @@ Value compile_native(State& state, Value vfn_) {
         break;
       }
 
+      /*
       case OP_APPLY_TAIL: {
         size_t argc = code[code_offset++];
         AR_LOG_JIT("apply-tail " << argc);
@@ -1302,46 +1305,109 @@ Value compile_native(State& state, Value vfn_) {
 
         break;
       }
+      */
 
-      //case OP_APPLY_TAIL: 
+      case OP_APPLY_TAIL: 
       case OP_APPLY: {
         size_t argc = code[code_offset++];
 
         AR_LOG_JIT("apply " << argc);
 
         |.if WINDOWS
+
 				// Windows calling convention handling
 				// We lose a register because ARG1 is used to communicate the address
 				// of the return value
 				| mov ARG2, STATE
 
-				| mov ARG4, STACK
-				| sub ARG4, ((argc * 8) + 8)
+        // First, extract Procedure::procedure_addr from the function pointer
+        // on the stack
+				| mov rax, STACK
+				| sub rax, ((argc * 8) + 8)
 
-				| mov ARG4, [ARG4]
+				| mov rax, [rax]
 
-				| extractProcedureAddr ARG4
+				| extractProcedureAddr rax
+        
+        // First argument register = location of return value 
+        | mov ARG1, rsp
+
+        // Set up the frame for the function call
+        | push rbp
+        | mov rbp, rsp
+
+        | sub rsp, 48
+
+        // stack format (relative to callee)
+        // [0-32] shadow space
+        // [rsp+32] function pointer
+        // [rsp+40] return value
+        // [rsp+48] rbp
+
+        // Get function pointer
+
+        // Third argument register = second argument = argc
+        | mov ARG3, (size_t) argc
+
+        // Fourth argument register = third argument = argv
+        | mov ARG4, STACK
+        | sub ARG4, ((argc * 8))
+
+        // [rsp+40] of calling function = fourth argument = function
+        // Also adjust stack
+        | sub STACK, ((argc * 8) + 8)
+        | mov ARG2, [STACK]
+        | mov [rsp+32], ARG2
+        // | mov qword [rsp+32], 18
+        
+        // Second argument register = first argument = State& state
+        | mov ARG2, STATE
+
+        /*
+        | mov qword [STACK], 2
+        | incStack
+        */
+
+        // Finally call function
+        | call rax
+
+
+        | add rsp, 48
+
+        | mov rsp, rbp
+        | pop rbp
+
+        | mov rax, [rsp]
+        | mov [STACK], rax
+        | incStack
+
+        #if 0
 
 				// [rsp+0] location of return value
-				// [rsp+8] location of function pointer
-				// [8-48] not used
+				// [rsp+8] location of function pointer (fourth argument to function)
+				// [8-16] not used
+        // [16-48] shadow space
 
 				| push rbp;
 				| mov rbp, rsp;
 
 				| sub rsp, 48
 
+        // Get function pointer
 				| mov ARG4, STACK
 				| sub ARG4, ((argc * 8) + 8)
 
+        // Set function pointer
 				| mov ARG4, [ARG4]
 				| mov [rsp+32], ARG4
 
+        // Get argv pointer
 				| mov ARG4, STACK
-				| sub ARG4, ((argc * 8) + 8)
-				| add ARG4, 8
-
+				| sub ARG4, (argc * 8)
+        
+        // Set location of return value
 				| mov ARG1, rsp
+        // Set argc
 				| mov ARG3, (size_t) argc
 
 				| call rax
@@ -1354,6 +1420,9 @@ Value compile_native(State& state, Value vfn_) {
 
 				| mov rsp, rbp;
 				| pop rbp
+
+        #endif
+
 
 				|.else
         // Pointer to function on stack
@@ -2041,12 +2110,10 @@ Value compile_native(State& state, Value vfn_) {
 
   // Retrieve return value from STACK
 
-	// Windows requires us to allocate return space on the stack because Value is
-	// a struct with a constructor
+  // Windows requires the struct be returned in a pointer, which we've stored
+  // in r15
 	| .if WINDOWS
-	|  mov rax, rsp
-	|  sub rax, 40
-	|  mov [rax], STACK
+  | mov [r15], STACK
 	| .else
   |  mov rax, STACK
 	| .endif
