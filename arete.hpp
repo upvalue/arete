@@ -2655,7 +2655,7 @@ struct TableIterator {
 #define AR_FN_EXPECT_RECORD_ISA(state, argv, arg, tag_index) \
   if((argv)[(arg)].type() != RECORD) { \
     std::ostringstream __os; \
-    __os << fn_name << " expected argument " << (arg) << " to be a record of typebut got " << ((argv)[(arg)].type()); \
+    __os << fn_name << " expected argument " << (arg) << " to be a record of type " << (state).globals.at((tag_index)).record_type_name() << " but got " << ((argv)[(arg)].type()); \
     return state.type_error(__os.str()); \
   } else if((argv)[(arg)].record_type() != (state).globals.at((tag_index))) { \
     std::ostringstream __os; \
