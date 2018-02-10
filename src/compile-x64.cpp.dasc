@@ -6,6 +6,13 @@
 // TODO: Stack traces 
 // TODO: Extended argument functionality, VM primitives
 
+// TODO: Compiler improvements
+
+// The VM compiler should (1) save label offsets so we don't have to loop over the full source
+// (2) detect whether a function has tail calls or not so we can omit that stuff
+// (3) detect whether a function needs a GC frame or not so we can omit that.
+
+
 #include <algorithm>
 #include <functional>
 
@@ -128,7 +135,7 @@ void load_native_compiler(State&) {}
 
 namespace arete {
 
-static const bool dbg = true;
+static const bool dbg = false;
 static const bool sanity_log = true;
 static const bool gc_debug = true;
 
@@ -418,6 +425,7 @@ void* allocate_rest_arguments(State* state, size_t arity, size_t argc, Value* ar
 Value* copy_arguments(State& state, size_t argc, Value* argv) {
   state.temps.clear();
   state.temps.insert(state.temps.end(), argv, &argv[argc]);
+  state.gc.protect_argv = state.temps.data();
   return state.temps.data();
 }
 
@@ -743,9 +751,9 @@ Value compile_native(State& state, Value vfn_) {
   | push rbx
   | push STATE
   | push STACK
-	|.if WINDOWS
 	| push r14
 	| push r15
+	|.if WINDOWS
 	| mov STATE, ARG2
 	|.else
   | mov STATE, ARG1
@@ -1130,7 +1138,6 @@ Value compile_native(State& state, Value vfn_) {
         //| mov ARG2, [ARG2]
         |.endmacro
 
-
         // TODO: This adds a LOT of code. 
 
         // Extract upvalue contents, which may either be a pointer, a stack offset, or a value
@@ -1257,13 +1264,17 @@ Value compile_native(State& state, Value vfn_) {
         break;
       }
 
-      /*
       case OP_APPLY_TAIL: {
         size_t argc = code[code_offset++];
         AR_LOG_JIT("apply-tail " << argc);
 
-        // copy_arguments copies the argv for the tail call into State::temps and returns
-        // a pointer to the array
+        // How tail applications work
+
+        // Because setting up and knocking down the stack is somewhat complex, we copy the arguments
+        // into State::temps, set r14 to positive value to indicate that a tail call should occur,
+        // then STACK to the actual function pointer.
+
+        // The copy_arguments function saves a pointer to the array in State::gc::protect_argv
         | mov ARG1, STATE
         | mov ARG2, (size_t) argc
         | mov ARG3, STACK
@@ -1271,44 +1282,25 @@ Value compile_native(State& state, Value vfn_) {
         | mov64 rax, (size_t) copy_arguments
         | call rax
 
-        // Take the pointer to State::temps.data
-        | mov ARG3, rax
+        | sub STACK, ((argc * 8) + 8)
+        | mov STACK, [STACK]
 
-        // Get function pointer
-        | mov rax, [STACK-((argc*8)+8)]
-        // Save it for function arguments
-        | mov ARG4, rax
-        // Get procedure address
-        | extractProcedureAddr rax
+        // Check for valid procedure
+        | mov rax, STACK
+        | immediateJmpTo1 rax
+        | mov rax, STACK
+        | test qword [rax], Value::VALUE_PROCEDURE_BIT
+        | jz >1
 
-        // Set up arguments for function call, argv and function pointer handled by above
-        | mov ARG1, STATE
+        // Finally we can do a tail call
+        | mov r14, argc
+        | jmp ->unwind_tail
+        | 1:
 
-        // state->gc.native_frames = NativeFrame.previous
-        | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.native_frames)
-        | mov ARG2, [rsp]
-        | mov [ARG1], ARG2
-
-        | mov ARG1, STATE
-        | mov ARG2, argc
-
-        // Now undo all the stuff we've done to the stack
-        | add rsp, kTotalStackSizeAligned
-
-        | pop STACK
-        | pop STATE
-        | pop rbx
-        | mov rsp, rbp
-        | pop rbp
-
-        // And jump to the next function
-        | jmp rax
-
+        | throwNativeException E_EVAL, E_APPLY_CHECK, STACK, 0
         break;
       }
-      */
 
-      case OP_APPLY_TAIL: 
       case OP_APPLY: {
         size_t argc = code[code_offset++];
 
@@ -2010,7 +2002,7 @@ Value compile_native(State& state, Value vfn_) {
   // Attempt to trace exception
   |->trace_exception:
 
-  |jmp ->unwind
+  | jmp ->unwind
 
   |->exception:
 	// Add State* and VMFunction pointer to this
@@ -2024,6 +2016,9 @@ Value compile_native(State& state, Value vfn_) {
 	| add rsp, (48+sizeof(NativeException)) // Reset stack
   
   |->unwind: 
+  | mov r14, -1
+
+  |->unwind_tail:
 
   // Protect return value
   if(dbg && gc_debug) {
@@ -2039,6 +2034,7 @@ Value compile_native(State& state, Value vfn_) {
 
   // Close over local upvalues
   if(upvalue_count) {
+    | mov sFrameScratch, STACK
     for(size_t i = 0; i != upvalue_count; i++) {
       | mov ARG2, rsp
       | add ARG2, (kUpvaluesOffset + (i * 8))
@@ -2048,6 +2044,7 @@ Value compile_native(State& state, Value vfn_) {
       | mov64 rax, (size_t) upvalue_close
       | call rax
     }
+    | mov STACK, sFrameScratch
   }
 
   // state->gc.native_frames = NativeFrame.previous
@@ -2070,24 +2067,52 @@ Value compile_native(State& state, Value vfn_) {
   // Windows requires the struct be returned in a pointer, which we've stored
   // in r15
 	| .if WINDOWS
-  | mov [r15], STACK
+  |  mov [r15], STACK
 	| .else
   |  mov rax, STACK
 	| .endif
 
+  // Check for tail call
+  | cmp r14, -1
+
+  | je ->restore_stack
+
+  // Save off values needed for tail call
+  | mov ARG1, STATE
+  | mov ARG2, r14
+  | mov ARG3, STATE
+  | add ARG3, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argv)
+  | mov ARG3, [ARG3]
+  | mov ARG4, STACK
+
+  | ->restore_stack:
+
+  // Save comparison for after registers are restored
+  | cmp r14, -1
+
   // Restore registers
-	|.if WINDOWS
 	| pop r15
 	| pop r14
-	|.endif
   | pop STACK
 	| pop STATE
   | pop rbx
   | mov rsp, rbp
 	| pop rbp
 
-  // Create return value
+  // Initiate a tail call, if there was one
+  | jne ->tail
+
+  // Actually return from function
   | ret
+
+  // Tail call
+  | ->tail:
+  | add rax, (&((Procedure*)0)->procedure_addr)
+  | mov rax, [rax]
+  | jmp rax
+
+  // TODO: All this tail call stuff should be conditionally emitted (only for functions with
+  // tail calls in them)
 
   size_t size;
 
