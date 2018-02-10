@@ -1553,6 +1553,8 @@ struct GCCommon {
   size_t protect_argc;
   Value* protect_argv;
 
+  Value native_tail_argv[128];
+
   /** If true, collect before every allocation. Flushes out GC bugs, incredibly expensive */
   bool collect_before_every_allocation;
   /** Number of total allocations */

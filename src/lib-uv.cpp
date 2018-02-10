@@ -114,6 +114,9 @@ Value tcp_bind(State& state, size_t, Value* argv, void* closure) {
 
   // TODO: Now what? 
   // How do we do a callback here?
+
+  // Could re-use DynASM here, use it to create a function encoded with a Handle which passes
+  // on arguments as appropriate. 
   CHECK_UV(uv_listen((uv_stream_t*) server, 128, on_new_connection));
 
   return C_UNSPECIFIED;

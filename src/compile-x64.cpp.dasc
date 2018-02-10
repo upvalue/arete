@@ -122,6 +122,9 @@ void load_native_compiler(State&) {
 // TODO: There is no need to store Closure pointer, we could store the VectorStorage of upvalues
 // directly in the frame pointer
 
+#define DASM_CHECKS
+#define DASM_FDEF static
+
 #include "dasm_proto.h"
 #include "dasm_x86.h"
 
@@ -388,24 +391,8 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
 // rsp = stack pointer
 // saved = rbx, rbp, rdi, rsi, rsp, r12-15
 // rsp-128 is the red zone; can be used for temp values but destroyed by any called function
-
-Value generic_apply(State* state, size_t argc, Value* argv, Value fn) {
-  std::cout << "Generic_apply: " << (ptrdiff_t)state << ' ' << (ptrdiff_t) fn.bits <<
-    ' ' << (ptrdiff_t) argc << ' ' << (ptrdiff_t) argv << std::endl;
-
-
-  if(argc > 0) {
-    std::cout << "argv[0] " << (ptrdiff_t) argv[0].bits << std::endl;
-  }
-
-  Value result(state->apply(fn, argc, argv));
-
-  std::cout << state->get_symbol("print").symbol_value().bits << std::endl;
-
-  return result;
-}
-
 /*
+
 void* allocate_flonum(State* state, Flonum* flo) {
   std::cout << "Allocate flonum called with argument " << flo->number << std::endl;
   return (void*) state->make_flonum(flo->number).heap;
@@ -430,6 +417,12 @@ void* allocate_rest_arguments(State* state, size_t arity, size_t argc, Value* ar
   }
 
   return (void*) state->temps_to_list(0).bits;
+}
+
+Value* copy_arguments(State& state, size_t argc, Value* argv) {
+  state.temps.clear();
+  state.temps.insert(state.temps.end(), argv, &argv[argc]);
+  return state.temps.data();
 }
 
 struct NativeFrameSize {
@@ -923,11 +916,10 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
   bool done = false;
   size_t code_limit = vmf->code->length;
 
+  // TODO: Reuse this.
   std::unordered_map<size_t, unsigned> offsets_to_labels;
 
   // Generate all labels
-
-  // Generate labels
   while(true) {
     size_t loc = 0;
 
@@ -1270,13 +1262,55 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
         break;
       }
 
-      case OP_APPLY_TAIL: 
+      case OP_APPLY_TAIL: {
+        size_t argc = code[code_offset++];
+        AR_LOG_JIT("apply-tail " << argc);
+
+        // copy_arguments copies the argv for the tail call into State::temps and returns
+        // a pointer to the array
+        | mov ARG1, STATE
+        | mov ARG2, (size_t) argc
+        | mov ARG3, STACK
+        | sub ARG3, (argc * 8)
+        | mov64 rax, (size_t) copy_arguments
+        | call rax
+
+        // Take the pointer to State::temps.data
+        | mov ARG3, rax
+
+        // Get function pointer
+        | mov rax, [STACK-((argc*8)+8)]
+        // Save it for function arguments
+        | mov ARG4, rax
+        // Get procedure address
+        | extractProcedureAddr rax
+
+        // Set up arguments for function call, argv and function pointer handled by above
+        | mov ARG1, STATE
+        | mov ARG2, argc
+
+        // Now undo all the stuff we've done to the stack
+        | add rsp, kTotalStackSizeAligned
+
+        | pop STACK
+        | pop STATE
+        | pop rbx
+        | mov rsp, rbp
+        | pop rbp
+
+        // And jump to the next function
+        | jmp rax
+
+        break;
+      }
+
+      //case OP_APPLY_TAIL: 
       case OP_APPLY: {
         size_t argc = code[code_offset++];
 
         AR_LOG_JIT("apply " << argc);
 
-				|.if WINDOWS
+        |.if WINDOWS
 				// Windows calling convention handling
 				// We lose a register because ARG1 is used to communicate the address
 				// of the return value
@@ -1311,7 +1345,6 @@ Value vmfunction_to_native(State& state, size_t argc, Value* argv, void* _) {
 				| mov ARG1, rsp
 				| mov ARG3, (size_t) argc
 
-				//| mov64 rax, (size_t) simple_fn_pointer_check
 				| call rax
 
 				| mov rax, [rsp]
