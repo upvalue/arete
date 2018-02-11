@@ -2085,6 +2085,9 @@ Value compile_native(State& state, Value vfn_) {
   | mov ARG3, [ARG3]
   | mov ARG4, STACK
 
+  // WINDOWS -- Have to preserve r15 here. Maybe move the pointer to rax which is saved, then
+  // have a special return right before ret?
+
   | ->restore_stack:
 
   // Save comparison for after registers are restored
@@ -2238,7 +2241,3 @@ void load_native_compiler(State& state) {
 }
 
 #endif // ARETE_64_BIT == 0
-
-
-
-

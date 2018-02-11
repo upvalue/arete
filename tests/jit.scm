@@ -63,6 +63,8 @@
 (define (return-true) #t)
 (define (return-false) #f)
 
+(test-equals 123 (lambda () (return-two) 123))
+
 (test-equals 2 (lambda () (return-two)))
 (test-equals 2 (lambda () (return-two) (return-two) (return-two)))
 (test-equals #f (lambda () (return-false)))
