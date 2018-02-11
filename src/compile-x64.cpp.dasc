@@ -1275,6 +1275,7 @@ Value compile_native(State& state, Value vfn_) {
         // then STACK to the actual function pointer.
 
         // The copy_arguments function saves a pointer to the array in State::gc::protect_argv
+
         | mov ARG1, STATE
         | mov ARG2, (size_t) argc
         | mov ARG3, STACK
@@ -2078,12 +2079,26 @@ Value compile_native(State& state, Value vfn_) {
   | je ->restore_stack
 
   // Save off values needed for tail call
+	|.if WINDOWS
+
+	// Re-use pointer to stack
+	| mov ARG1, r15
+	| mov ARG2, STATE
+	| mov ARG3, r14
+	| mov ARG4, STATE
+	| add ARG4, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argv)
+	| mov ARG4, [ARG4]
+	// Update function pointer on stack (is this legal / sane? -- how else could
+	// it be done?)
+	| mov [rsp+40+(8*6)], STACK
+  |.else
   | mov ARG1, STATE
   | mov ARG2, r14
   | mov ARG3, STATE
   | add ARG3, (ptrdiff_t)(&((arete::State*)0)->gc.protect_argv)
   | mov ARG3, [ARG3]
   | mov ARG4, STACK
+	|.endif
 
   // WINDOWS -- Have to preserve r15 here. Maybe move the pointer to rax which is saved, then
   // have a special return right before ret?
