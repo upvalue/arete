@@ -163,11 +163,11 @@ tail:
   // be updated after anything that might result in another apply_vm call
   VMFunction* vfn = static_cast<VMFunction*>(f.fn.heap);
 
-#if 0
-  if(vfn->calls++ >= 5000 && !vfn->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
-    compile_native(state, vfn);
+  // Highly complex and fine-tuned JIT compilation, this number was found by picking a random number
+  // that increases compilation speed by quite a bit.
+  if(vfn->calls++ >= 1000 && !vfn->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
+    compile_native(state, f.closure);
   }
-#endif
 
   Value *locals, *stack = 0, *sbegin = 0;
   size_t  *code = 0;

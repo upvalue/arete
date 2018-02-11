@@ -138,6 +138,9 @@ struct PointerUpdater {
         break;
 
       case VMFUNCTION: {
+        if(!reading && static_cast<VMFunction*>(heap)->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
+          static_cast<VMFunction*>(heap)->unset_header_bit(Value::VMFUNCTION_NATIVE_BIT);
+        }
         static_cast<VMFunction*>(heap)->calls = 0;
         static_cast<VMFunction*>(heap)->procedure_addr = apply_vm_;
         static_cast<VMFunction*>(heap)->name = update_value(static_cast<VMFunction*>(heap)->name);
