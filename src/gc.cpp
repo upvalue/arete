@@ -1,4 +1,4 @@
-// gc.cpp - Garbage collection
+
 
 // TODO: Reduction of code duplication between collectors. It should be possible to share
 // the code that visits the pointers. The marking collector is recursive and uses a GOTO to save
@@ -187,6 +187,13 @@ void State::print_gc_stats(std::ostream& os) {
 
   std::cout << "stack: " << gc.vm_stack_used << "/" << gc.vm_stack_size << " slots" << std::endl;
 # endif
+
+  size_t b = 0;
+  for(size_t i = 0; i != native_code.size(); i++) {
+    b += native_code[i]->size;
+  }
+
+  std::cout << (b / 1024) << "kb allocated for native code" << std::endl;
 
 }
 

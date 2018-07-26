@@ -12,10 +12,10 @@ Hyper-alpha software. Show stopping bugs not only likely, but guaranteed OR YOUR
 Currently:
 
     make heap.boot
-    bin/arete heap.boot
+    bin/arete --save-image heap.boot
 
-Will bootstrap the expander and compiler, then save them into a loadable image. Prepending --load-image heap.boot will
-make the files in examples/ and REPL work as expected, for example:
+Will bootstrap the expander and compiler, then save them into a loadable image. Prepending heap.boot will make the
+files in examples/ and REPL work as expected, for example:
 
     bin/arete heap.boot --repl
 

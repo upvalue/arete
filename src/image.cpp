@@ -1,15 +1,10 @@
 // image.cpp - saving and loading of heap images
 
+// TODO: Native compile on reload
+
 // TODO: Save sources
 
 // TODO: Cross-platformity
-
-// TODO: Support for non-semispace collectors. We need to be able to walk the entire heap, which
-// is more complex for the incremental collector. Since we're dumping everything, one option
-// might be to just create a GCSemispace and compact the entire heap once. However, this would
-// still require the semispace collector to walk the incremental heap; it would also be ideal
-// if we had a way to compact incremental and possibly inefficient allocations. However, we don't
-// always know what the correct size for an object should be.
 
 // TODO: It would be great to get rid of the function_id_to_ptr stuff. The problem is we don't know
 // where all c function pointers will be stored in a way such that we can restore them easily.
@@ -138,6 +133,8 @@ struct PointerUpdater {
         break;
 
       case VMFUNCTION: {
+        // Strip native compilation bit
+        // TODO: If we can't easily serialize native code, we could compile it after loading.
         if(!reading && static_cast<VMFunction*>(heap)->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
           static_cast<VMFunction*>(heap)->unset_header_bit(Value::VMFUNCTION_NATIVE_BIT);
         }

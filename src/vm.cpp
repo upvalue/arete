@@ -165,9 +165,18 @@ tail:
 
   // Highly complex and fine-tuned JIT compilation, this number was found by picking a random number
   // that increases compilation speed by quite a bit.
+  #if 0
   if(vfn->calls++ >= 1000 && !vfn->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
+    // TODO: Existing closures will not receive the new procedure address
+
+    // Seems unlikely that that will ever matter in a way that leaves serious performance on the
+    // table
+
+    // We could update the closure's procedure address every time it's unboxed in the VM.
+
     compile_native(state, f.closure);
   }
+  #endif
 
   Value *locals, *stack = 0, *sbegin = 0;
   size_t  *code = 0;
@@ -231,6 +240,7 @@ tail:
     &&LABEL_OP_ARGC_EQ, &&LABEL_OP_ARGC_GTE, &&LABEL_OP_ARG_OPTIONAL, &&LABEL_OP_ARGV_REST,
     &&LABEL_OP_ARG_KEY, &&LABEL_OP_ARGV_KEYS,
     // Extended instructions
+    &&LABEL_OP_TYPE_CHECK, &&LABEL_OP_FIXNUMP,
     &&LABEL_OP_ADD, &&LABEL_OP_SUB,
     &&LABEL_OP_LT,
     &&LABEL_OP_CAR,
@@ -620,6 +630,18 @@ tail:
             VM2_RESTORE_GC();
           }
         }
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_TYPE_CHECK): {
+        Value s(*(stack - 1));
+        size_t tipe = VM_NEXT_INSN();
+        *(stack - 1) = s.type() == tipe;
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_FIXNUMP): {
+        *(stack - 1) = Value::make_boolean((*(stack - 1)).fixnump());
         VM_DISPATCH();
       }
 

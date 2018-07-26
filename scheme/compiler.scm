@@ -169,6 +169,7 @@
     return 
     jump jump-when jump-when-pop jump-unless
     argc-eq argc-gte arg-optional argv-rest arg-key argv-keys
+    type-check fixnum?
     + - < car cdr list-ref not eq? fx< fx+ fx-))
 
 ;; Static labels
@@ -203,7 +204,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
-               (0 jump jump-when argc-optional jump-unless words return car cdr not argc-eq argc-gte argv-rest arg-optional arg-key argv-keys)
+               (0 jump jump-when argc-optional jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest arg-optional arg-key argv-keys)
                (1 push-immediate push-constant global-get local-get upvalue-get upvalue-from-closure upvalue-from-local)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -276,20 +277,32 @@
 
 (define primitive-table
   (alist->table '(
-    ;; name min-argc max-argc variable-arity
+    ;; name min-argc max-argc variable-arity primitive-type-check?
     #|
     (list-ref 2 2 #f)
     |#
-    (< 2 2 #t)
-    (+ 0 0 #t)
-    (- 0 0 #t)
-    (car 1 1 #f)
-    (cdr 1 1 #f)
-    (not 1 1 #f)
-    (eq? 2 2 #f)
-    (fx+ 2 2 #f)
-    (fx- 2 2 #f)
-    (fx< 2 2 #f)
+    (< 2 2 #t #f)
+    (+ 0 0 #t #f)
+    (- 0 0 #t #f)
+    (car 1 1 #f #f)
+    (cdr 1 1 #f #f)
+    (not 1 1 #f #f)
+    (eq? 2 2 #f #f)
+    (fx+ 2 2 #f #f)
+    (fx- 2 2 #f #f)
+    (fx< 2 2 #f #f)
+
+    ;; type checks
+    ;(symbol? 1 1 #f #t)
+    (table? 1 1 #f #t)
+    (pair? 1 1 #f #t)
+    (function? 1 1 #f #t)
+    (vmfunction? 1 1 #f #t)
+    (record? 1 1 #f #t)
+    (record-type? 1 1 #f #t)
+    (string? 1 1 #f #t)
+    (fixnum? 1 1 #f #t)
+    (constant? 1 1 #f #t)
   ))
 )
 
@@ -299,6 +312,24 @@
        (pair? (car x))
        (eq? (rename-strip (caar x)) 'lambda)
        (list? (cadar x))))
+
+(define primitive-type-checks '(symbol?))
+
+(define (compile-primitive-check fn prim)
+  (if (eq? prim 'fixnum?)
+    (emit fn 'fixnum?)
+    (emit fn 'type-check
+      (case prim
+        (symbol? (value-type 'asdf))
+        (pair? (value-type '(asdf)))
+        (table? (value-type primitive-table))
+        (string? (value-type "asdf"))
+        (function? 13)
+        (vmfunction? 19)
+        (cfunction? 14)
+        (record? 17)
+        (record-type? 18)
+        (constant? (value-type #t))))))
 
 (define (compile-inline-call fn x tail?)
   ;; inlining a function call:
@@ -422,7 +453,9 @@
             (if (and (eq? (car primitive) '+) (null? (cdr x)))
               (compile-constant fn 0)
               (emit fn (car primitive) (length (cdr x))))
-            (emit fn (car primitive))
+            (if (list-ref primitive 4)
+              (compile-primitive-check fn (car primitive))
+              (emit fn (car primitive)))
             
           )
         )

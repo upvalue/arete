@@ -12,6 +12,7 @@
 // (2) detect whether a function has tail calls or not so we can omit that stuff
 // (3) detect whether a function needs a GC frame or not so we can omit that.
 
+// TODO: Detect recursion limit.
 
 #include <algorithm>
 #include <functional>
