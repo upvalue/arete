@@ -7,8 +7,6 @@ design and implementation, but for the moment it's essentially a vanilla Scheme.
 
 # Usage
 
-Hyper-alpha software. Show stopping bugs not only likely, but guaranteed OR YOUR MONEY BACK!
-
 Currently:
 
     make heap.boot

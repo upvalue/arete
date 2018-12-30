@@ -164,6 +164,10 @@ Value State::table_insert(Value table, Value key, Value value) {
     table_grow(table);
   }
 
+  if(htable->n_occupied >= htable->upper_bound) {
+    // table_grow2(table);
+  }
+
   bool unhashable;
   ptrdiff_t index = hash_index(table, key, unhashable);
   if(unhashable) return unhashable_error(value);

@@ -165,7 +165,7 @@ tail:
 
   // Highly complex and fine-tuned JIT compilation, this number was found by picking a random number
   // that increases compilation speed by quite a bit.
-  #if 0
+#if 0
   if(vfn->calls++ >= 1000 && !vfn->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
     // TODO: Existing closures will not receive the new procedure address
 
@@ -176,7 +176,7 @@ tail:
 
     compile_native(state, f.closure);
   }
-  #endif
+#endif 
 
   Value *locals, *stack = 0, *sbegin = 0;
   size_t  *code = 0;

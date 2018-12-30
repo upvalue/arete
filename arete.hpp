@@ -1288,6 +1288,9 @@ struct Table : HeapValue  {
   unsigned char size_log2;
   size_t entries, max_entries;
 
+  size_t n_buckets, size, n_occupied, upper_bound;
+  Bytevector *flags;
+
   static const Type CLASS_TYPE = TABLE;
 };
 

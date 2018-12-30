@@ -4,7 +4,7 @@
 CXX := g++
 CC := gcc
 CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-implicit-fallthrough -I. -Ivendor -Ivendor/linenoise -Ivendor/dynasm
-CFLAGS := $(CFLAGS) -g3 -O3
+CFLAGS := $(CFLAGS) -g3 -O2
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) -fpermissive
 LDFLAGS := -fno-rtti -fno-exceptions
 

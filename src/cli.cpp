@@ -204,6 +204,26 @@ bool State::enter_repl(bool read_only, const char* history_file) {
 }
 
 int State::enter_cli(int argc_, char* argv[]) {
+  /*
+  Value table, temp;
+  AR_FRAME(*this, table, temp);
+  table = make_table();
+
+  temp = get_symbol("one");
+  table_insert(table, temp, Value::make_fixnum(1));
+  
+  temp = get_symbol("two");
+  table_insert(table, temp, Value::make_fixnum(2));
+
+  temp = get_symbol("three");
+  table_insert(table, temp, Value::make_fixnum(3));
+
+  bool found;
+
+  std::cout << table_get(table, get_symbol("one"), found) << std::endl;
+
+  return 0;
+  */
   AR_ASSERT(!booted);
   unsigned argc = (unsigned) argc_;
   static const std::string read("--read");
