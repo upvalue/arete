@@ -1,9 +1,15 @@
-Arete is an implementation of the Scheme programming language in C++ and itself.
+Arete is a low-footprint, high performance implementation of the Scheme programming language in C++ and itself.
 
 # Why?
 
 Arete was written mostly for fun. I also made it as a platform for experimenting with more radical programming language
 design and implementation, but for the moment it's essentially a vanilla Scheme. 
+
+# Features
+
+- Compacting garbage collection
+- Native compilation
+- Hygienic macros and modules
 
 # Usage
 

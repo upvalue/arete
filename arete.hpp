@@ -68,13 +68,14 @@
 
 #ifdef __GNUC__
 # define AR_FORCE_INLINE __attribute__((always_inline))
-# define AR_LIKELY(x) (__builtin_expect((x), 1))
-# define AR_UNLIKELY(x) (__builtin_expect((x), 0))
+// # define AR_LIKELY(x) (__builtin_expect((x), 1))
+// # define AR_UNLIKELY(x) (__builtin_expect((x), 0))
 #else
-# define AR_LIKELY(x) (x)
-# define AR_UNLIKELY(x) (x)
 # define AR_FORCE_INLINE
 #endif
+
+# define AR_LIKELY(x) (x)
+# define AR_UNLIKELY(x) (x)
 
 #define _AR_FRAME2_(state, counter, ...)  \
   arete::FrameHack __arete_frame_ptrs##counter[] = { __VA_ARGS__ };  \

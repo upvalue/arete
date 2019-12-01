@@ -230,7 +230,7 @@
         (cddr args)))
 
     #`(let ,bindings
-        (let-syntax ((,'set! 
+        (let-syntax ((set! 
                        (lambda (x r c)
                          (syntax-assert-length= x 3)
                          ;(print "kount:" (,record-type fields-count:))
