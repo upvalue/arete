@@ -132,17 +132,16 @@
   (lambda (x)
     (if (fx< (length x) 3)
       (raise-source x 'syntax "when expects a condition and a body" (list x)))
-
-    `(,#'if ,(list-ref x 1)
-        (,#'begin ,@(cddr x)))))
+    #`(if ,(list-ref x 1)
+        (begin ,@(cddr x)))))
 
 (define-syntax unless
   (lambda (x)
     (if (fx< (length x) 3)
       (raise-source x 'syntax "unless expects a condition and a body" (list x)))
 
-    `(,#'if (,#'not ,(list-ref x 1))
-        (,#'begin ,@(cddr x)))))
+    #`(if (not ,(list-ref x 1))
+        (begin ,@(cddr x)))))
 
 (define (syntax-error source . rest)
   (raise-source source 'syntax (apply print-string rest) (list source)))
