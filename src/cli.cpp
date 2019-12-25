@@ -21,7 +21,7 @@ static const char* help[] = {
   "will cause <file1> to be loaded, a REPL to be opened, and <file2> to be loaded after it is closed.\n",
   "  --help: Print this message",
   "  --save-image <path>: Save a heap image. Program exits after this.",
-  "  -- <arguments...>: Arguments after -- will be pass to Scheme as a list of strings named *command-line*",
+  "  -- <arguments...>: Arguments after -- will be passed to Scheme as a list of strings named *command-line*",
   "  --set <variable> <expr>: Set a top-level variable to an expression (only read, not evaluated)",
   "  Helpful top-level variables:",
   "     --set EXPANDER-PRINT t ",
