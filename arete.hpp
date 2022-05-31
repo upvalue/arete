@@ -93,7 +93,7 @@
 #endif 
 
 #ifndef AR_GC_LOAD_FACTOR
-# define AR_GC_LOAD_FACTOR 80
+# define AR_GC_LOAD_FACTOR 25
 #endif
 
 #ifndef AR_GC_DEBUG

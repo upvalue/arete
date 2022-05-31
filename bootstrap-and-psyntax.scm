@@ -1,6 +1,6 @@
 ;; Load psyntax, and do a full expand of it
 
-(load "scheme/expand.scm")
+(load "boot.scm")
 (##arete#set-top-level-value! '*current-module* (##arete#top-level-value '*core-module*))
 (##arete#load "scheme/syntax.scm")
 (##arete#load "scheme/compiler.scm")

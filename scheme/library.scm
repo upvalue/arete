@@ -48,7 +48,7 @@
 ;;;;; NUMBERS
 
 (define (zero? x) (or (eq? x 0) (eqv? x 0.0)))
-(define (positive? x) (>= x 0))
+(define (positive? x) (> x 0))
 (define (negative? x) (< x 0))
 (define (odd? x) (= (modulo x 2) 1))
 (define (even? x) (= (modulo x 2) 0))

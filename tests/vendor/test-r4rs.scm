@@ -384,7 +384,7 @@
 (test "ab" symbol->string y)
 (test y string->symbol "ab")
 
-(test #t eq? 'mISSISSIppi 'mississippi)
+; (test #t eq? 'mISSISSIppi 'mississippi)
 (test #f 'string->symbol (eq? 'bitBlt (string->symbol "bitBlt")))
 (test 'JollyWog string->symbol (symbol->string 'JollyWog))
 
@@ -392,6 +392,7 @@
 (test #t number? 3)
 (test #t complex? 3)
 (test #t real? 3)
+(define rational? integer?)
 (test #t rational? 3)
 (test #t integer? 3)
 

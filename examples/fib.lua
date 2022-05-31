@@ -6,4 +6,4 @@ function fib(n)
   end
 end
 
-print(fib(36))
+print(fib(35))

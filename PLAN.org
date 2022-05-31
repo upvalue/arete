@@ -69,7 +69,7 @@
   - [ ] Analysis pass.
     Replace symbol usage with unique eq? based "bindings." Display closures and most basic inlining,
     e.g. car in the application position.
-  - [ ] Native code compilation
+  - [x] Native code compilation
 
 * I/O
   - [ ] Tables and structs should have read/write support
