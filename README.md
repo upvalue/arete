@@ -1,3 +1,26 @@
+# History!
+
+This is a Scheme implementation I wrote in late 2017 / early 2018. It's angling
+towards being an R7RS Scheme but falls pretty short of supporting a lot of the
+specification. It's pretty much on ice, but put here for posterity.
+
+A couple of thoughts I thought were somewhat interesting:
+
+- It's self hosting via a compiler to bytecode, but earlier stages of code are
+  always written in a limited dialect supported by a simple C++ interpreter, so
+  it's not difficult to port between architectures. (In fact while writing this README
+  I compiled it on ARM64 OSX for the first time and it worked).
+
+- It used a little reader hack to make implicit renaming macros the basis of
+  writing macros. Putting return values into #\` syntax (that in syntax-case is
+  used for "quasisyntax") causes all values not put in #, to be wrapped in
+  renames. 
+
+- Native compiler for x64 written with DynASM (from LuaJIT). This may have
+  bitrotted, it's not been tested recently!
+
+# Original README
+
 Arete is a low-footprint, high performance implementation of the Scheme programming language in C++ and itself.
 
 # Why?
