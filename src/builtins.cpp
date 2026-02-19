@@ -244,7 +244,6 @@ Value fn_list_join(State& state, size_t argc, Value* argv, void* v) {
 
   AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
   AR_FN_EXPECT_TYPE(state, argv, 1, STRING);
-  AR_FN_ASSERT_ARG(state, 0, "to be a list", (argv[0].list_length() > 0));
 
   Value lst = argv[0], join_char = argv[1];
   std::ostringstream ss;
@@ -271,12 +270,6 @@ Value fn_map_impl(State& state, size_t argc, Value* argv, const char* fn_name, b
 
   if(argv[1] == C_NIL) return ret ? C_NIL : C_UNSPECIFIED;
   AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
-
-  if(!improper) {
-    AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1].list_length() > 0));
-  } else {
-    AR_FN_EXPECT_TYPE(state, argv, 1, PAIR);
-  }
 
   Value tmp, lst = argv[1], fn = argv[0], arg;
   ListAppender nlst;
@@ -378,7 +371,7 @@ Value fn_filter(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "filter";
   AR_FN_ARGC_EQ(state, argc, 2);
   AR_FN_ASSERT_ARG(state, 0, "to be applicable", (argv[0].applicable()));
-  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].heap_type_equals(PAIR)));
   
   Value fn = argv[0], lst = argv[1], result = C_NIL, tmp;
   ListAppender a;
@@ -407,7 +400,7 @@ enum Mem { MEMQ, MEMV, MEMBER };
 
 Value fn_mem_impl(const char* fn_name, Mem method, State& state, size_t argc, Value* argv) {
   AR_FN_ARGC_EQ(state, argc, 2);
-  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].heap_type_equals(PAIR)));
 
   if(argv[1] == C_NIL) {
     return C_FALSE;
@@ -439,7 +432,7 @@ AR_DEFUN("memq", fn_memq, 2);
 
 Value fn_memv(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "memv";
-  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].list_length() > 0));
+  AR_FN_ASSERT_ARG(state, 1, "to be a list", (argv[1] == C_NIL || argv[1].heap_type_equals(PAIR)));
 
   Value lst = argv[1], obj = argv[0];
   while(lst.heap_type_equals(PAIR)) {
@@ -460,16 +453,21 @@ Value fn_reverse(State& state, size_t argc, Value* argv, void* v) {
   static const char* fn_name = "reverse";
   AR_FN_ARGC_EQ(state, argc, 1);
   if(argv[0] == C_NIL) return C_NIL;
-  size_t length = argv[0].list_length();
-  AR_FN_ASSERT_ARG(state, 1, "to be a list", (length > 0));
+  AR_FN_EXPECT_TYPE(state, argv, 0, PAIR);
 
-  state.temps.clear();
-  for(size_t i = 0; i != length; i++) {
-    state.temps.push_back(argv[0].car());
-      argv[0] = argv[0].cdr();
+  Value lst = argv[0], result = C_NIL;
+  AR_FRAME(state, lst, result);
+
+  while(lst.heap_type_equals(PAIR)) {
+    result = state.make_pair(lst.car(), result);
+    lst = lst.cdr();
   }
-  std::reverse(state.temps.begin(), state.temps.end());
-  return state.temps_to_list();
+
+  if(lst != C_NIL) {
+    return state.type_error("reverse: argument is not a proper list");
+  }
+
+  return result;
 }
 AR_DEFUN("reverse", fn_reverse, 1);
 

@@ -520,11 +520,8 @@ tail_call:
       }
 
       case PAIR: {
-        size_t length = exp.list_length();
-
-        if(length == 0) {
+        if(!exp.cdr().heap_type_equals(PAIR) && exp.cdr() != C_NIL) {
           EVAL_TRACE(cell);
-          std::cout << exp << std::endl;
           return eval_error("dotted list in source code", exp);
         }
 
@@ -548,23 +545,35 @@ tail_call:
           unsigned form = get_form(*this, kar);
           switch(form) {
             case S_IF: {
-              if(length < 3) {
-                return eval_error("if must have at least two arguments (condition and then branch)",
-                  exp);
-              } else if(length > 4) {
-                return eval_error("if must have at most four arguments (condition, then and else branch)", exp);
+              // (if cond then) or (if cond then else)
+              // Validate structure before eval (no allocation, so no GC concern)
+              Value if_cdr = exp.cdr();
+              if(!if_cdr.heap_type_equals(PAIR)) {
+                return eval_error("if must have at least two arguments (condition and then branch)", exp);
               }
-              
+              Value if_cddr = if_cdr.cdr();
+              if(!if_cddr.heap_type_equals(PAIR)) {
+                return eval_error("if must have at least two arguments (condition and then branch)", exp);
+              }
+              {
+                Value if_else_tail = if_cddr.cdr();
+                bool has_else = if_else_tail.heap_type_equals(PAIR);
+                if(has_else && if_else_tail.cdr() != C_NIL) {
+                  return eval_error("if must have at most four arguments (condition, then and else branch)", exp);
+                }
+              }
+
+              // Evaluate condition — may trigger GC, so retraverse from exp after
               tmp = eval_body(frame, exp.cadr(), true);
               EVAL_CHECK(tmp, exp);
 
               if(tmp != C_FALSE) {
-                exp = exp.list_ref(2);
-              } else if(length == 3) {
+                exp = exp.cdr().cdr().car();       // then branch
+              } else if(exp.cdr().cdr().cdr() == C_NIL) {
                 // 1-arm if
                 exp = C_UNSPECIFIED;
               } else {
-                exp = exp.list_ref(3);
+                exp = exp.cdr().cdr().cdr().car();  // else branch
               }
 
               if(tail) {
@@ -637,7 +646,7 @@ tail_call:
 
           //if(!tmp.immediatep() && tmp.heap->get_header_bit(Value::VALUE_PROCEDURE_BIT))
 
-          if(AR_LIKELY(tmp.procedurep())) {
+          if(tmp.procedurep()) {
             if(tmp.heap_type_equals(FUNCTION)) {
               EvalFrame frame2;
               Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body;

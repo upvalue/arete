@@ -421,7 +421,7 @@ tail:
         size_t fargc = VM_NEXT_INSN();
         Value afn = *(stack - (fargc + 1));
         AR_LOG_VM2("apply " << fargc << " " << afn);
-        if(AR_LIKELY(afn.procedurep())) {
+        if(afn.procedurep()) {
           Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, afn.heap);
           VM2_RESTORE();
           *(stack - (fargc + 1)) = ret;
@@ -446,7 +446,7 @@ tail:
         Value to_apply = afn;
         AR_LOG_VM2("apply-tail fargc " << fargc << " fn: " << afn);
 
-        if(AR_LIKELY(afn.procedurep())) {
+        if(afn.procedurep()) {
           if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
             frames_lost++;
 
@@ -530,7 +530,7 @@ tail:
       VM_CASE(OP_ARGC_EQ): {
         size_t eargc = VM_NEXT_INSN();
         AR_LOG_VM2("argc-eq " << eargc);
-        if(AR_UNLIKELY(argc != eargc)) {
+        if(argc != eargc) {
           VM2_EXCEPTION("eval", "function expected exactly " << eargc << " arguments but got " << argc);
         }
         VM_DISPATCH();
@@ -541,7 +541,7 @@ tail:
 
         AR_LOG_VM2("argc-gte " << eargc);
 
-        if(AR_UNLIKELY(argc < eargc)) {
+        if(argc < eargc) {
           VM2_EXCEPTION("eval", "function expected at least " << eargc << " arguments but got " << argc);
         }
         VM_DISPATCH();
@@ -766,7 +766,7 @@ tail:
       }
 
 #define VM_TOP_PAIR_CHECK(name) \
-  if(AR_UNLIKELY(!STACK_PICK(1).heap_type_equals(PAIR))) { \
+  if(!STACK_PICK(1).heap_type_equals(PAIR)) { \
     VM2_EXCEPTION("type", "vm primitive " name " expected a pair as its argument but got " << STACK_PICK(1).type()); \
   }
 

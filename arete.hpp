@@ -68,14 +68,9 @@
 
 #ifdef __GNUC__
 # define AR_FORCE_INLINE __attribute__((always_inline))
-// # define AR_LIKELY(x) (__builtin_expect((x), 1))
-// # define AR_UNLIKELY(x) (__builtin_expect((x), 0))
 #else
 # define AR_FORCE_INLINE
 #endif
-
-# define AR_LIKELY(x) (x)
-# define AR_UNLIKELY(x) (x)
 
 #define _AR_FRAME2_(state, counter, ...)  \
   arete::FrameHack __arete_frame_ptrs##counter[] = { __VA_ARGS__ };  \
@@ -558,13 +553,12 @@ struct Value {
     return static_cast<String*>(heap)->bytes;
   }
 
-  bool string_equals(const std::string& cmp) const {
-    return cmp.compare(string_data()) == 0;
+  bool string_equals(const char* s) const {
+    return strcmp(string_data(), s) == 0;
   }
 
-  bool string_equals(const char* s) const {
-    std::string cmp(s);
-    return string_equals(cmp);
+  bool string_equals(const std::string& cmp) const {
+    return cmp.compare(string_data()) == 0;
   }
 
   // BYTEVECTORS
@@ -609,8 +603,7 @@ struct Value {
 
   /** Quickly compare symbol to string */
   bool symbol_equals(const char* s) const {
-    std::string cmp(s);
-    return cmp.compare(symbol_name_data()) == 0;
+    return strcmp(symbol_name_data(), s) == 0;
   }
 
   bool symbol_qualified() const {
@@ -993,7 +986,7 @@ inline void Value::exception_deactivate() {
 }
 
 inline bool Value::is_active_exception() const {
-  return AR_UNLIKELY(heap_type_equals(EXCEPTION) && heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT));
+  return heap_type_equals(EXCEPTION) && heap->get_header_bit(Value::EXCEPTION_ACTIVE_BIT);
 }
 
 inline bool Value::exception_trace() const {

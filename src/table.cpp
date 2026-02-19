@@ -88,7 +88,9 @@ void State::table_setup(Value table, size_t size_log2) {
 
 ptrdiff_t State::hash_index(Value table, Value key, bool& unhashable) {
   ptrdiff_t hash = hash_value(key, unhashable);
-  return hash % (table.as<Table>()->chains->length - 1);
+  size_t buckets = table.as<Table>()->chains->length;
+  AR_ASSERT((buckets & (buckets - 1)) == 0 && "table bucket count must be a power of two");
+  return static_cast<ptrdiff_t>(static_cast<size_t>(hash) & (buckets - 1));
 }
   
 void State::table_grow(Value table) {
@@ -172,12 +174,12 @@ Value State::table_insert(Value table, Value key, Value value) {
   ptrdiff_t index = hash_index(table, key, unhashable);
   if(unhashable) return unhashable_error(value);
 
-  // Build chain
-  chain = make_pair(key, value);
-
   if(key.type() == STRING) {
     key = string_copy(key);
   }
+
+  // Build chain
+  chain = make_pair(key, value);
 
   htable = table.as<Table>();
 
