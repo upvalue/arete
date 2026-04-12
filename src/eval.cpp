@@ -40,6 +40,22 @@ Value State::make_env(Value parent, size_t size) {
   return vec;
 }
 
+Value State::make_call_env(Value parent, size_t npairs) {
+  Value vec;
+  AR_FRAME(this, vec, parent);
+  // 2 header slots (parent + unused flag) + two slots per binding + one slack
+  // slot so a later `(define ...)` in the body can use `vector_append` (which
+  // stores-then-grows) without overflowing before the grow check fires.
+  size_t cap = 3 + 2 * npairs;
+  vec = make_vector(cap);
+  VectorStorage* store = static_cast<VectorStorage*>(
+    static_cast<Vector*>(vec.heap)->storage.heap);
+  store->data[0] = parent;
+  store->data[1] = C_FALSE;
+  store->length = 2;
+  return vec;
+}
+
 void State::env_set(Value env, Value name, Value val) {
   AR_FRAME(this, env, name, val);
   AR_TYPE_ASSERT(name.identifierp());
@@ -394,40 +410,38 @@ Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
   fn_args = fn.function_arguments();
   fn_rest_args = fn.function_rest_arguments();
 
-  AR_FRAME(state, frame.fn_name, frame.env, fn, fn_args, fn_rest_args, tmp, new_env);
+  Value rest_list = C_NIL;
+  AR_FRAME(state, frame.fn_name, frame.env, fn, fn_args, fn_rest_args, tmp, new_env,
+    rest_list);
   // Check argc against args length
   size_t arity = fn_args.list_length();
+  bool has_rest = fn_rest_args != C_FALSE;
 
-  tmp = eval_check_arity(state, fn, C_FALSE, argc, arity, arity, fn_rest_args != C_FALSE);
+  tmp = eval_check_arity(state, fn, C_FALSE, argc, arity, arity, has_rest);
   if(tmp.is_active_exception()) return tmp;
 
-  state.temps.clear();
-  state.temps.insert(state.temps.end(), argv, &argv[argc]);
-
-  size_t actual_args = arity;
-
-  // Handle rest arguments
-  if(argc > arity) {
-    tmp = state.temps_to_list(arity);
-    state.temps[arity] = tmp;
-    AR_ASSERT(state.temps.size() > arity);
-    actual_args++;
-  } else {
-    state.temps.push_back(C_NIL);
+  // Pack any surplus arguments into the rest list before we allocate the env
+  // (so argv's contents remain referenced only from the caller's AR_FRAME).
+  if(has_rest) {
+    if(argc > arity) {
+      state.temps.clear();
+      state.temps.insert(state.temps.end(), &argv[arity], &argv[argc]);
+      rest_list = state.temps_to_list(0);
+    } else {
+      rest_list = C_NIL;
+    }
   }
 
-  new_env = state.make_env(fn.function_parent_env(), actual_args);
+  size_t npairs = arity + (has_rest ? 1 : 0);
+  new_env = state.make_call_env(fn.function_parent_env(), npairs);
 
-  size_t i = 0;
-  while(fn_args.heap_type_equals(PAIR)) {
-    state.vector_append(new_env, fn_args.car());
-    state.vector_append(new_env, state.temps[i++]);
+  for(size_t i = 0; i < arity; ++i) {
+    state.env_push_binding(new_env, fn_args.car(), argv[i]);
     fn_args = fn_args.cdr();
   }
 
-  if(fn_rest_args != C_FALSE) {
-    state.vector_append(new_env, fn_rest_args);
-    state.vector_append(new_env, state.temps[i]);
+  if(has_rest) {
+    state.env_push_binding(new_env, fn_rest_args, rest_list);
   }
 
   frame.env = new_env;
@@ -437,7 +451,7 @@ Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
   return tmp;
 }
 Value State::eval_body(EvalFrame frame, Value body, bool single) {
-  if(get_global_value(G_FORBID_INTERPRETER) == C_TRUE) {
+  if(forbid_interpreter) {
     std::ostringstream os;
     os << "interpreter has been disabled, but FUNCTION " << frame.fn_name << " was called";
 
@@ -446,7 +460,8 @@ Value State::eval_body(EvalFrame frame, Value body, bool single) {
   Value exp, cell, tmp;
 
 tail_call:
-  bool tail = false, tco_enabled = get_global_value(G_TCO_ENABLED) != C_FALSE;
+  bool tail = false;
+  const bool tco_on = this->tco_enabled;
 
   AR_ASSERT(single || body.heap_type_equals(PAIR) || body == C_NIL);
 
@@ -465,7 +480,7 @@ tail_call:
     }
     restart_exp:
 
-    tail = tco_enabled && (body == C_NIL || body == C_FALSE);
+    tail = tco_on && (body == C_NIL || body == C_FALSE);
 
     switch(exp.type()) {
       case SYMBOL: {
@@ -659,28 +674,34 @@ tail_call:
                 rest.head, rest.tail);
               
               fn_args = fn.function_arguments();
-              size_t argc = args.list_length();
               size_t arity = fn_args.list_length();
               rest_args_name = fn.function_rest_arguments();
+              bool has_rest = rest_args_name != C_FALSE;
 
-              //std::cout << "tmp: " << tmp << std::endl;
+              frame2.env = make_call_env(fn.function_parent_env(),
+                arity + (has_rest ? 1 : 0));
 
-              tmp = eval_check_arity(*this, fn, exp, argc, arity, arity, rest_args_name != C_FALSE);
-              EVAL_CHECK(tmp, exp);
-
-              frame2.env = make_env(fn.function_parent_env(), argc + 1);
-
-              // Evaluate arguemnts, left to right
+              // Single walk: evaluate each argument and bind it into the
+              // freshly-sized env in lockstep with fn_args, counting argc as
+              // we go. Arity mismatches are reported lazily below so we skip
+              // the up-front args.list_length() and fn_args double-walk.
+              size_t argc = 0;
               while(args.heap_type_equals(PAIR) && fn_args.heap_type_equals(PAIR)) {
                 tmp = eval_body(frame, args.car(), true);
                 EVAL_CHECK(tmp, args);
-                vector_append(frame2.env, fn_args.car());
-                vector_append(frame2.env, tmp);
+                env_push_binding(frame2.env, fn_args.car(), tmp);
                 args = args.cdr();
                 fn_args = fn_args.cdr();
+                argc++;
               }
 
-              if(rest_args_name != C_FALSE) {
+              if(fn_args.heap_type_equals(PAIR)) {
+                // Ran out of args before filling all named parameters.
+                tmp = eval_check_arity(*this, fn, exp, argc, arity, arity, has_rest);
+                EVAL_CHECK(tmp, exp);
+              }
+
+              if(has_rest) {
                 while(args.heap_type_equals(PAIR)) {
                   tmp = eval_body(frame, args.car(), true);
                   EVAL_CHECK(tmp, args);
@@ -689,8 +710,14 @@ tail_call:
                   args = args.cdr();
                 }
 
-                vector_append(frame2.env, rest_args_name);
-                vector_append(frame2.env, rest.head);
+                env_push_binding(frame2.env, rest_args_name, rest.head);
+              } else if(args.heap_type_equals(PAIR)) {
+                // Surplus args without a rest binding: formatter needs the
+                // total arg count, so do a cheap tail walk only in the error
+                // path.
+                tmp = eval_check_arity(*this, fn, exp, argc + args.list_length(),
+                  arity, arity, false);
+                EVAL_CHECK(tmp, exp);
               }
 
               new_body = fn.function_body();

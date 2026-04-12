@@ -12,6 +12,8 @@ Running Arete also requires
 
 # Tickets
 
+Use `ticket --help` to learn about the ticketing subsystem and `ticket list` to see existing tickets.
+
 # Wiki
 
 In docs/ there is a markdown wiki. Use [[WikiLinks]] to link out to other

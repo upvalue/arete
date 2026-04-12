@@ -3,11 +3,12 @@
 Three complementary signals. Consult more than one before concluding a
 change helped or hurt.
 
-| Signal                   | Answers                                              |
-| ------------------------ | ---------------------------------------------------- |
-| **Bootstrap time**       | Is the whole stack still healthy end-to-end?         |
-| **ecraven benchmarks**   | How does Arete do on standard Scheme workloads?      |
-| **Perf reports**         | Where inside a single run is time being spent?       |
+| Signal                          | Answers                                              |
+| ------------------------------- | ---------------------------------------------------- |
+| **Bootstrap time**              | Is the whole stack still healthy end-to-end?         |
+| **ecraven benchmarks**          | How does Arete do on standard Scheme workloads?     |
+| **Interpreter microbenchmarks** | How does a change affect the tree-walking eval loop? |
+| **Perf reports**                | Where inside a single run is time being spent?       |
 
 ## Bootstrap time
 
@@ -64,6 +65,49 @@ Caveats when interpreting:
   report.
 - Single runs are noisy; median of 3–5 under ~10% effect sizes.
 
+## Interpreter microbenchmarks
+
+A small curated set of single-axis benchmarks under `bench/interp/`,
+each run through `--interp-only` so the tree-walker in `eval.cpp` is
+the only thing being measured (no bytecode compile, no VM). Use these
+when you're touching the interpreter — bootstrap and ecraven mix too
+many subsystems to isolate a regression there.
+
+```
+make heap.boot
+utils/run-interp-bench.sh                  # all, best of 3
+utils/run-interp-bench.sh arith tak        # pick by name
+RUNS=5 utils/run-interp-bench.sh           # more samples
+RESULTS=/tmp/before.csv utils/run-interp-bench.sh
+```
+
+Each benchmark self-reports its elapsed time as
+
+```
++!CSVLINE!+arete-interp,<name>,<seconds>
+```
+
+and the driver prints a summary table at the end. Full suite runs in
+roughly 20 s on x86-64 Linux.
+
+| Benchmark      | Isolates                                                    |
+| -------------- | ----------------------------------------------------------- |
+| `arith`        | tight tail loop of `+ - * =` — arithmetic dispatch          |
+| `global-ref`   | hot references to top-level bindings — global lookup path   |
+| `deep-env`     | references through 6 nested `let` frames — env-chain walk   |
+| `cons-list`    | build + drop length-200 lists — pair alloc + car/cdr        |
+| `closure`      | `make-adder` inside the loop — closure creation per call    |
+| `higher-order` | fold over 500-element list via user lambda — repeat apply   |
+| `cond-chain`   | 9-clause `cond` in a tight loop — special-form dispatch     |
+| `tak`          | scaled-down Takeuchi — non-tail recursion + int arith       |
+| `gc-churn`     | allocate/discard 40-cell lists — nursery throughput         |
+
+The full ecraven suite is not generally tractable under `--interp-only`
+(huge iteration counts, deep recursion); see [[Benchmarks ecraven]].
+Cherry-picked cases can be usable at reduced inputs — fib(30) finishes
+in ≈0.6 s under pure interpretation here, vs fib(40) as the upstream
+ecraven input.
+
 ## Perf reports
 
 Field reference: [[Performance Reports]]. Implementation and how to add
@@ -80,6 +124,11 @@ Splits wall time into interpreter / VM / GC with allocation counts and
 pause distributions. Use for *ratios* between runs taken with the flag
 on; the flag itself adds per-transition overhead, so measure absolute
 numbers with `time bin/arete ...`.
+
+Pass `--interp-only` (after the `heap.boot` image) to clear the
+installed bytecode compiler so loaded files run under the tree-walking
+interpreter — useful for isolating eval.cpp time on higher-level
+workloads.
 
 ## Workflow
 
