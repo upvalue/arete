@@ -384,6 +384,7 @@ static Value eval_check_arity(State& state, Value fn, Value exp,
 // Apply a function. Not used by the interpreter itself but used for generic apply and calls from
 // C/VM functions
 Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
+  PerfScope perf_scope(state, PERF_INTERP, &state.perf.interpreter_calls);
   Value fn((ptrdiff_t) fnp);
   AR_TYPE_ASSERT(fn.heap_type_equals(FUNCTION));
 	State::EvalFrame frame;
@@ -647,6 +648,7 @@ tail_call:
           //if(!tmp.immediatep() && tmp.heap->get_header_bit(Value::VALUE_PROCEDURE_BIT))
 
           if(tmp.procedurep()) {
+            if(perf_report_enabled) perf.interpreter_calls++;
             if(tmp.heap_type_equals(FUNCTION)) {
               EvalFrame frame2;
               Value fn = tmp, args = exp.cdr(), fn_args, rest_args_name, new_body;
@@ -776,6 +778,7 @@ Value State::eval_exp(Value exp) {
 }
 
 Value State::eval_list(Value lst, bool expand, Value env) {
+  PerfScope perf_scope(*this, PERF_INTERP);
   Value elt, lst_top, tmp, compiler, expander, vfn;
   EvalFrame frame;
   frame.env = env;
@@ -823,6 +826,7 @@ Value State::eval_list(Value lst, bool expand, Value env) {
 //
 
 Value State::apply(Value fn, size_t argc, Value* argv) {
+  if(perf_report_enabled) perf.apply_calls++;
   if(fn.procedurep()) {
     return fn.as_unsafe<Procedure>()->procedure_addr(*this, argc, argv, (void*) fn.bits);
   } else {

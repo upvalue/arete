@@ -37,7 +37,7 @@ ifeq ($(OS),Windows_NT)
 	DASMFLAGS := -D WINDOWS
 	MATH :=	
 else
-	ARETE_LIBS := sdl 
+	ARETE_LIBS := 
 	DASMFLAGS :=
 	MATH := -lm
 endif
@@ -146,7 +146,20 @@ test-all: tests/test-semispace
 	tests/test-semispace
 	python utils/run-tests.py
 
-.PHONY: count clean cleaner install
+# Run the ecraven/r7rs-benchmarks suite (vendored at vendor/r7rs-benchmarks)
+# under Arete. Usage:
+#   make r7rs-bench BENCH=fib
+#   make r7rs-bench BENCH="fib ack"
+#   make r7rs-bench BENCH=all   # many benchmarks are expected to fail
+r7rs-bench: bin/arete heap.boot
+	@if [ -z "$(BENCH)" ]; then \
+		echo "Usage: make r7rs-bench BENCH=<name|group|all>"; \
+		echo "  groups: all gabriel num kvw io other gc synth"; \
+		exit 1; \
+	fi
+	utils/run-r7rs-benchmarks.sh $(BENCH)
+
+.PHONY: count clean cleaner install r7rs-bench
 
 count:
 	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard scheme/*.scm)

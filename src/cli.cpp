@@ -29,7 +29,8 @@ static const char* help[] = {
   "  --read <file>: Read and print S-expressions from a file without expanding or evaluating them",
   "  --read --repl: Same but with REPL",
   "  --repl: Open REPL",
-  "  --debug-gc: Forces a collection after every allocation, used to flush out GC bugs"
+  "  --debug-gc: Forces a collection after every allocation, used to flush out GC bugs",
+  "  --perf-report <path>: Write a JSON performance report at shutdown. Use - for stderr."
 };
 
 static void  print_help() {
@@ -235,7 +236,19 @@ int State::enter_cli(int argc_, char* argv[]) {
   static const std::string set("--set");
   static const std::string eval("--eval");
   static const std::string stats("--stats");
+  static const std::string perf_report("--perf-report");
   static const std::string rest("--");
+
+  // Writes the performance report JSON at shutdown if enabled, regardless of exit path.
+  struct PerfReportGuard {
+    State& state;
+    PerfReportGuard(State& s): state(s) {}
+    ~PerfReportGuard() {
+      if(state.perf_report_enabled) state.write_perf_report();
+    }
+  };
+  PerfReportGuard perf_guard(*this);
+  (void) perf_guard;
 
   size_t i = 1;
 
@@ -389,6 +402,13 @@ int State::enter_cli(int argc_, char* argv[]) {
       }
     } else if(debug_gc.compare(arg) == 0) {
       gc.collect_before_every_allocation = true;
+    } else if(perf_report.compare(arg) == 0) {
+      if((i + 1) >= argc) {
+        std::cerr << "Expected a path after --perf-report (use - for stderr)" << std::endl;
+        return EXIT_FAILURE;
+      }
+      perf_report_enabled = true;
+      perf_report_path = argv[++i];
     } else if(save_image.compare(arg) == 0) {
       if((i + 1) >= argc) {
         std::cerr << "Expected at least one argument after --save-image" << std::endl;

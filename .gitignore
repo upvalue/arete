@@ -20,3 +20,4 @@ vgcore*
 /vendor/dynasm/minilua
 /arete-distilled.cpp
 /scraps
+/results.Arete

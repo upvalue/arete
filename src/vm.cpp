@@ -120,6 +120,8 @@ extern Value compile_native(State&, Value);
 Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
   //std::cout << "apply_vm called" << std::endl;
 
+  PerfScope perf_scope(state, PERF_VM, &state.perf.vm_calls);
+
   size_t frames_lost = 0;
 
   // Function frame, allocated on stack

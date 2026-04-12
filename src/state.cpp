@@ -31,7 +31,9 @@ State::State():
   globals(),
   temps(),
   stack_trace(),
-  vm_depth(0)
+  vm_depth(0),
+  perf_report_enabled(false),
+  perf_report_path()
   {
 
   symbol_table = new symbol_table_t();

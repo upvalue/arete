@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 
 #include "arete.hpp"
 
@@ -123,44 +124,47 @@ void State::finalize(Type object_type, Value object, bool called_by_gc) {
   }
 }
 
-size_t gc_collect_timer = 0;
-size_t gc_alloc_timer = 0;
-size_t gc_overall_timer = 0;
-size_t gc_longest_pause = 0;
+struct GCPauseTimer {
+  GCPauseTimer(size_t& timer_, size_t& longest_):
+    timer(timer_), longest(longest_),
+    t1(std::chrono::high_resolution_clock::now()) {}
 
-#ifdef ARETE_BENCH_GC
-struct GCTimer {
-  GCTimer(size_t& timer_): timer(timer_) {
-    t1 = std::chrono::high_resolution_clock::now();
-  }
-
-  ~GCTimer() {
-    size_t elapsed = 
+  ~GCPauseTimer() {
+    size_t elapsed =
       (std::chrono::duration_cast<std::chrono::microseconds>((
         std::chrono::high_resolution_clock::now() - t1))).count();
-
-    gc_longest_pause = std::max(elapsed, gc_longest_pause);
-    timer += elapsed;
-  }
-
-  void end() {
-    size_t elapsed = 
-      (std::chrono::duration_cast<std::chrono::microseconds>((
-        std::chrono::high_resolution_clock::now() - t1))).count();
+    longest = std::max(elapsed, longest);
     timer += elapsed;
   }
 
   size_t& timer;
-  std::chrono::time_point<std::chrono::high_resolution_clock> t1, t2;
+  size_t& longest;
+  std::chrono::time_point<std::chrono::high_resolution_clock> t1;
 };
-#else
-struct GCTimer {
-  GCTimer(size_t) {}
-  ~GCTimer() {}
-};
-#endif
 
-GCTimer gc_overall_timer_i(gc_overall_timer);
+PerfStats::PerfStats():
+  apply_calls(0),
+  interpreter_calls(0),
+  vm_calls(0),
+  current(PERF_IDLE),
+  last_switch(std::chrono::steady_clock::now()) {
+  for(int i = 0; i < PERF_N; i++) time_us[i] = 0;
+}
+
+void PerfStats::switch_to(PerfComponent c) {
+  auto now = std::chrono::steady_clock::now();
+  time_us[current] += (size_t)
+    std::chrono::duration_cast<std::chrono::microseconds>(now - last_switch).count();
+  last_switch = now;
+  current = c;
+}
+
+void PerfStats::flush() {
+  auto now = std::chrono::steady_clock::now();
+  time_us[current] += (size_t)
+    std::chrono::duration_cast<std::chrono::microseconds>(now - last_switch).count();
+  last_switch = now;
+}
 
 Block::Block(size_t size_, bool executable): size(size_) {
   data = static_cast<char*>(gc_allocate(size, executable));
@@ -171,34 +175,131 @@ Block::~Block() {
   gc_free(data, size);
 }
 
+static size_t wall_time_us(const std::chrono::steady_clock::time_point& start) {
+  return (std::chrono::duration_cast<std::chrono::microseconds>(
+    std::chrono::steady_clock::now() - start)).count();
+}
+
+static size_t native_code_bytes(const std::vector<Block*>& native_code) {
+  size_t b = 0;
+  for(size_t i = 0; i != native_code.size(); i++) b += native_code[i]->size;
+  return b;
+}
+
 void State::print_gc_stats(std::ostream& os) {
+  size_t wall_us = wall_time_us(gc.start_time);
+  size_t in_use = gc.block_cursor;
 
   os << (gc.heap_size / 1024) << "kb heap size after " << gc.collections << " collections and "
      << gc.allocations << " allocations " << std::endl;
 
-#ifdef ARETE_BENCH_GC
-  std::cout << (gc_collect_timer / 1000) << "ms in collection" << std::endl;
-  std::cout << ((size_t)((((char*)gc.active->data + gc.block_cursor) - (char*)gc.active->data)) / 1024) << "kb in use" << std::endl;
+  os << (gc.collect_time_us / 1000) << "ms in collection" << std::endl;
+  os << (in_use / 1024) << "kb in use" << std::endl;
 
-  // TODO: This cannot be called twice and remain accurate
-  gc_overall_timer_i.end();
-  std::cout << "approximately " << ((double)(gc_collect_timer + gc_alloc_timer) * 100) / (double)(gc_overall_timer) << "% of program time spent in GC" << std::endl;
-  std::cout << "longest pause: " << (gc_longest_pause / 1000) << "ms" << std::endl;
+  if(wall_us > 0) {
+    os << "approximately " << ((double)(gc.collect_time_us) * 100) / (double)(wall_us)
+       << "% of program time spent in GC" << std::endl;
+  }
+  os << "longest pause: " << (gc.longest_pause_us / 1000) << "ms" << std::endl;
 
-  std::cout << "stack: " << gc.vm_stack_used << "/" << gc.vm_stack_size << " slots" << std::endl;
-# endif
+  os << "stack: " << gc.vm_stack_used << "/" << gc.vm_stack_size << " slots" << std::endl;
 
-  size_t b = 0;
-  for(size_t i = 0; i != native_code.size(); i++) {
-    b += native_code[i]->size;
+  os << (native_code_bytes(native_code) / 1024) << "kb allocated for native code" << std::endl;
+}
+
+// Escape a string for inclusion in JSON output.
+static void json_escape(std::ostream& os, const std::string& s) {
+  os << '"';
+  for(size_t i = 0; i != s.size(); i++) {
+    unsigned char c = (unsigned char) s[i];
+    switch(c) {
+      case '"':  os << "\\\""; break;
+      case '\\': os << "\\\\"; break;
+      case '\b': os << "\\b"; break;
+      case '\f': os << "\\f"; break;
+      case '\n': os << "\\n"; break;
+      case '\r': os << "\\r"; break;
+      case '\t': os << "\\t"; break;
+      default:
+        if(c < 0x20) {
+          char buf[8];
+          snprintf(buf, sizeof(buf), "\\u%04x", c);
+          os << buf;
+        } else {
+          os << (char) c;
+        }
+    }
+  }
+  os << '"';
+}
+
+void State::write_perf_report(std::ostream& os) {
+  perf.flush();
+
+  size_t wall_us = wall_time_us(gc.start_time);
+  size_t in_use = gc.block_cursor;
+  size_t native_bytes = native_code_bytes(native_code);
+  double gc_pct = wall_us > 0
+    ? ((double)(gc.collect_time_us) * 100) / (double)(wall_us)
+    : 0.0;
+  double interp_pct = wall_us > 0
+    ? ((double)(perf.time_us[PERF_INTERP]) * 100) / (double)(wall_us)
+    : 0.0;
+  double vm_pct = wall_us > 0
+    ? ((double)(perf.time_us[PERF_VM]) * 100) / (double)(wall_us)
+    : 0.0;
+
+  os << "{\n";
+  os << "  \"arete_version\": ";
+  json_escape(os, "0.0.1");
+  os << ",\n";
+  os << "  \"wall_time_us\": " << wall_us << ",\n";
+  os << "  \"gc\": {\n";
+  os << "    \"collections\": " << gc.collections << ",\n";
+  os << "    \"allocations\": " << gc.allocations << ",\n";
+  os << "    \"collect_time_us\": " << gc.collect_time_us << ",\n";
+  os << "    \"longest_pause_us\": " << gc.longest_pause_us << ",\n";
+  os << "    \"time_in_gc_pct\": " << gc_pct << ",\n";
+  os << "    \"heap_size_bytes\": " << gc.heap_size << ",\n";
+  os << "    \"in_use_bytes\": " << in_use << ",\n";
+  os << "    \"live_bytes_after_last_collection\": " << gc.live_memory_after_collection << "\n";
+  os << "  },\n";
+  os << "  \"interpreter\": {\n";
+  os << "    \"calls\": " << perf.interpreter_calls << ",\n";
+  os << "    \"exclusive_time_us\": " << perf.time_us[PERF_INTERP] << ",\n";
+  os << "    \"exclusive_time_pct\": " << interp_pct << "\n";
+  os << "  },\n";
+  os << "  \"vm\": {\n";
+  os << "    \"calls\": " << perf.vm_calls << ",\n";
+  os << "    \"exclusive_time_us\": " << perf.time_us[PERF_VM] << ",\n";
+  os << "    \"exclusive_time_pct\": " << vm_pct << ",\n";
+  os << "    \"stack_slots_used\": " << gc.vm_stack_used << ",\n";
+  os << "    \"stack_slots_capacity\": " << gc.vm_stack_size << "\n";
+  os << "  },\n";
+  os << "  \"apply_calls\": " << perf.apply_calls << ",\n";
+  os << "  \"idle_time_us\": " << perf.time_us[PERF_IDLE] << ",\n";
+  os << "  \"native_code_bytes\": " << native_bytes << "\n";
+  os << "}\n";
+}
+
+void State::write_perf_report() {
+  if(perf_report_path.empty() || perf_report_path == "-") {
+    write_perf_report(std::cerr);
+    return;
   }
 
-  std::cout << (b / 1024) << "kb allocated for native code" << std::endl;
-
+  std::ofstream out(perf_report_path.c_str());
+  if(!out) {
+    std::cerr << "arete: could not open performance report file " << perf_report_path
+              << "; writing to stderr instead" << std::endl;
+    write_perf_report(std::cerr);
+    return;
+  }
+  write_perf_report(out);
 }
 
 GCCommon::GCCommon(State& state_, size_t heap_size_):
-  state(state_), 
+  state(state_),
   frames(0),
   native_frames(0),
   vm_stack(static_cast<Value*>(calloc(2048, sizeof(Value)))),
@@ -208,7 +309,10 @@ GCCommon::GCCommon(State& state_, size_t heap_size_):
   allocations(0),
   collections(0), live_objects_after_collection(0), live_memory_after_collection(0),
   heap_size(heap_size_),
-  block_size(heap_size_) {
+  block_size(heap_size_),
+  collect_time_us(0),
+  longest_pause_us(0),
+  start_time(std::chrono::steady_clock::now()) {
 
 }
 
@@ -376,7 +480,7 @@ void GCSemispace::run_finalizers(bool finalize_all) {
 void GCSemispace::collect(size_t request, bool force) {
   collections++;
 
-  GCTimer timer(gc_collect_timer);
+  GCPauseTimer timer(collect_time_us, longest_pause_us);
 
   size_t new_heap_size = heap_size;
   size_t pressure = (live_memory_after_collection * 100) / heap_size;

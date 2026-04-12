@@ -17,9 +17,11 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <chrono>
 #include <list>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <vector>
 #include <unordered_map>
 
@@ -175,7 +177,38 @@ struct VectorStorage;
 struct VMFunction;
 struct XReader;
 
-extern size_t gc_collect_timer;
+/** Components tracked for exclusive-time slicing in the performance-report subsystem.
+ * PERF_IDLE accumulates time outside measured components (C functions, reader,
+ * CLI orchestration, and anything before the first switch_to call).
+ */
+enum PerfComponent {
+  PERF_IDLE = 0,
+  PERF_INTERP,
+  PERF_VM,
+  PERF_N
+};
+
+/** Performance counters for the performance-report subsystem.
+ * Call counts are updated only when State::perf_report_enabled is true, so there
+ * is no overhead outside of performance-report runs.
+ */
+struct PerfStats {
+  size_t apply_calls;
+  size_t interpreter_calls;
+  size_t vm_calls;
+
+  PerfComponent current;
+  std::chrono::steady_clock::time_point last_switch;
+  size_t time_us[PERF_N];
+
+  PerfStats();
+
+  /** Record elapsed time in the current component and switch to the new one. */
+  void switch_to(PerfComponent c);
+
+  /** Accumulate the current tick without changing components; call before reading time_us. */
+  void flush();
+};
 
 // For debugging purposes only: a global instance of the current state
 extern State* current_state;
@@ -1559,6 +1592,13 @@ struct GCCommon {
   size_t live_objects_after_collection, live_memory_after_collection, heap_size;
   size_t block_size;
 
+  /** Cumulative microseconds spent inside collect() */
+  size_t collect_time_us;
+  /** Longest single pause inside collect() in microseconds */
+  size_t longest_pause_us;
+  /** When this GC instance was constructed; used to compute wall time */
+  std::chrono::steady_clock::time_point start_time;
+
   GCCommon(State& state_, size_t heap_size_);
   ~GCCommon();
 
@@ -1704,7 +1744,14 @@ struct State {
 
   // Current VM depth
   size_t vm_depth;
-  
+
+  /** If true, write_perf_report will be called at shutdown */
+  bool perf_report_enabled;
+  /** Destination for performance report JSON. Empty string or "-" means stderr. */
+  std::string perf_report_path;
+  /** Runtime performance counters and time slicing. Only populated when perf_report_enabled. */
+  PerfStats perf;
+
   State();
   ~State();
 
@@ -2028,6 +2075,13 @@ struct State {
 
   /** Print GC stats, including time spent if compile flag is enabled */
   void print_gc_stats(std::ostream& os);
+
+  /** Write a JSON performance report covering GC and runtime stats.
+   * Destination is determined by perf_report_path: empty or "-" writes to stderr;
+   * anything else is treated as a filesystem path.
+   */
+  void write_perf_report();
+  void write_perf_report(std::ostream& os);
 
   /** Print a stack trace. */
   void print_stack_trace(std::ostream& os = std::cerr, bool clear = true);
@@ -2529,6 +2583,33 @@ struct TableIterator {
 
   size_t i;
   Value table, chain, cell;
+};
+
+/** RAII helper: records the entry to a component for time-slicing and optionally
+ * bumps a call counter. Zero cost when State::perf_report_enabled is false (one
+ * branch). Nested enters into the same component are free: they do not reset
+ * timing and they do not switch.
+ */
+struct PerfScope {
+  State& state;
+  PerfComponent previous;
+  bool switched;
+
+  inline PerfScope(State& s, PerfComponent c, size_t* counter = nullptr):
+    state(s), previous(PERF_IDLE), switched(false) {
+    if(s.perf_report_enabled) {
+      if(counter) (*counter)++;
+      if(s.perf.current != c) {
+        previous = s.perf.current;
+        s.perf.switch_to(c);
+        switched = true;
+      }
+    }
+  }
+
+  inline ~PerfScope() {
+    if(switched) state.perf.switch_to(previous);
+  }
 };
 
 } // namespace arete
