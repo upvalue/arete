@@ -84,6 +84,25 @@ std::ostream& operator<<(std::ostream& os, const VMSourceLocation& loc) {
   return os;
 }
 
+static void vm_close_open_upvalues(State& state, VMFunction* vfn, size_t frame_offset,
+  size_t frame_used) {
+  Value* upvalues = &state.gc.vm_stack[frame_offset + vfn->local_count];
+  size_t frame_limit = frame_offset + frame_used;
+  for(size_t i = 0; i != vfn->upvalue_count; i++) {
+    if(!upvalues[i].heap_type_equals(UPVALUE) || upvalues[i].upvalue_closed()) {
+      continue;
+    }
+
+    size_t idx = upvalues[i].as_unsafe<Upvalue>()->U.vm_local_idx;
+    if(idx >= frame_limit) {
+      continue;
+    }
+
+    upvalues[i].as_unsafe<Upvalue>()->U.converted = state.gc.vm_stack[idx];
+    upvalues[i].heap->set_header_bit(Value::UPVALUE_CLOSED_BIT);
+  }
+}
+
 struct VMFrame2 {
   VMFrame2(State& state_, Value fnp): state(state_) {
     closure = fnp;
@@ -99,21 +118,7 @@ struct VMFrame2 {
 
   ~VMFrame2() {
     VMFunction* vfn = fn.as<VMFunction>();
-    Value* upvalues = &state.gc.vm_stack[state.gc.vm_stack_used - vm_stack_used + vfn->local_count];
-    //std::cout << "closing over " << vfn->upvalue_count << " upvalues" << std::endl;
-    for(size_t i = 0; i != vfn->upvalue_count; i++) {
-      if(!upvalues[i].heap_type_equals(UPVALUE) || upvalues[i].upvalue_closed()) {
-        continue;
-      }
-
-      size_t idx = upvalues[i].as_unsafe<Upvalue>()->U.vm_local_idx;
-      if(idx >= state.gc.vm_stack_used) {
-        continue;
-      }
-
-      upvalues[i].as_unsafe<Upvalue>()->U.converted = state.gc.vm_stack[idx];
-      upvalues[i].heap->set_header_bit(Value::UPVALUE_CLOSED_BIT);
-    }
+    vm_close_open_upvalues(state, vfn, state.gc.vm_stack_used - vm_stack_used, vm_stack_used);
     state.gc.shrink_stack(vm_stack_used);
     state.vm_depth--;
   }
@@ -163,22 +168,31 @@ Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
   PerfScope perf_scope(state, PERF_VM, &state.perf.vm_calls);
 
   size_t frames_lost = 0;
+  bool argv_from_stack = false;
+  size_t argv_offset = 0;
+  bool tail_recycled = false;
 
   // Function frame, allocated on stack
   size_t sff_offset = state.gc.vm_stack_used;
   Value exception;
 
 tail:
+  argv_from_stack = false;
+  argv_offset = 0;
+  tail_recycled = false;
   AR_ASSERT(fnp != (void*) C_EOF); // for debugging native code
   AR_ASSERT(state.gc.live((HeapValue*) fnp));
   VMFrame2 f(state, Value((HeapValue*) fnp));
 
   // If argv points to somewhere on the existing stack, we need to update it
-  if(state.gc.stack_needs_realloc(f.vm_stack_used) && ((size_t)argv >= (size_t)state.gc.vm_stack && (size_t)argv <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*))))) {
-    size_t argv_offset = ((size_t)argv) - ((size_t) state.gc.vm_stack);
+  if((size_t)argv >= (size_t)state.gc.vm_stack && (size_t)argv <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*)))) {
+    argv_from_stack = true;
+    argv_offset = ((size_t)argv) - ((size_t) state.gc.vm_stack);
+  }
 
+frame_init:
+  if(state.gc.stack_needs_realloc(f.vm_stack_used) && argv_from_stack) {
     state.gc.grow_stack(f.vm_stack_used);
-
     argv = (Value*) ((((size_t) state.gc.vm_stack) + argv_offset));
   } else {
     state.gc.grow_stack(f.vm_stack_used);
@@ -238,7 +252,11 @@ tail:
 
   size_t locals_size = std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*);
   // Initialize local variables
-  memcpy(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
+  if(tail_recycled) {
+    memmove(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
+  } else {
+    memcpy(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
+  }
   // Zero out whole stack
   // TODO: Necessary?
   memset((void*)(((size_t)locals) + locals_size), 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
@@ -505,7 +523,35 @@ tail:
           if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
             frames_lost++;
 
+            Value tail_target = afn;
+            VMFunction* caller_vfn = f.fn.as_unsafe<VMFunction>();
             afn = afn.closure_unbox();
+            VMFunction* next_vfn = afn.as_unsafe<VMFunction>();
+
+            if(caller_vfn->upvalue_count == 0 &&
+               !next_vfn->get_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT) &&
+               next_vfn->upvalue_count == 0 &&
+               next_vfn->min_arity == next_vfn->max_arity &&
+               fargc == next_vfn->max_arity) {
+              size_t old_vm_stack_used = f.vm_stack_used;
+              Value* tail_argv = stack - fargc;
+              size_t next_vm_stack_used =
+                next_vfn->local_count + next_vfn->upvalue_count + next_vfn->stack_max;
+
+              vm_close_open_upvalues(state, caller_vfn, sff_offset, old_vm_stack_used);
+              state.gc.shrink_stack(old_vm_stack_used);
+
+              f.closure = tail_target;
+              f.fn = afn;
+              f.vm_stack_used = next_vm_stack_used;
+
+              argc = fargc;
+              argv = tail_argv;
+              argv_from_stack = true;
+              argv_offset = ((size_t) tail_argv) - ((size_t) state.gc.vm_stack);
+              tail_recycled = true;
+              goto frame_init;
+            }
 
             state.temps.clear();
             state.temps.insert(state.temps.end(), stack - fargc, stack);
