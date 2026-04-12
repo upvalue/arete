@@ -36,6 +36,12 @@
 
 #define AR_VM_LOG_ALWAYS false
 
+#ifdef __GNUC__
+# define AR_VM_COLD_NOINLINE __attribute__((cold, noinline))
+#else
+# define AR_VM_COLD_NOINLINE
+#endif
+
 namespace arete {
 
 extern Value fn_apply(State& state, size_t argc, Value* argv, void* v);
@@ -124,6 +130,80 @@ struct VMFrame2 {
   size_t vm_stack_used;
   size_t depth;
 };
+
+static AR_VM_COLD_NOINLINE Value vm_add_slow(State& state, Value* stack, size_t argc, size_t i,
+  ptrdiff_t fx) {
+  double fl = (double) fx;
+  for(; i != 0; i--) {
+    Value n(*(stack - i));
+    if(n.fixnump()) {
+      fl += (double) n.fixnum_value();
+    } else if(n.heap_type_equals(FLONUM)) {
+      fl += n.flonum_value();
+    } else {
+      std::ostringstream os;
+      os << "vm primitive + expected a fixnum or flonum as argument " << i << " but got " << n.type();
+      return state.make_exception("type", os.str());
+    }
+  }
+  return state.make_flonum(fl);
+}
+
+static AR_VM_COLD_NOINLINE Value vm_sub_arity_error(State& state) {
+  return state.make_exception("eval", "vm primitive - expects at least one argument");
+}
+
+static AR_VM_COLD_NOINLINE Value vm_sub_unary_slow(State& state, Value n) {
+  if(n.heap_type_equals(FLONUM)) {
+    return state.make_flonum(-n.flonum_value());
+  }
+
+  std::ostringstream os;
+  os << "vm primitive - expected fixnum or flonum as argument but got " << n.type();
+  return state.make_exception("type", os.str());
+}
+
+static AR_VM_COLD_NOINLINE Value vm_sub_slow(State& state, Value* stack, size_t argc, size_t i,
+  Value n, ptrdiff_t fx) {
+  double fl = (double) fx;
+  for(; i != argc; i++) {
+    Value n2(*(stack - i));
+    if(n2.fixnump()) {
+      fl += n2.fixnum_value();
+    } else if(n2.heap_type_equals(FLONUM)) {
+      fl += n2.flonum_value();
+    } else {
+      std::ostringstream os;
+      os << "vm primitive - expected fixnum or flonum as argument but got " << n2.type();
+      return state.make_exception("type", os.str());
+    }
+  }
+
+  if(n.fixnump()) {
+    return state.make_flonum((double)n.fixnum_value() - fl);
+  }
+  return state.make_flonum(n.flonum_value() - fl);
+}
+
+static AR_VM_COLD_NOINLINE Value vm_lt_type_error(State& state, size_t arg_idx, Value n) {
+  std::ostringstream os;
+  os << "< expects all numeric arguments but argument " << arg_idx << " is a " << n.type();
+  return state.make_exception("type", os.str());
+}
+
+static AR_VM_COLD_NOINLINE Value vm_pair_type_error(State& state, const char* name, Value n) {
+  std::ostringstream os;
+  os << "vm primitive " << name << " expected a pair as its argument but got " << n.type();
+  return state.make_exception("type", os.str());
+}
+
+static AR_VM_COLD_NOINLINE Value vm_fixnum_type_error(State& state, const char* name, Value lhs,
+  Value rhs) {
+  std::ostringstream os;
+  os << "vm primitive " << name << " expected a fixnum as its arguments but got " << lhs.type() <<
+    ' ' << rhs.type();
+  return state.make_exception("type", os.str());
+}
 
 // It is possible for pointers to be moved around during program execution; however, putting them
 // in an AR_FRAME tracking structure means they can't be stored in registers.
@@ -746,19 +826,13 @@ tail:
           stack -= argc;
           (*stack++) = Value::make_fixnum(fx);
         } else {
-          double fl = (double) fx;
-          for(; i != 0; i--) {
-            Value n(*(stack - i));
-            if(n.fixnump()) {
-              fl += (double) n.fixnum_value();
-            } else if(n.heap_type_equals(FLONUM)) {
-              fl += n.flonum_value();
-            } else {
-              VM2_EXCEPTION("type", "vm primitive + expected a fixnum or flonum as argument " << i << " but got " << n.type());
-            }
+          Value ret = vm_add_slow(state, stack, argc, i, fx);
+          if(ret.is_active_exception()) {
+            exception = ret;
+            goto exception;
           }
           stack -= argc;
-          (*stack++) = state.make_flonum(fl);
+          (*stack++) = ret;
           VM2_RESTORE_GC();
         }
         VM_DISPATCH();
@@ -768,14 +842,19 @@ tail:
         size_t argc = VM_NEXT_INSN();
         // TODO Separate unary operator
         if(argc == 0) {
-          VM2_EXCEPTION("eval", "vm primitive - expects at least one argument");
+          exception = vm_sub_arity_error(state);
+          goto exception;
         } else if(argc == 1) {
           if(STACK_PICK(1).fixnump()) {
             *(stack - 1) = Value::make_fixnum(-STACK_PICK(1).fixnum_value());
-          } else if(STACK_PICK(1).heap_type_equals(FLONUM)) {
-            *(stack - 1) = state.make_flonum(-STACK_PICK(1).flonum_value());
           } else {
-            VM2_EXCEPTION("type", "vm primitive - expected fixnum or flonum as argument but got " << STACK_PICK(1).type());
+            Value ret = vm_sub_unary_slow(state, STACK_PICK(1));
+            if(ret.is_active_exception()) {
+              exception = ret;
+              goto exception;
+            }
+            *(stack - 1) = ret;
+            VM2_RESTORE_GC();
           }
         } else {
           Value n(*(stack - argc));
@@ -792,26 +871,16 @@ tail:
           if(i == argc) {
             *(stack - argc) = Value::make_fixnum(n.fixnum_value() - fx);
           } else {
-            double fl = (double) fx;
-            for(; i != argc; i++) {
-              Value n2(STACK_PICK(i));
-              if(n2.fixnump()) {
-                fl += n2.fixnum_value();
-              } else if(n2.heap_type_equals(FLONUM)) {
-                fl += n2.flonum_value();
-              } else {
-                VM2_EXCEPTION("type", "vm primitive - expected fixnum or flonum as argument but got " << STACK_PICK(i).type());
-              }
+            Value ret = vm_sub_slow(state, stack, argc, i, n, fx);
+            if(ret.is_active_exception()) {
+              exception = ret;
+              goto exception;
             }
-            if(n.fixnump()) {
-              *(stack - argc) = state.make_flonum((double)n.fixnum_value() - fl);
-            } else {
-              *(stack - argc) = state.make_flonum(n.flonum_value() - fl);
-            }
+            *(stack - argc) = ret;
+            VM2_RESTORE_GC();
           }
           stack -= (argc - 1);
         }
-        VM2_RESTORE_GC();
         VM_DISPATCH();
       }
 
@@ -821,9 +890,11 @@ tail:
           Value n(STACK_PICK(argc-i));
           Value n2(STACK_PICK(argc-i-1));
           if(!n.numeric()) {
-            VM2_EXCEPTION("type", "< expects all numeric arguments but argument " << i+1 << " is a " << n.type());
+            exception = vm_lt_type_error(state, i + 1, n);
+            goto exception;
           } else if(!n2.numeric()) {
-            VM2_EXCEPTION("type", "< expects all numeric arguments but argument " << i+2 << " is a " << n2.type());
+            exception = vm_lt_type_error(state, i + 2, n2);
+            goto exception;
           }
           if(n.fixnump()) {
             if(n2.fixnump() && !(n.fixnum_value() < n2.fixnum_value())) {
@@ -851,7 +922,8 @@ tail:
 
 #define VM_TOP_PAIR_CHECK(name) \
   if(!STACK_PICK(1).heap_type_equals(PAIR)) { \
-    VM2_EXCEPTION("type", "vm primitive " name " expected a pair as its argument but got " << STACK_PICK(1).type()); \
+    exception = vm_pair_type_error(state, name, STACK_PICK(1)); \
+    goto exception; \
   }
 
       VM_CASE(OP_CAR): {
@@ -884,7 +956,8 @@ tail:
 
     #define VM_FX_CHECK(name) \
       if(!STACK_PICK(1).fixnump() || !STACK_PICK(2).fixnump()) { \
-        VM2_EXCEPTION("type", "vm primitive " name " expected a fixnum as its arguments but got " << STACK_PICK(2).type() << ' ' << STACK_PICK(1).type()) \
+        exception = vm_fixnum_type_error(state, name, STACK_PICK(2), STACK_PICK(1)); \
+        goto exception; \
       }
 
       VM_CASE(OP_FX_LT): {
