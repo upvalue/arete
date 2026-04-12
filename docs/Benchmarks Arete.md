@@ -23,10 +23,16 @@ make bin/arete
 make bench-report-arete
 make bench-report-arete BENCH=boot
 RUNS=5 CPU_LIMIT=600 python3 utils/benchmark-report.py arete
+python3 utils/benchmark-report.py series --output-dir scratch/bench --arete boot --arete bootstrap-and-psyntax
 ```
 
 The generated report lives at `web/benchmarks/reports/arete.html`, with
 matching `.log` and `.json` sidecars.
+
+When invoked through `series`, the Arete workload artifacts are written
+to the chosen output directory as `arete.html`, `arete.log`, and
+`arete.json`, with `manifest.json` at the directory root describing the
+full mixed run.
 
 ## Interpretation
 

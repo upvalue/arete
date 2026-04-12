@@ -172,6 +172,9 @@ bench-report-r7rs: bin/arete heap.boot web/benchmarks/dist/report.css
 bench-report-arete: bin/arete web/benchmarks/dist/report.css
 	python3 utils/benchmark-report.py arete $(if $(BENCH),$(BENCH),all)
 
+bench-series: bin/arete heap.boot web/benchmarks/dist/report.css
+	python3 utils/benchmark-report.py series --output-dir $(if $(OUT),$(OUT),web/benchmarks/reports/series) $(if $(BENCH),$(foreach bench,$(BENCH),--r7rs $(bench)),--r7rs perf) $(if $(WORKLOAD),$(foreach workload,$(WORKLOAD),--arete $(workload)),--arete all)
+
 modal-bench:
 	modal run tools/modal_bench.py --suite $(if $(SUITE),$(SUITE),r7rs) --benchmarks "$(if $(BENCH),$(BENCH),perf)" --runs $(if $(RUNS),$(RUNS),1) --cpu-limit $(if $(CPU_LIMIT),$(CPU_LIMIT),300) --max-parallelism $(if $(MAX_PARALLELISM),$(MAX_PARALLELISM),8)
 
@@ -179,7 +182,7 @@ web/benchmarks/dist/report.css: web/benchmarks/src/report.css web/benchmarks/tai
 	npm --prefix web/benchmarks install
 	npm --prefix web/benchmarks run build
 
-.PHONY: count clean cleaner install r7rs-bench arete-bench bench-report-css bench-report-r7rs bench-report-arete modal-bench
+.PHONY: count clean cleaner install r7rs-bench arete-bench bench-report-css bench-report-r7rs bench-report-arete bench-series modal-bench
 
 count:
 	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard scheme/*.scm)

@@ -27,3 +27,4 @@ vgcore*
 /web/benchmarks/reports/*.html
 /web/benchmarks/reports/*.json
 /web/benchmarks/reports/*.log
+/scratch

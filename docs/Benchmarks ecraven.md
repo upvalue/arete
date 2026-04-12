@@ -133,8 +133,14 @@ make heap.boot
 CPU_LIMIT=30 make r7rs-bench BENCH=all    # full suite, ~30 min upper bound
 CPU_LIMIT=30 make r7rs-bench BENCH=fib    # single benchmark
 utils/run-r7rs-benchmarks.sh gabriel      # by group
+python3 utils/benchmark-report.py series --output-dir scratch/bench --r7rs fib --r7rs tak --arete boot
 ```
 
 Results are appended to `results.Arete`. Per-benchmark CSV lines are
 emitted with the prefix `+!CSVLINE!+arete,<name>,<time-or-status>` so
 they can be extracted for further processing.
+
+If you need machine-readable output in a dedicated folder instead of the
+legacy append-only root log, prefer `utils/benchmark-report.py r7rs ...`
+or the mixed `series` command above. Those write `r7rs.json` containing
+the parsed rows and aggregate summary.

@@ -1,0 +1,10 @@
+{
+  "name": "arete-benchmark-report",
+  "private": true,
+  "scripts": {
+    "build": "tailwindcss -i ./src/report.css -o ./dist/report.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

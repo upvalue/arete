@@ -92,6 +92,27 @@ The report uses locally-built Tailwind CSS from `web/benchmarks/`
 without CDN assets. Project-native Arete workloads are reported through
 the same pipeline via `make bench-report-arete`.
 
+For a mixed sequential run that is easier for humans and agents to
+consume, use the `series` subcommand or the `bench-series` make target:
+
+```
+python3 utils/benchmark-report.py series \
+  --output-dir scratch/bench-2026-04-12 \
+  --r7rs fib --r7rs tak --r7rs earley \
+  --arete boot --arete bootstrap-and-psyntax
+
+make bench-series OUT=scratch/bench-series BENCH="fib tak earley" WORKLOAD="boot"
+```
+
+This writes one directory containing:
+
+- `manifest.json` with the selections and artifact paths
+- `r7rs.json` and/or `arete.json` with parsed rows plus summary data
+- matching `.log` and `.html` files for each subsystem
+
+The per-suite JSON now includes the actual benchmark rows and aggregate
+summary, not just metadata, so other tools can consume it directly.
+
 Caveats when interpreting:
 
 - `CPU_LIMIT=30` clips larger inputs — raise it to compare against
