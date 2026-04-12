@@ -188,14 +188,28 @@ TODO: Casting
       sum
       (loop (fx+ i 1) (fx+ sum (char->integer (char-case-fold (string-ref s1 i))))))))
 
-(define (string<? a b) (< (string-sum a) (string-sum b)))
-(define (string>? a b) (> (string-sum a) (string-sum b)))
-(define (string<=? a b) (not (string>? a b)))
-(define (string>=? a b) (not (string<? a b)))
-(define (string-ci<? a b) (< (string-sum-ci a) (string-sum-ci b)))
-(define (string-ci>? a b) (> (string-sum-ci a) (string-sum-ci b)))
-(define (string-ci<=? a b) (<= (string-sum-ci a) (string-sum-ci b)))
-(define (string-ci>=? a b) (>= (string-sum-ci a) (string-sum-ci b)))
+(define (%string-cmp a b fold)
+  (let ((la (string-length a)) (lb (string-length b)))
+    (let loop ((i 0))
+      (cond ((fx= i la) (if (fx= i lb) 0 -1))
+            ((fx= i lb) 1)
+            (else
+             (let ((ca (fold (string-ref a i)))
+                   (cb (fold (string-ref b i))))
+               (cond ((char<? ca cb) -1)
+                     ((char<? cb ca) 1)
+                     (else (loop (fx+ i 1))))))))))
+
+(define (%id-char c) c)
+
+(define (string<?  a b) (fx< (%string-cmp a b %id-char) 0))
+(define (string>?  a b) (fx> (%string-cmp a b %id-char) 0))
+(define (string<=? a b) (fx<= (%string-cmp a b %id-char) 0))
+(define (string>=? a b) (fx>= (%string-cmp a b %id-char) 0))
+(define (string-ci<?  a b) (fx< (%string-cmp a b char-case-fold) 0))
+(define (string-ci>?  a b) (fx> (%string-cmp a b char-case-fold) 0))
+(define (string-ci<=? a b) (fx<= (%string-cmp a b char-case-fold) 0))
+(define (string-ci>=? a b) (fx>= (%string-cmp a b char-case-fold) 0))
 
 ;;;;; STRINGS
 
@@ -301,20 +315,20 @@ TODO: Casting
   (define tag (gensym))
   (define (trigger-continuation value)
     (raise-continuation tag value))
-  (define result #f)
+  (define result (list #f))
   (try
-    (lambda () (thunk (lambda (value) (trigger-continuation value))))
+    (lambda ()
+      (set-car! result (thunk (lambda (value) (trigger-continuation value)))))
     (lambda (exc)
       (if (and (eq? (exception-tag exc) 'continuation) (eq? (exception-message exc) tag))
         (begin
-          (set! result
-            (exception-irritants exc))
+          (set-car! result (exception-irritants exc))
           #t)
         #f)))
   (set! trigger-continuation
     (lambda (value)
       (raise 'eval "Attempt to invoke spent one-shot continuation" tag)))
-  result)
+  (car result))
 
 ;; We define call/cc and dynamic-wind on the simpler unwind-protect and call/1cc. It will throw an error for more
 ;; extreme uses of continuations but is sufficient for many of them.

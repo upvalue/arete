@@ -32,3 +32,58 @@
 (define (write-string s . rest)
   (let ((port (if (null? rest) (current-output-port) (car rest))))
     (display s port)))
+
+(define (exact-integer? x) (and (integer? x) (exact? x)))
+
+;; R7RS string->number must return #f for non-numeric input. Arete's
+;; builtin raises a reader error instead; wrap it so the compiler
+;; benchmark's valid-module-name? (which uses string->number as a
+;; numeric-string test) works.
+(define %arete-raw-string->number string->number)
+(define (string->number s . rest)
+  (define result '(#f))
+  (try
+    (lambda ()
+      (set! result
+        (list (if (null? rest)
+                  (%arete-raw-string->number s)
+                  (%arete-raw-string->number s (car rest))))))
+    (lambda (exc) 'string->number-non-numeric))
+  (car result))
+
+(define (exact-integer-sqrt n)
+  (let ((sq (exact (floor (sqrt n)))))
+    (values sq (- n (* sq sq)))))
+
+(define rational? real?)
+
+(define (gcd . args)
+  (define (gcd2 a b)
+    (if (= b 0) (abs a) (gcd2 b (remainder a b))))
+  (cond ((null? args) 0)
+        ((null? (cdr args)) (abs (car args)))
+        (else (let loop ((acc (gcd2 (car args) (cadr args))) (rest (cddr args)))
+                (if (null? rest) acc (loop (gcd2 acc (car rest)) (cdr rest)))))))
+
+(define (lcm . args)
+  (cond ((null? args) 1)
+        ((null? (cdr args)) (abs (car args)))
+        (else (let loop ((acc (abs (car args))) (rest (cdr args)))
+                (if (null? rest) acc
+                    (let ((x (abs (car rest))))
+                      (loop (if (= acc 0) 0 (* (quotient acc (gcd acc x)) x))
+                            (cdr rest))))))))
+
+(define (read-line . rest)
+  (let ((port (if (null? rest) (current-input-port) (car rest))))
+    (let loop ((chars '()))
+      (let ((c (read-char port)))
+        (cond ((eof-object? c)
+               (if (null? chars) c (list->string (reverse chars))))
+              ((char=? c #\newline) (list->string (reverse chars)))
+              (else (loop (cons c chars))))))))
+
+;; ack needs a deeper non-tail-recursive call stack than Arete's default
+;; 1500-frame cap. See src/vm.cpp:149, src/state.cpp:161. Setting too
+;; high causes a C-stack overflow / SIGSEGV. ack(3,12) needs ~64k frames.
+(set-top-level-value! 'RECURSION-LIMIT 75000)
