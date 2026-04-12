@@ -7,10 +7,12 @@
 #if AR_OS == AR_POSIX
 # include <sys/time.h>
 # include <sys/stat.h>
+# include <unistd.h>
 #elif AR_OS == AR_WINDOWS
 # include <winsock2.h>
 # include <windows.h>
 #endif
+#include <cstdio>
 
 namespace arete {
 
@@ -70,6 +72,18 @@ Value fn_file_exists(State& state, size_t argc, Value* argv, void* _) {
   return C_FALSE;
 }
 AR_DEFUN("file-exists?", fn_file_exists, 1);
+
+Value fn_delete_file(State& state, size_t argc, Value* argv, void* _) {
+  static const char* fn_name = "delete-file";
+  AR_FN_ARGC_EQ(state, argc, 1);
+  AR_FN_EXPECT_TYPE(state, argv, 0, STRING);
+  if(std::remove(argv[0].string_data()) != 0) {
+    return state.make_exception(state.globals[State::S_FILE_ERROR],
+                                "delete-file: could not remove file");
+  }
+  return C_UNSPECIFIED;
+}
+AR_DEFUN("delete-file", fn_delete_file, 1);
 
 Value fn_path_separator(State& state, size_t argc, Value* argv, void* _) {
 	static const char* fn_name = "path-separator"; (void) _;

@@ -279,9 +279,17 @@
             (raise-source (list-tail (cadr x) i) 'syntax "let* binding must be a list with two elements" (list binding))))
         bindings)
 
-    `(,#'let (,@(map1 (lambda (b) (list-source b (car b) #'unspecified)) bindings))
-      ,@(map1 (lambda (b) (list-source b #'set! (car b) (cadr b))) bindings)
-      ,@body))))
+      ;; Expand to nested single-binding lets so each RHS is evaluated in
+      ;; the scope of previous bindings only, not its own. The prior
+      ;; (let + set!) expansion was incorrect because the new binding
+      ;; shadowed an outer same-named identifier before its RHS ran, so
+      ;; e.g. (let* ((i (+ i 1))) i) read the placeholder value instead
+      ;; of the outer i.
+      (let loop ((bs bindings))
+        (if (null? bs)
+          `(,#'let () ,@body)
+          `(,#'let (,(list-source (car bs) (car (car bs)) (cadr (car bs))))
+             ,(loop (cdr bs))))))))
 
 ;; TODO: letrec restrictions.
 (define-syntax letrec

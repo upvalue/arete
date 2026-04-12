@@ -143,6 +143,10 @@ run_one() {
     echo
     echo "Testing $bench under Arete"
     ulimit -t "$CPU_LIMIT"
+    # Arete's non-tail-call RECURSION-LIMIT is raised from the prelude, but
+    # each Scheme frame also consumes a C-stack frame. Lift the default 8 MiB
+    # cap so benchmarks like ack don't SIGSEGV before the Scheme limit fires.
+    ulimit -s unlimited 2>/dev/null || true
     local status
     # Run from the vendored benchmark root so benchmarks that open
     # relative paths like "inputs/bib" or "outputs/ray.output" resolve
