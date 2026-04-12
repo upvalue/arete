@@ -2137,6 +2137,25 @@ struct State {
 
   Value make_env(Value parent = C_FALSE, size_t size = 0);
 
+  /** Allocate a call-frame environment sized exactly for `npairs` name/value
+   * bindings. The parent pointer and the unused header slot are installed in
+   * the same pass; bindings must be appended via `env_push_binding`, which
+   * does NOT grow the storage. Callers are responsible for supplying an
+   * npairs that accounts for every binding (including rest-args). */
+  Value make_call_env(Value parent, size_t npairs);
+
+  /** Append a (name, value) pair to an env built via `make_call_env`. No
+   * bounds check, no GC — storage must have been pre-sized. */
+  void env_push_binding(Value env, Value name, Value val) {
+    VectorStorage* store = static_cast<VectorStorage*>(
+      static_cast<Vector*>(env.heap)->storage.heap);
+    size_t n = store->length;
+    store->data[n] = name;
+    store->data[n + 1] = val;
+    store->length = n + 2;
+    AR_ASSERT(store->length <= static_cast<Vector*>(env.heap)->capacity);
+  }
+
   void env_set(Value env, Value name, Value val);
 
   bool identifier_equal(Value id1, Value id2) {
