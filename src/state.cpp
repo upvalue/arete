@@ -24,6 +24,7 @@ State::State():
   gc(*this, AR_HEAP_SIZE),
   gensym_counter(0),
   tco_enabled(true),
+  forbid_interpreter(false),
   booted(false),
   symbol_table(),
   source_names(),

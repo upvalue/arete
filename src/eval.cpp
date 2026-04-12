@@ -437,7 +437,7 @@ Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
   return tmp;
 }
 Value State::eval_body(EvalFrame frame, Value body, bool single) {
-  if(get_global_value(G_FORBID_INTERPRETER) == C_TRUE) {
+  if(forbid_interpreter) {
     std::ostringstream os;
     os << "interpreter has been disabled, but FUNCTION " << frame.fn_name << " was called";
 
@@ -446,7 +446,8 @@ Value State::eval_body(EvalFrame frame, Value body, bool single) {
   Value exp, cell, tmp;
 
 tail_call:
-  bool tail = false, tco_enabled = get_global_value(G_TCO_ENABLED) != C_FALSE;
+  bool tail = false;
+  const bool tco_on = this->tco_enabled;
 
   AR_ASSERT(single || body.heap_type_equals(PAIR) || body == C_NIL);
 
@@ -465,7 +466,7 @@ tail_call:
     }
     restart_exp:
 
-    tail = tco_enabled && (body == C_NIL || body == C_FALSE);
+    tail = tco_on && (body == C_NIL || body == C_FALSE);
 
     switch(exp.type()) {
       case SYMBOL: {

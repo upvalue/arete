@@ -45,6 +45,14 @@ Value State::get_global_value(Global sym) {
 
 void State::set_global_value(Global sym, Value v) {
   globals.at((size_t) sym).as<Symbol>()->value = v;
+  // Keep cached mirrors of hot interpreter flags in sync. These flags
+  // aren't exposed to Scheme; the only mutation paths are C++ callers
+  // of set_global_value, so invalidating here is sufficient.
+  switch(sym) {
+    case G_TCO_ENABLED:        tco_enabled = (v != C_FALSE); break;
+    case G_FORBID_INTERPRETER: forbid_interpreter = (v == C_TRUE); break;
+    default: break;
+  }
 }
 
 bool State::equals(Value a, Value b) {

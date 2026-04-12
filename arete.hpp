@@ -1705,7 +1705,12 @@ struct State {
    * their uniqueness */ 
   size_t gensym_counter;
 
+  /** Cached mirror of G_TCO_ENABLED's value, kept in sync by set_global_value.
+   *  Read on every eval_body entry, so we avoid the per-form hashtable-style lookup. */
   bool tco_enabled;
+
+  /** Cached mirror of G_FORBID_INTERPRETER, kept in sync by set_global_value. */
+  bool forbid_interpreter;
 
   bool booted;
 
