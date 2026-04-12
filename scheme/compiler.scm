@@ -221,7 +221,7 @@
   (compiler-log fn insns)
 
   (fn-adjust-stack fn 
-    (aif (table-ref stack-effects (car insns))
+      (aif (table-ref stack-effects (car insns))
       it
       (case (car insns)
         ;; Variable microcode: Remove arguments from stack, and re-use one of the argument slots to push results

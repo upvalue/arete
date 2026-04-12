@@ -1712,6 +1712,9 @@ struct State {
   /** Cached mirror of G_FORBID_INTERPRETER, kept in sync by set_global_value. */
   bool forbid_interpreter;
 
+  /** Cached mirror of G_RECURSION_LIMIT, read on every apply_vm entry. */
+  size_t recursion_limit;
+
   bool booted;
 
   /** The symbol table */

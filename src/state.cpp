@@ -25,6 +25,7 @@ State::State():
   gensym_counter(0),
   tco_enabled(true),
   forbid_interpreter(false),
+  recursion_limit(1500),
   booted(false),
   symbol_table(),
   source_names(),
