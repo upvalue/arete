@@ -21,4 +21,9 @@ vgcore*
 /arete-distilled.cpp
 /scraps
 /results.Arete
+/modal-results
 /.codex
+/web/benchmarks/node_modules
+/web/benchmarks/reports/*.html
+/web/benchmarks/reports/*.json
+/web/benchmarks/reports/*.log

@@ -5,12 +5,14 @@ change helped or hurt.
 
 | Signal                          | Answers                                              |
 | ------------------------------- | ---------------------------------------------------- |
-| **Bootstrap time**              | Is the whole stack still healthy end-to-end?         |
+| **Arete workloads**             | Is the whole stack still healthy end-to-end?         |
 | **ecraven benchmarks**          | How does Arete do on standard Scheme workloads?     |
 | **Interpreter microbenchmarks** | How does a change affect the tree-walking eval loop? |
 | **Perf reports**                | Where inside a single run is time being spent?       |
 
-## Bootstrap time
+For agent-scale fan-out without loading the local host, see [[Modal Benchmarking]].
+
+## Arete workloads
 
 `make heap.boot` reports its own elapsed time:
 
@@ -32,6 +34,28 @@ rm -f heap.boot && make heap.boot 2>&1 | tail -3
 
 Best of 3–5 runs; typical is ~100–150 ms on x86-64 Linux. Also watch the
 image size — it shifts when heap shape changes.
+
+The web benchmark subsystem now also tracks two project-native workloads
+through the static report path:
+
+- `boot` runs `bin/arete boot.scm`
+- `bootstrap-and-psyntax` runs `bin/arete bootstrap-and-psyntax.scm`
+
+These cover the normal bootstrap path and the heavier psyntax bootstrap
+experiment documented in [[Psyntax]].
+
+```
+make bench-report-arete
+make bench-report-arete BENCH=boot
+RUNS=5 CPU_LIMIT=600 python3 utils/benchmark-report.py arete
+```
+
+This writes `web/benchmarks/reports/arete.html` plus sidecar log/json.
+The current runner reports the best wall-clock time across `RUNS`
+successful executions for each workload and marks the workload failed if
+any run crashes or hits the CPU limit.
+
+Per-workload notes live in [[Benchmarks Arete]].
 
 ## ecraven benchmarks
 
@@ -55,6 +79,18 @@ Output is appended to `results.Arete`. Per-benchmark lines are grep-able:
 ```
 +!CSVLINE!+arete,<name>,<seconds|CRASHED|ULIMITKILLED|INCORRECT>
 ```
+
+HTML report generation for the R7RS suite goes through the same static
+reporting pipeline:
+
+```
+make bench-report-r7rs BENCH="fib ack tak"
+# writes web/benchmarks/reports/r7rs.html plus sidecar log/json
+```
+
+The report uses locally-built Tailwind CSS from `web/benchmarks/`
+without CDN assets. Project-native Arete workloads are reported through
+the same pipeline via `make bench-report-arete`.
 
 Caveats when interpreting:
 

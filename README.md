@@ -1,8 +1,7 @@
 # History!
 
-This is a Scheme implementation I wrote in late 2017 / early 2018. It's angling
-towards being an R7RS Scheme but falls pretty short of supporting a lot of the
-specification. It's pretty much on ice, but put here for posterity.
+This is a Scheme implementation I wrote in late 2017 / early 2018. It is
+pretty much on ice, but put here for posterity.
 
 A couple of thoughts I thought were somewhat interesting:
 
@@ -65,9 +64,11 @@ Arete uses the C++ STL, and optionally
 - SDL2
 - Python (for building & testing only)
 
-# R?RS/SRFI compliance.
+# Language support
 
-Arete currently supports some features of R5RS and R7RS. Full compliance is not the primary goal at present, but I have tried to hew to the standards. If you miss something, open an issue :)
+Arete implements a pragmatic subset of Scheme oriented around its own bootstrap,
+runtime, compiler, and macro system. Full standards compliance is not the
+primary goal here. If you miss something, open an issue :)
 
 ## Noted issues
 
