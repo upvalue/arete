@@ -141,7 +141,7 @@ tests/test-semispace: $(CXXOBJS) tests/test-semispace.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^
 
-test-all: tests/test-semispace
+test-all: bin/arete tests/test-semispace
 	#tests/test-incremental
 	tests/test-semispace
 	python utils/run-tests.py
