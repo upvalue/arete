@@ -52,8 +52,9 @@ RUNS=5 CPU_LIMIT=600 python3 utils/benchmark-report.py arete
 
 This writes `web/benchmarks/reports/arete.html` plus sidecar log/json.
 The current runner reports the best wall-clock time across `RUNS`
-successful executions for each workload and marks the workload failed if
-any run crashes or hits the CPU limit.
+successful executions for each workload, rendering sub-second values in
+milliseconds, and marks the workload failed if any run crashes or hits
+the CPU limit.
 
 Per-workload notes live in [[Benchmarks Arete]].
 

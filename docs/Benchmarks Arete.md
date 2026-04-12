@@ -13,8 +13,9 @@ microbenchmarks, and perf reports, see [[Benchmarking]].
 
 Both workloads run from the repository root and are timed externally by
 the benchmark runner. The report records the best wall-clock time across
-`RUNS` successful executions. If any run crashes or hits the CPU limit,
-that workload is marked as failed for the report.
+`RUNS` successful executions. Sub-second results are rendered in
+milliseconds in the HTML and JSON artifacts. If any run crashes or hits
+the CPU limit, that workload is marked as failed for the report.
 
 ## Running
 

@@ -92,18 +92,20 @@ def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def format_seconds(value: float) -> str:
-    if value >= 10:
-        return f"{value:.1f}s"
+def format_duration(value: float) -> str:
     if value >= 1:
-        return f"{value:.2f}s"
-    return f"{value:.3f}s"
+        seconds = f"{value:.3f}".rstrip("0").rstrip(".")
+        return f"{seconds}s"
+
+    milliseconds = value * 1000.0
+    millis = f"{milliseconds:.3f}".rstrip("0").rstrip(".")
+    return f"{millis}ms"
 
 
 def classify_result(raw_value: str) -> tuple[str, str, float | None]:
     if NUMERIC_RE.fullmatch(raw_value):
         seconds = float(raw_value)
-        return ("PASS", format_seconds(seconds), seconds)
+        return ("PASS", format_duration(seconds), seconds)
     if raw_value == "INCORRECT":
         return ("INCORRECT", raw_value, None)
     if raw_value == "ULIMITKILLED":
@@ -133,6 +135,7 @@ def parse_log(log_text: str, expected_system: str) -> list[dict[str, object]]:
             "status": status,
             "display_value": display_value,
             "seconds": seconds,
+            "milliseconds": seconds * 1000.0 if isinstance(seconds, float) else None,
         }
     rows = list(rows_by_name.values())
     rows.sort(key=lambda row: str(row["display_name"]))
@@ -259,10 +262,10 @@ def render_html(
     )
 
     pass_details = [
-        f"Total passing runtime {format_seconds(float(pass_total))}" if pass_count else "No passing timings captured",
-        f"Median passing runtime {format_seconds(float(pass_median))}" if isinstance(pass_median, float) else "Median unavailable",
-        f"Fastest pass {format_seconds(float(fastest))}" if isinstance(fastest, float) else "Fastest unavailable",
-        f"Slowest pass {format_seconds(float(slowest))}" if isinstance(slowest, float) else "Slowest unavailable",
+        f"Total passing runtime {format_duration(float(pass_total))}" if pass_count else "No passing timings captured",
+        f"Median passing runtime {format_duration(float(pass_median))}" if isinstance(pass_median, float) else "Median unavailable",
+        f"Fastest pass {format_duration(float(fastest))}" if isinstance(fastest, float) else "Fastest unavailable",
+        f"Slowest pass {format_duration(float(slowest))}" if isinstance(slowest, float) else "Slowest unavailable",
     ]
 
     pills = "\n".join(
