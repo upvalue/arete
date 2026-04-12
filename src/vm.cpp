@@ -186,10 +186,10 @@ tail:
 
   // TODO: CHECK RECURSION LIMIT
 
-  if(state.vm_depth >= (size_t)state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero()) {
+  if(state.vm_depth >= state.recursion_limit) {
     std::ostringstream os;
     os << " non-tail recursive calls exceeded RECURSION-LIMIT (" << 
-      state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero() << ')';
+      state.recursion_limit << ')';
     exception = state.make_exception(State::S_EVAL_ERROR, os.str());
     return exception;
   }
@@ -204,7 +204,6 @@ tail:
   // In addition, pointers to the VM stack (which is managed manually, but can be realloc) have to
   // be updated after anything that might result in another apply_vm call
   VMFunction* vfn = static_cast<VMFunction*>(f.fn.heap);
-
   // Highly complex and fine-tuned JIT compilation, this number was found by picking a random number
   // that increases compilation speed by quite a bit.
 #if 0
@@ -327,7 +326,7 @@ tail:
 
       VM_CASE(OP_POP): {
         AR_LOG_VM2("pop");
-        (*stack--);
+        stack--;
         VM_DISPATCH();
       }
 
@@ -812,7 +811,6 @@ tail:
           }
           stack -= (argc - 1);
         }
-
         VM2_RESTORE_GC();
         VM_DISPATCH();
       }

@@ -49,6 +49,7 @@ void State::set_global_value(Global sym, Value v) {
   // aren't exposed to Scheme; the only mutation paths are C++ callers
   // of set_global_value, so invalidating here is sufficient.
   switch(sym) {
+    case G_RECURSION_LIMIT:    recursion_limit = (size_t)v.fixnum_value_or_zero(); break;
     case G_TCO_ENABLED:        tco_enabled = (v != C_FALSE); break;
     case G_FORBID_INTERPRETER: forbid_interpreter = (v == C_TRUE); break;
     default: break;
