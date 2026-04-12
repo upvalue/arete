@@ -645,18 +645,24 @@ tail:
       }
 
       VM_CASE(OP_ARGV_REST): {
-        if(argc <= vfn->max_arity) {
-          locals[vfn->max_arity] = C_NIL;
+        // Snapshot max_arity before any allocation: temps_to_list() can
+        // trigger a GC that moves the VMFunction, invalidating `vfn`.
+        // (Assignment RHS is sequenced before LHS in C++17, so reading
+        // vfn->max_arity on the LHS would use a stale pointer.)
+        size_t max_arity = vfn->max_arity;
+        if(argc <= max_arity) {
+          locals[max_arity] = C_NIL;
         } else {
           // argv may point into temps if this is a tail call
+          Value lst;
           if(!state.temps.empty() && argv == state.temps.data()) {
-            locals[vfn->max_arity] = state.temps_to_list(vfn->max_arity);
+            lst = state.temps_to_list(max_arity);
           } else {
             state.temps.clear();
-            state.temps.insert(state.temps.end(), &argv[vfn->max_arity], &argv[argc]);
-
-            locals[vfn->max_arity] = state.temps_to_list();
+            state.temps.insert(state.temps.end(), &argv[max_arity], &argv[argc]);
+            lst = state.temps_to_list();
           }
+          locals[max_arity] = lst;
         }
         VM2_RESTORE_GC();
         VM_DISPATCH();
