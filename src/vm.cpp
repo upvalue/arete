@@ -38,6 +38,38 @@
 
 namespace arete {
 
+extern Value fn_apply(State& state, size_t argc, Value* argv, void* v);
+
+static Value vm_flatten_apply_arguments(State& state, size_t argc, Value* argv, Value& fn) {
+  fn = argv[0];
+
+  if(!fn.procedurep()) {
+    return state.type_error("apply: argument 1 is not a procedure");
+  }
+
+  Value lst = argv[argc - 1];
+  Value original_lst = lst;
+  AR_FRAME(state, fn, lst, original_lst);
+
+  size_t lst_length = (argc - 2) + original_lst.list_length();
+  if(original_lst != C_NIL && lst_length == 0) {
+    return state.type_error("apply: argument 2 is not a proper list");
+  }
+
+  state.temps.clear();
+  if(argc > 2) {
+    state.temps.insert(state.temps.end(), &argv[1], &argv[argc - 1]);
+  }
+
+  while(lst.heap_type_equals(PAIR)) {
+    state.temps.push_back(lst.car());
+    lst = lst.cdr();
+  }
+
+  AR_ASSERT(state.temps.size() == lst_length);
+  return C_FALSE;
+}
+
 /**
  * Like SourceLocation, but includes a code offset
  */
@@ -70,8 +102,16 @@ struct VMFrame2 {
     Value* upvalues = &state.gc.vm_stack[state.gc.vm_stack_used - vm_stack_used + vfn->local_count];
     //std::cout << "closing over " << vfn->upvalue_count << " upvalues" << std::endl;
     for(size_t i = 0; i != vfn->upvalue_count; i++) {
-      AR_ASSERT(upvalues[i].heap_type_equals(UPVALUE));
-      upvalues[i].as_unsafe<Upvalue>()->U.converted = state.gc.vm_stack[upvalues[i].as_unsafe<Upvalue>()->U.vm_local_idx];
+      if(!upvalues[i].heap_type_equals(UPVALUE) || upvalues[i].upvalue_closed()) {
+        continue;
+      }
+
+      size_t idx = upvalues[i].as_unsafe<Upvalue>()->U.vm_local_idx;
+      if(idx >= state.gc.vm_stack_used) {
+        continue;
+      }
+
+      upvalues[i].as_unsafe<Upvalue>()->U.converted = state.gc.vm_stack[idx];
       upvalues[i].heap->set_header_bit(Value::UPVALUE_CLOSED_BIT);
     }
     state.gc.shrink_stack(vm_stack_used);
@@ -338,7 +378,13 @@ tail:
       VM_CASE(OP_UPVALUE_GET): {
         size_t idx = VM_NEXT_INSN();
         AR_LOG_VM2("upvalue-get " << idx);
-        Upvalue* upval = f.closure.as_unsafe<Closure>()->upvalues->data[idx].as_unsafe<Upvalue>();
+        Value upvalue = f.closure.as_unsafe<Closure>()->upvalues->data[idx];
+        if(!upvalue.heap_type_equals(UPVALUE)) {
+          (*stack++) = upvalue;
+          VM_DISPATCH();
+        }
+
+        Upvalue* upval = upvalue.as_unsafe<Upvalue>();
         if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
           (*stack++) = upval->U.converted;
         } else {
@@ -354,8 +400,15 @@ tail:
 
       VM_CASE(OP_UPVALUE_SET): {
         size_t idx = VM_NEXT_INSN();
-        Upvalue* upval = f.closure.as_unsafe<Closure>()->upvalues->data[idx].as_unsafe<Upvalue>();
         Value val = (*--stack);
+        Value upvalue = f.closure.as_unsafe<Closure>()->upvalues->data[idx];
+        if(!upvalue.heap_type_equals(UPVALUE)) {
+          f.closure.as_unsafe<Closure>()->upvalues->data[idx] = val;
+          AR_LOG_VM2("upvalue-set " << idx << " = " << val);
+          VM_DISPATCH();
+        }
+
+        Upvalue* upval = upvalue.as_unsafe<Upvalue>();
         if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
           upval->U.converted = val;
         } else {
@@ -443,6 +496,7 @@ tail:
 
       VM_CASE(OP_APPLY_TAIL): {
         size_t fargc = VM_NEXT_INSN();
+        size_t apply_fargc = fargc;
 
         Value afn = *(stack - fargc - 1);
         Value to_apply = afn;
@@ -457,16 +511,46 @@ tail:
             state.temps.clear();
             state.temps.insert(state.temps.end(), stack - fargc, stack);
 
-            argv = &state.temps[0];
+            argv = state.temps.empty() ? nullptr : state.temps.data();
             argc = fargc;
             fnp = (void*) to_apply.bits;
 
             goto tail;
           } else {
-            Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, (void*) to_apply.heap);
+            Value ret;
+            if(afn.heap_type_equals(CFUNCTION) &&
+               afn.as_unsafe<Procedure>()->procedure_addr == &fn_apply) {
+              Value flat_error = vm_flatten_apply_arguments(state, fargc, stack - fargc, to_apply);
+              if(flat_error != C_FALSE) {
+                exception = flat_error;
+                goto exception;
+              }
+
+              afn = to_apply;
+              fargc = state.temps.size();
+              Value* flat_argv = state.temps.empty() ? nullptr : state.temps.data();
+
+              if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
+                frames_lost++;
+
+                afn = afn.closure_unbox();
+
+                argv = flat_argv;
+                argc = fargc;
+                fnp = (void*) to_apply.bits;
+
+                goto tail;
+              }
+
+              ret = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, flat_argv,
+                (void*) to_apply.heap);
+            } else {
+              ret = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc,
+                (void*) to_apply.heap);
+            }
             VM2_RESTORE();
-            *(stack - (fargc + 1)) = ret;
-            stack -= fargc;
+            *(stack - (apply_fargc + 1)) = ret;
+            stack -= apply_fargc;
 
             if((*(stack-1)).is_active_exception()) {
               exception = *(stack-1);
@@ -565,8 +649,8 @@ tail:
         if(argc <= vfn->max_arity) {
           locals[vfn->max_arity] = C_NIL;
         } else {
-          // argv may be &temps[0] if this is a tail call
-          if(argv == &state.temps[0]) {
+          // argv may point into temps if this is a tail call
+          if(!state.temps.empty() && argv == state.temps.data()) {
             locals[vfn->max_arity] = state.temps_to_list(vfn->max_arity);
           } else {
             state.temps.clear();
