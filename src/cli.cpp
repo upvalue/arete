@@ -30,7 +30,9 @@ static const char* help[] = {
   "  --read --repl: Same but with REPL",
   "  --repl: Open REPL",
   "  --debug-gc: Forces a collection after every allocation, used to flush out GC bugs",
-  "  --perf-report <path>: Write a JSON performance report at shutdown. Use - for stderr."
+  "  --perf-report <path>: Write a JSON performance report at shutdown. Use - for stderr.",
+  "  --interp-only: Clear the installed bytecode compiler so subsequently loaded code runs",
+  "    under the tree-walking interpreter. Place after the heap.boot image (or after boot.scm)."
 };
 
 static void  print_help() {
@@ -237,6 +239,7 @@ int State::enter_cli(int argc_, char* argv[]) {
   static const std::string eval("--eval");
   static const std::string stats("--stats");
   static const std::string perf_report("--perf-report");
+  static const std::string interp_only("--interp-only");
   static const std::string rest("--");
 
   // Writes the performance report JSON at shutdown if enabled, regardless of exit path.
@@ -402,6 +405,8 @@ int State::enter_cli(int argc_, char* argv[]) {
       }
     } else if(debug_gc.compare(arg) == 0) {
       gc.collect_before_every_allocation = true;
+    } else if(interp_only.compare(arg) == 0) {
+      set_global_value(G_COMPILER, C_UNDEFINED);
     } else if(perf_report.compare(arg) == 0) {
       if((i + 1) >= argc) {
         std::cerr << "Expected a path after --perf-report (use - for stderr)" << std::endl;

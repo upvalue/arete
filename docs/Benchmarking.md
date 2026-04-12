@@ -81,6 +81,11 @@ pause distributions. Use for *ratios* between runs taken with the flag
 on; the flag itself adds per-transition overhead, so measure absolute
 numbers with `time bin/arete ...`.
 
+Pass `--interp-only` (after the `heap.boot` image) to clear the
+installed bytecode compiler so loaded files run under the tree-walking
+interpreter — useful for isolating eval.cpp time on higher-level
+workloads.
+
 ## Workflow
 
 1. Baseline: bootstrap (best of 5), a few relevant ecraven benchmarks,
