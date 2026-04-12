@@ -243,32 +243,6 @@ tail:
   // TODO: Necessary?
   memset((void*)(((size_t)locals) + locals_size), 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
 
-  // Here we allocate all upvalues needed by functions that will be enclosed by this function.
-  // Each upvalue is tied to a local until control exits this function, at which point they become
-  // freestanding
-  if(vfn->upvalue_count) {
-    Value* upvalues = &state.gc.vm_stack[sff_offset + vfn->local_count];
-    state.gc.protect_argc = argc;
-    state.gc.protect_argv = argv;
-
-    //AR_LOG_VM2("allocating space for " << vfn->free_variables->length << " upvalues");
-
-    for(size_t i = 0; i != f.fn.as_unsafe<VMFunction>()->free_variables->length; i++) {
-      upvalues[i] = state.gc.allocate(UPVALUE, sizeof(Upvalue));
-      AR_ASSERT(state.gc.live(f.fn));
-      AR_ASSERT(state.gc.live(upvalues[i]));
-      size_t idx = ((size_t*) f.fn.as_unsafe<VMFunction>()->free_variables->data)[i];
-      size_t vm_stack_idx = ((size_t)&locals[idx] - (size_t) state.gc.vm_stack) / sizeof(void*);
-
-
-      AR_ASSERT(current_state->gc.live(upvalues[i]));
-      upvalues[i].as<Upvalue>()->U.vm_local_idx = vm_stack_idx;
-    }
-
-    VM2_RESTORE_GC();
-    state.gc.protect_argc = 0;
-  }
-
 #if AR_COMPUTED_GOTO
   static void* dispatch_table[] = {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,
@@ -463,7 +437,16 @@ tail:
 
       VM_CASE(OP_UPVALUE_FROM_LOCAL): {
         size_t idx = VM_NEXT_INSN();
-        (*stack++) = state.gc.vm_stack[sff_offset + vfn->local_count + idx];
+        Value* upvalue_slot = &state.gc.vm_stack[sff_offset + vfn->local_count + idx];
+        if(!upvalue_slot->heap_type_equals(UPVALUE)) {
+          size_t local_idx = ((size_t*)vfn->free_variables->data)[idx];
+          *upvalue_slot = state.gc.allocate(UPVALUE, sizeof(Upvalue));
+          upvalue_slot->as_unsafe<Upvalue>()->U.vm_local_idx = sff_offset + local_idx;
+          VM2_RESTORE_GC();
+          upvalue_slot = &state.gc.vm_stack[sff_offset + vfn->local_count + idx];
+        }
+
+        (*stack++) = *upvalue_slot;
         AR_LOG_VM2("upvalue-from-local " << idx << ' ' << *(stack - 1));
 
         //(*stack++) = (&state.gc.vm_stack[sff_offset + vfn->local_count])[idx];
