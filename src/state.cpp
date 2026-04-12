@@ -19,6 +19,7 @@ extern void load_platform_functions(State&);
 extern void load_sdl(State&);
 extern void load_uv(State&);
 extern void load_native_compiler(State&);
+extern void load_native_vm(State&);
 
 State::State():
   gc(*this, AR_HEAP_SIZE),
@@ -58,7 +59,12 @@ void State::boot_common() {
   set_global_value(G_CURRENT_OUTPUT_PORT, make_output_file_port("stdout", &std::cout));
   set_global_value(G_STR_MODULE_NAME, make_string("module-name"));
   set_global_value(G_STR_MODULE_EXPORTS, make_string("module-exports"));
-  
+
+  // Assemble the native VM's shared dispatch core. Must happen on both full
+  // boot and image-load paths, independent of whether builtins are being
+  // installed fresh or re-linked from a saved image.
+  if(getenv("NATIVE_VM_ENABLE")) init_native_vm(*this);
+
   booted = true;
 }
   
@@ -146,6 +152,7 @@ void State::boot() {
   load_string_functions(*this);
   load_platform_functions(*this);
   load_native_compiler(*this);
+  load_native_vm(*this);
 
   set_global_value(G_FEATURES, C_NIL);
 

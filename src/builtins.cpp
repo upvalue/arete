@@ -1403,6 +1403,15 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
     code.bv_set<size_t>(i, insns.vector_ref(i).fixnum_value());
   }
 
+  // Opt this function into the native VM if its opcode set is fully
+  // supported. Must happen AFTER the bytecode is copied — eligibility walks
+  // vfn->code. See docs/Native VM.md. Gated by NATIVE_VM_DEFAULT env var
+  // while we stabilize; remove the gate after S12.
+  if(getenv("NATIVE_VM_DEFAULT") && native_vm_function_eligible(vfn)) {
+    vfn->set_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT);
+    vfn->procedure_addr = (c_closure_t) &apply_native_vm;
+  }
+
   return fn;
 }
 AR_DEFUN("OpenFn->procedure", fn_openfn_to_procedure, 1);
