@@ -85,6 +85,7 @@ suites = (
     ('reader', ['--read', '{}']),
     ('preboot',  ['{}']),
     ('expander', ['--set', 'BOOT-STAGE', '2', 'boot.scm', '{}']),
+    ('bootstrap', ['--set', 'BOOT-STAGE', '3', 'boot.scm', '{}']),
     ('compiler', ['--set', 'BOOT-STAGE', '3', 'boot.scm', '--set', 'compiler-test-file', '"{}"', 'tests/compiler-test.scm']),
     ('modules', ['--set', 'BOOT-STAGE', '3 ', 'boot.scm',
         '--eval', "(set-top-level-value! '*module-paths* (append (top-level-value '*module-paths*) (list \"tests/modules\")))", '{}']),
@@ -107,4 +108,3 @@ if __name__ == '__main__':
 
     if successful_tests != total_tests:
         sys.exit(1)
-

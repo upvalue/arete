@@ -1030,7 +1030,8 @@
   (let* ((fn-name (function-name oldfn))
          (fn-body (function-body oldfn))
          (fn-source (if (list-get-source fn-body) fn-body (car fn-body)))
-         (is-macro? (macro? oldfn))
+         (is-procedural-macro? (function-procedural-macro? oldfn))
+         (is-identifier-macro? (function-identifier-macro? oldfn))
          ;; TODO Could just save the original arguments list in the Function; it doesn't really matter
          ;; if they are oversized as they won't exist during normal execution in any case
          (fn-proper-args (or (function-arguments oldfn) '()))
@@ -1059,9 +1060,12 @@
     (let ((fn (compile-lambda #f fn-exxxpr)))
       (when fn-name
         (set-function-name! fn fn-name))
-      (when is-macro?
-        (set-function-macro-env! fn (function-env oldfn))
+      (when (or is-procedural-macro? is-identifier-macro?)
+        (set-function-macro-env! fn (function-env oldfn)))
+      (when is-procedural-macro?
         (set-function-macro-bit! fn))
+      (when is-identifier-macro?
+        (set-function-identifier-macro-bit! fn))
       fn)
   ))
 
