@@ -236,22 +236,9 @@ tail:
 
   // Problem: ARGV is moved after stack growth!
 
-  bool simple_entry = vfn->upvalue_count == 0 &&
-    vfn->min_arity == vfn->max_arity &&
-    vfn->code_pointer()[0] == OP_ARGC_EQ;
-
-  if(simple_entry) {
-    if(argc != vfn->min_arity) {
-      std::ostringstream os;
-      os << "function expected exactly " << vfn->min_arity << " arguments but got " << argc;
-      exception = state.make_exception(State::S_EVAL_ERROR, os.str());
-      return exception;
-    }
-  }
-
   size_t locals_size = std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*);
   // Initialize local variables
-  memcpy(locals, argv, locals_size);
+  memcpy(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
   // Zero out whole stack
   // TODO: Necessary?
   memset((void*)(((size_t)locals) + locals_size), 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
@@ -259,7 +246,7 @@ tail:
   // Here we allocate all upvalues needed by functions that will be enclosed by this function.
   // Each upvalue is tied to a local until control exits this function, at which point they become
   // freestanding
-  if(!simple_entry && vfn->upvalue_count) {
+  if(vfn->upvalue_count) {
     Value* upvalues = &state.gc.vm_stack[sff_offset + vfn->local_count];
     state.gc.protect_argc = argc;
     state.gc.protect_argv = argv;
