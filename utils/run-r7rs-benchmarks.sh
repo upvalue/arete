@@ -37,6 +37,7 @@ INPUTS="$BENCH_DIR/inputs"
 ARETE="${ARETE:-$ROOT/bin/arete}"
 HEAP="${HEAP:-$ROOT/heap.boot}"
 PRELUDE="$HERE/r7rs-bench-prelude.scm"
+GCBENCH_SHIM="$HERE/r7rs-bench-gcbench-shim.scm"
 POSTLUDE="$HERE/r7rs-bench-postlude.scm"
 CPU_LIMIT="${CPU_LIMIT:-300}"
 TEMP="${TEMP:-/tmp/arete-r7rs-benchmarks}"
@@ -135,10 +136,15 @@ run_one() {
         return
     fi
 
-    # Assemble: <our prelude> <bench src> <common.scm> <our postlude> <common-postlude.scm>
+    local extra_prelude=()
+    if [ "$bench" = "gcbench" ] && [ -f "$GCBENCH_SHIM" ]; then
+        extra_prelude=("$GCBENCH_SHIM")
+    fi
+
+    # Assemble: <our prelude> <bench-specific shim(s)> <bench src> <common.scm> <our postlude> <common-postlude.scm>
     # Order matches what vendor/r7rs-benchmarks/bench's make_src_code does,
     # substituting our out-of-tree prelude/postlude for src/Arete-*.scm.
-    cat "$PRELUDE" "$src" "$SRC/common.scm" "$POSTLUDE" "$SRC/common-postlude.scm" > "$tgt"
+    cat "$PRELUDE" "${extra_prelude[@]}" "$src" "$SRC/common.scm" "$POSTLUDE" "$SRC/common-postlude.scm" > "$tgt"
 
     echo
     echo "Testing $bench under Arete"
