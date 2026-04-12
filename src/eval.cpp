@@ -674,27 +674,31 @@ tail_call:
                 rest.head, rest.tail);
               
               fn_args = fn.function_arguments();
-              size_t argc = args.list_length();
               size_t arity = fn_args.list_length();
               rest_args_name = fn.function_rest_arguments();
               bool has_rest = rest_args_name != C_FALSE;
 
-              tmp = eval_check_arity(*this, fn, exp, argc, arity, arity, has_rest);
-              EVAL_CHECK(tmp, exp);
-
-              // Tight allocation: one slot per (name, value) binding plus the
-              // rest binding if present. env_push_binding writes without
-              // bounds checks or resize.
               frame2.env = make_call_env(fn.function_parent_env(),
                 arity + (has_rest ? 1 : 0));
 
-              // Evaluate arguments, left to right, binding in lockstep with fn_args.
+              // Single walk: evaluate each argument and bind it into the
+              // freshly-sized env in lockstep with fn_args, counting argc as
+              // we go. Arity mismatches are reported lazily below so we skip
+              // the up-front args.list_length() and fn_args double-walk.
+              size_t argc = 0;
               while(args.heap_type_equals(PAIR) && fn_args.heap_type_equals(PAIR)) {
                 tmp = eval_body(frame, args.car(), true);
                 EVAL_CHECK(tmp, args);
                 env_push_binding(frame2.env, fn_args.car(), tmp);
                 args = args.cdr();
                 fn_args = fn_args.cdr();
+                argc++;
+              }
+
+              if(fn_args.heap_type_equals(PAIR)) {
+                // Ran out of args before filling all named parameters.
+                tmp = eval_check_arity(*this, fn, exp, argc, arity, arity, has_rest);
+                EVAL_CHECK(tmp, exp);
               }
 
               if(has_rest) {
@@ -707,6 +711,13 @@ tail_call:
                 }
 
                 env_push_binding(frame2.env, rest_args_name, rest.head);
+              } else if(args.heap_type_equals(PAIR)) {
+                // Surplus args without a rest binding: formatter needs the
+                // total arg count, so do a cheap tail walk only in the error
+                // path.
+                tmp = eval_check_arity(*this, fn, exp, argc + args.list_length(),
+                  arity, arity, false);
+                EVAL_CHECK(tmp, exp);
               }
 
               new_body = fn.function_body();
