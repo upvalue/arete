@@ -494,7 +494,9 @@ Value fn_load_file(State& state, size_t argc, Value* argv, void* v) {
   
   mod = state.get_global_value(State::G_CURRENT_MODULE);
   res = state.load_file(path);
-  state.set_global_value(State::G_CURRENT_MODULE, mod);
+  if(mod.heap_type_equals(TABLE)) {
+    state.set_global_value(State::G_CURRENT_MODULE, mod);
+  }
   // Allow *push-module* to override the current module. This is so the expander can set up
   // and install the user module in which interaction happens by default
   if(state.get_global_value(State::G_PUSH_MODULE) != C_UNDEFINED) {

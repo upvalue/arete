@@ -222,7 +222,9 @@
 
 ;; Add a module's name to a symbol
 (define (module-qualify mod name)
-  (string->symbol (string-append "##" (table-ref mod "module-name") "#" (symbol->string name))))
+  (if (symbol-qualified? name)
+    name
+    (string->symbol (string-append "##" (table-ref mod "module-name") "#" (symbol->string name)))))
 
 ;; Retrieve a rename-expr from a rename, leave other expressions alone
 (define (rename-strip id)
@@ -246,7 +248,9 @@
          ;(print (env-lookup (rename-env name) (rename-expr name)))
          (env-lookup (rename-env name) (rename-expr name)))
        (begin
-         (if (table-ref env strip)
+         (if (symbol-qualified? strip)
+           (list #f strip (env-check-syntax strip) (top-level-bound? strip))
+           (if (table-ref env strip)
            ;; this variable is defined, can either be a transformer which is 
            ;; returned directly for the use of the expander,
            ;; or is a reference to a variable
@@ -262,7 +266,7 @@
            ;; something defined later on in a module.
            (if (eq? (env-check-syntax strip) 'syntax)
              (list #f strip 'syntax #t)
-             (list env (module-qualify env strip) unspecified #f))))))
+             (list env (module-qualify env strip) unspecified #f)))))))
     ;; local environment
     ((vector? env)
      ((lambda (res)
@@ -280,6 +284,11 @@
     )
     (env-lookup env name)))
 
+(define (env-lookup-destructure lookup fn)
+  (if (not (and (pair? lookup) (pair? (cdr lookup)) (pair? (cddr lookup)) (pair? (cdddr lookup))))
+    (raise 'expand (print-string "env-lookup returned malformed result:" lookup) (list lookup)))
+  (fn (car lookup) (cadr lookup) (caddr lookup) (cadddr lookup)))
+
 ;; Compare two identifiers to see if they "mean" the same thing
 ;; For example
 ;; 'else and (make-rename #f 'else) => #t
@@ -291,18 +300,17 @@
     ((and (rename? a) (identifier? b))
 
      (and (eq? (rename-expr a) (rename-strip b))
-      (apply 
-         (lambda (renv rkey rvalue rfound)
-           (apply
-             (lambda (env key value found)
-               ;; env-lookup will still return a table and qualified name
-               ;; in the case that something cannot be found
-               (define senv (if (and (not found) (table? env)) #f env))
-               (define rsenv (if (and (not rfound) (table? renv)) #f renv))
-               (eq? rsenv senv))
-
-             (env-lookup-maybe-rename env b)))
-         (env-lookup (rename-env a) (rename-expr a)))))
+      (env-lookup-destructure
+        (env-lookup (rename-env a) (rename-expr a))
+        (lambda (renv rkey rvalue rfound)
+          (env-lookup-destructure
+            (env-lookup-maybe-rename env b)
+            (lambda (env key value found)
+              ;; env-lookup will still return a table and qualified name
+              ;; in the case that something cannot be found
+              (define senv (if (and (not found) (table? env)) #f env))
+              (define rsenv (if (and (not rfound) (table? renv)) #f renv))
+              (eq? rsenv senv)))))))
 
     (else #f)))
 
@@ -317,7 +325,8 @@
 ;; (define ##arete#x #t)
 
 (define (env-resolve env name)
-  (apply
+  (env-lookup-destructure
+    (env-lookup env name)
     (lambda (env key value found)
       (cond
         ((and (rename? key) (rename-gensym key)) (rename-gensym key))
@@ -325,19 +334,17 @@
         (else
           (if (or (gensym? value) (symbol-qualified? value))
             value
-            name))))
-    (env-lookup env name)))
+            name))))))
 
 (define (env-syntax? env name)
-  (apply 
+  (env-lookup-destructure
+    (env-lookup env name)
     (lambda (env name value found)
       (if (eq? value 'syntax)
         name
         (if (function-macro? value)
           'macro
-          #f))
-    )
-    (env-lookup env name)))
+          #f)))))
 
 ;; Shorthand for mapping expand because it's so common
 (define (expand-map x env params)
@@ -408,20 +415,20 @@
 (define (expand-identifier x env params)
   ;; Check for identifier-transformers or invalid use of 
   (if (env-syntax? env x)
-    (apply
+    (env-lookup-destructure
+      (env-lookup env x)
       (lambda (env name value found)
         (if (or (eq? value 'syntax) (not (function-identifier-macro? value)))
           (raise-source x 'expand (print-string "used syntax" x "as identifier") (list x))
-          (expand-macro x env value params)))
-      (env-lookup env x))
+          (expand-macro x env value params))))
     (if (symbol-qualified? x)
       x
       (begin
-        (apply
+        (env-lookup-destructure
+          (env-lookup env x)
           (lambda (env name value found)
             (env-resolve env x)
-            )
-        (env-lookup env x))))))
+            ))))))
 
 ;; Expand and/or
 (define (expand-and-or x env params)
