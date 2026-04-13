@@ -1293,7 +1293,54 @@ void init_native_vm(State& state) {
   // Variadic. Helper takes (state, argc, stack-argc), returns result value
   // or an active exception. On success we write the result at stack[-argc]
   // and bring STACK down by (argc-1). On exception we return the exception.
+  //
+  // Two-level fast path:
+  //   argc == 2 fixnum: ~13 insns inline (dominant case in fib/tak/interp).
+  //   argc >= 3 fixnum: loop that accumulates bits; subtract (argc-1) at end.
+  // Non-fixnum or argc 0 falls through to the variadic C helper.
   |->op_add:
+  | mov rax, [CP]
+  | cmp rax, 2
+  | jne >3                     // not binary: try variadic or helper
+  | mov r8, [STACK - 16]
+  | mov rdi, [STACK - 8]
+  | mov rcx, r8
+  | and rcx, rdi
+  | test rcx, 1
+  | jz >2
+  | add CP, 8
+  | add r8, rdi
+  | sub r8, 1
+  | mov [STACK - 16], r8
+  | sub STACK, 8
+  | jmp ->dispatch
+  |3:
+  | test rax, rax
+  | jz >2
+  | mov rcx, rax
+  | shl rcx, 3
+  | mov rdx, STACK
+  | sub rdx, rcx               // args_start
+  | xor r8, r8
+  | mov r9, rax
+  |4:
+  | mov rdi, [rdx]
+  | test rdi, 1
+  | jz >2
+  | add r8, rdi
+  | add rdx, 8
+  | dec r9
+  | jnz <4
+  | lea rcx, [rax - 1]
+  | sub r8, rcx
+  | add CP, 8
+  | mov rcx, rax
+  | dec rcx
+  | shl rcx, 3
+  | sub STACK, rcx
+  | mov [STACK - 8], r8
+  | jmp ->dispatch
+  |2:
   | mov rdi, STATE
   | mov rsi, [CP]              // argc
   | add CP, 8
@@ -1334,6 +1381,52 @@ void init_native_vm(State& state) {
   | jmp ->dispatch
 
   |->op_sub:
+  | mov rax, [CP]
+  | cmp rax, 2
+  | jne >3
+  | mov r8, [STACK - 16]
+  | mov rdi, [STACK - 8]
+  | mov rcx, r8
+  | and rcx, rdi
+  | test rcx, 1
+  | jz >2
+  | add CP, 8
+  | sub r8, rdi
+  | add r8, 1
+  | mov [STACK - 16], r8
+  | sub STACK, 8
+  | jmp ->dispatch
+  |3:
+  | cmp rax, 2
+  | jl >2                      // argc 0 or 1: helper
+  | mov rcx, rax
+  | shl rcx, 3
+  | mov rdx, STACK
+  | sub rdx, rcx
+  | mov r8, [rdx]
+  | test r8, 1
+  | jz >2
+  | add rdx, 8
+  | mov r9, rax
+  | dec r9
+  |4:
+  | mov rdi, [rdx]
+  | test rdi, 1
+  | jz >2
+  | sub r8, rdi
+  | add rdx, 8
+  | dec r9
+  | jnz <4
+  | lea rcx, [rax - 1]
+  | add r8, rcx
+  | add CP, 8
+  | mov rcx, rax
+  | dec rcx
+  | shl rcx, 3
+  | sub STACK, rcx
+  | mov [STACK - 8], r8
+  | jmp ->dispatch
+  |2:
   | mov rdi, STATE
   | mov rsi, [CP]
   | add CP, 8
@@ -1374,6 +1467,68 @@ void init_native_vm(State& state) {
   | jmp ->dispatch
 
   |->op_lt:
+  | mov rax, [CP]
+  | cmp rax, 2
+  | jne >3
+  | mov r8, [STACK - 16]
+  | mov rdi, [STACK - 8]
+  | mov rcx, r8
+  | and rcx, rdi
+  | test rcx, 1
+  | jz >2
+  | add CP, 8
+  | cmp r8, rdi
+  | mov64 rax, (ptrdiff_t) C_FALSE
+  | mov64 rcx, (ptrdiff_t) C_TRUE
+  | cmovl rax, rcx
+  | mov [STACK - 16], rax
+  | sub STACK, 8
+  | jmp ->dispatch
+  |3:
+  | cmp rax, 2
+  | jl >2                      // argc 0 or 1: helper handles
+  | mov rcx, rax
+  | shl rcx, 3
+  | mov rdx, STACK
+  | sub rdx, rcx
+  | mov r8, [rdx]
+  | test r8, 1
+  | jz >2
+  | mov r9, rax
+  | dec r9
+  |4:
+  | mov rdi, [rdx + 8]
+  | test rdi, 1
+  | jz >2
+  | cmp r8, rdi
+  | jge >5
+  | mov r8, rdi
+  | add rdx, 8
+  | dec r9
+  | jnz <4
+  | add CP, 8
+  | mov rcx, rax
+  | dec rcx
+  | shl rcx, 3
+  | sub STACK, rcx
+  | mov64 rcx, (ptrdiff_t) C_TRUE
+  | mov [STACK - 8], rcx
+  | jmp ->dispatch
+  |5:
+  // Short-circuit #f — but to match apply_vm's semantics we must still have
+  // validated later args as fixnums. If there are unchecked args, fall back
+  // to the helper (which raises type errors properly).
+  | cmp r9, 1
+  | jg >2                      // more unchecked pairs -> helper
+  | add CP, 8
+  | mov rcx, rax
+  | dec rcx
+  | shl rcx, 3
+  | sub STACK, rcx
+  | mov64 rcx, (ptrdiff_t) C_FALSE
+  | mov [STACK - 8], rcx
+  | jmp ->dispatch
+  |2:
   | mov rdi, STATE
   | mov rsi, [CP]
   | add CP, 8
