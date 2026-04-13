@@ -100,6 +100,7 @@ static Value native_vm_bad_opcode(State* state) {
       "native VM dispatched an unimplemented opcode; coverage bug");
 }
 
+
 static Value native_vm_global_undefined(State* state, Value sym, size_t was_set) {
   std::ostringstream os;
   if(was_set) {
@@ -776,8 +777,8 @@ void init_native_vm(State& state) {
   |1:
   | mov r10, r9
   |2:
-  // TODO(native-vm): OP_APPLY_TAIL fast path disabled alongside OP_APPLY
-  // fast path while the nested-call return-value bug is unresolved.
+  // TODO(native-vm): OP_APPLY_TAIL fast path disabled for symmetry with
+  // OP_APPLY fast path; the slow path is semantically equivalent.
   | jmp >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz >9
@@ -952,12 +953,17 @@ void init_native_vm(State& state) {
   |1:
   | mov r10, r9
   |2:
-  // TODO(native-vm): OP_APPLY fast path has a latent bug when deeply nested
-  // native-to-native calls run the compiler (compile-expr → special-form et al.)
-  // — special-form returns the wrong value at the frame-link return boundary,
-  // manifesting as "unknown special form" during stage-4 pull-up. Forcing the
-  // slow path (procedure_addr call into apply_native_vm) is correct but loses
-  // the in-place frame reuse win. Keep until the root cause is found.
+  // TODO(native-vm): OP_APPLY fast path has an unresolved bug in deeply
+  // nested call chains. Specifically, when compile-expr → compile-apply →
+  // compile-expr → special-form all fast-path-nest and special-form's body
+  // calls other functions (memq, print) via slow path, LOCAL slots of
+  // special-form end up corrupted at OP_RETURN — both LOCAL[0] (the arg
+  // `x`) and LOCAL[1] (a let binding `mq`) contain CFunction values from
+  // prior slow-path calls (rename-expr, memq) instead of the correct
+  // values (print symbol, #f). Scheme-level prints confirm the body
+  // produces #f correctly; the corruption happens between the final
+  // value push and OP_RETURN dispatching. Forcing the slow path (through
+  // apply_native_vm recursion) is semantically equivalent and correct.
   | jmp >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz >9
@@ -1132,9 +1138,9 @@ void init_native_vm(State& state) {
   | mov LOCALS, rax
   | mov STACK, rdx
   | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 8]
+  | mov rdx, [rsp + 24]                // sff_offset (was [rsp+8] before the 2 pushes)
   | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 32], rdx
+  | mov [rsp + 32], rdx                // closure_ref (was [rsp+16] before the 2 pushes)
   // Reload DTABLE + VFN
   | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
   | mov VFN, [rsp + 16]                // vfn_ref (was [rsp] before pushes)
@@ -1569,7 +1575,6 @@ void init_native_vm(State& state) {
   | mov [rsp + 24], rdx
   | lea CP, [rdx + rcx*8]
   | lea LOCALS, [rsi + 40]
-  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
   | mov rdx, [rdi + 32]
   | shr rdx, 1                         // saved_ret_slot
   | mov r8, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
@@ -1871,23 +1876,30 @@ tail:
   // Variable-arity prologue: ARGV_REST / ARGV_KEYS are prologue-only opcodes,
   // so compute their result eagerly here and keep the dispatch handlers as
   // no-ops. Keyword-accepting lambdas always begin argc-gte; argv-keys.
+  //
+  // max_arity is cached up front because helpers here (build_argv_keys,
+  // temps_to_list) allocate and can GC — the raw vfn pointer becomes stale
+  // across the allocation, so we must not re-read vfn->max_arity after.
   if(vfn->get_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT)) {
+    size_t max_arity = vfn->max_arity;
     if(native_vm_uses_argv_keys(vfn)) {
-      Value keys = native_vm_build_argv_keys(&state, argc, argv, vfn->max_arity);
+      Value keys = native_vm_build_argv_keys(&state, argc, argv, max_arity);
       if(keys.is_active_exception()) {
         state.gc.shrink_stack(frame_words);
         state.vm_depth--;
         return keys;
       }
-      locals[vfn->max_arity] = keys;
-    } else if(argc <= vfn->max_arity) {
-      locals[vfn->max_arity] = C_NIL;
+      locals[max_arity] = keys;
+    } else if(argc <= max_arity) {
+      locals[max_arity] = C_NIL;
     } else if(!state.temps.empty() && argv == state.temps.data()) {
-      locals[vfn->max_arity] = state.temps_to_list(vfn->max_arity);
+      Value rest = state.temps_to_list(max_arity);
+      locals[max_arity] = rest;
     } else {
       state.temps.clear();
-      state.temps.insert(state.temps.end(), &argv[vfn->max_arity], &argv[argc]);
-      locals[vfn->max_arity] = state.temps_to_list();
+      state.temps.insert(state.temps.end(), &argv[max_arity], &argv[argc]);
+      Value rest = state.temps_to_list();
+      locals[max_arity] = rest;
     }
     vfn = fn.as_unsafe<VMFunction>();
   }
