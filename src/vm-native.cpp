@@ -10,6 +10,8 @@
 
 #include "arete.hpp"
 
+#include <unordered_set>
+
 namespace arete {
 
 DefunGroup native_vm_fns("native-vm");
@@ -18,6 +20,11 @@ DefunGroup native_vm_fns("native-vm");
 // without a native dispatch core (non-x86-64, Windows, Emscripten for now),
 // this stays false forever and eligibility always returns false.
 static bool native_vm_ready = false;
+
+size_t native_vm_stat_apply_vm_path = 0;
+size_t native_vm_stat_apply_c_path = 0;
+size_t native_vm_stat_apply_tail_vm_path = 0;
+size_t native_vm_stat_apply_tail_c_path = 0;
 
 // Opcodes the native VM can currently execute. Every opcode in a VMFunction's
 // body must be present here for the function to be eligible.
@@ -70,15 +77,85 @@ static bool native_vm_opcode_supported(size_t op) {
     case OP_UPVALUE_FROM_CLOSURE:
     // S10:
     case OP_ARGV_REST:
+    case OP_ARG_KEY:
+    case OP_ARGV_KEYS:
       return true;
     default:
       return false;
   }
 }
 
+static bool native_vm_install_one(Value fn) {
+  Value unboxed = fn.closure_unbox();
+  if(unboxed.type() != VMFUNCTION) {
+    return false;
+  }
+
+  VMFunction* vfn = unboxed.as_unsafe<VMFunction>();
+  if(vfn->get_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT)) {
+    if(fn.heap_type_equals(CLOSURE)) {
+      fn.as_unsafe<Closure>()->procedure_addr = (c_closure_t) &apply_native_vm;
+    }
+    return true;
+  }
+
+  if(!native_vm_function_eligible(vfn)) {
+    return false;
+  }
+
+  vfn->set_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT);
+  vfn->procedure_addr = (c_closure_t) &apply_native_vm;
+  if(fn.heap_type_equals(CLOSURE)) {
+    fn.as_unsafe<Closure>()->procedure_addr = (c_closure_t) &apply_native_vm;
+  }
+  return true;
+}
+
+static void native_vm_install_tree_visit(Value fn,
+                                         std::unordered_set<VMFunction*>& seen) {
+  Value unboxed = fn.closure_unbox();
+  if(unboxed.type() != VMFUNCTION) return;
+
+  VMFunction* vfn = unboxed.as_unsafe<VMFunction>();
+  if(!seen.insert(vfn).second) return;
+
+  native_vm_install_one(fn);
+
+  VectorStorage* constants = vfn->constants;
+  for(size_t i = 0; i != constants->length; i++) {
+    Value constant = constants->data[i];
+    if(constant.type() == VMFUNCTION || constant.type() == CLOSURE) {
+      native_vm_install_tree_visit(constant, seen);
+    }
+  }
+}
+
+static Value native_vm_stats_alist(State& state) {
+  Value result = C_NIL;
+  Value key = C_FALSE;
+  Value val = C_FALSE;
+  Value pair = C_FALSE;
+  AR_FRAME(state, result, key, val, pair);
+
+  auto push = [&](const char* name, size_t n) {
+    key = state.get_symbol(name);
+    val = Value::make_fixnum((ptrdiff_t) n);
+    pair = state.make_pair(key, val);
+    result = state.make_pair(pair, result);
+  };
+
+  push("apply-tail-c", native_vm_stat_apply_tail_c_path);
+  push("apply-tail-vm", native_vm_stat_apply_tail_vm_path);
+  push("apply-c", native_vm_stat_apply_c_path);
+  push("apply-vm", native_vm_stat_apply_vm_path);
+  return result;
+}
+
 bool native_vm_function_eligible(VMFunction* vfn) {
   if(!native_vm_ready) return false;
   if(vfn->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) return false;
+  if(vfn->get_header_bit(Value::VMFUNCTION_MACRO_BIT)) return false;
+  if(vfn->get_header_bit(Value::VMFUNCTION_IDENTIFIER_MACRO_BIT)) return false;
 
   size_t* code = vfn->code_pointer();
   size_t len = vfn->code->length;
@@ -167,23 +244,25 @@ static Value fn_native_vm_install(State& state, size_t argc, Value* argv, void*)
     return C_TRUE;
   }
 
-  if(!native_vm_function_eligible(vfn)) {
-    return C_FALSE;
-  }
-
-  vfn->set_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT);
-  vfn->procedure_addr = (c_closure_t) &apply_native_vm;
-
-  // If the caller handed us a Closure pointing at this function, patch the
-  // closure's procedure_addr too so direct calls short-circuit to the native
-  // dispatch just like they do for apply_vm.
-  if(fn.heap_type_equals(CLOSURE)) {
-    fn.as_unsafe<Closure>()->procedure_addr = (c_closure_t) &apply_native_vm;
-  }
-
-  return C_TRUE;
+  return Value::make_boolean(native_vm_install_one(fn));
 }
 AR_DEFUN("native-vm-install!", fn_native_vm_install, 1);
+
+static Value fn_native_vm_install_tree(State& state, size_t argc, Value* argv, void*) {
+  static const char* fn_name = "native-vm-install-tree!";
+  AR_FN_ARGC_EQ(state, argc, 1);
+
+  Value fn = argv[0];
+  Value unboxed = fn.closure_unbox();
+  if(unboxed.type() != VMFUNCTION) {
+    return state.type_error("native-vm-install-tree!: expected a vm function");
+  }
+
+  std::unordered_set<VMFunction*> seen;
+  native_vm_install_tree_visit(fn, seen);
+  return C_TRUE;
+}
+AR_DEFUN("native-vm-install-tree!", fn_native_vm_install_tree, 1);
 
 static Value fn_native_vm_function_p(State& state, size_t argc, Value* argv, void*) {
   static const char* fn_name = "native-vm-function?";
@@ -203,6 +282,24 @@ static Value fn_native_vm_eligible_p(State& state, size_t argc, Value* argv, voi
   return Value::make_boolean(native_vm_function_eligible(fn.as_unsafe<VMFunction>()));
 }
 AR_DEFUN("native-vm-eligible?", fn_native_vm_eligible_p, 1);
+
+static Value fn_native_vm_stats(State& state, size_t argc, Value* argv, void*) {
+  static const char* fn_name = "native-vm-stats";
+  AR_FN_ARGC_EQ(state, argc, 0);
+  return native_vm_stats_alist(state);
+}
+AR_DEFUN("native-vm-stats", fn_native_vm_stats, 0);
+
+static Value fn_native_vm_reset_stats(State& state, size_t argc, Value* argv, void*) {
+  static const char* fn_name = "native-vm-reset-stats!";
+  AR_FN_ARGC_EQ(state, argc, 0);
+  native_vm_stat_apply_vm_path = 0;
+  native_vm_stat_apply_c_path = 0;
+  native_vm_stat_apply_tail_vm_path = 0;
+  native_vm_stat_apply_tail_c_path = 0;
+  return C_UNSPECIFIED;
+}
+AR_DEFUN("native-vm-reset-stats!", fn_native_vm_reset_stats, 0);
 
 void native_vm_mark_ready() {
   native_vm_ready = true;
