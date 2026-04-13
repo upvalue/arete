@@ -101,6 +101,7 @@ static Value native_vm_bad_opcode(State* state) {
 }
 
 
+
 static Value native_vm_global_undefined(State* state, Value sym, size_t was_set) {
   std::ostringstream os;
   if(was_set) {
@@ -429,8 +430,15 @@ static Value native_vm_close_over(State* state, Value* stack_top, size_t count) 
   return closure;
 }
 
+// When allow_tail is nonzero, a native-VM VMFunction/Closure target is
+// handled by raising the tail flag so apply_native_vm restarts with the new
+// fn. When zero (the caller is inside a nested fast-path frame), the tail
+// flag path is unsafe — setting it would unwind apply_native_vm's top-level
+// frame instead of just the current frame — so we treat the call like a
+// non-tail apply: invoke procedure_addr directly and let the dispatch core
+// write the result and fall through to op_return.
 static TailResult native_vm_op_apply_tail(
-    State* state, Value fn, Value* args, size_t argc) {
+    State* state, Value fn, Value* args, size_t argc, size_t allow_tail) {
   TailResult r;
   Value afn = fn;
   AR_FRAME(*state, afn);
@@ -449,7 +457,8 @@ static TailResult native_vm_op_apply_tail(
   }
 
   Value unboxed = afn.closure_unbox();
-  if(unboxed.heap_type_equals(VMFUNCTION) &&
+  if(allow_tail &&
+     unboxed.heap_type_equals(VMFUNCTION) &&
      unboxed.heap->get_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT)) {
     state->temps.clear();
     state->temps.insert(state->temps.end(), args, args + argc);
@@ -550,10 +559,6 @@ void init_native_vm(State& state) {
   // fall through into dispatch
 
   |->dispatch:
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 8]
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 16], rdx
   | mov rax, [CP]
   | add CP, 8
   | jmp qword [DTABLE + rax*8]
@@ -777,9 +782,6 @@ void init_native_vm(State& state) {
   |1:
   | mov r10, r9
   |2:
-  // TODO(native-vm): OP_APPLY_TAIL fast path disabled for symmetry with
-  // OP_APPLY fast path; the slow path is semantically equivalent.
-  | jmp >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz >9
   // Fast reuse only for exact-arity, non-variadic, no-upvalue callees whose
@@ -873,9 +875,19 @@ void init_native_vm(State& state) {
   // Helper fallback for complex tail calls and all CFUNCTION targets.
   | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_c_path
   | inc qword [rcx]
+  // Compute allow_tail = (saved_vfn of current frame == C_EOF).
+  // saved_vfn lives at gc.vm_stack[sff_offset] = &frame[0]. Tail-flag is only
+  // safe at the top-level frame of this apply_native_vm call — in nested
+  // fast-path frames the flag would cause apply_native_vm to unwind the
+  // wrong level.
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov r10, [rsp + 8]                 // sff_offset
+  | mov r10, [rcx + r10*8]             // saved_vfn
+  | xor r11, r11
+  | cmp r10, C_EOF
+  | sete r11b                          // allow_tail = 1 iff saved_vfn == C_EOF
   // Save the current absolute stack-top word index so we can rebuild STACK
   // after a helper call that may realloc gc.vm_stack.
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
   | mov rdx, STACK
   | sub rdx, rcx
   | shr rdx, 3
@@ -885,6 +897,7 @@ void init_native_vm(State& state) {
   | mov rsi, r9                        // fn value
   | mov rdx, r8                        // args_start
   | mov rcx, rax                       // fargc
+  | mov r8, r11                        // allow_tail
   | mov64 rax, (ptrdiff_t) &native_vm_op_apply_tail
   | call rax
   // rax = is_tail, rdx = result
@@ -953,18 +966,6 @@ void init_native_vm(State& state) {
   |1:
   | mov r10, r9
   |2:
-  // TODO(native-vm): OP_APPLY fast path has an unresolved bug in deeply
-  // nested call chains. Specifically, when compile-expr → compile-apply →
-  // compile-expr → special-form all fast-path-nest and special-form's body
-  // calls other functions (memq, print) via slow path, LOCAL slots of
-  // special-form end up corrupted at OP_RETURN — both LOCAL[0] (the arg
-  // `x`) and LOCAL[1] (a let binding `mq`) contain CFunction values from
-  // prior slow-path calls (rename-expr, memq) instead of the correct
-  // values (print symbol, #f). Scheme-level prints confirm the body
-  // produces #f correctly; the corruption happens between the final
-  // value push and OP_RETURN dispatching. Forcing the slow path (through
-  // apply_native_vm recursion) is semantically equivalent and correct.
-  | jmp >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz >9
   // C1 fast path only: exact-arity, non-variadic, no-upvalue VM callees.
