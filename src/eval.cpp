@@ -810,6 +810,7 @@ Value State::eval_list(Value lst, bool expand, Value env) {
   EvalFrame frame;
   frame.env = env;
   lst_top = lst;
+  tmp = C_UNSPECIFIED;
   expander = get_global_value(G_EXPANDER);
   compiler = get_global_value(G_COMPILER);
 

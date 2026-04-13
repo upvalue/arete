@@ -10,6 +10,6 @@
    (vmfunction->native! fib))
   (else #t))
 
-(display (fib 36)) (newline)
+(display (fib 44)) (newline)
 
 (display fib)

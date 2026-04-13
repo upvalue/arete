@@ -751,6 +751,10 @@ struct Value {
   static const unsigned VMFUNCTION_IDENTIFIER_MACRO_BIT = 1 << 13;
   // True if this has been compiled to native code
   static const unsigned VMFUNCTION_NATIVE_BIT = 1 << 14;
+  // True if this VMFunction dispatches through the hand-written native VM
+  // (see docs/Native VM.md and src/vm-native-x64.cpp.dasc). Mutually exclusive
+  // with VMFUNCTION_NATIVE_BIT.
+  static const unsigned VMFUNCTION_NATIVE_VM_BIT = 1 << 15;
 
   unsigned vm_function_min_arity() const;
   unsigned vm_function_max_arity() const;
@@ -2264,6 +2268,16 @@ struct State {
 // a pointer to a State member function does not work well on Windows or Emscripten.
 Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp);
 Value apply_vm(State& state, size_t argc, Value* argv, void* fnp);
+Value apply_native_vm(State& state, size_t argc, Value* argv, void* fnp);
+
+/** Walk the bytecode of a VMFunction and return true iff every opcode is
+ * currently supported by the native VM. Used by native-vm-install! to reject
+ * functions the native VM can't execute yet. */
+bool native_vm_function_eligible(VMFunction* vfn);
+
+/** Initialize the native VM's shared DynASM dispatch core. Called once from
+ * State::boot_common. On non-x86-64 builds this is a no-op. */
+void init_native_vm(State& state);
 
 ///// READ! S-Expression reader
 

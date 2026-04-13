@@ -15,7 +15,7 @@ ECXXFLAGS := -s ASSERTIONS=1 -O3 $(ECPPFLAGS) -std=c++14 -fno-rtti -fno-exceptio
 ELDFLAGS := -O3 -s ASSERTIONS=1 -s EXTRA_EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]'
 
 # Retrieve compilation targets
-CXXOBJS := $(filter-out src/compile-x64.o,$(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp )))) src/compile-x64.o
+CXXOBJS := $(filter-out src/compile-x64.o,$(filter-out src/vm-native-x64.o,$(filter-out src/main.o,$(patsubst %.cpp,%.o,$(wildcard src/*.cpp ))))) src/compile-x64.o src/vm-native-x64.o
 ECXXOBJS := $(patsubst %.o,%.em.o,$(CXXOBJS))
 CXXOBJS := $(CXXOBJS) $(patsubst %.cpp,%.o,$(wildcard vendor/linenoise/*.cpp))
 CXXOBJS32 := $(patsubst %.o,%.32.o,$(CXXOBJS))
@@ -94,8 +94,11 @@ all: bin/arete
 vendor/dynasm/minilua: vendor/dynasm/minilua.c
 	$(CC) -O2 -o $@ $< $(MATH)
 
-src/compile-x64.cpp: src/compile-x64.cpp.dasc vendor/dynasm/minilua 
-	vendor/dynasm/minilua vendor/dynasm/dynasm.lua $(DASMFLAGS) -D X64 -o $@ $< 
+src/compile-x64.cpp: src/compile-x64.cpp.dasc vendor/dynasm/minilua
+	vendor/dynasm/minilua vendor/dynasm/dynasm.lua $(DASMFLAGS) -D X64 -o $@ $<
+
+src/vm-native-x64.cpp: src/vm-native-x64.cpp.dasc vendor/dynasm/minilua
+	vendor/dynasm/minilua vendor/dynasm/dynasm.lua $(DASMFLAGS) -D X64 -o $@ $<
 
 # Compile to assembly for examination
 src/compile-x64.S: src/compile-x64.cpp
