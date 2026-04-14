@@ -68,6 +68,48 @@ static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 // eligibility bug manifests as a readable exception, not wild control flow.
 static void* dispatch_table[OP_FX_SUB + 1];
 
+#define NATIVE_VM_PAIR_CAR_OFF ((ptrdiff_t) offsetof(Pair, data_car))
+#define NATIVE_VM_PAIR_CDR_OFF ((ptrdiff_t) offsetof(Pair, data_cdr))
+
+#define NATIVE_VM_DISPATCH_OPS(_) \
+  _(OP_ARGC_EQ, op_argc_eq) \
+  _(OP_PUSH_IMMEDIATE, op_push_immediate) \
+  _(OP_RETURN, op_return) \
+  _(OP_ARGC_GTE, op_argc_gte) \
+  _(OP_LOCAL_GET, op_local_get) \
+  _(OP_LOCAL_SET, op_local_set) \
+  _(OP_POP, op_pop) \
+  _(OP_PUSH_CONSTANT, op_push_constant) \
+  _(OP_JUMP, op_jump) \
+  _(OP_JUMP_WHEN, op_jump_when) \
+  _(OP_JUMP_WHEN_POP, op_jump_when_pop) \
+  _(OP_JUMP_UNLESS, op_jump_unless) \
+  _(OP_ARG_OPTIONAL, op_arg_optional) \
+  _(OP_GLOBAL_GET, op_global_get) \
+  _(OP_GLOBAL_SET, op_global_set) \
+  _(OP_FX_ADD, op_fx_add) \
+  _(OP_FX_SUB, op_fx_sub) \
+  _(OP_FX_LT, op_fx_lt) \
+  _(OP_EQ, op_eq) \
+  _(OP_NOT, op_not) \
+  _(OP_FIXNUMP, op_fixnump) \
+  _(OP_CAR, op_car) \
+  _(OP_CDR, op_cdr) \
+  _(OP_TYPE_CHECK, op_type_check) \
+  _(OP_ADD, op_add) \
+  _(OP_SUB, op_sub) \
+  _(OP_LT, op_lt) \
+  _(OP_APPLY, op_apply) \
+  _(OP_APPLY_TAIL, op_apply_tail) \
+  _(OP_UPVALUE_FROM_LOCAL, op_upvalue_from_local) \
+  _(OP_UPVALUE_FROM_CLOSURE, op_upvalue_from_closure) \
+  _(OP_UPVALUE_GET, op_upvalue_get) \
+  _(OP_UPVALUE_SET, op_upvalue_set) \
+  _(OP_CLOSE_OVER, op_close_over) \
+  _(OP_ARGV_REST, op_argv_rest) \
+  _(OP_ARG_KEY, op_arg_key) \
+  _(OP_ARGV_KEYS, op_argv_keys)
+
 // Called from assembly when OP_ARGC_EQ fails.
 static Value native_vm_argc_error(State* state, size_t got, size_t expected) {
   std::ostringstream os;
@@ -307,14 +349,6 @@ static void native_vm_close_frame_upvalues(
   }
 }
 
-// Absolute word index of a pointer within state->gc.vm_stack. The dispatch
-// entry stashes this at startup so OP_APPLY can recompute absolute stack
-// positions after a callee that realloc'd gc.vm_stack.
-static size_t native_vm_stack_index(State* state, Value* p) {
-  return (size_t)(p - state->gc.vm_stack);
-}
-
-
 static Value native_vm_flatten_apply_arguments(
     State* state, size_t argc, Value* argv, Value* out_fn) {
   Value fn = argv[0];
@@ -505,6 +539,114 @@ void init_native_vm(State& state) {
   |.define ARGC,   r10
   |.define DTABLE, r11
 
+  |.define sVfnRef,     [rsp]
+  |.define sSffOffset,  [rsp+8]
+  |.define sClosureRef, [rsp+16]
+  |.define sCodeBase,   [rsp+24]
+  |.define sScratch0,   [rsp+32]
+  |.define sScratch1,   [rsp+40]
+  |.define sScratch2,   [rsp+48]
+  |.define sSffRef,     [rsp+56]
+
+  |.macro returnEpilogue
+  | add rsp, 72
+  | pop r15
+  | pop r14
+  | pop r13
+  | pop r12
+  | pop rbp
+  | pop rbx
+  | ret
+  |.endmacro
+
+  |.macro reloadDtable
+  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  |.endmacro
+
+  |.macro reloadVfn
+  | mov VFN, sVfnRef
+  | mov VFN, [VFN]
+  |.endmacro
+
+  |.macro refreshClosureRef
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rdx, sSffOffset
+  | lea rdx, [rcx + rdx*8 + 16]
+  | mov sClosureRef, rdx
+  |.endmacro
+
+  |.macro rebaseCpFromVfn
+  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
+  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
+  | mov r9, sCodeBase
+  | mov sCodeBase, r8
+  | sub CP, r9
+  | add CP, r8
+  |.endmacro
+
+  |.macro restoreAfterStateCall
+  | refreshClosureRef
+  | reloadDtable
+  |.endmacro
+
+  |.macro restoreAfterHelperCall
+  | restoreAfterStateCall
+  | reloadVfn
+  |.endmacro
+
+  |.macro restoreAfterGcHelperCall
+  | restoreAfterHelperCall
+  | rebaseCpFromVfn
+  |.endmacro
+
+  |.macro fetchOperand, dst
+  | mov dst, [CP]
+  | add CP, 8
+  |.endmacro
+
+  |.macro pushReg, src
+  | mov [STACK], src
+  | add STACK, 8
+  |.endmacro
+
+  |.macro popReg, dst
+  | sub STACK, 8
+  | mov dst, [STACK]
+  |.endmacro
+
+  |.macro jumpToOperandTarget, reg
+  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
+  | lea CP, [rcx + reg*8 + (ptrdiff_t) offsetof(Bytevector, data)]
+  | jmp ->dispatch
+  |.endmacro
+
+  |.macro jumpIfActiveException, value, scratch
+  | test value, value
+  | jz >1
+  | test value, 3
+  | jnz >1
+  | mov scratch, [value]
+  | and scratch, 2047
+  | cmp scratch, (EXCEPTION + Value::EXCEPTION_ACTIVE_BIT)
+  | je ->exception_return
+  |1:
+  |.endmacro
+
+  |.macro pairAccessTop, field_off, err
+  | mov rax, [STACK - 8]
+  | test rax, rax
+  | je err
+  | test rax, 3
+  | jnz err
+  | mov rdx, [rax]
+  | movzx rdx, dl
+  | cmp rdx, PAIR
+  | jne err
+  | mov rdx, [rax + field_off]
+  | mov [STACK - 8], rdx
+  | jmp ->dispatch
+  |.endmacro
+
   |.code
 
   // --- entry -----------------------------------------------------------------
@@ -534,7 +676,7 @@ void init_native_vm(State& state) {
   // C `call`s as SysV AMD64 requires.
   | sub rsp, 72
   | mov STATE,  rdi
-  | mov [rsp], rsi           // vfn_ref (&f.fn)
+  | mov sVfnRef, rsi         // vfn_ref (&f.fn)
   | mov VFN,    [rsi]        // VFN = *vfn_ref = VMFunction* (latest)
   | mov LOCALS, rdx
   | mov STACK,  rcx
@@ -545,17 +687,17 @@ void init_native_vm(State& state) {
   // in src/vm.cpp.
   | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea rax, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
-  | mov [rsp + 24], rax
+  | mov sCodeBase, rax
   // 7th stack arg = sff_ref, 8th = closure_ref. Offsets from our rsp:
   // 6 pushes (48) + 72-byte reserve + return address (8) = 128 for the 7th,
   // 136 for the 8th.
   | mov rax, [rsp + 128]
-  | mov [rsp + 56], rax
+  | mov sSffRef, rax
   | mov rax, [rax]
-  | mov [rsp + 8], rax
+  | mov sSffOffset, rax
   | mov rax, [rsp + 136]
-  | mov [rsp + 16], rax
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | mov sClosureRef, rax
+  | reloadDtable
   // fall through into dispatch
 
   |->dispatch:
@@ -565,24 +707,20 @@ void init_native_vm(State& state) {
 
   // --- OP_ARGC_EQ ------------------------------------------------------------
   |->op_argc_eq:
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | cmp ARGC, rax
   | jne ->argc_error
   | jmp ->dispatch
 
   // --- OP_PUSH_IMMEDIATE -----------------------------------------------------
   |->op_push_immediate:
-  | mov rax, [CP]
-  | add CP, 8
-  | mov [STACK], rax
-  | add STACK, 8
+  | fetchOperand rax
+  | pushReg rax
   | jmp ->dispatch
 
   // --- OP_ARGC_GTE (S3) ------------------------------------------------------
   |->op_argc_gte:
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | cmp ARGC, rax
   | jb ->argc_gte_error
   | jmp ->dispatch
@@ -590,20 +728,16 @@ void init_native_vm(State& state) {
   // --- OP_LOCAL_GET (S3) -----------------------------------------------------
   // LOCAL_GET idx: push locals[idx]
   |->op_local_get:
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | mov rdx, [LOCALS + rax*8]
-  | mov [STACK], rdx
-  | add STACK, 8
+  | pushReg rdx
   | jmp ->dispatch
 
   // --- OP_LOCAL_SET (S3) -----------------------------------------------------
   // LOCAL_SET idx: locals[idx] = pop
   |->op_local_set:
-  | mov rax, [CP]
-  | add CP, 8
-  | sub STACK, 8
-  | mov rdx, [STACK]
+  | fetchOperand rax
+  | popReg rdx
   | mov [LOCALS + rax*8], rdx
   | jmp ->dispatch
 
@@ -623,7 +757,7 @@ void init_native_vm(State& state) {
   | add CP, 8
   | mov r9, [CP]                       // label
   | add CP, 8
-  | mov [rsp + 40], r9
+  | mov sScratch1, r9
   | mov rdx, [VFN + (ptrdiff_t) offsetof(VMFunction, constants)]
   | mov rcx, [rdx + rax*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
   | mov edi, dword [VFN + (ptrdiff_t) offsetof(VMFunction, max_arity)]
@@ -632,14 +766,10 @@ void init_native_vm(State& state) {
   | mov rdx, LOCALS
   | mov64 rax, (ptrdiff_t) &native_vm_arg_key
   | call rax
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 8]
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 16], rdx
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | restoreAfterStateCall
   | test rax, rax
   | jz ->dispatch
-  | mov rax, [rsp + 40]
+  | mov rax, sScratch1
   | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea CP, [rcx + rax*8 + (ptrdiff_t) offsetof(Bytevector, data)]
   | jmp ->dispatch
@@ -660,12 +790,10 @@ void init_native_vm(State& state) {
   // Push the Upvalue sitting in this frame's upvalue area just past locals.
   |->op_upvalue_from_local:
   | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | add rdx, rax
   | mov rcx, [LOCALS + rdx*8]
-  | mov [STACK], rcx
-  | add STACK, 8
+  | pushReg rcx
   | jmp ->dispatch
 
   // --- OP_UPVALUE_FROM_CLOSURE (S9) ------------------------------------------
@@ -674,11 +802,9 @@ void init_native_vm(State& state) {
   | mov rdx, [rsp + 16]          // closure_ref
   | mov rdx, [rdx]               // Closure* (as heap pointer)
   | mov rdx, [rdx + (ptrdiff_t) offsetof(Closure, upvalues)]
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | mov rcx, [rdx + rax*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
-  | mov [STACK], rcx
-  | add STACK, 8
+  | pushReg rcx
   | jmp ->dispatch
 
   // --- OP_UPVALUE_GET (S9) ---------------------------------------------------
@@ -686,15 +812,13 @@ void init_native_vm(State& state) {
   // we don't re-implement Upvalue's open/closed/pointer branching in asm.
   |->op_upvalue_get:
   | mov rdi, STATE
-  | mov rdx, [rsp + 16]
+  | mov rdx, sClosureRef
   | mov rsi, [rdx]               // closure value
   | mov rdx, [CP]
   | add CP, 8
   | mov64 rax, (ptrdiff_t) &native_vm_upvalue_get
   | call rax
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
-  | mov VFN, [rsp]
-  | mov VFN, [VFN]
+  | restoreAfterHelperCall
   | mov [STACK], rax
   | add STACK, 8
   | jmp ->dispatch
@@ -703,7 +827,7 @@ void init_native_vm(State& state) {
   // idx: closure upvalue[idx] = pop.
   |->op_upvalue_set:
   | mov rdi, STATE
-  | mov rdx, [rsp + 16]
+  | mov rdx, sClosureRef
   | mov rsi, [rdx]               // closure value
   | mov rdx, [CP]
   | add CP, 8
@@ -711,9 +835,7 @@ void init_native_vm(State& state) {
   | mov rcx, [STACK]             // val
   | mov64 rax, (ptrdiff_t) &native_vm_upvalue_set
   | call rax
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
-  | mov VFN, [rsp]
-  | mov VFN, [VFN]
+  | restoreAfterHelperCall
   | jmp ->dispatch
 
   // --- OP_CLOSE_OVER (S9) ----------------------------------------------------
@@ -727,21 +849,9 @@ void init_native_vm(State& state) {
   | add CP, 8
   | mov64 rax, (ptrdiff_t) &native_vm_close_over
   | call rax
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 8]
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 16], rdx
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
-  | mov VFN, [rsp]
-  | mov VFN, [VFN]
+  | restoreAfterGcHelperCall
   // CP reload — close_over allocates so the bytecode Bytevector may have
   // moved. Uses r8/r9 as scratches; preserves rax (return value).
-  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | mov r9, [rsp + 24]
-  | mov [rsp + 24], r8
-  | sub CP, r9
-  | add CP, r8
   // Pop count + 1 (for fn) and push result at the now-top slot.
   | mov rcx, [CP - 8]            // count
   | inc rcx                      // count + 1
@@ -869,7 +979,7 @@ void init_native_vm(State& state) {
   | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | reloadDtable
   | jmp ->dispatch
   |9:
   // Helper fallback for complex tail calls and all CFUNCTION targets.
@@ -921,17 +1031,10 @@ void init_native_vm(State& state) {
   | mov STACK, rdx
   | mov VFN, [rsp + 16]                // vfn_ref (was [rsp] before pushes)
   | mov VFN, [VFN]
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | reloadDtable
   | pop rax                            // align slot
   | pop rax                            // result
-  | test rax, rax
-  | jz ->apply_tail_helper_result_ready
-  | test rax, 3
-  | jnz ->apply_tail_helper_result_ready
-  | mov rcx, [rax]
-  | and rcx, 2047
-  | cmp rcx, (EXCEPTION + Value::EXCEPTION_ACTIVE_BIT)
-  | je ->exception_return
+  | jumpIfActiveException rax, rcx
   |->apply_tail_helper_result_ready:
   | mov [STACK - 8], rax
   | jmp ->op_return
@@ -1001,7 +1104,7 @@ void init_native_vm(State& state) {
   | mov rsi, rcx
   | mov64 rax, (ptrdiff_t) &native_vm_grow_stack
   | call rax
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | reloadDtable
   | jmp >4
   |3:
   | mov [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))], rdx
@@ -1101,7 +1204,7 @@ void init_native_vm(State& state) {
   | mov [rcx], r11
   | lea rax, [rsi + 16]
   | mov [rsp + 16], rax
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | reloadDtable
   | jmp ->dispatch
   |9:
   // Compute absolute stack-top word index relative to gc.vm_stack, save it.
@@ -1143,7 +1246,7 @@ void init_native_vm(State& state) {
   | lea rdx, [rcx + rdx*8 + 16]
   | mov [rsp + 32], rdx                // closure_ref (was [rsp+16] before the 2 pushes)
   // Reload DTABLE + VFN
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | reloadDtable
   | mov VFN, [rsp + 16]                // vfn_ref (was [rsp] before pushes)
   | mov VFN, [VFN]
   // Recover result
@@ -1244,32 +1347,10 @@ void init_native_vm(State& state) {
   // Type-check: heap pointer, not immediate, heap->get_type() == PAIR.
   // On mismatch dive into native_vm_pair_error with the offending value.
   |->op_car:
-  | mov rax, [STACK - 8]
-  | test rax, rax
-  | je ->car_error
-  | test rax, 3
-  | jnz ->car_error
-  | mov rdx, [rax]
-  | movzx rdx, dl
-  | cmp rdx, PAIR
-  | jne ->car_error
-  | mov rdx, [rax + (ptrdiff_t) offsetof(Pair, data_car)]
-  | mov [STACK - 8], rdx
-  | jmp ->dispatch
+  | pairAccessTop NATIVE_VM_PAIR_CAR_OFF, ->car_error
 
   |->op_cdr:
-  | mov rax, [STACK - 8]
-  | test rax, rax
-  | je ->cdr_error
-  | test rax, 3
-  | jnz ->cdr_error
-  | mov rdx, [rax]
-  | movzx rdx, dl
-  | cmp rdx, PAIR
-  | jne ->cdr_error
-  | mov rdx, [rax + (ptrdiff_t) offsetof(Pair, data_cdr)]
-  | mov [STACK - 8], rdx
-  | jmp ->dispatch
+  | pairAccessTop NATIVE_VM_PAIR_CDR_OFF, ->cdr_error
 
   // --- OP_TYPE_CHECK (S6) ----------------------------------------------------
   // TYPE_CHECK tipe: pop v, push Value(v.type() == tipe).
@@ -1279,13 +1360,7 @@ void init_native_vm(State& state) {
   | add CP, 8
   | mov64 rax, (ptrdiff_t) &native_vm_op_type_check
   | call rax
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 8]
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 16], rdx
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
-  | mov VFN, [rsp]
-  | mov VFN, [VFN]
+  | restoreAfterHelperCall
   | mov [STACK - 8], rax
   | jmp ->dispatch
 
@@ -1350,29 +1425,10 @@ void init_native_vm(State& state) {
   | sub rdx, rcx               // rdx = stack top - argc*8
   | mov64 rax, (ptrdiff_t) &native_vm_op_add
   | call rax
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 8]
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 16], rdx
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
-  | mov VFN, [rsp]
-  | mov VFN, [VFN]
+  | restoreAfterGcHelperCall
   // CP reload — helper may have allocated a flonum.
-  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | mov r9, [rsp + 24]
-  | mov [rsp + 24], r8
-  | sub CP, r9
-  | add CP, r8
   | mov rcx, [CP - 8]          // argc (re-read operand)
-  | test rax, rax
-  | jz >1
-  | test rax, 3
-  | jnz >1
-  | mov rdx, [rax]
-  | and rdx, 2047
-  | cmp rdx, (EXCEPTION + Value::EXCEPTION_ACTIVE_BIT)
-  | je ->exception_return
+  | jumpIfActiveException rax, rdx
   |1:
   | dec rcx
   | shl rcx, 3
@@ -1436,29 +1492,10 @@ void init_native_vm(State& state) {
   | sub rdx, rcx
   | mov64 rax, (ptrdiff_t) &native_vm_op_sub
   | call rax
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 8]
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 16], rdx
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
-  | mov VFN, [rsp]
-  | mov VFN, [VFN]
+  | restoreAfterGcHelperCall
   // CP reload — helper may have allocated a flonum.
-  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | mov r9, [rsp + 24]
-  | mov [rsp + 24], r8
-  | sub CP, r9
-  | add CP, r8
   | mov rcx, [CP - 8]
-  | test rax, rax
-  | jz >1
-  | test rax, 3
-  | jnz >1
-  | mov rdx, [rax]
-  | and rdx, 2047
-  | cmp rdx, (EXCEPTION + Value::EXCEPTION_ACTIVE_BIT)
-  | je ->exception_return
+  | jumpIfActiveException rax, rdx
   |1:
   | dec rcx
   | shl rcx, 3
@@ -1538,30 +1575,11 @@ void init_native_vm(State& state) {
   | sub rdx, rcx
   | mov64 rax, (ptrdiff_t) &native_vm_op_lt
   | call rax
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 8]
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 16], rdx
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
-  | mov VFN, [rsp]
-  | mov VFN, [VFN]
+  | restoreAfterGcHelperCall
   // CP reload — lt is non-allocating on the fast path but on the fallback
   // exception path (calls make_exception) it can. Cheap to do unconditionally.
-  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | mov r9, [rsp + 24]
-  | mov [rsp + 24], r8
-  | sub CP, r9
-  | add CP, r8
   | mov rcx, [CP - 8]
-  | test rax, rax
-  | jz >1
-  | test rax, 3
-  | jnz >1
-  | mov rdx, [rax]
-  | and rdx, 2047
-  | cmp rdx, (EXCEPTION + Value::EXCEPTION_ACTIVE_BIT)
-  | je ->exception_return
+  | jumpIfActiveException rax, rdx
   |1:
   | dec rcx
   | shl rcx, 3
@@ -1574,14 +1592,12 @@ void init_native_vm(State& state) {
   // Undefined value raises an exception carrying the symbol name.
   |->op_global_get:
   | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, constants)]
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | mov rdx, [rcx + rax*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
   | mov rax, [rdx + (ptrdiff_t) offsetof(Symbol, value)]
   | cmp rax, C_UNDEFINED
   | je ->global_undefined
-  | mov [STACK], rax
-  | add STACK, 8
+  | pushReg rax
   | jmp ->dispatch
 
   // --- OP_GLOBAL_SET (S5) ----------------------------------------------------
@@ -1613,69 +1629,52 @@ void init_native_vm(State& state) {
   // JUMP target: cp = code_base + target (word offset)
   |->op_jump:
   | mov rax, [CP]
-  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea CP, [rcx + rax*8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | jmp ->dispatch
+  | jumpToOperandTarget rax
 
   // --- OP_JUMP_WHEN (S4) -----------------------------------------------------
   // JUMP_WHEN target: if stack[-1] == C_FALSE (0), jump; does NOT pop.
   |->op_jump_when:
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | mov rdx, [STACK - 8]
   | test rdx, rdx
   | jnz ->dispatch
-  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea CP, [rcx + rax*8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | jmp ->dispatch
+  | jumpToOperandTarget rax
 
   // --- OP_JUMP_WHEN_POP (S4) -------------------------------------------------
   // Same as JUMP_WHEN but pops the stack unconditionally.
   |->op_jump_when_pop:
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | sub STACK, 8
   | mov rdx, [STACK]
   | test rdx, rdx
   | jnz ->dispatch
-  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea CP, [rcx + rax*8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | jmp ->dispatch
+  | jumpToOperandTarget rax
 
   // --- OP_JUMP_UNLESS (S4) ---------------------------------------------------
   // JUMP_UNLESS target: if stack[-1] != C_FALSE, jump; does NOT pop.
   |->op_jump_unless:
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | mov rdx, [STACK - 8]
   | test rdx, rdx
   | jz ->dispatch
-  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea CP, [rcx + rax*8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | jmp ->dispatch
+  | jumpToOperandTarget rax
 
   // --- OP_ARG_OPTIONAL (S4) --------------------------------------------------
   // ARG_OPTIONAL eargc target: if argc > eargc, jump to target; else fall through.
   |->op_arg_optional:
-  | mov rax, [CP]
-  | add CP, 8
-  | mov rdx, [CP]
-  | add CP, 8
+  | fetchOperand rax
+  | fetchOperand rdx
   | cmp ARGC, rax
   | jbe ->dispatch
-  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea CP, [rcx + rdx*8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | jmp ->dispatch
+  | jumpToOperandTarget rdx
 
   // --- OP_PUSH_CONSTANT (S3) -------------------------------------------------
   // PUSH_CONSTANT idx: push vfn->constants->data[idx]
   |->op_push_constant:
   | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, constants)]
-  | mov rax, [CP]
-  | add CP, 8
+  | fetchOperand rax
   | mov rdx, [rcx + rax*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
-  | mov [STACK], rdx
-  | add STACK, 8
+  | pushReg rdx
   | jmp ->dispatch
 
   // --- OP_RETURN -------------------------------------------------------------
@@ -1696,7 +1695,7 @@ void init_native_vm(State& state) {
   | call rax
   | pop rax
   | pop rax
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | reloadDtable
   | mov rcx, [rsp + 8]
   | mov rdi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
   | lea rdi, [rdi + rcx*8]
@@ -1704,14 +1703,7 @@ void init_native_vm(State& state) {
   | mov r10, [rdi]
   | cmp r10, C_EOF
   | jne >2
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
   |2:
   | mov r11, [rdi + 24]
   | shr r11, 1                         // caller_sff_offset
@@ -1738,7 +1730,7 @@ void init_native_vm(State& state) {
   | lea STACK, [r8 + rdx*8 + 8]
   | lea rax, [rsi + 16]
   | mov [rsp + 16], rax
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | reloadDtable
   | jmp ->dispatch
 
   // --- argc mismatch error ---------------------------------------------------
@@ -1748,14 +1740,7 @@ void init_native_vm(State& state) {
   | mov rdx, rax
   | mov64 rax, (ptrdiff_t) &native_vm_argc_error
   | call rax
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   // --- argc less-than-minimum error (S3) -------------------------------------
   |->argc_gte_error:
@@ -1764,14 +1749,7 @@ void init_native_vm(State& state) {
   | mov rdx, rax
   | mov64 rax, (ptrdiff_t) &native_vm_argc_gte_error
   | call rax
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   // --- undefined-variable error paths (S5) ----------------------------------
   // Entered from OP_GLOBAL_GET — rdx holds the symbol.
@@ -1781,14 +1759,7 @@ void init_native_vm(State& state) {
   | xor edx, edx
   | mov64 rax, (ptrdiff_t) &native_vm_global_undefined
   | call rax
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   // Entered from OP_GLOBAL_SET — rdx holds the symbol.
   |->set_undefined_error:
@@ -1797,14 +1768,7 @@ void init_native_vm(State& state) {
   | mov edx, 1
   | mov64 rax, (ptrdiff_t) &native_vm_global_undefined
   | call rax
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   // --- CAR/CDR type-error trampolines (S6) ----------------------------------
   // The offending value is still on top of the stack; fetch from there.
@@ -1814,14 +1778,7 @@ void init_native_vm(State& state) {
   | xor edx, edx
   | mov64 rax, (ptrdiff_t) &native_vm_pair_error
   | call rax
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   |->cdr_error:
   | mov rdi, STATE
@@ -1829,14 +1786,7 @@ void init_native_vm(State& state) {
   | mov edx, 1
   | mov64 rax, (ptrdiff_t) &native_vm_pair_error
   | call rax
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   // --- OP_APPLY error path (S7) ---------------------------------------------
   // The offending fn value is at [STACK - (fargc+1)*8]; but fargc is in rax
@@ -1846,66 +1796,31 @@ void init_native_vm(State& state) {
   | mov rsi, r9
   | mov64 rax, (ptrdiff_t) &native_vm_apply_error
   | call rax
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   // --- tail-return epilogue (S8) --------------------------------------------
   // Same epilogue as exception_return; separate label for clarity. Reached
   // with rax already holding the return value (C_FALSE on the tail path,
   // the callee's result on the non-tail path).
   |->tail_return_marker:
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   // --- variadic-arith exception propagation (S6) ----------------------------
   // Reached with the exception value already in rax.
   |->exception_return:
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   // --- unimplemented-opcode trampoline --------------------------------------
   |->bad_opcode:
   | mov rdi, STATE
   | mov64 rax, (ptrdiff_t) &native_vm_bad_opcode
   | call rax
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   // --- non-sentinel frame-link return trap (Phase B stub) -------------------
   |->bad_frame_return:
   | .byte 0x0f, 0x0b
-  | add rsp, 72
-  | pop r15
-  | pop r14
-  | pop r13
-  | pop r12
-  | pop rbp
-  | pop rbx
-  | ret
+  | returnEpilogue
 
   size_t size;
   dasm_link(&d, &size);
@@ -1918,43 +1833,10 @@ void init_native_vm(State& state) {
   for(size_t i = 0; i < sizeof(dispatch_table) / sizeof(void*); i++) {
     dispatch_table[i] = globals[G_bad_opcode];
   }
-  dispatch_table[OP_ARGC_EQ]        = globals[G_op_argc_eq];
-  dispatch_table[OP_PUSH_IMMEDIATE] = globals[G_op_push_immediate];
-  dispatch_table[OP_RETURN]         = globals[G_op_return];
-  dispatch_table[OP_ARGC_GTE]       = globals[G_op_argc_gte];
-  dispatch_table[OP_LOCAL_GET]      = globals[G_op_local_get];
-  dispatch_table[OP_LOCAL_SET]      = globals[G_op_local_set];
-  dispatch_table[OP_POP]            = globals[G_op_pop];
-  dispatch_table[OP_PUSH_CONSTANT]  = globals[G_op_push_constant];
-  dispatch_table[OP_JUMP]           = globals[G_op_jump];
-  dispatch_table[OP_JUMP_WHEN]      = globals[G_op_jump_when];
-  dispatch_table[OP_JUMP_WHEN_POP]  = globals[G_op_jump_when_pop];
-  dispatch_table[OP_JUMP_UNLESS]    = globals[G_op_jump_unless];
-  dispatch_table[OP_ARG_OPTIONAL]   = globals[G_op_arg_optional];
-  dispatch_table[OP_GLOBAL_GET]     = globals[G_op_global_get];
-  dispatch_table[OP_GLOBAL_SET]     = globals[G_op_global_set];
-  dispatch_table[OP_FX_ADD]         = globals[G_op_fx_add];
-  dispatch_table[OP_FX_SUB]         = globals[G_op_fx_sub];
-  dispatch_table[OP_FX_LT]          = globals[G_op_fx_lt];
-  dispatch_table[OP_EQ]             = globals[G_op_eq];
-  dispatch_table[OP_NOT]            = globals[G_op_not];
-  dispatch_table[OP_FIXNUMP]        = globals[G_op_fixnump];
-  dispatch_table[OP_CAR]            = globals[G_op_car];
-  dispatch_table[OP_CDR]            = globals[G_op_cdr];
-  dispatch_table[OP_TYPE_CHECK]     = globals[G_op_type_check];
-  dispatch_table[OP_ADD]            = globals[G_op_add];
-  dispatch_table[OP_SUB]            = globals[G_op_sub];
-  dispatch_table[OP_LT]             = globals[G_op_lt];
-  dispatch_table[OP_APPLY]          = globals[G_op_apply];
-  dispatch_table[OP_APPLY_TAIL]     = globals[G_op_apply_tail];
-  dispatch_table[OP_UPVALUE_FROM_LOCAL]   = globals[G_op_upvalue_from_local];
-  dispatch_table[OP_UPVALUE_FROM_CLOSURE] = globals[G_op_upvalue_from_closure];
-  dispatch_table[OP_UPVALUE_GET]    = globals[G_op_upvalue_get];
-  dispatch_table[OP_UPVALUE_SET]    = globals[G_op_upvalue_set];
-  dispatch_table[OP_CLOSE_OVER]     = globals[G_op_close_over];
-  dispatch_table[OP_ARGV_REST]      = globals[G_op_argv_rest];
-  dispatch_table[OP_ARG_KEY]        = globals[G_op_arg_key];
-  dispatch_table[OP_ARGV_KEYS]      = globals[G_op_argv_keys];
+#define INSTALL_NATIVE_VM_DISPATCH(opcode, label) \
+  dispatch_table[opcode] = globals[G_##label];
+  NATIVE_VM_DISPATCH_OPS(INSTALL_NATIVE_VM_DISPATCH)
+#undef INSTALL_NATIVE_VM_DISPATCH
 
   native_vm_mark_ready();
 }
@@ -1991,13 +1873,11 @@ tail:
   size_t current_sff_offset = sff_offset;
   state.vm_depth++;
 
-  if(state.vm_depth >=
-     (size_t) state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero()) {
+  if(state.vm_depth >= state.recursion_limit) {
     state.vm_depth--;
     std::ostringstream os;
     os << " non-tail recursive calls exceeded RECURSION-LIMIT ("
-       << state.get_global_value(State::G_RECURSION_LIMIT).fixnum_value_or_zero()
-       << ')';
+       << state.recursion_limit << ')';
     return state.make_exception(State::S_EVAL_ERROR, os.str());
   }
 
@@ -2089,14 +1969,7 @@ tail:
   vfn = fn.as_unsafe<VMFunction>();
   frame_words = state.gc.vm_stack_used - current_sff_offset;
   if(vfn->upvalue_count) {
-    Value* upvalues = &state.gc.vm_stack[current_sff_offset + 5 + vfn->local_count];
-    for(size_t i = 0; i != vfn->upvalue_count; i++) {
-      if(!upvalues[i].heap_type_equals(UPVALUE) || upvalues[i].upvalue_closed()) continue;
-      size_t idx = upvalues[i].as_unsafe<Upvalue>()->U.vm_local_idx;
-      if(idx >= state.gc.vm_stack_used) continue;
-      upvalues[i].as_unsafe<Upvalue>()->U.converted = state.gc.vm_stack[idx];
-      upvalues[i].heap->set_header_bit(Value::UPVALUE_CLOSED_BIT);
-    }
+    native_vm_close_frame_upvalues(&state, vfn, current_sff_offset);
   }
 
   state.gc.shrink_stack(frame_words);
