@@ -118,8 +118,9 @@ suite passing and bootstrap succeeding.
 
 ## Postmortem (after S11)
 
-The plumbing works (81/81 tests with `NATIVE_VM_ENABLE=1
-NATIVE_VM_DEFAULT=1`, bootstrap-and-psyntax passes) but measured
+The plumbing works (81/81 tests with
+`make NATIVE_VM_ENABLE=1 NATIVE_VM_DEFAULT=1`, bootstrap-and-psyntax
+passes) but measured
 end-to-end performance is a regression vs. the C interpreter:
 
 | workload          | baseline | native VM | delta        |
@@ -231,14 +232,16 @@ gets 0% of the speedup.
 
 ### Current state
 
-Kept in tree, gated by two env vars:
+Kept in tree, gated by two compile-time flags:
 
 - `NATIVE_VM_ENABLE=1` — initializes the dispatch core at boot.
 - `NATIVE_VM_DEFAULT=1` — additionally installs the native VM on
   every eligible VMFunction at `OpenFn->procedure` time.
 
-Neither is on by default. `bin/arete` without these env vars is
-unchanged from baseline. The native VM path has no known correctness
-bugs (81/81 tests + bootstrap-and-psyntax clean across many runs)
-so the infrastructure is a valid starting point for a future rewrite
+Both are on by default. Build with
+`make NATIVE_VM_ENABLE=0 NATIVE_VM_DEFAULT=0` to opt out, or pass the
+equivalent compiler defines manually (`-DNATIVE_VM_ENABLE=0`,
+`-DNATIVE_VM_DEFAULT=0`). The native VM path has no known correctness
+bugs (81/81 tests + bootstrap-and-psyntax clean across many runs) so
+the infrastructure is a valid starting point for a future rewrite
 that fixes the actual architectural problem.

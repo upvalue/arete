@@ -110,6 +110,14 @@
 # define AR_LOG_TAGS 0
 #endif 
 
+#ifndef NATIVE_VM_ENABLE
+# define NATIVE_VM_ENABLE 1
+#endif
+
+#ifndef NATIVE_VM_DEFAULT
+# define NATIVE_VM_DEFAULT 1
+#endif
+
 // Various internal log tags for debugging
 
 #define AR_LOG_TAG_GC (1 << 0)

@@ -114,6 +114,41 @@ This writes one directory containing:
 The per-suite JSON now includes the actual benchmark rows and aggregate
 summary, not just metadata, so other tools can consume it directly.
 
+For agent-driven optimization loops, use the `compare` subcommand or
+`bench-compare` make target. The intended flow is:
+
+1. Capture a baseline once, including the benchmark selection and CPU limits.
+2. Re-run later against that baseline and inspect only the deltas.
+
+Create a baseline:
+
+```
+python3 utils/benchmark-report.py compare \
+  --baseline scratch/compiler-baseline.json \
+  --save-baseline \
+  --r7rs browse --r7rs nboyer --r7rs parsing \
+  --arete boot --arete bootstrap-and-psyntax
+
+make bench-compare SAVE_BASELINE=1 BASELINE=scratch/compiler-baseline.json BENCH="browse nboyer parsing" WORKLOAD="boot bootstrap-and-psyntax"
+```
+
+Compare the current tree against that saved baseline:
+
+```
+python3 utils/benchmark-report.py compare \
+  --baseline scratch/compiler-baseline.json
+
+make bench-compare BASELINE=scratch/compiler-baseline.json
+```
+
+Default terminal output is intentionally short: one summary line plus
+one line per case with current time, baseline time, millisecond delta,
+and percentage delta. The full JSON comparison is written to disk for
+agents that want more detail. For Arete-native workloads, the baseline
+and current capture both include `--perf-report` JSON by default, so
+the comparison artifact can also report VM/interpreter/GC percentage and
+time deltas without flooding the terminal.
+
 Caveats when interpreting:
 
 - `CPU_LIMIT=30` clips larger inputs — raise it to compare against

@@ -1405,12 +1405,14 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
 
   // Opt this function into the native VM if its opcode set is fully
   // supported. Must happen AFTER the bytecode is copied — eligibility walks
-  // vfn->code. See docs/Native VM.md. Gated by NATIVE_VM_DEFAULT env var
+  // vfn->code. See docs/Native VM.md. Gated by the NATIVE_VM_DEFAULT compile flag
   // while we stabilize; remove the gate after S12.
-  if(getenv("NATIVE_VM_DEFAULT") && native_vm_function_eligible(vfn)) {
+#if NATIVE_VM_DEFAULT
+  if(native_vm_function_eligible(vfn)) {
     vfn->set_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT);
     vfn->procedure_addr = (c_closure_t) &apply_native_vm;
   }
+#endif
 
   return fn;
 }

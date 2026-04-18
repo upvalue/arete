@@ -64,7 +64,9 @@ void State::boot_common() {
   // Assemble the native VM's shared dispatch core. Must happen on both full
   // boot and image-load paths, independent of whether builtins are being
   // installed fresh or re-linked from a saved image.
-  if(getenv("NATIVE_VM_ENABLE")) init_native_vm(*this);
+#if NATIVE_VM_ENABLE
+  init_native_vm(*this);
+#endif
 
   booted = true;
 }

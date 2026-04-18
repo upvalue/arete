@@ -7,6 +7,8 @@ CPPFLAGS := $(CPPFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-implicit-fallth
 CFLAGS := $(CFLAGS) -g3 -O2
 CXXFLAGS := $(CPPFLAGS) -std=c++14 -fno-rtti -fno-exceptions $(CFLAGS) -fpermissive
 LDFLAGS := -fno-rtti -fno-exceptions
+NATIVE_VM_ENABLE ?= 1
+NATIVE_VM_DEFAULT ?= 1
 
 # Emscripten
 ECXX := em++
@@ -44,6 +46,9 @@ endif
 
 # site.mk allows the user to override settings
 -include site.mk
+
+CXXFLAGS := $(CXXFLAGS) -DNATIVE_VM_ENABLE=$(NATIVE_VM_ENABLE) -DNATIVE_VM_DEFAULT=$(NATIVE_VM_DEFAULT)
+ECXXFLAGS := $(ECXXFLAGS) -DNATIVE_VM_ENABLE=$(NATIVE_VM_ENABLE) -DNATIVE_VM_DEFAULT=$(NATIVE_VM_DEFAULT)
 
 LDFLAGS := $(MATH) $(LDFLAGS)
 
@@ -178,6 +183,9 @@ bench-report-arete: bin/arete web/benchmarks/dist/report.css
 bench-series: bin/arete heap.boot web/benchmarks/dist/report.css
 	python3 utils/benchmark-report.py series --output-dir $(if $(OUT),$(OUT),web/benchmarks/reports/series) $(if $(BENCH),$(foreach bench,$(BENCH),--r7rs $(bench)),--r7rs perf) $(if $(WORKLOAD),$(foreach workload,$(WORKLOAD),--arete $(workload)),--arete all)
 
+bench-compare: bin/arete heap.boot
+	python3 utils/benchmark-report.py compare --baseline $(if $(BASELINE),$(BASELINE),scratch/bench-baseline.json) $(if $(SAVE_BASELINE),--save-baseline,) $(if $(OUT),--output $(OUT),) $(if $(BENCH),$(foreach bench,$(BENCH),--r7rs $(bench)),) $(if $(WORKLOAD),$(foreach workload,$(WORKLOAD),--arete $(workload)),) $(if $(R7RS_CPU_LIMIT),--r7rs-cpu-limit $(R7RS_CPU_LIMIT),) $(if $(ARETE_CPU_LIMIT),--arete-cpu-limit $(ARETE_CPU_LIMIT),)
+
 modal-bench:
 	modal run tools/modal_bench.py --suite $(if $(SUITE),$(SUITE),r7rs) --benchmarks "$(if $(BENCH),$(BENCH),perf)" --runs $(if $(RUNS),$(RUNS),1) --cpu-limit $(if $(CPU_LIMIT),$(CPU_LIMIT),300) --max-parallelism $(if $(MAX_PARALLELISM),$(MAX_PARALLELISM),8)
 
@@ -185,7 +193,7 @@ web/benchmarks/dist/report.css: web/benchmarks/src/report.css web/benchmarks/tai
 	npm --prefix web/benchmarks install
 	npm --prefix web/benchmarks run build
 
-.PHONY: count clean cleaner install r7rs-bench arete-bench bench-report-css bench-report-r7rs bench-report-arete bench-series modal-bench
+.PHONY: count clean cleaner install r7rs-bench arete-bench bench-report-css bench-report-r7rs bench-report-arete bench-series bench-compare modal-bench
 
 count:
 	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard scheme/*.scm)
