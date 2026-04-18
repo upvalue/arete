@@ -324,32 +324,6 @@
        (eq? (rename-strip (caar x)) 'lambda)
        (list? (cadar x))))
 
-;; For the eqv?->eq? rewrite: is E a *safe-immediate* literal, i.e. a value
-;; whose identity under eq? is equivalent to its equality under eqv??
-;; - fixnums: bit-immediate tagged, same bits iff equal.
-;; - symbols: interned by the reader, same name ⇒ same pointer.
-;; - booleans and the empty list: singletons (C_TRUE/C_FALSE/C_NIL).
-;; Chars and flonums are explicitly EXCLUDED: chars are heap-allocated and two
-;; same-datum chars are not eq?, and (eqv? 0.0 -0.0) differs from eq? on flonums.
-;; Literals appear either self-evaluating (fixnum, boolean) or quoted
-;; ((quote <datum>) — a pair whose CAR's rename-strip is 'quote).
-(define (eqv-safe-immediate-literal? e)
-  (define (safe-datum? d)
-    (or (fixnum? d) (symbol? d) (boolean? d) (null? d)))
-  (cond
-    ;; self-evaluating fixnums/booleans: raw value in expr position
-    ((fixnum? e) #t)
-    ((boolean? e) #t)
-    ((null? e) #t)
-    ;; quoted literal: (quote <datum>)
-    ((and (pair? e)
-          (identifier? (car e))
-          (eq? (rename-strip (car e)) 'quote)
-          (pair? (cdr e))
-          (null? (cddr e)))
-     (safe-datum? (cadr e)))
-    (else #f)))
-
 ;; Detect the named-let expansion pattern:
 ;;   ((lambda () (define NAME (lambda ARGS BODY...)) (NAME INITS...)))
 ;; Returns a list (NAME ARGS BODY INITS) if matched, otherwise #f.
@@ -661,19 +635,6 @@
   (define primitive #f)
   (define primitive-args #f)
   (let ()
-      ;; Inline rewrite: (eqv? A B) with a safe-immediate literal arg becomes
-      ;; (eq? A B). Safe immediates are fixnums, symbols, booleans, and nil;
-      ;; chars and flonums are intentionally excluded (see eqv-safe-immediate-literal?).
-      ;; We only mutate the local `kar` so the primitive-table lookup below picks
-      ;; up `eq?`; (car x) is never compiled when a primitive match is found, so
-      ;; leaving x unchanged is harmless.
-      (when (and (eq? kar 'eqv?)
-                 (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
-                 (fx= argc 2)
-                 (eq? (car (fn-lookup fn kar x)) 'global)
-                 (or (eqv-safe-immediate-literal? (cadr x))
-                     (eqv-safe-immediate-literal? (caddr x))))
-        (set! kar 'eq?))
       ;; Compiling specific opcodes
       ;; +, -, etc
       (aif (and (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
