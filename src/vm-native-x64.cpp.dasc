@@ -66,7 +66,7 @@ static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 // Direct-indexed by opcode. Dispatch tail does `jmp [r11 + rax*8]`. Slots
 // this core doesn't yet handle point at the bad-opcode trampoline so an
 // eligibility bug manifests as a readable exception, not wild control flow.
-static void* dispatch_table[OP_FX_SUB + 1];
+static void* dispatch_table[OP_CONS + 1];
 
 // Called from assembly when OP_ARGC_EQ fails.
 static Value native_vm_argc_error(State* state, size_t got, size_t expected) {
@@ -355,6 +355,15 @@ static void native_vm_upvalue_set(State* state, Value closure, size_t idx, Value
   } else {
     state->gc.vm_stack[upval->U.vm_local_idx] = val;
   }
+}
+
+// CONS helper — pop 2 values (car, cdr) from the top of the VM stack, allocate
+// a fresh pair, return it. Caller is responsible for adjusting stack (pop 2,
+// push 1) and for restoring GC-movable pointers (VFN code_pointer, vm_stack).
+static Value native_vm_op_cons(State* state, Value* stack_top) {
+  Value a = stack_top[-2];
+  Value b = stack_top[-1];
+  return state->make_pair(a, b);
 }
 
 // Allocate a VectorStorage + Closure, copy `count` upvalues from the stack
@@ -663,6 +672,34 @@ void init_native_vm(State& state) {
   | sub STACK, rcx
   | mov [STACK], rax
   | add STACK, 8
+  | jmp ->dispatch
+
+  // --- OP_CONS (compiler primitive) -----------------------------------------
+  // Pop car + cdr off the top of the stack, allocate a pair, push the pair.
+  // Net stack effect: -1. No operand. Uses the same GC-restore plumbing as
+  // op_close_over since make_pair may trigger a collection.
+  |->op_cons:
+  | mov rdi, STATE
+  | mov rsi, STACK
+  | mov64 rax, (ptrdiff_t) &native_vm_op_cons
+  | call rax
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rdx, [rsp + 8]
+  | lea rdx, [rcx + rdx*8 + 16]
+  | mov [rsp + 16], rdx
+  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
+  | mov VFN, [rsp]
+  | mov VFN, [VFN]
+  // CP reload — make_pair may have relocated the bytecode buffer.
+  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
+  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
+  | mov r9, [rsp + 24]
+  | mov [rsp + 24], r8
+  | sub CP, r9
+  | add CP, r8
+  // Pop 2 args, write pair at new stack top.
+  | sub STACK, 8
+  | mov [STACK - 8], rax
   | jmp ->dispatch
 
   // --- OP_APPLY_TAIL (S8) ----------------------------------------------------
@@ -1852,6 +1889,7 @@ void init_native_vm(State& state) {
   dispatch_table[OP_UPVALUE_GET]    = globals[G_op_upvalue_get];
   dispatch_table[OP_UPVALUE_SET]    = globals[G_op_upvalue_set];
   dispatch_table[OP_CLOSE_OVER]     = globals[G_op_close_over];
+  dispatch_table[OP_CONS]           = globals[G_op_cons];
   dispatch_table[OP_ARGV_REST]      = globals[G_op_argv_rest];
 
   native_vm_mark_ready();
