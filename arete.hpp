@@ -2476,26 +2476,23 @@ enum {
   // Prologue instructions
   OP_ARGC_EQ = 20,
   OP_ARGC_GTE = 21,
-  OP_ARG_OPTIONAL = 22,
-  OP_ARGV_REST = 23,
-  OP_ARG_KEY = 24,
-  OP_ARGV_KEYS = 25,
+  OP_ARGV_REST = 22,
   // Instructions below this point are primitive versions of the builtin C++ routines for speed;
   // they are not necessary for code to execute correctly.
   // Predicates
-  OP_TYPE_CHECK = 26,
-  OP_FIXNUMP = 27,
-  OP_ADD = 28,
-  OP_SUB = 29,
-  OP_LT = 30,
-  OP_CAR = 31,
-  OP_CDR = 32,
-  OP_LIST_REF = 33,
-  OP_NOT = 34,
-  OP_EQ = 35,
-  OP_FX_LT = 36,
-  OP_FX_ADD = 37,
-  OP_FX_SUB = 38,
+  OP_TYPE_CHECK = 23,
+  OP_FIXNUMP = 24,
+  OP_ADD = 25,
+  OP_SUB = 26,
+  OP_LT = 27,
+  OP_CAR = 28,
+  OP_CDR = 29,
+  OP_LIST_REF = 30,
+  OP_NOT = 31,
+  OP_EQ = 32,
+  OP_FX_LT = 33,
+  OP_FX_ADD = 34,
+  OP_FX_SUB = 35,
 };
 
 inline Type Value::type() const {

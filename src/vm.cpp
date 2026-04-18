@@ -278,8 +278,7 @@ tail:
     &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
     &&LABEL_OP_RETURN,
     &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
-    &&LABEL_OP_ARGC_EQ, &&LABEL_OP_ARGC_GTE, &&LABEL_OP_ARG_OPTIONAL, &&LABEL_OP_ARGV_REST,
-    &&LABEL_OP_ARG_KEY, &&LABEL_OP_ARGV_KEYS,
+    &&LABEL_OP_ARGC_EQ, &&LABEL_OP_ARGC_GTE, &&LABEL_OP_ARGV_REST,
     // Extended instructions
     &&LABEL_OP_TYPE_CHECK, &&LABEL_OP_FIXNUMP,
     &&LABEL_OP_ADD, &&LABEL_OP_SUB,
@@ -632,18 +631,6 @@ tail:
         VM_DISPATCH();
       }
 
-      VM_CASE(OP_ARG_OPTIONAL): {
-        size_t eargc = VM_NEXT_INSN();
-        size_t offset = VM_NEXT_INSN();
-        
-        AR_LOG_VM2("arg-optional " << eargc << ' ' << offset << ' ' << (argc > eargc ? "jumping" : "not jumping"));
-        if(argc > eargc) {
-          VM_JUMP(offset);
-        }
-
-        VM_DISPATCH();
-      }
-
       VM_CASE(OP_ARGV_REST): {
         // Snapshot max_arity before any allocation: temps_to_list() can
         // trigger a GC that moves the VMFunction, invalidating `vfn`.
@@ -665,62 +652,6 @@ tail:
           locals[max_arity] = lst;
         }
         VM2_RESTORE_GC();
-        VM_DISPATCH();
-      }
-
-      VM_CASE(OP_ARG_KEY): {
-        size_t local_idx = VM_NEXT_INSN();
-        size_t key_constant = VM_NEXT_INSN();
-        size_t label = VM_NEXT_INSN();
-
-        // Attempt to find key in #!keys table
-        Value keys = locals[vfn->max_arity];
-        Value constant = vfn->constants->data[key_constant];
-        AR_LOG_VM2("arg-key " << local_idx << " " << constant)
-
-        bool found;
-        Value result = state.table_get(keys, constant, found);
-
-        std::cout << "keys: " << keys << std::endl;
-        std::cout << "constant: " << constant << std::endl;
-
-        if(found) {
-          locals[local_idx] = result;
-          AR_LOG_VM2("arg-key found key, jumping past default value expression");
-          VM_JUMP(label);
-        } 
-
-        VM_DISPATCH();
-      }
-
-      VM_CASE(OP_ARGV_KEYS): {
-        // Convert argv to table containing keywords
-        Value table;
-        {
-          AR_FRAME(state, table);
-
-          state.gc.protect_argc = argc;
-          state.gc.protect_argv = argv;
-
-          locals[vfn->max_arity] = state.make_table();
-
-          VM2_RESTORE_GC();
-
-          for(size_t i = vfn->max_arity; i != argc; i += 2) {
-            if(i + 1 == argc) {
-              VM2_EXCEPTION("eval", "odd number of arguments to keyword-accepting function");
-            }
-
-            Value k = argv[i], v = argv[i+1];
-
-            if(!(k.heap_type_equals(SYMBOL) && k.symbol_keyword())) {
-              VM2_EXCEPTION("eval", "expected keyword as argument " << i << " but got " << k.type());
-            }
-
-            state.table_set(locals[vfn->max_arity], k, v);
-            VM2_RESTORE_GC();
-          }
-        }
         VM_DISPATCH();
       }
 

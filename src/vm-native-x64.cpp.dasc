@@ -83,18 +83,6 @@ static Value native_vm_argc_gte_error(State* state, size_t got, size_t expected)
   return state->make_exception(State::S_EVAL_ERROR, os.str());
 }
 
-static ptrdiff_t native_vm_arg_key(
-    State* state, size_t max_arity, Value* locals, Value constant,
-    size_t local_idx) {
-  bool found = false;
-  Value result = state->table_get(locals[max_arity], constant, found);
-  if(found) {
-    locals[local_idx] = result;
-    return 1;
-  }
-  return 0;
-}
-
 static Value native_vm_bad_opcode(State* state) {
   return state->make_exception(State::S_EVAL_ERROR,
       "native VM dispatched an unimplemented opcode; coverage bug");
@@ -230,42 +218,6 @@ static Value native_vm_op_lt(State* state, size_t argc, Value* args) {
 // the same way apply_vm does.
 static Value native_vm_op_type_check(Value v, size_t tipe) {
   return Value((ptrdiff_t)(v.type() == (Type) tipe));
-}
-
-static Value native_vm_build_argv_keys(
-    State* state, size_t argc, Value* argv, size_t max_arity) {
-  Value table = C_FALSE;
-  AR_FRAME(*state, table);
-
-  state->gc.protect_argc = argc;
-  state->gc.protect_argv = argv;
-
-  table = state->make_table();
-  for(size_t i = max_arity; i != argc; i += 2) {
-    if(i + 1 == argc) {
-      state->gc.protect_argc = 0;
-      return state->make_exception(State::S_EVAL_ERROR,
-          "odd number of arguments to keyword-accepting function");
-    }
-
-    Value k = argv[i], v = argv[i + 1];
-    if(!(k.heap_type_equals(SYMBOL) && k.symbol_keyword())) {
-      std::ostringstream os;
-      os << "expected keyword as argument " << i << " but got " << k.type();
-      state->gc.protect_argc = 0;
-      return state->make_exception(State::S_EVAL_ERROR, os.str());
-    }
-
-    state->table_set(table, k, v);
-  }
-
-  state->gc.protect_argc = 0;
-  return table;
-}
-
-static bool native_vm_uses_argv_keys(VMFunction* vfn) {
-  size_t* code = vfn->code_pointer();
-  return vfn->code->length >= 3 && code[2] == OP_ARGV_KEYS;
 }
 
 // Returned via rax:rdx on SysV (16-byte POD), which is exactly what the
@@ -612,48 +564,10 @@ void init_native_vm(State& state) {
   | sub STACK, 8
   | jmp ->dispatch
 
-  // --- OP_ARG_KEY (S10) ------------------------------------------------------
-  // ARG_KEY local_idx key_constant target: if locals[max_arity] contains the
-  // keyword, write the value to locals[local_idx] and jump to target; else
-  // fall through to evaluate the default expression.
-  |->op_arg_key:
-  | mov r8, [CP]                       // local_idx
-  | add CP, 8
-  | mov rax, [CP]                      // constant idx
-  | add CP, 8
-  | mov r9, [CP]                       // label
-  | add CP, 8
-  | mov [rsp + 40], r9
-  | mov rdx, [VFN + (ptrdiff_t) offsetof(VMFunction, constants)]
-  | mov rcx, [rdx + rax*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
-  | mov edi, dword [VFN + (ptrdiff_t) offsetof(VMFunction, max_arity)]
-  | mov rsi, rdi
-  | mov rdi, STATE
-  | mov rdx, LOCALS
-  | mov64 rax, (ptrdiff_t) &native_vm_arg_key
-  | call rax
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 8]
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 16], rdx
-  | mov64 DTABLE, (ptrdiff_t) &dispatch_table[0]
-  | test rax, rax
-  | jz ->dispatch
-  | mov rax, [rsp + 40]
-  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea CP, [rcx + rax*8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | jmp ->dispatch
-
   // --- OP_ARGV_REST (S10) ----------------------------------------------------
   // The rest-list has already been built in apply_native_vm's prologue, so
   // this is a no-op — just advance to the next opcode.
   |->op_argv_rest:
-  | jmp ->dispatch
-
-  // --- OP_ARGV_KEYS (S10) ----------------------------------------------------
-  // Keyword tables are built in apply_native_vm's prologue, so this is a
-  // no-op just like OP_ARGV_REST.
-  |->op_argv_keys:
   | jmp ->dispatch
 
   // --- OP_UPVALUE_FROM_LOCAL (S9) -------------------------------------------
@@ -1654,19 +1568,6 @@ void init_native_vm(State& state) {
   | lea CP, [rcx + rax*8 + (ptrdiff_t) offsetof(Bytevector, data)]
   | jmp ->dispatch
 
-  // --- OP_ARG_OPTIONAL (S4) --------------------------------------------------
-  // ARG_OPTIONAL eargc target: if argc > eargc, jump to target; else fall through.
-  |->op_arg_optional:
-  | mov rax, [CP]
-  | add CP, 8
-  | mov rdx, [CP]
-  | add CP, 8
-  | cmp ARGC, rax
-  | jbe ->dispatch
-  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea CP, [rcx + rdx*8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | jmp ->dispatch
-
   // --- OP_PUSH_CONSTANT (S3) -------------------------------------------------
   // PUSH_CONSTANT idx: push vfn->constants->data[idx]
   |->op_push_constant:
@@ -1930,7 +1831,6 @@ void init_native_vm(State& state) {
   dispatch_table[OP_JUMP_WHEN]      = globals[G_op_jump_when];
   dispatch_table[OP_JUMP_WHEN_POP]  = globals[G_op_jump_when_pop];
   dispatch_table[OP_JUMP_UNLESS]    = globals[G_op_jump_unless];
-  dispatch_table[OP_ARG_OPTIONAL]   = globals[G_op_arg_optional];
   dispatch_table[OP_GLOBAL_GET]     = globals[G_op_global_get];
   dispatch_table[OP_GLOBAL_SET]     = globals[G_op_global_set];
   dispatch_table[OP_FX_ADD]         = globals[G_op_fx_add];
@@ -1953,8 +1853,6 @@ void init_native_vm(State& state) {
   dispatch_table[OP_UPVALUE_SET]    = globals[G_op_upvalue_set];
   dispatch_table[OP_CLOSE_OVER]     = globals[G_op_close_over];
   dispatch_table[OP_ARGV_REST]      = globals[G_op_argv_rest];
-  dispatch_table[OP_ARG_KEY]        = globals[G_op_arg_key];
-  dispatch_table[OP_ARGV_KEYS]      = globals[G_op_argv_keys];
 
   native_vm_mark_ready();
 }
@@ -2029,24 +1927,15 @@ tail:
   memset(((char*) locals) + locals_size, 0,
          ((frame_words - 5) * sizeof(Value)) - locals_size);
 
-  // Variable-arity prologue: ARGV_REST / ARGV_KEYS are prologue-only opcodes,
-  // so compute their result eagerly here and keep the dispatch handlers as
-  // no-ops. Keyword-accepting lambdas always begin argc-gte; argv-keys.
+  // Variable-arity prologue: ARGV_REST is a prologue-only opcode, so build
+  // the rest list eagerly here and keep the dispatch handler as a no-op.
   //
-  // max_arity is cached up front because helpers here (build_argv_keys,
-  // temps_to_list) allocate and can GC — the raw vfn pointer becomes stale
-  // across the allocation, so we must not re-read vfn->max_arity after.
+  // max_arity is cached up front because temps_to_list allocates and can GC —
+  // the raw vfn pointer becomes stale across the allocation, so we must not
+  // re-read vfn->max_arity after.
   if(vfn->get_header_bit(Value::VMFUNCTION_VARIABLE_ARITY_BIT)) {
     size_t max_arity = vfn->max_arity;
-    if(native_vm_uses_argv_keys(vfn)) {
-      Value keys = native_vm_build_argv_keys(&state, argc, argv, max_arity);
-      if(keys.is_active_exception()) {
-        state.gc.shrink_stack(frame_words);
-        state.vm_depth--;
-        return keys;
-      }
-      locals[max_arity] = keys;
-    } else if(argc <= max_arity) {
+    if(argc <= max_arity) {
       locals[max_arity] = C_NIL;
     } else if(!state.temps.empty() && argv == state.temps.data()) {
       Value rest = state.temps_to_list(max_arity);

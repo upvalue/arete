@@ -48,7 +48,6 @@ static bool native_vm_opcode_supported(size_t op) {
     case OP_JUMP_WHEN:
     case OP_JUMP_WHEN_POP:
     case OP_JUMP_UNLESS:
-    case OP_ARG_OPTIONAL:
     // S5:
     case OP_GLOBAL_GET:
     case OP_GLOBAL_SET:
@@ -77,8 +76,6 @@ static bool native_vm_opcode_supported(size_t op) {
     case OP_UPVALUE_FROM_CLOSURE:
     // S10:
     case OP_ARGV_REST:
-    case OP_ARG_KEY:
-    case OP_ARGV_KEYS:
       return true;
     default:
       return false;
@@ -176,7 +173,6 @@ bool native_vm_function_eligible(VMFunction* vfn) {
       case OP_FX_ADD:
       case OP_FX_SUB:
       case OP_ARGV_REST:
-      case OP_ARGV_KEYS:
         i += 1; break;
 
       case OP_PUSH_CONSTANT:
@@ -204,11 +200,7 @@ bool native_vm_function_eligible(VMFunction* vfn) {
         i += 2; break;
 
       case OP_GLOBAL_SET:
-      case OP_ARG_OPTIONAL:
         i += 3; break;
-
-      case OP_ARG_KEY:
-        i += 4; break;
 
       default:
         return false;

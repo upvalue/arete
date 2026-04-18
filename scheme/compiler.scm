@@ -55,7 +55,7 @@
   min-arity ;; 9
   ;; Maximum arguments to function; ignored if var-arity is #t
   max-arity ;; 10
-  ;; 'rest if function takes rest arguments, 'keys if function takes keyword arguments, #f otherwise
+  ;; 'rest if function takes rest arguments, #f otherwise
   var-arity ;; 11
   ;; Depth of the function
   depth ;; 12
@@ -166,14 +166,13 @@
     global-get global-set local-get local-set upvalue-get upvalue-set
     close-over upvalue-from-local upvalue-from-closure
     apply apply-tail
-    return 
+    return
     jump jump-when jump-when-pop jump-unless
-    argc-eq argc-gte arg-optional argv-rest arg-key argv-keys
+    argc-eq argc-gte argv-rest
     type-check fixnum?
     + - < car cdr list-ref not eq? fx< fx+ fx-))
 
-;; Static labels
-(define static-labels '(past-optionals))
+(define static-labels '())
 
 (let loop ((i 0) (lst insn-list))
   (table-set! insns-to-bytes (car lst) i)
@@ -204,7 +203,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
-               (0 jump jump-when argc-optional jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest arg-optional arg-key argv-keys)
+               (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest)
                (1 push-immediate push-constant global-get local-get upvalue-get upvalue-from-closure upvalue-from-local)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -591,16 +590,11 @@
 ;; be emitted precisely when things are known. Should make the code a little cleaner.
 
 ;; Processes an arguments list. Defines all argument names as local variables, sets up function arity and local count
-;; appropriately.
+;; appropriately. Optional/keyword markers are rewritten away by the expander, so the compiler only sees
+;; plain proper or improper argument lists.
 
 (define (process-argument-list! fn x)
   (define arg-i 0)
-  (define seen-optional #f)
-  (define seen-rest #f)
-  (define seen-keys #f)
-  (define seen-key #f)
-
-  ;; How to handle keywords
 
   (cond
     ((null? x) #t)
@@ -612,42 +606,12 @@
       (begin
         (for-each-improper
           (lambda (a)
-            (cond
-              ((or (identifier? a) (pair? a))
-               (let ((name (if (identifier? a) a (car a))))
-                 ;; Check for #!rest argument
-                 (if (or seen-rest seen-keys)
-                   (begin
-                     (OpenFn/var-arity! fn (if seen-rest 'rest 'keys))
-                     (OpenFn/define! fn name))
-                   (begin
-                     (unless (or seen-optional seen-key)
-                       (OpenFn/min-arity! fn (fx+ arg-i 1)))
-
-                     (unless seen-key
-                       (OpenFn/max-arity! fn (fx+ arg-i 1))
-                       (set! arg-i (fx+ arg-i 1)))
-                     (OpenFn/define! fn name)))))
-
-              ((eq? a #!optional)
-               (set! seen-optional #t)
-               )
-
-              ((eq? a #!rest)
-               (set! seen-rest #t))
-              
-              ((eq? a #!keys)
-               (set! seen-keys #t))
-
-              ((eq? a #!key)
-
-               (OpenFn/var-arity! fn 'keys)
-               (OpenFn/define! fn (gensym 'keys))
-
-               (set! seen-key #t))
-
-              (else
-                (raise-source x 'compiler-internal "unexpected argument list item" (lsit a)))))
+            (if (not (identifier? a))
+              (raise-source x 'compiler-internal "unexpected argument list item" (list a)))
+            (OpenFn/min-arity! fn (fx+ arg-i 1))
+            (OpenFn/max-arity! fn (fx+ arg-i 1))
+            (set! arg-i (fx+ arg-i 1))
+            (OpenFn/define! fn a))
           x)
 
         ;; Handle improper list rest argument
@@ -656,17 +620,7 @@
           ;; Remove rest argument from arity.
           (when (fx= (OpenFn/min-arity fn) (OpenFn/max-arity fn))
             (OpenFn/min-arity! fn (fx- (OpenFn/min-arity fn) 1)))
-          (OpenFn/max-arity! fn (fx- (OpenFn/max-arity fn) 1)))))
-    
-    )
-)
-
-;; Optional argument evaluation:
-;; ($optional 5)
-;; ($optional 6)
-;; ($optional 7)
-;; if argc < current optional index (given as wordcode operand), evaluate the stuff on the right; otherwise, jump
-;; to the body of the function (given by label optionals)
+          (OpenFn/max-arity! fn (fx- (OpenFn/max-arity fn) 1)))))))
 
 (define (compile-lambda fn x)
   ;; Create a new OpenFn with fn as a parent
@@ -685,18 +639,13 @@
   ;; Emit prologue argument checking/processing instructions
 
   (process-argument-list! sub-fn args)
-  ;; If this function has simple arity (no optional or rest arguments), we use argc-eq. Otherwise, we use argc-gte,
-  ;; followed by argv-rest
-  (if (and (fx= (OpenFn/min-arity sub-fn) (OpenFn/max-arity sub-fn)) (not (OpenFn/var-arity sub-fn)))
-    (emit sub-fn 'argc-eq (OpenFn/min-arity sub-fn))
+  ;; Fixed-arity lambdas use argc-eq. Variable-arity lambdas use argc-gte
+  ;; followed by argv-rest to pack any extra arguments into the rest list.
+  (if (OpenFn/var-arity sub-fn)
     (begin
       (emit sub-fn 'argc-gte (OpenFn/min-arity sub-fn))
-      ;; We generate argv-rest after the argc checks only for functions which don't take optional arguments
-      ;; Otherwise it will be generated after $label-rest-optionals
-      (when (and (OpenFn/var-arity sub-fn) (fx= (OpenFn/min-arity sub-fn) (OpenFn/max-arity sub-fn)))
-        (if (eq? (OpenFn/var-arity sub-fn) 'rest)
-          (emit sub-fn 'argv-rest)
-          (emit sub-fn 'argv-keys)))))
+      (emit sub-fn 'argv-rest))
+    (emit sub-fn 'argc-eq (OpenFn/min-arity sub-fn)))
 
   (scan-local-defines sub-fn (cddr x))
   ;; Compile the lambda's body
@@ -881,33 +830,6 @@
       )
       (cdr x))))
 
-(define (compile-optional fn x)
-  (emit fn 'arg-optional (cadr x) 'past-optionals)
-  (compile-expr fn (caddr x) #f x #f)
-  (emit fn 'local-set (cadr x))
-  )
-
-(define (compile-key fn x)
-  ;; ($key <local idx> <keyword constant> <default expr)
-  ;; becomes
-
-  ;; (arg-key <local idx> <keyword constant idx> <evaluation label>)
-  ;; default expr code
-  ;; <label>
-
-  (print x)
-  (define key-label (gensym 'key))
-  (define key-const (register-constant fn (list-ref x 2)))
-  (define local-idx (list-ref x 1))
-
-  ;; local-idx of key variables is offset by one because we create a local variable to store the keys table
-
-  (emit fn 'arg-key (fx+ local-idx 1) key-const key-label)
-  (compile-expr fn (car (list-ref x 3)) #f x #f)
-  (emit fn 'local-set (fx+ local-idx 1))
-  (register-label fn key-label)
-)
-
 (define (compile-special-form fn x cd src type tail?)
   (compiler-log fn "compiling special form" type x)
   (case type
@@ -919,15 +841,6 @@
     (or (compile-condeval 'or fn x tail?))
     (quote (compile-quote fn x))
     (begin (compile-begin fn x tail?))
-
-    ;; Expander-generated builtins
-    ($optional (compile-optional fn x))
-    ($key (compile-key fn x))
-    ($label-past-optionals
-      (unless (eq? (OpenFn/var-arity fn) 'keys)
-        (register-label fn 'past-optionals)
-        (when (OpenFn/var-arity fn)
-          (emit fn 'argv-rest))))
     (else
       (begin
         (raise 'compile-internal "unknown special form" (list type (car x)))))))
@@ -939,7 +852,7 @@
 
     (set! x (rename-expr x)))
 
-  (if (memq x '(lambda define set! if begin and or quote $key $optional $label-past-optionals)) x #f))
+  (if (memq x '(lambda define set! if begin and or quote)) x #f))
 
 (define (compile-expr fn x cd src tail?)
   (and #f #f)
