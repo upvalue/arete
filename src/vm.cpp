@@ -336,7 +336,7 @@ tail:
         if(value == C_UNDEFINED) {
           VM2_EXCEPTION("eval", "reference to undefined variable " << global);
         }
-        (*stack++) = global.symbol_value();
+        (*stack++) = value;
         VM_DISPATCH();
       }
 
