@@ -2501,6 +2501,7 @@ enum {
   OP_FX_LT = 33,
   OP_FX_ADD = 34,
   OP_FX_SUB = 35,
+  OP_CONS = 36,
 };
 
 inline Type Value::type() const {

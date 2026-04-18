@@ -170,7 +170,7 @@
     jump jump-when jump-when-pop jump-unless
     argc-eq argc-gte argv-rest
     type-check fixnum?
-    + - < car cdr list-ref not eq? fx< fx+ fx-))
+    + - < car cdr list-ref not eq? fx< fx+ fx- cons))
 
 (define static-labels '())
 
@@ -202,7 +202,7 @@
 (define stack-effects
   (let ((table (make-table))
         (lst '(
-               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
+               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+ cons)
                (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest)
                (1 push-immediate push-constant global-get local-get upvalue-get upvalue-from-closure upvalue-from-local)
                )))
@@ -296,6 +296,7 @@
     (fx+ 2 2 #f #f)
     (fx- 2 2 #f #f)
     (fx< 2 2 #f #f)
+    (cons 2 2 #f #f)
     ;; char=? and fx= both compile to eq? — same-bits iff equal for immediate tagged chars/fixnums.
     (char=? 2 2 #f #f)
     (fx= 2 2 #f #f)
