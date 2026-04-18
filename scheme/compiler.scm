@@ -172,7 +172,9 @@
     type-check fixnum?
     + - < car cdr list-ref not eq? fx< fx+ fx-
     ;; Exp 3: fused null?+conditional-jump (see compile-if).
-    jump-if-not-nil jump-if-nil))
+    jump-if-not-nil jump-if-nil
+    ;; Exp 3b: fused pair?+conditional-jump (see compile-if).
+    jump-if-not-pair jump-if-pair))
 
 (define static-labels '())
 
@@ -204,7 +206,7 @@
 (define stack-effects
   (let ((table (make-table))
         (lst '(
-               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+ jump-if-not-nil jump-if-nil)
+               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+ jump-if-not-nil jump-if-nil jump-if-not-pair jump-if-pair)
                (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest)
                (1 push-immediate push-constant global-get local-get upvalue-get upvalue-from-closure upvalue-from-local)
                )))
@@ -1066,12 +1068,21 @@
   ;; Exp 3: fuse (null? X) and (not (null? X)) tests into a single opcode.
   ;; (null? X) => jump-if-not-nil else-branch
   ;; (not (null? X)) => jump-if-nil else-branch
+  ;; Exp 3b: same for (pair? X) / (not (pair? X)).
   ;; Otherwise fall through to the normal emit of condition + jump-when-pop.
   (define null-arg (if-primitive-call-match fn condition 'null?))
   (define not-null-arg
     (and (not null-arg)
          (aif (if-primitive-call-match fn condition 'not)
            (if-primitive-call-match fn it 'null?)
+           #f)))
+  (define pair-arg
+    (and (not null-arg) (not not-null-arg)
+         (if-primitive-call-match fn condition 'pair?)))
+  (define not-pair-arg
+    (and (not null-arg) (not not-null-arg) (not pair-arg)
+         (aif (if-primitive-call-match fn condition 'not)
+           (if-primitive-call-match fn it 'pair?)
            #f)))
 
   (cond
@@ -1081,6 +1092,12 @@
     (not-null-arg
      (compile-expr fn not-null-arg #f (list not-null-arg) #f)
      (emit fn 'jump-if-nil then-branch-end))
+    (pair-arg
+     (compile-expr fn pair-arg #f (list pair-arg) #f)
+     (emit fn 'jump-if-not-pair then-branch-end))
+    (not-pair-arg
+     (compile-expr fn not-pair-arg #f (list not-pair-arg) #f)
+     (emit fn 'jump-if-pair then-branch-end))
     (else
      (compile-expr fn condition #f (list-tail x 1) #f)
      (emit fn 'jump-when-pop then-branch-end)))

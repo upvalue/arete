@@ -67,7 +67,7 @@ static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 // Direct-indexed by opcode. Dispatch tail does `jmp [r11 + rax*8]`. Slots
 // this core doesn't yet handle point at the bad-opcode trampoline so an
 // eligibility bug manifests as a readable exception, not wild control flow.
-static void* dispatch_table[OP_JUMP_IF_NIL + 1];
+static void* dispatch_table[OP_JUMP_IF_PAIR + 1];
 
 #define NATIVE_VM_PAIR_CAR_OFF ((ptrdiff_t) offsetof(Pair, data_car))
 #define NATIVE_VM_PAIR_CDR_OFF ((ptrdiff_t) offsetof(Pair, data_cdr))
@@ -108,7 +108,9 @@ static void* dispatch_table[OP_JUMP_IF_NIL + 1];
   _(OP_CLOSE_OVER, op_close_over) \
   _(OP_ARGV_REST, op_argv_rest) \
   _(OP_JUMP_IF_NOT_NIL, op_jump_if_not_nil) \
-  _(OP_JUMP_IF_NIL, op_jump_if_nil)
+  _(OP_JUMP_IF_NIL, op_jump_if_nil) \
+  _(OP_JUMP_IF_NOT_PAIR, op_jump_if_not_pair) \
+  _(OP_JUMP_IF_PAIR, op_jump_if_pair)
 
 // Called from assembly when OP_ARGC_EQ fails.
 static Value native_vm_argc_error(State* state, size_t got, size_t expected) {
@@ -1597,6 +1599,43 @@ void init_native_vm(State& state) {
   | cmp rdx, C_NIL
   | jne ->dispatch
   | jumpToOperandTarget rax
+
+  // --- OP_JUMP_IF_NOT_PAIR (exp 3b) ------------------------------------------
+  // Fused pair?+jump: pop stack; jump to target iff popped value is NOT a pair.
+  // Replaces (type-check PAIR; jump-when-pop L) used by (if (pair? X) ...).
+  // Pair test: rdx != 0 AND (rdx & 3) == 0 AND heap->get_type() == PAIR.
+  // Treat any failed precondition as "not a pair" → take the jump.
+  |->op_jump_if_not_pair:
+  | fetchOperand rax
+  | sub STACK, 8
+  | mov rdx, [STACK]
+  | test rdx, rdx
+  | je >1               // immediate 0 → not a pair → jump
+  | test rdx, 3
+  | jnz >1              // fixnum/constant tag bits → not a pair → jump
+  | mov rcx, [rdx]
+  | movzx rcx, cl
+  | cmp rcx, PAIR
+  | jne >1              // heap but wrong type → not a pair → jump
+  | jmp ->dispatch      // is a pair → fall through (no jump)
+  |1:
+  | jumpToOperandTarget rax
+
+  // --- OP_JUMP_IF_PAIR (exp 3b) ----------------------------------------------
+  // Fused (not (pair? X))+jump: pop stack; jump to target iff popped value IS a pair.
+  |->op_jump_if_pair:
+  | fetchOperand rax
+  | sub STACK, 8
+  | mov rdx, [STACK]
+  | test rdx, rdx
+  | je ->dispatch       // immediate 0 → not a pair → fall through
+  | test rdx, 3
+  | jnz ->dispatch      // fixnum/constant tag bits → not a pair → fall through
+  | mov rcx, [rdx]
+  | movzx rcx, cl
+  | cmp rcx, PAIR
+  | jne ->dispatch      // heap but wrong type → not a pair → fall through
+  | jumpToOperandTarget rax   // is a pair → take the jump
 
   // --- OP_PUSH_CONSTANT (S3) -------------------------------------------------
   // PUSH_CONSTANT idx: push vfn->constants->data[idx]

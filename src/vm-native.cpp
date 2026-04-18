@@ -79,6 +79,9 @@ static bool native_vm_opcode_supported(size_t op) {
     // Fused null?+conditional-jump (exp 3):
     case OP_JUMP_IF_NOT_NIL:
     case OP_JUMP_IF_NIL:
+    // Fused pair?+conditional-jump (exp 3b):
+    case OP_JUMP_IF_NOT_PAIR:
+    case OP_JUMP_IF_PAIR:
       return true;
     default:
       return false;
@@ -196,6 +199,8 @@ bool native_vm_function_eligible(VMFunction* vfn) {
       case OP_JUMP_UNLESS:
       case OP_JUMP_IF_NOT_NIL:
       case OP_JUMP_IF_NIL:
+      case OP_JUMP_IF_NOT_PAIR:
+      case OP_JUMP_IF_PAIR:
       case OP_ARGC_EQ:
       case OP_ARGC_GTE:
       case OP_TYPE_CHECK:

@@ -966,7 +966,9 @@ Value compile_native(State& state, Value vfn_) {
       case OP_JUMP_UNLESS:
       case OP_JUMP_WHEN_POP:
       case OP_JUMP_IF_NOT_NIL:
-      case OP_JUMP_IF_NIL: {
+      case OP_JUMP_IF_NIL:
+      case OP_JUMP_IF_NOT_PAIR:
+      case OP_JUMP_IF_PAIR: {
         loc = code[code_offset++];
         break;
       }
@@ -1462,6 +1464,47 @@ Value compile_native(State& state, Value vfn_) {
         if(code[current_insn] == OP_JUMP_IF_NIL) {
           | je =>lbl
         } else {
+          | jne =>lbl
+        }
+        break;
+      }
+
+      // Fused pair?+conditional-jump (exp 3b).
+      // Pair test: bits != 0 AND (bits & 3) == 0 AND heap->get_type() == PAIR.
+      // For OP_JUMP_IF_NOT_PAIR: take branch iff NOT a pair.
+      // For OP_JUMP_IF_PAIR:     take branch iff IS a pair.
+      case OP_JUMP_IF_NOT_PAIR:
+      case OP_JUMP_IF_PAIR: {
+        size_t loc = code[code_offset++];
+        auto it = offsets_to_labels.find(loc);
+        AR_ASSERT(it != offsets_to_labels.end() && "jump label was not generated correctly");
+        unsigned lbl = it->second;
+        bool jump_if_pair = (code[current_insn] == OP_JUMP_IF_PAIR);
+        AR_LOG_JIT("jump-if-" << (jump_if_pair ? "" : "not-") << "pair " << loc << " (label " << lbl << ")");
+
+        | popStackTop rax
+        if(jump_if_pair) {
+          // Fall through on any "not-a-pair" condition; only jump if all
+          // pair-checks succeed.
+          | test rax, rax
+          | je >1
+          | test rax, 3
+          | jnz >1
+          | mov rcx, [rax]
+          | movzx rcx, cl
+          | cmp rcx, PAIR
+          | jne >1
+          | jmp =>lbl
+          |1:
+        } else {
+          // Jump on any "not-a-pair" condition.
+          | test rax, rax
+          | je =>lbl
+          | test rax, 3
+          | jnz =>lbl
+          | mov rcx, [rax]
+          | movzx rcx, cl
+          | cmp rcx, PAIR
           | jne =>lbl
         }
         break;

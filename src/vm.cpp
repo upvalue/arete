@@ -293,6 +293,8 @@ tail:
     &&LABEL_OP_FX_SUB,
     &&LABEL_OP_JUMP_IF_NOT_NIL,
     &&LABEL_OP_JUMP_IF_NIL,
+    &&LABEL_OP_JUMP_IF_NOT_PAIR,
+    &&LABEL_OP_JUMP_IF_PAIR,
   };
 #endif
 
@@ -630,6 +632,29 @@ tail:
         size_t jmp_offset = VM_NEXT_INSN();
         Value v = *--stack;
         if(v == C_NIL) {
+          VM_JUMP(jmp_offset);
+        }
+        VM_DISPATCH();
+      }
+
+      // Fused pair?+jump: pop value, jump if it is NOT a pair.
+      // Emitted by compile-if for (if (pair? X) then else).
+      VM_CASE(OP_JUMP_IF_NOT_PAIR): {
+        size_t jmp_offset = VM_NEXT_INSN();
+        Value v = *--stack;
+        if(!v.heap_type_equals(PAIR)) {
+          VM_JUMP(jmp_offset);
+        }
+        VM_DISPATCH();
+      }
+
+      // Fused (not (pair? X))+jump: pop value, jump if it IS a pair.
+      // Emitted by compile-if for (if (not (pair? X)) then else), which is
+      // what unless expands to for a pair? test.
+      VM_CASE(OP_JUMP_IF_PAIR): {
+        size_t jmp_offset = VM_NEXT_INSN();
+        Value v = *--stack;
+        if(v.heap_type_equals(PAIR)) {
           VM_JUMP(jmp_offset);
         }
         VM_DISPATCH();

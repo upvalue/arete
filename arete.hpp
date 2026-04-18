@@ -2510,6 +2510,14 @@ enum {
   //   compile-if produces for (not (null? X)) — the unless/when-unless form.
   OP_JUMP_IF_NOT_NIL = 36,
   OP_JUMP_IF_NIL = 37,
+  // Fused pair?+conditional-jump (exp 3b): operand is jump target (word offset).
+  // JUMP_IF_NOT_PAIR: pops stack; jumps if popped value is NOT a pair.
+  //   Replaces (type-check PAIR ; jump-when-pop L) after (if (pair? X) ...).
+  // JUMP_IF_PAIR: pops stack; jumps if popped value IS a pair.
+  //   Emitted for (if (not (pair? X)) ...), which unless/when expand to.
+  // Pair test: bits != 0 AND (bits & 3) == 0 AND heap->get_type() == PAIR.
+  OP_JUMP_IF_NOT_PAIR = 38,
+  OP_JUMP_IF_PAIR = 39,
 };
 
 inline Type Value::type() const {
