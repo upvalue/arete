@@ -209,7 +209,8 @@ bool native_vm_function_eligible(VMFunction* vfn) {
   return true;
 }
 
-#if !(AR_64_BIT == 1) || defined(_MSC_VER) || defined(__EMSCRIPTEN__)
+#if !(AR_64_BIT == 1) || defined(_MSC_VER) || defined(__EMSCRIPTEN__) || \
+    !(defined(__x86_64__) || defined(_M_X64))
 // Platforms without a native dispatch core — apply_native_vm just forwards.
 // On x86-64 SysV these are defined in vm-native-x64.cpp (generated from .dasc).
 Value apply_native_vm(State& state, size_t argc, Value* argv, void* fnp) {

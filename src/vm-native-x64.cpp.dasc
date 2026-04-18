@@ -23,7 +23,8 @@
 
 #include "arete.hpp"
 
-#if AR_64_BIT == 1 && !defined(_MSC_VER) && !defined(__EMSCRIPTEN__)
+#if AR_64_BIT == 1 && !defined(_MSC_VER) && !defined(__EMSCRIPTEN__) && \
+    (defined(__x86_64__) || defined(_M_X64))
 
 #include <algorithm>
 #include <cstring>
