@@ -1040,23 +1040,6 @@
   (define then-branch-end (gensym 'if-else))
   (define else-branch-end (gensym 'if-end))
 
-  ;; Peephole: (if (not X) A B) -> (if X B A). Only when `not` is the global
-  ;; primitive (not shadowed locally) and both branches are present, so the
-  ;; semantics match and we don't need to fabricate a then-branch. Saves one
-  ;; OP_NOT per matching (if ...).
-  (when (and (fx= (length x) 4)
-             (pair? condition)
-             (fx= (length condition) 2)
-             (let ((kar (car condition)))
-               (and (identifier? kar)
-                    (eq? (rename-strip kar) 'not)
-                    (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
-                    (eq? (car (fn-lookup fn (rename-strip kar) condition)) 'global))))
-    (set! condition (cadr condition))
-    (let ((saved then-branch))
-      (set! then-branch else-branch)
-      (set! else-branch saved)))
-
   ;(print "control destination" cd)
 
   (define check-stack (OpenFn/stack-size fn))
