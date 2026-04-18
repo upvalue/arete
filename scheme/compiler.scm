@@ -1177,10 +1177,110 @@
 
   fn)
 
+;; Operand widths (insns beyond the opcode). Used by the peephole pass to walk
+;; the symbolic insn stream. Must be kept in sync with insn-list + emit special cases.
+(define insn-operand-count
+  (let ((table (make-table)))
+    (for-each1 (lambda (op) (table-set! table op 0))
+      '(pop return car cdr list-ref not eq? fx< fx+ fx- fixnum? argv-rest bad))
+    (for-each1 (lambda (op) (table-set! table op 1))
+      '(push-constant push-immediate global-get local-get local-set upvalue-get upvalue-set
+        close-over upvalue-from-local upvalue-from-closure apply apply-tail
+        jump jump-when jump-when-pop jump-unless argc-eq argc-gte type-check
+        + - <))
+    (table-set! table 'global-set 2)
+    table))
+
+;; Build a set of insn positions that are jump targets (from OpenFn/labels).
+;; Returns a table: position -> #t.
+(define (peephole-label-positions fn)
+  (let ((targets (make-table)))
+    (table-for-each
+      (lambda (label pos)
+        (table-set! targets pos #t))
+      (OpenFn/labels fn))
+    targets))
+
+;; Peephole pass: remove redundant `push-immediate X; pop` triples that come
+;; from compile-expr's dummy-unspecified push getting popped immediately (e.g.
+;; intermediate set!/define in a begin). Runs on the symbolic insn stream
+;; before compile-finish converts opcodes to bytes.
+;;
+;; Safety: only remove when no label points into [push-immediate..pop] and no
+;; source-location references the removed positions. Update labels + sources
+;; to account for shifted positions.
+(define (peephole-pass fn)
+  (let* ((old-insns (OpenFn/insns fn))
+         (old-len (vector-length old-insns))
+         (label-targets (peephole-label-positions fn))
+         ;; Collect source-tracked positions (first of each source tuple of 5).
+         (sources (OpenFn/sources fn))
+         (source-positions
+           (let ((st (make-table)))
+             (let loop ((i 0))
+               (if (fx< i (vector-length sources))
+                 (begin
+                   (table-set! st (vector-ref sources i) #t)
+                   (loop (fx+ i 5)))))
+             st))
+         ;; Build pos-map: old-position -> new-position, skipping removed triples.
+         (pos-map (make-vector))
+         (new-insns (make-vector)))
+    ;; Walk the old insns, deciding which to keep. pos-map grows to old-len+1
+    ;; so labels pointing at the very end also remap correctly.
+    (let loop ((i 0))
+      (cond
+        ((fx= i old-len)
+         (vector-append! pos-map (vector-length new-insns)))
+        (else
+         (let ((op (vector-ref old-insns i)))
+           (aif (table-ref insn-operand-count op)
+             (let ((width (fx+ 1 it)))
+               ;; Candidate: push-immediate X; pop  (width=2) followed by pop (width=1).
+               (if (and (eq? op 'push-immediate)
+                        (fx< (fx+ i 2) old-len)
+                        (eq? (vector-ref old-insns (fx+ i 2)) 'pop)
+                        ;; No label inside [i+1, i+2].
+                        (not (table-ref label-targets (fx+ i 1)))
+                        (not (table-ref label-targets (fx+ i 2)))
+                        ;; No source-location inside.
+                        (not (table-ref source-positions (fx+ i 1)))
+                        (not (table-ref source-positions (fx+ i 2))))
+                 (begin
+                   ;; Skip this triple: map positions i, i+1, i+2 all to current new-insns length.
+                   (vector-append! pos-map (vector-length new-insns))
+                   (vector-append! pos-map (vector-length new-insns))
+                   (vector-append! pos-map (vector-length new-insns))
+                   (loop (fx+ i 3)))
+                 (begin
+                   ;; Keep: copy `width` insns verbatim, recording new position for each old one.
+                   (let copy ((j 0))
+                     (when (fx< j width)
+                       (vector-append! pos-map (vector-length new-insns))
+                       (vector-append! new-insns (vector-ref old-insns (fx+ i j)))
+                       (copy (fx+ j 1))))
+                   (loop (fx+ i width)))))
+             (raise 'compile-internal "peephole: unknown opcode width" (list op i)))))))
+    ;; Only commit if we actually removed something; otherwise leave untouched.
+    (when (fx< (vector-length new-insns) old-len)
+      (OpenFn/insns! fn new-insns)
+      ;; Remap labels: each label position -> pos-map[position].
+      (let ((labels (OpenFn/labels fn)))
+        (table-for-each
+          (lambda (label pos)
+            (table-set! labels label (vector-ref pos-map pos)))
+          labels))
+      ;; Remap source positions (first word of each 5-tuple).
+      (let loop ((i 0))
+        (when (fx< i (vector-length sources))
+          (vector-set! sources i (vector-ref pos-map (vector-ref sources i)))
+          (loop (fx+ i 5)))))))
+
 ;; Compiler finisher -- converts symbolic VM instructions into actual fixnums
 (define (compile-finish fn)
   (compiler-log fn fn)
   ;(print-insns fn)
+  (peephole-pass fn)
 
   (let loop ((i 0))
     (unless (fx= i (vector-length (OpenFn/insns fn)))
