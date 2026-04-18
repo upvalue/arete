@@ -76,8 +76,6 @@ static bool native_vm_opcode_supported(size_t op) {
     case OP_UPVALUE_FROM_CLOSURE:
     // S10:
     case OP_ARGV_REST:
-    // OP_CONS (compiler primitive):
-    case OP_CONS:
       return true;
     default:
       return false;
@@ -175,7 +173,6 @@ bool native_vm_function_eligible(VMFunction* vfn) {
       case OP_FX_ADD:
       case OP_FX_SUB:
       case OP_ARGV_REST:
-      case OP_CONS:
         i += 1; break;
 
       case OP_PUSH_CONSTANT:
