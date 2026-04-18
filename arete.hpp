@@ -2518,6 +2518,17 @@ enum {
   // Pair test: bits != 0 AND (bits & 3) == 0 AND heap->get_type() == PAIR.
   OP_JUMP_IF_NOT_PAIR = 38,
   OP_JUMP_IF_PAIR = 39,
+  // Fused eq?-to-safe-immediate-literal + conditional-jump (exp 3d).
+  // Operands: {constant-pool index, jump target word offset}.
+  // JUMP_IF_EQ_IMM:     pops stack; jumps iff popped value eq? constants[idx].
+  // JUMP_IF_NOT_EQ_IMM: pops stack; jumps iff popped value NOT eq? constants[idx].
+  // Replaces the (push-constant idx; eq?; jump-when-pop L) sequence emitted
+  // for (if (eq? X 'LIT) ...) when LIT is a safe-immediate literal (symbols,
+  // fixnums, booleans, '()). Most common hot pattern is `cond` over symbols
+  // — see peval's (eq? (car exp) 'if) / 'begin / 'let / 'lambda / 'quote
+  // chains.
+  OP_JUMP_IF_EQ_IMM = 40,
+  OP_JUMP_IF_NOT_EQ_IMM = 41,
 };
 
 inline Type Value::type() const {

@@ -295,6 +295,8 @@ tail:
     &&LABEL_OP_JUMP_IF_NIL,
     &&LABEL_OP_JUMP_IF_NOT_PAIR,
     &&LABEL_OP_JUMP_IF_PAIR,
+    &&LABEL_OP_JUMP_IF_EQ_IMM,
+    &&LABEL_OP_JUMP_IF_NOT_EQ_IMM,
   };
 #endif
 
@@ -655,6 +657,34 @@ tail:
         size_t jmp_offset = VM_NEXT_INSN();
         Value v = *--stack;
         if(v.heap_type_equals(PAIR)) {
+          VM_JUMP(jmp_offset);
+        }
+        VM_DISPATCH();
+      }
+
+      // Fused eq?-to-safe-immediate-literal + jump (exp 3d).
+      // JUMP_IF_NOT_EQ_IMM: operand = {const-idx, jmp-target}. Pops value,
+      // jumps iff popped value is NOT eq? to constants[idx]. Replaces the
+      // (push-constant idx; eq?; jump-when-pop L) sequence after (if (eq? X 'LIT) ...).
+      VM_CASE(OP_JUMP_IF_NOT_EQ_IMM): {
+        size_t idx = VM_NEXT_INSN();
+        size_t jmp_offset = VM_NEXT_INSN();
+        Value lit = vfn->constants->data[idx];
+        Value v = *--stack;
+        if(v != lit) {
+          VM_JUMP(jmp_offset);
+        }
+        VM_DISPATCH();
+      }
+
+      // JUMP_IF_EQ_IMM: as above but jump iff IS eq?. Emitted for
+      // (if (not (eq? X 'LIT)) ...).
+      VM_CASE(OP_JUMP_IF_EQ_IMM): {
+        size_t idx = VM_NEXT_INSN();
+        size_t jmp_offset = VM_NEXT_INSN();
+        Value lit = vfn->constants->data[idx];
+        Value v = *--stack;
+        if(v == lit) {
           VM_JUMP(jmp_offset);
         }
         VM_DISPATCH();

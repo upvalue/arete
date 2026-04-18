@@ -82,6 +82,9 @@ static bool native_vm_opcode_supported(size_t op) {
     // Fused pair?+conditional-jump (exp 3b):
     case OP_JUMP_IF_NOT_PAIR:
     case OP_JUMP_IF_PAIR:
+    // Fused eq?-to-safe-immediate-literal + jump (exp 3d):
+    case OP_JUMP_IF_EQ_IMM:
+    case OP_JUMP_IF_NOT_EQ_IMM:
       return true;
     default:
       return false;
@@ -210,6 +213,8 @@ bool native_vm_function_eligible(VMFunction* vfn) {
         i += 2; break;
 
       case OP_GLOBAL_SET:
+      case OP_JUMP_IF_EQ_IMM:
+      case OP_JUMP_IF_NOT_EQ_IMM:
         i += 3; break;
 
       default:

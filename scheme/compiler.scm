@@ -174,7 +174,9 @@
     ;; Exp 3: fused null?+conditional-jump (see compile-if).
     jump-if-not-nil jump-if-nil
     ;; Exp 3b: fused pair?+conditional-jump (see compile-if).
-    jump-if-not-pair jump-if-pair))
+    jump-if-not-pair jump-if-pair
+    ;; Exp 3d: fused eq?-to-safe-immediate-literal + conditional-jump.
+    jump-if-eq-imm jump-if-not-eq-imm))
 
 (define static-labels '())
 
@@ -206,7 +208,7 @@
 (define stack-effects
   (let ((table (make-table))
         (lst '(
-               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+ jump-if-not-nil jump-if-nil jump-if-not-pair jump-if-pair)
+               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+ jump-if-not-nil jump-if-nil jump-if-not-pair jump-if-pair jump-if-eq-imm jump-if-not-eq-imm)
                (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest)
                (1 push-immediate push-constant global-get local-get upvalue-get upvalue-from-closure upvalue-from-local)
                )))
@@ -1054,6 +1056,49 @@
               (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
               (cadr expr)))))
 
+;; Exp 3d: a "safe immediate literal" is a value where eq? is semantically
+;; correct against any other Scheme equality predicate (i.e., identity ==
+;; equivalence). Chars are EXCLUDED here because in Arete chars are
+;; heap-allocated, so eq? on chars is wrong (see char=? inline-is-wrong note).
+;; Strings/flonums/vectors are heap objects and not identity-compared.
+(define (safe-eq-immediate? v)
+  (or (symbol? v) (fixnum? v) (boolean? v) (null? v)))
+
+;; Exp 3d: detect (eq? A B) where one of {A,B} is a quoted safe-immediate
+;; literal. Returns (cons ARG LIT) on match (ARG to evaluate, LIT the raw
+;; value), or #f. Requires eq? not shadowed and primitives enabled.
+(define (if-eq-imm-match fn expr)
+  (and (pair? expr)
+       (fx= (length expr) 3)
+       (let ((head (car expr)))
+         (and (identifier? head)
+              (eq? (rename-strip head) 'eq?)
+              (eq? (car (fn-lookup fn (rename-strip head) expr)) 'global)
+              (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
+              (let ((a (cadr expr))
+                    (b (caddr expr)))
+                ;; A and B are raw source expressions at this point. Quoted
+                ;; literals take the form (quote X) where the quote identifier
+                ;; may be renamed.
+                (define (quoted-safe-imm x)
+                  (and (pair? x)
+                       (fx= (length x) 2)
+                       (identifier? (car x))
+                       (eq? (rename-strip (car x)) 'quote)
+                       (safe-eq-immediate? (cadr x))
+                       (cadr x)))
+                ;; Also recognize bare self-evaluating safe-immediates (e.g.
+                ;; (eq? x #t), (eq? x 5)) — these don't need quote.
+                (define (bare-safe-imm x)
+                  (and (or (fixnum? x) (boolean? x)) x))
+                (let ((lit-b (or (quoted-safe-imm b) (bare-safe-imm b))))
+                  (if lit-b
+                    (cons a lit-b)
+                    (let ((lit-a (or (quoted-safe-imm a) (bare-safe-imm a))))
+                      (if lit-a
+                        (cons b lit-a)
+                        #f)))))))))
+
 (define (compile-if fn x cd tail?)
   (define condition (cadr x))
   (define then-branch (list-ref x 2))
@@ -1084,6 +1129,16 @@
          (aif (if-primitive-call-match fn condition 'not)
            (if-primitive-call-match fn it 'pair?)
            #f)))
+  ;; Exp 3d: (eq? X 'LIT) / (eq? 'LIT X) for safe-immediate LIT.
+  (define eq-imm-pair
+    (and (not null-arg) (not not-null-arg) (not pair-arg) (not not-pair-arg)
+         (if-eq-imm-match fn condition)))
+  (define not-eq-imm-pair
+    (and (not null-arg) (not not-null-arg) (not pair-arg) (not not-pair-arg)
+         (not eq-imm-pair)
+         (aif (if-primitive-call-match fn condition 'not)
+           (if-eq-imm-match fn it)
+           #f)))
 
   (cond
     (null-arg
@@ -1098,6 +1153,18 @@
     (not-pair-arg
      (compile-expr fn not-pair-arg #f (list not-pair-arg) #f)
      (emit fn 'jump-if-pair then-branch-end))
+    (eq-imm-pair
+     ;; (if (eq? X 'LIT) then else) => compile X; jump-if-not-eq-imm IDX else.
+     (let ((arg (car eq-imm-pair))
+           (lit (cdr eq-imm-pair)))
+       (compile-expr fn arg #f (list arg) #f)
+       (emit fn 'jump-if-not-eq-imm (register-constant fn lit) then-branch-end)))
+    (not-eq-imm-pair
+     ;; (if (not (eq? X 'LIT)) then else) => compile X; jump-if-eq-imm IDX else.
+     (let ((arg (car not-eq-imm-pair))
+           (lit (cdr not-eq-imm-pair)))
+       (compile-expr fn arg #f (list arg) #f)
+       (emit fn 'jump-if-eq-imm (register-constant fn lit) then-branch-end)))
     (else
      (compile-expr fn condition #f (list-tail x 1) #f)
      (emit fn 'jump-when-pop then-branch-end)))

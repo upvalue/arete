@@ -973,6 +973,14 @@ Value compile_native(State& state, Value vfn_) {
         break;
       }
 
+      // Exp 3d: two-operand jump {const-idx, target}.
+      case OP_JUMP_IF_EQ_IMM:
+      case OP_JUMP_IF_NOT_EQ_IMM: {
+        code_offset++;           // skip const-idx
+        loc = code[code_offset++];
+        break;
+      }
+
       default: {
         AR_LOG_JIT("label generation unknown bytecode " << code[code_offset-1]);
         std::ostringstream os; os << "unknown bytecode during label generation " << code[code_offset-1];
@@ -1505,6 +1513,31 @@ Value compile_native(State& state, Value vfn_) {
           | mov rcx, [rax]
           | movzx rcx, cl
           | cmp rcx, PAIR
+          | jne =>lbl
+        }
+        break;
+      }
+
+      // Fused eq?-literal+conditional-jump (exp 3d).
+      // Operands: {const-idx, target}. Pops stack; compares with constants[idx].
+      // JUMP_IF_EQ_IMM:     jump if equal. Emitted for (if (not (eq? X 'LIT)) ...).
+      // JUMP_IF_NOT_EQ_IMM: jump if not equal. Emitted for (if (eq? X 'LIT) ...).
+      case OP_JUMP_IF_EQ_IMM:
+      case OP_JUMP_IF_NOT_EQ_IMM: {
+        size_t idx = code[code_offset++];
+        size_t loc = code[code_offset++];
+        auto it = offsets_to_labels.find(loc);
+        AR_ASSERT(it != offsets_to_labels.end() && "jump label was not generated correctly");
+        unsigned lbl = it->second;
+        bool jump_if_eq = (code[current_insn] == OP_JUMP_IF_EQ_IMM);
+        AR_LOG_JIT("jump-if-" << (jump_if_eq ? "" : "not-") << "eq-imm idx=" << idx << " " << loc << " (label " << lbl << ")");
+
+        | storeConstant ARG1, idx   // ARG1 = constants[idx]
+        | popStackTop rax
+        | cmp rax, ARG1
+        if(jump_if_eq) {
+          | je =>lbl
+        } else {
           | jne =>lbl
         }
         break;

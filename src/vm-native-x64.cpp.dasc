@@ -67,7 +67,7 @@ static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 // Direct-indexed by opcode. Dispatch tail does `jmp [r11 + rax*8]`. Slots
 // this core doesn't yet handle point at the bad-opcode trampoline so an
 // eligibility bug manifests as a readable exception, not wild control flow.
-static void* dispatch_table[OP_JUMP_IF_PAIR + 1];
+static void* dispatch_table[OP_JUMP_IF_NOT_EQ_IMM + 1];
 
 #define NATIVE_VM_PAIR_CAR_OFF ((ptrdiff_t) offsetof(Pair, data_car))
 #define NATIVE_VM_PAIR_CDR_OFF ((ptrdiff_t) offsetof(Pair, data_cdr))
@@ -110,7 +110,9 @@ static void* dispatch_table[OP_JUMP_IF_PAIR + 1];
   _(OP_JUMP_IF_NOT_NIL, op_jump_if_not_nil) \
   _(OP_JUMP_IF_NIL, op_jump_if_nil) \
   _(OP_JUMP_IF_NOT_PAIR, op_jump_if_not_pair) \
-  _(OP_JUMP_IF_PAIR, op_jump_if_pair)
+  _(OP_JUMP_IF_PAIR, op_jump_if_pair) \
+  _(OP_JUMP_IF_EQ_IMM, op_jump_if_eq_imm) \
+  _(OP_JUMP_IF_NOT_EQ_IMM, op_jump_if_not_eq_imm)
 
 // Called from assembly when OP_ARGC_EQ fails.
 static Value native_vm_argc_error(State* state, size_t got, size_t expected) {
@@ -1636,6 +1638,36 @@ void init_native_vm(State& state) {
   | cmp rcx, PAIR
   | jne ->dispatch      // heap but wrong type → not a pair → fall through
   | jumpToOperandTarget rax   // is a pair → take the jump
+
+  // --- OP_JUMP_IF_NOT_EQ_IMM (exp 3d) ----------------------------------------
+  // Fused eq?-literal+jump: operands {const-idx, target}. Pops stack; jump to
+  // target iff popped value != constants[idx]. Replaces
+  //   push-constant idx; eq?; jump-when-pop L
+  // used by compile-if for (if (eq? X 'LIT) ...) when LIT is a safe-immediate
+  // literal (symbols, fixnums, booleans, '()).
+  |->op_jump_if_not_eq_imm:
+  | fetchOperand rcx                  // rcx = const-idx
+  | fetchOperand rax                  // rax = jump target
+  | mov rdx, [VFN + (ptrdiff_t) offsetof(VMFunction, constants)]
+  | mov rdx, [rdx + rcx*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
+  | sub STACK, 8
+  | mov rcx, [STACK]
+  | cmp rcx, rdx
+  | je ->dispatch                     // equal → fall through (no jump)
+  | jumpToOperandTarget rax           // not equal → take branch
+
+  // --- OP_JUMP_IF_EQ_IMM (exp 3d) --------------------------------------------
+  // Fused (not (eq? X 'LIT))+jump: as above but jump iff equal.
+  |->op_jump_if_eq_imm:
+  | fetchOperand rcx
+  | fetchOperand rax
+  | mov rdx, [VFN + (ptrdiff_t) offsetof(VMFunction, constants)]
+  | mov rdx, [rdx + rcx*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
+  | sub STACK, 8
+  | mov rcx, [STACK]
+  | cmp rcx, rdx
+  | jne ->dispatch                    // not equal → fall through
+  | jumpToOperandTarget rax           // equal → take branch
 
   // --- OP_PUSH_CONSTANT (S3) -------------------------------------------------
   // PUSH_CONSTANT idx: push vfn->constants->data[idx]
