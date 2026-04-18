@@ -232,25 +232,14 @@
       (unless (or (symbol? (car clause)) (list? (car clause)) (self-evaluating? (car clause)))
         (raise 'syntax "case expects an else clause, a literal, or a list of literals as its datum"))
 
-      (define (all-immediate? lst)
-        (if (null? lst)
-          #t
-          (if (or (symbol? (car lst)) (char? (car lst)) (fixnum? (car lst)) (boolean? (car lst)))
-            (all-immediate? (cdr lst))
-            #f)))
-
       (define condition
         (if (c (car clause) #'else)
-          #t
+          #t 
           (if (or (symbol? (car clause)) (self-evaluating? (car clause)))
             ;; Immediate values result in an eqv? call
-            `(,#'eqv? ,#'result (,#'quote ,(car clause)))
-            ;; Lists of immediates expand to an inlined or+eqv? chain
-            ;; to avoid memv's function-call + list-walk overhead.
-            (if (and (list? (car clause)) (all-immediate? (car clause)))
-              `(,#'or ,@(map (lambda (d) `(,#'eqv? ,#'result (,#'quote ,d))) (car clause)))
-              ;; Fallback: non-immediate datums go through memv
-              `(,#'memv ,#'result (,#'quote ,(car clause)))))))
+            `(,#'eqv? ,#'result (,#'quote ,(car clause)))            
+            ;; Lists will be memv'd
+            `(,#'memv ,#'result (,#'quote ,(car clause))))))
 
       (define branch
         (if (and (c (car clause) #'else) (c (cadr clause) #'=>))
