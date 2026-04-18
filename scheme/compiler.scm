@@ -324,6 +324,225 @@
        (eq? (rename-strip (caar x)) 'lambda)
        (list? (cadar x))))
 
+;; Detect the named-let expansion pattern:
+;;   ((lambda () (define NAME (lambda ARGS BODY...)) (NAME INITS...)))
+;; Returns a list (NAME ARGS BODY INITS) if matched, otherwise #f.
+;; This is specifically the shape produced by the (let loop ...) macro in syntax.scm.
+(define (named-loop-match fn x)
+  (and (compiler-inline-car)
+       (not (OpenFn/toplevel? fn))
+       ;; Outer: ((lambda () ...))
+       (pair? (car x)) (null? (cdr x))
+       (eq? (rename-strip (caar x)) 'lambda)
+       (null? (cadar x)) ; outer args must be ()
+       ;; Outer body is exactly two expressions: DEF and CALL
+       (let ((outer-body (cddar x)))
+         (and (list? outer-body)
+              (fx= (length outer-body) 2)
+              (let ((def (car outer-body)) (call (cadr outer-body)))
+                (and (pair? def)
+                     (eq? (rename-strip (car def)) 'define)
+                     (fx= (length def) 3)
+                     (identifier? (cadr def))
+                     (pair? (caddr def))
+                     (eq? (rename-strip (car (caddr def))) 'lambda)
+                     (fx>= (length (caddr def)) 3)
+                     ;; CALL is (NAME INITS...) and NAME matches
+                     (pair? call)
+                     (identifier? (car call))
+                     (identifier=? (cadr def) (car call))
+                     ;; args list must be proper and all identifiers
+                     (let* ((inner-lambda (caddr def))
+                            (args (cadr inner-lambda))
+                            (body (cddr inner-lambda)))
+                       (and (list? args)
+                            (every identifier? args)
+                            ;; argc must match inits count
+                            (fx= (length args) (length (cdr call)))
+                            (list (cadr def) args body (cdr call))))))))))
+
+;; Scan BODY to verify that NAME is used only as the head of an application,
+;; every such application is in tail position, and NAME is never set! or captured.
+;; Returns #t if safe to lower; #f otherwise.
+(define (named-loop-usage-ok? name body tail?)
+  (let ((ok #t))
+    (define (ident=? x) (and (identifier? x) (identifier=? x name)))
+    (define (args-shadow? args)
+      (cond
+        ((null? args) #f)
+        ((identifier? args) (ident=? args))
+        ((pair? args) (or (ident=? (car args)) (args-shadow? (cdr args))))
+        (else #f)))
+    (define (scan-expr x tail?)
+      (when ok
+        (cond
+          ((identifier? x)
+           (when (ident=? x) (set! ok #f)))
+          ((pair? x)
+           (let ((head (car x)))
+             (cond
+               ((and (identifier? head) (eq? (rename-strip head) 'quote)) #f)
+               ((and (identifier? head) (eq? (rename-strip head) 'set!))
+                ;; (set! NAME ...) - reject. Also scan the value form.
+                (when (and (pair? (cdr x)) (ident=? (cadr x)))
+                  (set! ok #f))
+                (when (and ok (pair? (cdr x)) (pair? (cddr x)))
+                  (scan-expr (caddr x) #f)))
+               ((and (identifier? head) (eq? (rename-strip head) 'lambda))
+                ;; Inside a nested lambda, NAME must not be referenced at all —
+                ;; capturing NAME into a closure defeats the lowering. If the
+                ;; lambda's argument list shadows NAME, the body can't see it.
+                (unless (and (pair? (cdr x)) (args-shadow? (cadr x)))
+                  (scan-body-no-ref (cddr x))))
+               ((and (identifier? head) (eq? (rename-strip head) 'if))
+                ;; condition non-tail, branches inherit tail
+                (when (pair? (cdr x)) (scan-expr (cadr x) #f))
+                (when (and (pair? (cdr x)) (pair? (cddr x))) (scan-expr (caddr x) tail?))
+                (when (and (pair? (cdr x)) (pair? (cddr x)) (pair? (cdddr x)))
+                  (scan-expr (cadddr x) tail?)))
+               ((and (identifier? head) (eq? (rename-strip head) 'begin))
+                (scan-body (cdr x) tail?))
+               ((and (identifier? head) (eq? (rename-strip head) 'define))
+                ;; Shadowing NAME via an internal define is rejected for simplicity.
+                (when (and (pair? (cdr x)) (ident=? (cadr x)))
+                  (set! ok #f))
+                ;; non-tail value
+                (when (and ok (pair? (cdr x)) (pair? (cddr x)))
+                  (scan-expr (caddr x) #f)))
+               ((and (identifier? head) (or (eq? (rename-strip head) 'and)
+                                            (eq? (rename-strip head) 'or)))
+                (scan-body (cdr x) tail?))
+               (else
+                 ;; Application. Head may be NAME.
+                 (cond
+                   ((ident=? head)
+                    (unless tail? (set! ok #f))
+                    ;; And scan arguments non-tail — NAME must not appear in them
+                    (when ok (scan-args (cdr x))))
+                   ((and (pair? head)
+                         (identifier? (car head))
+                         (eq? (rename-strip (car head)) 'lambda)
+                         (pair? (cdr head))
+                         (list? (cadr head))
+                         (every identifier? (cadr head)))
+                    ;; Inline lambda-application: (((lambda (params) body...) args...)).
+                    ;; The lambda body inherits our tail position because the
+                    ;; compiler will inline it via compile-inline-call. Args are
+                    ;; non-tail.
+                    (scan-args (cdr x))
+                    (when ok
+                      (unless (args-shadow? (cadr head))
+                        (scan-body (cddr head) tail?))))
+                   (else
+                     ;; head is not NAME; scan it as a non-tail expr, then scan args
+                     (scan-expr head #f)
+                     (when ok (scan-args (cdr x))))))))))))
+    (define (scan-args xs)
+      (when (and ok (pair? xs))
+        (scan-expr (car xs) #f)
+        (scan-args (cdr xs))))
+    (define (scan-body xs tail?)
+      (when (and ok (pair? xs))
+        (if (null? (cdr xs))
+          (scan-expr (car xs) tail?)
+          (begin
+            (scan-expr (car xs) #f)
+            (scan-body (cdr xs) tail?)))))
+    (define (scan-body-no-ref xs)
+      ;; Scan a body that must not reference NAME at all (e.g. inside a nested lambda).
+      (when (and ok (pair? xs))
+        (scan-expr-no-ref (car xs))
+        (scan-body-no-ref (cdr xs))))
+    (define (scan-expr-no-ref x)
+      (when ok
+        (cond
+          ((identifier? x) (when (ident=? x) (set! ok #f)))
+          ((pair? x)
+           (let ((head (car x)))
+             (cond
+               ((and (identifier? head) (eq? (rename-strip head) 'quote)) #f)
+               ((and (identifier? head) (eq? (rename-strip head) 'lambda))
+                ;; Skip the args list; only scan the body. Respect shadowing.
+                (unless (and (pair? (cdr x)) (args-shadow? (cadr x)))
+                  (scan-body-no-ref (cddr x))))
+               (else (for-each-improper scan-expr-no-ref x))))))))
+    (scan-body body tail?)
+    ok))
+
+;; Compile a named-let lowering. Expects tail? to be #t.
+;; pattern = (NAME ARGS BODY INITS)
+(define (compile-named-loop fn x tail? pattern)
+  (let* ((name (car pattern))
+         (args (cadr pattern))
+         (body (caddr pattern))
+         (inits (cadddr pattern))
+         (argc (length args))
+         (base-local (OpenFn/local-count fn))
+         (label (gensym 'named-loop)))
+    (compiler-log fn "lowering named loop" name "args" args "argc" argc)
+    ;; Reserve one local slot per argument up front so subsequent compilation
+    ;; does not reuse those slots.
+    (OpenFn/local-count! fn (fx+ base-local argc))
+    ;; Evaluate each init expression and store it into the matching slot. Stack
+    ;; effect per init: +1 then -1 via local-set, net 0.
+    (let loop ((i 0) (as args) (is inits))
+      (unless (null? as)
+        (let ((slot (fx+ base-local i)) (a (car as)))
+          (table-set! (OpenFn/env fn) a (Var/make slot a))
+          (compile-expr fn (car is) #f is #f)
+          (emit fn 'local-set slot)
+          (loop (fx+ i 1) (cdr as) (cdr is)))))
+    ;; Install the named-loop marker so (NAME ...) calls in BODY are lowered to
+    ;; backward jumps. We store a tagged list: ('named-loop label argc base-local).
+    (let ((marker (list 'named-loop label argc base-local)))
+      (table-set! (OpenFn/env fn) name marker))
+    ;; Hoist any internal defines in BODY.
+    (scan-local-defines fn body)
+    ;; Label points at the current insn position (body start).
+    (register-label fn label)
+    ;; Compile body as a begin so it shares compile-begin's tail handling.
+    (let ((begin-form (cons (make-rename #f 'begin) body)))
+      (compile-expr fn begin-form #f body tail?))
+    ;; Remove the marker so it cannot leak into sibling code.
+    (table-set! (OpenFn/env fn) name #f)))
+
+;; Emit a tail-jump back to the named-loop label: evaluate args, store to slots,
+;; then jump. Artificially bumps stack-size by 1 so the caller's +1 invariant holds.
+(define (compile-named-loop-call fn x marker)
+  (let* ((label (list-ref marker 1))
+         (expected-argc (list-ref marker 2))
+         (base-local (list-ref marker 3))
+         (args (cdr x))
+         (argc (length args)))
+    (unless (fx= argc expected-argc)
+      (raise-source x 'compile
+        (print-string "named-loop call expected" expected-argc "arguments but got" argc)
+        (list x)))
+    (cond
+      ((fx= argc 0)
+       (emit fn 'jump label))
+      ((fx= argc 1)
+       ;; Evaluate and store directly — no temporaries needed.
+       (compile-expr fn (car args) #f args #f)
+       (emit fn 'local-set base-local)
+       (emit fn 'jump label))
+      (else
+        ;; Evaluate all args onto the stack (left-to-right) so later inits can
+        ;; still see the old values of the loop variables, then pop into slots
+        ;; in reverse order.
+        (let loop ((i 0) (rest args))
+          (unless (null? rest)
+            (compile-expr fn (car rest) #f rest #f)
+            (loop (fx+ i 1) (cdr rest))))
+        (let loop ((i (fx- argc 1)))
+          (unless (fx< i 0)
+            (emit fn 'local-set (fx+ base-local i))
+            (loop (fx- i 1))))
+        (emit fn 'jump label)))
+    ;; The instructions after a jump are unreachable, but compile-expr's stack
+    ;; invariant demands +1. Bump stack-size manually without emitting.
+    (fn-adjust-stack fn 1)))
+
 (define primitive-type-checks '(symbol?))
 
 (define (compile-primitive-check fn prim)
@@ -390,10 +609,32 @@
 
   (compiler-log fn "compiling application" x)
 
-  (if (apply-inlinable? fn x)
-    (begin
-      (compile-inline-call fn x tail?))
-    (let ()
+  ;; Named-let lowering: detect and compile the (let loop ...) expansion as a
+  ;; labeled-jump loop rather than a closure-allocating recursive call.
+  (aif (and tail?
+            (symbol? kar)
+            (identifier? kar)
+            ;; Lookup in the *current* fn's env only — the marker is only valid
+            ;; here; crossing a lambda boundary would have required capture and
+            ;; the tail-only scan would have rejected it.
+            (let ((entry (table-ref (OpenFn/env fn) kar)))
+              (and (pair? entry) (eq? (car entry) 'named-loop) entry)))
+    (compile-named-loop-call fn x it)
+    (aif (named-loop-match fn x)
+      (if (named-loop-usage-ok? (car it) (caddr it) tail?)
+        (compile-named-loop fn x tail? it)
+        (compile-inline-call fn x tail?))
+      (if (apply-inlinable? fn x)
+        (compile-inline-call fn x tail?)
+        (compile-apply/generic fn x tail? kar))))
+)
+
+(define (compile-apply/generic fn x tail? kar)
+  (define stack-check #f)
+  (define argc (length (cdr x)))
+  (define primitive #f)
+  (define primitive-args #f)
+  (let ()
       ;; Compiling specific opcodes
       ;; +, -, etc
       (aif (and (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
@@ -489,7 +730,7 @@
           )
         )
         (emit fn (if tail? 'apply-tail 'apply) (length (cdr x))))
-      )))
+      ))
 
 ;; This is the free-variable handling, it's necessarily somewhat complex
 
