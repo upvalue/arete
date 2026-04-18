@@ -288,6 +288,11 @@
     (not 1 1 #f #f)
     (eq? 2 2 #f #f)
     (null? 1 1 #f #f)
+    (cadr 1 1 #f #f)
+    (cddr 1 1 #f #f)
+    (caar 1 1 #f #f)
+    (cdar 1 1 #f #f)
+    (caddr 1 1 #f #f)
     (fx+ 2 2 #f #f)
     (fx- 2 2 #f #f)
     (fx< 2 2 #f #f)
@@ -455,13 +460,20 @@
               (emit fn (car primitive) (length (cdr x))))
             (if (list-ref primitive 4)
               (compile-primitive-check fn (car primitive))
-              (if (eq? (car primitive) 'null?)
-                ;; Inline (null? x) as: push-immediate (value-bits '()), eq?
-                ;; value-bits '() = 10 (C_NIL)
-                (begin
-                  (emit fn 'push-immediate 10)
-                  (emit fn 'eq?))
-                (emit fn (car primitive))))
+              (case (car primitive)
+                ((null?)
+                 ;; Inline (null? x) as: push-immediate (value-bits '()), eq?
+                 ;; value-bits '() = 10 (C_NIL)
+                 (emit fn 'push-immediate 10)
+                 (emit fn 'eq?))
+                ;; Composite list accessors: emit sequences of car/cdr.
+                ;; Each car/cdr has stack-effect 0, so net effect matches a single car.
+                ((cadr)  (emit fn 'cdr) (emit fn 'car))
+                ((cddr)  (emit fn 'cdr) (emit fn 'cdr))
+                ((caar)  (emit fn 'car) (emit fn 'car))
+                ((cdar)  (emit fn 'car) (emit fn 'cdr))
+                ((caddr) (emit fn 'cdr) (emit fn 'cdr) (emit fn 'car))
+                (else (emit fn (car primitive)))))
 
           )
         )
