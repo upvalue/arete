@@ -296,6 +296,9 @@
     (fx+ 2 2 #f #f)
     (fx- 2 2 #f #f)
     (fx< 2 2 #f #f)
+    ;; char=? and fx= both compile to eq? — same-bits iff equal for immediate tagged chars/fixnums.
+    (char=? 2 2 #f #f)
+    (fx= 2 2 #f #f)
 
     ;; type checks
     ;(symbol? 1 1 #f #t)
@@ -307,6 +310,9 @@
     (record-type? 1 1 #f #t)
     (string? 1 1 #f #t)
     (fixnum? 1 1 #f #t)
+    (flonum? 1 1 #f #t)
+    (char? 1 1 #f #t)
+    (vector? 1 1 #f #t)
     (constant? 1 1 #f #t)
   ))
 )
@@ -334,6 +340,9 @@
         (cfunction? 14)
         (record? 17)
         (record-type? 18)
+        (flonum? 4)
+        (char? 6)
+        (vector? 9)
         (constant? (value-type #t))))))
 
 (define (compile-inline-call fn x tail?)
@@ -473,6 +482,8 @@
                 ((caar)  (emit fn 'car) (emit fn 'car))
                 ((cdar)  (emit fn 'car) (emit fn 'cdr))
                 ((caddr) (emit fn 'cdr) (emit fn 'cdr) (emit fn 'car))
+                ;; char=? and fx= compile to eq? — bits equality for immediates.
+                ((char=? fx=) (emit fn 'eq?))
                 (else (emit fn (car primitive)))))
 
           )
