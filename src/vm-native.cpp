@@ -85,6 +85,12 @@ static bool native_vm_opcode_supported(size_t op) {
     // Fused eq?-to-safe-immediate-literal + jump (exp 3d):
     case OP_JUMP_IF_EQ_IMM:
     case OP_JUMP_IF_NOT_EQ_IMM:
+    // Fused composite-pair accessors (exp 7):
+    case OP_CADR:
+    case OP_CDDR:
+    case OP_CAAR:
+    case OP_CDAR:
+    case OP_CADDR:
       return true;
     default:
       return false;
@@ -182,6 +188,11 @@ bool native_vm_function_eligible(VMFunction* vfn) {
       case OP_FX_ADD:
       case OP_FX_SUB:
       case OP_ARGV_REST:
+      case OP_CADR:
+      case OP_CDDR:
+      case OP_CAAR:
+      case OP_CDAR:
+      case OP_CADDR:
         i += 1; break;
 
       case OP_PUSH_CONSTANT:

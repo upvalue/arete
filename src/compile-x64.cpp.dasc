@@ -935,10 +935,15 @@ Value compile_native(State& state, Value vfn_) {
       case OP_NOT:
       case OP_CAR:
       case OP_CDR:
-      case OP_FX_ADD: case OP_FX_SUB: 
+      case OP_CADR:
+      case OP_CDDR:
+      case OP_CAAR:
+      case OP_CDAR:
+      case OP_CADDR:
+      case OP_FX_ADD: case OP_FX_SUB:
       case OP_FX_LT:
       case OP_POP:
-      case OP_RETURN: 
+      case OP_RETURN:
       case OP_ARGV_REST:
       case OP_EQ: continue;
 
@@ -1654,6 +1659,46 @@ Value compile_native(State& state, Value vfn_) {
         | assertHeapTypeEquals rax, E_CAR, E_EXPECTED_TYPE, PAIR
         | add rax, (car ? (ptrdiff_t)(&((Pair*)0)->data_car) : (ptrdiff_t)(&((Pair*)0)->data_cdr))
         | mov rax, [rax]
+        | mov [STACK-8], rax
+
+        break;
+      }
+
+      // Exp 7: fused composite pair accessors. Same pair-check + deref
+      // sequence as OP_CAR/OP_CDR, repeated 2 (or 3 for CADDR) times with
+      // no stack traffic between steps. Error tag matches the existing
+      // single-op convention (E_CAR).
+      case OP_CADR:
+      case OP_CDDR:
+      case OP_CAAR:
+      case OP_CDAR:
+      case OP_CADDR: {
+        int op = code[current_insn];
+        const char* op_name =
+          op == OP_CADR  ? "cadr"  :
+          op == OP_CDDR  ? "cddr"  :
+          op == OP_CAAR  ? "caar"  :
+          op == OP_CDAR  ? "cdar"  :
+                           "caddr";
+        AR_LOG_JIT(op_name);
+
+        // Step sequence: 0 = cdr, 1 = car.
+        int steps[3];
+        int nsteps;
+        switch(op) {
+          case OP_CADR:  steps[0] = 0; steps[1] = 1;               nsteps = 2; break;
+          case OP_CDDR:  steps[0] = 0; steps[1] = 0;               nsteps = 2; break;
+          case OP_CAAR:  steps[0] = 1; steps[1] = 1;               nsteps = 2; break;
+          case OP_CDAR:  steps[0] = 1; steps[1] = 0;               nsteps = 2; break;
+          default:       steps[0] = 0; steps[1] = 0; steps[2] = 1; nsteps = 3; break;
+        }
+
+        | mov rax, [STACK-8]
+        for(int s = 0; s < nsteps; s++) {
+          | assertHeapTypeEquals rax, E_CAR, E_EXPECTED_TYPE, PAIR
+          | add rax, (steps[s] == 1 ? (ptrdiff_t)(&((Pair*)0)->data_car) : (ptrdiff_t)(&((Pair*)0)->data_cdr))
+          | mov rax, [rax]
+        }
         | mov [STACK-8], rax
 
         break;

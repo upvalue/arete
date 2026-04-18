@@ -2529,6 +2529,17 @@ enum {
   // chains.
   OP_JUMP_IF_EQ_IMM = 40,
   OP_JUMP_IF_NOT_EQ_IMM = 41,
+  // Fused composite-pair-accessor opcodes (exp 7). Each pops 1, performs two
+  // (or three for CADDR) PAIR-type-checked dereferences inline, then pushes
+  // the result. Semantic = same as the corresponding car/cdr opcode sequence
+  // (see da07122). Benefit: one opcode dispatch instead of 2–3. On a non-pair
+  // at any intermediate step, raises the same type-error as OP_CAR/OP_CDR
+  // would.
+  OP_CADR = 42,    // (car (cdr X)) — cdr, car
+  OP_CDDR = 43,    // (cdr (cdr X)) — cdr, cdr
+  OP_CAAR = 44,    // (car (car X)) — car, car
+  OP_CDAR = 45,    // (cdr (car X)) — car, cdr
+  OP_CADDR = 46,   // (car (cdr (cdr X))) — cdr, cdr, car
 };
 
 inline Type Value::type() const {

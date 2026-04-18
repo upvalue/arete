@@ -176,7 +176,10 @@
     ;; Exp 3b: fused pair?+conditional-jump (see compile-if).
     jump-if-not-pair jump-if-pair
     ;; Exp 3d: fused eq?-to-safe-immediate-literal + conditional-jump.
-    jump-if-eq-imm jump-if-not-eq-imm))
+    jump-if-eq-imm jump-if-not-eq-imm
+    ;; Exp 7: fused composite-pair-accessor opcodes. One dispatch per accessor
+    ;; rather than 2–3 (replaces the da07122 car/cdr opcode sequences).
+    cadr cddr caar cdar caddr))
 
 (define static-labels '())
 
@@ -209,7 +212,7 @@
   (let ((table (make-table))
         (lst '(
                (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+ jump-if-not-nil jump-if-nil jump-if-not-pair jump-if-pair jump-if-eq-imm jump-if-not-eq-imm)
-               (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest)
+               (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest cadr cddr caar cdar caddr)
                (1 push-immediate push-constant global-get local-get upvalue-get upvalue-from-closure upvalue-from-local)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
@@ -722,13 +725,14 @@
                  ;; value-bits '() = 10 (C_NIL)
                  (emit fn 'push-immediate 10)
                  (emit fn 'eq?))
-                ;; Composite list accessors: emit sequences of car/cdr.
-                ;; Each car/cdr has stack-effect 0, so net effect matches a single car.
-                ((cadr)  (emit fn 'cdr) (emit fn 'car))
-                ((cddr)  (emit fn 'cdr) (emit fn 'cdr))
-                ((caar)  (emit fn 'car) (emit fn 'car))
-                ((cdar)  (emit fn 'car) (emit fn 'cdr))
-                ((caddr) (emit fn 'cdr) (emit fn 'cdr) (emit fn 'car))
+                ;; Exp 7: single-dispatch fused composite pair accessors.
+                ;; Each emits one opcode (net stack effect 0) instead of the
+                ;; 2- or 3-op car/cdr sequences from da07122.
+                ((cadr)  (emit fn 'cadr))
+                ((cddr)  (emit fn 'cddr))
+                ((caar)  (emit fn 'caar))
+                ((cdar)  (emit fn 'cdar))
+                ((caddr) (emit fn 'caddr))
                 ;; char=? and fx= compile to eq? — bits equality for immediates.
                 ((char=? fx=) (emit fn 'eq?))
                 (else (emit fn (car primitive)))))

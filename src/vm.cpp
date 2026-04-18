@@ -297,6 +297,11 @@ tail:
     &&LABEL_OP_JUMP_IF_PAIR,
     &&LABEL_OP_JUMP_IF_EQ_IMM,
     &&LABEL_OP_JUMP_IF_NOT_EQ_IMM,
+    &&LABEL_OP_CADR,
+    &&LABEL_OP_CDDR,
+    &&LABEL_OP_CAAR,
+    &&LABEL_OP_CDAR,
+    &&LABEL_OP_CADDR,
   };
 #endif
 
@@ -880,6 +885,70 @@ tail:
       VM_CASE(OP_CDR): {
         VM_TOP_PAIR_CHECK("cdr");
         *(stack - 1) = STACK_PICK(1).cdr();
+        VM_DISPATCH();
+      }
+
+      // Exp 7: fused composite pair accessors. Each performs 2 (or 3 for
+      // CADDR) PAIR-type-checked dereferences in a single opcode dispatch.
+      // Error behavior matches the equivalent OP_CAR/OP_CDR sequence: the
+      // first non-pair intermediate value raises the same type-error the
+      // corresponding single op would, named after the step that tripped.
+      VM_CASE(OP_CADR): {
+        // (car (cdr X)): cdr step first, then car step.
+        VM_TOP_PAIR_CHECK("cdr");
+        Value v = STACK_PICK(1).cdr();
+        if(!v.heap_type_equals(PAIR)) {
+          VM2_EXCEPTION("type", "vm primitive car expected a pair as its argument but got " << v.type());
+        }
+        *(stack - 1) = v.car();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_CDDR): {
+        // (cdr (cdr X))
+        VM_TOP_PAIR_CHECK("cdr");
+        Value v = STACK_PICK(1).cdr();
+        if(!v.heap_type_equals(PAIR)) {
+          VM2_EXCEPTION("type", "vm primitive cdr expected a pair as its argument but got " << v.type());
+        }
+        *(stack - 1) = v.cdr();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_CAAR): {
+        // (car (car X))
+        VM_TOP_PAIR_CHECK("car");
+        Value v = STACK_PICK(1).car();
+        if(!v.heap_type_equals(PAIR)) {
+          VM2_EXCEPTION("type", "vm primitive car expected a pair as its argument but got " << v.type());
+        }
+        *(stack - 1) = v.car();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_CDAR): {
+        // (cdr (car X))
+        VM_TOP_PAIR_CHECK("car");
+        Value v = STACK_PICK(1).car();
+        if(!v.heap_type_equals(PAIR)) {
+          VM2_EXCEPTION("type", "vm primitive cdr expected a pair as its argument but got " << v.type());
+        }
+        *(stack - 1) = v.cdr();
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_CADDR): {
+        // (car (cdr (cdr X))) — three derefs in one dispatch.
+        VM_TOP_PAIR_CHECK("cdr");
+        Value v1 = STACK_PICK(1).cdr();
+        if(!v1.heap_type_equals(PAIR)) {
+          VM2_EXCEPTION("type", "vm primitive cdr expected a pair as its argument but got " << v1.type());
+        }
+        Value v2 = v1.cdr();
+        if(!v2.heap_type_equals(PAIR)) {
+          VM2_EXCEPTION("type", "vm primitive car expected a pair as its argument but got " << v2.type());
+        }
+        *(stack - 1) = v2.car();
         VM_DISPATCH();
       }
 

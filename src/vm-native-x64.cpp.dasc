@@ -67,7 +67,7 @@ static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 // Direct-indexed by opcode. Dispatch tail does `jmp [r11 + rax*8]`. Slots
 // this core doesn't yet handle point at the bad-opcode trampoline so an
 // eligibility bug manifests as a readable exception, not wild control flow.
-static void* dispatch_table[OP_JUMP_IF_NOT_EQ_IMM + 1];
+static void* dispatch_table[OP_CADDR + 1];
 
 #define NATIVE_VM_PAIR_CAR_OFF ((ptrdiff_t) offsetof(Pair, data_car))
 #define NATIVE_VM_PAIR_CDR_OFF ((ptrdiff_t) offsetof(Pair, data_cdr))
@@ -112,7 +112,12 @@ static void* dispatch_table[OP_JUMP_IF_NOT_EQ_IMM + 1];
   _(OP_JUMP_IF_NOT_PAIR, op_jump_if_not_pair) \
   _(OP_JUMP_IF_PAIR, op_jump_if_pair) \
   _(OP_JUMP_IF_EQ_IMM, op_jump_if_eq_imm) \
-  _(OP_JUMP_IF_NOT_EQ_IMM, op_jump_if_not_eq_imm)
+  _(OP_JUMP_IF_NOT_EQ_IMM, op_jump_if_not_eq_imm) \
+  _(OP_CADR, op_cadr) \
+  _(OP_CDDR, op_cddr) \
+  _(OP_CAAR, op_caar) \
+  _(OP_CDAR, op_cdar) \
+  _(OP_CADDR, op_caddr)
 
 // Called from assembly when OP_ARGC_EQ fails.
 static Value native_vm_argc_error(State* state, size_t got, size_t expected) {
@@ -601,6 +606,29 @@ void init_native_vm(State& state) {
   | mov rdx, [rax + field_off]
   | mov [STACK - 8], rdx
   | jmp ->dispatch
+  |.endmacro
+
+  // Exp 7: chained pair-access check. Caller sets rax to the current value
+  // (first step: rax = [STACK - 8]; subsequent steps: rax = result of prior
+  // step). This macro only does the PAIR type-check — on mismatch, stores
+  // the offending value back to [STACK - 8] and jumps to `err` (which reads
+  // [STACK - 8] to populate the error). On success, falls through with rax
+  // unchanged; the caller is responsible for doing `mov rax, [rax +
+  // field_off]` afterwards.
+  //
+  // Using two local labels per expansion would collide when the macro is
+  // invoked multiple times in the same procedure (DynASM local labels are
+  // reusable across the whole code segment), so we thread the mismatch
+  // through a per-caller off-path label the caller chooses.
+  |.macro pairCheckTop, err
+  | test rax, rax
+  | je err
+  | test rax, 3
+  | jnz err
+  | mov rdx, [rax]
+  | movzx rdx, dl
+  | cmp rdx, PAIR
+  | jne err
   |.endmacro
 
   |.code
@@ -1273,6 +1301,90 @@ void init_native_vm(State& state) {
 
   |->op_cdr:
   | pairAccessTop NATIVE_VM_PAIR_CDR_OFF, ->cdr_error
+
+  // --- Exp 7: fused composite pair accessors ----------------------------------
+  // Each performs 2 (or 3 for CADDR) PAIR-type-checked dereferences inline
+  // with a single opcode dispatch. On a non-pair intermediate, the per-op
+  // error trampoline stores the offender to [STACK - 8] (so the shared
+  // car_error/cdr_error trampolines can read it there) and jumps to the
+  // correct shared handler. Error-tag names the step that tripped (CADR's
+  // cdr step traps to cdr_error; its car step to car_error).
+
+  |->op_cadr:
+  // (car (cdr X))
+  | mov rax, [STACK - 8]
+  | pairCheckTop ->cadr_cdr_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CDR_OFF]
+  | pairCheckTop ->cadr_car_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CAR_OFF]
+  | mov [STACK - 8], rax
+  | jmp ->dispatch
+  |->cadr_cdr_err:
+  | mov [STACK - 8], rax
+  | jmp ->cdr_error
+  |->cadr_car_err:
+  | mov [STACK - 8], rax
+  | jmp ->car_error
+
+  |->op_cddr:
+  // (cdr (cdr X))
+  | mov rax, [STACK - 8]
+  | pairCheckTop ->cddr_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CDR_OFF]
+  | pairCheckTop ->cddr_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CDR_OFF]
+  | mov [STACK - 8], rax
+  | jmp ->dispatch
+  |->cddr_err:
+  | mov [STACK - 8], rax
+  | jmp ->cdr_error
+
+  |->op_caar:
+  // (car (car X))
+  | mov rax, [STACK - 8]
+  | pairCheckTop ->caar_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CAR_OFF]
+  | pairCheckTop ->caar_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CAR_OFF]
+  | mov [STACK - 8], rax
+  | jmp ->dispatch
+  |->caar_err:
+  | mov [STACK - 8], rax
+  | jmp ->car_error
+
+  |->op_cdar:
+  // (cdr (car X))
+  | mov rax, [STACK - 8]
+  | pairCheckTop ->cdar_car_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CAR_OFF]
+  | pairCheckTop ->cdar_cdr_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CDR_OFF]
+  | mov [STACK - 8], rax
+  | jmp ->dispatch
+  |->cdar_car_err:
+  | mov [STACK - 8], rax
+  | jmp ->car_error
+  |->cdar_cdr_err:
+  | mov [STACK - 8], rax
+  | jmp ->cdr_error
+
+  |->op_caddr:
+  // (car (cdr (cdr X)))
+  | mov rax, [STACK - 8]
+  | pairCheckTop ->caddr_cdr_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CDR_OFF]
+  | pairCheckTop ->caddr_cdr_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CDR_OFF]
+  | pairCheckTop ->caddr_car_err
+  | mov rax, [rax + NATIVE_VM_PAIR_CAR_OFF]
+  | mov [STACK - 8], rax
+  | jmp ->dispatch
+  |->caddr_cdr_err:
+  | mov [STACK - 8], rax
+  | jmp ->cdr_error
+  |->caddr_car_err:
+  | mov [STACK - 8], rax
+  | jmp ->car_error
 
   // --- OP_TYPE_CHECK (S6) ----------------------------------------------------
   // TYPE_CHECK tipe: pop v, push Value(v.type() == tipe).
