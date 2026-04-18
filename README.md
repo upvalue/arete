@@ -1,7 +1,7 @@
 # History!
 
-This is a Scheme implementation I wrote in late 2017 / early 2018. It is
-pretty much on ice, but put here for posterity.
+This is a Scheme implementation I wrote in late 2017 / early 2018. It's mostly
+on ice but recently I've been optimizing it.
 
 A couple of thoughts I thought were somewhat interesting:
 
@@ -16,7 +16,8 @@ A couple of thoughts I thought were somewhat interesting:
   renames. 
 
 - Native compiler for x64 written with DynASM (from LuaJIT). This may have
-  bitrotted, it's not been tested recently!
+  bitrotted, it's not been tested recently! More recently replaced with a
+  native code VM.
 
 # Original README
 
