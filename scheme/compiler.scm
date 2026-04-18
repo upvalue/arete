@@ -179,7 +179,12 @@
     jump-if-eq-imm jump-if-not-eq-imm
     ;; Exp 7: fused composite-pair-accessor opcodes. One dispatch per accessor
     ;; rather than 2–3 (replaces the da07122 car/cdr opcode sequences).
-    cadr cddr caar cdar caddr))
+    cadr cddr caar cdar caddr
+    ;; Exp 8: fused callee-load + apply opcodes. Two operands: {source-idx, argc}.
+    ;; Callee is read directly (no operand-stack push) — from the constant pool
+    ;; (global) or from locals[] (local). Saves one dispatch + one push/pop per
+    ;; call at known-binding sites.
+    apply-global apply-tail-global apply-local apply-tail-local))
 
 (define static-labels '())
 
@@ -236,6 +241,10 @@
         ((+ - <) (fx+ (fx- 0 (cadr insns)) 1))
         ;; Remove arguments from stack, but push a single result in the place of the function on the stack
         ((apply apply-tail close-over) (fx- 0 (cadr insns)))
+        ;; Exp 8: fused callee-load + apply. Operand 2 is argc. Callee is not
+        ;; on the operand stack; result replaces arg1. Net: 1 - argc.
+        ((apply-global apply-tail-global apply-local apply-tail-local)
+         (fx- 1 (caddr insns)))
         (else (raise 'compile-internal (print-string "unknown instruction" (car insns)) (list fn (car insns) insns))))
     ))
 
@@ -643,6 +652,11 @@
   (define argc (length (cdr x)))
   (define primitive #f)
   (define primitive-args #f)
+  ;; Exp 8: if set, a fused callee-load+apply will be emitted after the args.
+  ;; Value is a list (KIND IDX) where KIND is 'global or 'local and IDX is the
+  ;; constant-pool index (global) or local slot (local). The callee is NOT
+  ;; evaluated onto the operand stack; the fused op reads it directly.
+  (define fused-callee #f)
   (let ()
       ;; Compiling specific opcodes
       ;; +, -, etc
@@ -666,7 +680,26 @@
               (set! primitive-args #t))
 
           (set! primitive it)))
-        (compile-expr fn (car x) #f x #f))
+        ;; Exp 8: if kar is a bare (un-renamed) identifier that resolves to a
+        ;; global or a plain local (not an upvalue and not a named-loop marker),
+        ;; skip the operand-stack push and defer to a fused op after arg-eval.
+        ;; Falls through to compile-expr for upvalues, lambda forms, and any
+        ;; other non-trivial callee shapes — preserving existing behavior.
+        (aif (and (symbol? kar)
+                  (identifier? kar)
+                  (not (rename? (car x)))
+                  (let ((res (fn-lookup fn kar x)))
+                    (cond
+                      ((eq? (car res) 'global)
+                       (list 'global (register-constant fn kar)))
+                      ((eq? (car res) 'local)
+                       ;; Exclude named-loop markers (env entry is a tagged
+                       ;; list, not a Var). The named-loop case was handled
+                       ;; earlier in compile-apply before reaching /generic.
+                       (list 'local (cdr res)))
+                      (else #f))))
+          (set! fused-callee it)
+          (compile-expr fn (car x) #f x #f)))
 
       (set! stack-check (OpenFn/stack-size fn))
 
@@ -739,7 +772,13 @@
 
           )
         )
-        (emit fn (if tail? 'apply-tail 'apply) (length (cdr x))))
+        (if fused-callee
+          ;; Exp 8: emit fused callee-load + apply.
+          (let ((kind (car fused-callee)) (idx (cadr fused-callee)))
+            (case kind
+              ((global) (emit fn (if tail? 'apply-tail-global 'apply-global) idx (length (cdr x))))
+              ((local)  (emit fn (if tail? 'apply-tail-local 'apply-local) idx (length (cdr x))))))
+          (emit fn (if tail? 'apply-tail 'apply) (length (cdr x)))))
       ))
 
 ;; This is the free-variable handling, it's necessarily somewhat complex
