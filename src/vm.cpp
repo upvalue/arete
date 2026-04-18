@@ -291,6 +291,8 @@ tail:
     &&LABEL_OP_FX_LT,
     &&LABEL_OP_FX_ADD,
     &&LABEL_OP_FX_SUB,
+    &&LABEL_OP_JUMP_IF_NOT_NIL,
+    &&LABEL_OP_JUMP_IF_NIL,
   };
 #endif
 
@@ -607,6 +609,29 @@ tail:
           VM_JUMP(jmp_offset);
         }
 
+        VM_DISPATCH();
+      }
+
+      // Fused null?+jump: pop value, jump if it is NOT nil.
+      // Emitted by compile-if for (if (null? X) then else).
+      VM_CASE(OP_JUMP_IF_NOT_NIL): {
+        size_t jmp_offset = VM_NEXT_INSN();
+        Value v = *--stack;
+        if(v != C_NIL) {
+          VM_JUMP(jmp_offset);
+        }
+        VM_DISPATCH();
+      }
+
+      // Fused (not (null? X))+jump: pop value, jump if it IS nil.
+      // Emitted by compile-if for (if (not (null? X)) then else), which is
+      // what unless expands to for a null? test.
+      VM_CASE(OP_JUMP_IF_NIL): {
+        size_t jmp_offset = VM_NEXT_INSN();
+        Value v = *--stack;
+        if(v == C_NIL) {
+          VM_JUMP(jmp_offset);
+        }
         VM_DISPATCH();
       }
 

@@ -67,7 +67,7 @@ static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 // Direct-indexed by opcode. Dispatch tail does `jmp [r11 + rax*8]`. Slots
 // this core doesn't yet handle point at the bad-opcode trampoline so an
 // eligibility bug manifests as a readable exception, not wild control flow.
-static void* dispatch_table[OP_FX_SUB + 1];
+static void* dispatch_table[OP_JUMP_IF_NIL + 1];
 
 #define NATIVE_VM_PAIR_CAR_OFF ((ptrdiff_t) offsetof(Pair, data_car))
 #define NATIVE_VM_PAIR_CDR_OFF ((ptrdiff_t) offsetof(Pair, data_cdr))
@@ -106,7 +106,9 @@ static void* dispatch_table[OP_FX_SUB + 1];
   _(OP_UPVALUE_GET, op_upvalue_get) \
   _(OP_UPVALUE_SET, op_upvalue_set) \
   _(OP_CLOSE_OVER, op_close_over) \
-  _(OP_ARGV_REST, op_argv_rest)
+  _(OP_ARGV_REST, op_argv_rest) \
+  _(OP_JUMP_IF_NOT_NIL, op_jump_if_not_nil) \
+  _(OP_JUMP_IF_NIL, op_jump_if_nil)
 
 // Called from assembly when OP_ARGC_EQ fails.
 static Value native_vm_argc_error(State* state, size_t got, size_t expected) {
@@ -1573,6 +1575,27 @@ void init_native_vm(State& state) {
   | mov rdx, [STACK - 8]
   | test rdx, rdx
   | jz ->dispatch
+  | jumpToOperandTarget rax
+
+  // --- OP_JUMP_IF_NOT_NIL (exp 3) --------------------------------------------
+  // Fused null?+jump: pop stack; jump to target iff popped value != C_NIL.
+  // Replaces push-immediate '(); eq?; jump-when-pop L in (if (null? X) ...).
+  |->op_jump_if_not_nil:
+  | fetchOperand rax
+  | sub STACK, 8
+  | mov rdx, [STACK]
+  | cmp rdx, C_NIL
+  | je ->dispatch
+  | jumpToOperandTarget rax
+
+  // --- OP_JUMP_IF_NIL (exp 3) ------------------------------------------------
+  // Fused (not (null? X))+jump: pop stack; jump to target iff popped value == C_NIL.
+  |->op_jump_if_nil:
+  | fetchOperand rax
+  | sub STACK, 8
+  | mov rdx, [STACK]
+  | cmp rdx, C_NIL
+  | jne ->dispatch
   | jumpToOperandTarget rax
 
   // --- OP_PUSH_CONSTANT (S3) -------------------------------------------------

@@ -964,7 +964,9 @@ Value compile_native(State& state, Value vfn_) {
       case OP_JUMP:
       case OP_JUMP_WHEN:
       case OP_JUMP_UNLESS:
-      case OP_JUMP_WHEN_POP: {
+      case OP_JUMP_WHEN_POP:
+      case OP_JUMP_IF_NOT_NIL:
+      case OP_JUMP_IF_NIL: {
         loc = code[code_offset++];
         break;
       }
@@ -1424,7 +1426,7 @@ Value compile_native(State& state, Value vfn_) {
       case OP_JUMP_WHEN_POP: {
         size_t loc = code[code_offset++];
         // Get top of stack
-        // If it is false, 
+        // If it is false,
 
         auto it = offsets_to_labels.find(loc);
         AR_ASSERT(it != offsets_to_labels.end() && "jump label was not generated correctly");
@@ -1442,6 +1444,25 @@ Value compile_native(State& state, Value vfn_) {
           | jne =>lbl
         } else {
           | je =>lbl
+        }
+        break;
+      }
+
+      // Fused null?+conditional-jump (exp 3).
+      case OP_JUMP_IF_NOT_NIL:
+      case OP_JUMP_IF_NIL: {
+        size_t loc = code[code_offset++];
+        auto it = offsets_to_labels.find(loc);
+        AR_ASSERT(it != offsets_to_labels.end() && "jump label was not generated correctly");
+        unsigned lbl = it->second;
+        AR_LOG_JIT("jump-if-" << ((code[current_insn] == OP_JUMP_IF_NIL) ? "" : "not-") << "nil " << loc << " (label " << lbl << ")");
+
+        | popStackTop ARG1
+        | cmp ARG1, C_NIL
+        if(code[current_insn] == OP_JUMP_IF_NIL) {
+          | je =>lbl
+        } else {
+          | jne =>lbl
         }
         break;
       }

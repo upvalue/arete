@@ -2501,6 +2501,15 @@ enum {
   OP_FX_LT = 33,
   OP_FX_ADD = 34,
   OP_FX_SUB = 35,
+  // Fused null?+conditional-jump: operand is jump target (word offset).
+  // JUMP_IF_NOT_NIL: pops stack; jumps if popped value != C_NIL. Replaces the
+  //   3-op sequence (push-immediate '(); eq?; jump-when-pop L) used by if's
+  //   codegen after (null? X) — the common list-recursion base-case test.
+  // JUMP_IF_NIL: pops stack; jumps if popped value == C_NIL. Replaces the
+  //   5-op sequence (push-immediate '(); eq?; not; jump-when-pop L) that
+  //   compile-if produces for (not (null? X)) — the unless/when-unless form.
+  OP_JUMP_IF_NOT_NIL = 36,
+  OP_JUMP_IF_NIL = 37,
 };
 
 inline Type Value::type() const {

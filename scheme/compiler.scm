@@ -170,7 +170,9 @@
     jump jump-when jump-when-pop jump-unless
     argc-eq argc-gte argv-rest
     type-check fixnum?
-    + - < car cdr list-ref not eq? fx< fx+ fx-))
+    + - < car cdr list-ref not eq? fx< fx+ fx-
+    ;; Exp 3: fused null?+conditional-jump (see compile-if).
+    jump-if-not-nil jump-if-nil))
 
 (define static-labels '())
 
@@ -202,7 +204,7 @@
 (define stack-effects
   (let ((table (make-table))
         (lst '(
-               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+)
+               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+ jump-if-not-nil jump-if-nil)
                (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest)
                (1 push-immediate push-constant global-get local-get upvalue-get upvalue-from-closure upvalue-from-local)
                )))
@@ -1033,6 +1035,23 @@
     )
   label))
 
+
+;; Exp 3: detect (head ARG) where head resolves to the global primitive named
+;; `sym`. Returns ARG on match, #f otherwise. Used by compile-if to fuse
+;; null?-tests into a single opcode.
+(define (if-primitive-call-match fn expr sym)
+  (and (pair? expr)
+       (fx= (length expr) 2)
+       (let ((head (car expr)))
+         (and (identifier? head)
+              (eq? (rename-strip head) sym)
+              ;; Ensure head isn't shadowed by a local/upvalue binding.
+              (eq? (car (fn-lookup fn (rename-strip head) expr)) 'global)
+              ;; Require the primitive path to actually be active; otherwise
+              ;; the argument wouldn't be inlined as a value anyway.
+              (eq? (top-level-value 'COMPILER-VM-PRIMITIVES) #t)
+              (cadr expr)))))
+
 (define (compile-if fn x cd tail?)
   (define condition (cadr x))
   (define then-branch (list-ref x 2))
@@ -1043,9 +1062,28 @@
   ;(print "control destination" cd)
 
   (define check-stack (OpenFn/stack-size fn))
-  (compile-expr fn condition #f (list-tail x 1) #f)
 
-  (emit fn 'jump-when-pop then-branch-end)
+  ;; Exp 3: fuse (null? X) and (not (null? X)) tests into a single opcode.
+  ;; (null? X) => jump-if-not-nil else-branch
+  ;; (not (null? X)) => jump-if-nil else-branch
+  ;; Otherwise fall through to the normal emit of condition + jump-when-pop.
+  (define null-arg (if-primitive-call-match fn condition 'null?))
+  (define not-null-arg
+    (and (not null-arg)
+         (aif (if-primitive-call-match fn condition 'not)
+           (if-primitive-call-match fn it 'null?)
+           #f)))
+
+  (cond
+    (null-arg
+     (compile-expr fn null-arg #f (list null-arg) #f)
+     (emit fn 'jump-if-not-nil then-branch-end))
+    (not-null-arg
+     (compile-expr fn not-null-arg #f (list not-null-arg) #f)
+     (emit fn 'jump-if-nil then-branch-end))
+    (else
+     (compile-expr fn condition #f (list-tail x 1) #f)
+     (emit fn 'jump-when-pop then-branch-end)))
 
   (set! check-stack (OpenFn/stack-size fn))
   (compile-expr fn then-branch (control-destination cd else-branch-end) (list-tail x 2) tail?)

@@ -76,6 +76,9 @@ static bool native_vm_opcode_supported(size_t op) {
     case OP_UPVALUE_FROM_CLOSURE:
     // S10:
     case OP_ARGV_REST:
+    // Fused null?+conditional-jump (exp 3):
+    case OP_JUMP_IF_NOT_NIL:
+    case OP_JUMP_IF_NIL:
       return true;
     default:
       return false;
@@ -191,6 +194,8 @@ bool native_vm_function_eligible(VMFunction* vfn) {
       case OP_JUMP_WHEN:
       case OP_JUMP_WHEN_POP:
       case OP_JUMP_UNLESS:
+      case OP_JUMP_IF_NOT_NIL:
+      case OP_JUMP_IF_NIL:
       case OP_ARGC_EQ:
       case OP_ARGC_GTE:
       case OP_TYPE_CHECK:
