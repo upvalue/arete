@@ -287,6 +287,7 @@
     (cdr 1 1 #f #f)
     (not 1 1 #f #f)
     (eq? 2 2 #f #f)
+    (null? 1 1 #f #f)
     (fx+ 2 2 #f #f)
     (fx- 2 2 #f #f)
     (fx< 2 2 #f #f)
@@ -454,8 +455,14 @@
               (emit fn (car primitive) (length (cdr x))))
             (if (list-ref primitive 4)
               (compile-primitive-check fn (car primitive))
-              (emit fn (car primitive)))
-            
+              (if (eq? (car primitive) 'null?)
+                ;; Inline (null? x) as: push-immediate (value-bits '()), eq?
+                ;; value-bits '() = 10 (C_NIL)
+                (begin
+                  (emit fn 'push-immediate 10)
+                  (emit fn 'eq?))
+                (emit fn (car primitive))))
+
           )
         )
         (emit fn (if tail? 'apply-tail 'apply) (length (cdr x))))
