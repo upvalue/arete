@@ -420,13 +420,19 @@ Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
   tmp = eval_check_arity(state, fn, C_FALSE, argc, arity, arity, has_rest);
   if(tmp.is_active_exception()) return tmp;
 
-  // Pack any surplus arguments into the rest list before we allocate the env
-  // (so argv's contents remain referenced only from the caller's AR_FRAME).
+  // We cannot rely on callers to keep `argv` rooted: the values at argv[i]
+  // are only live through the caller's AR_FRAME of other variables, and
+  // `make_call_env` below allocates (which can trigger GC and move heap
+  // objects). Stash argv into state.temps — which the GC already walks as
+  // a root — so the stored pointers get updated if a collection moves them.
+  // The rest-list packing path already used temps for this reason; do the
+  // same for the fixed-arity portion.
+  state.temps.clear();
+  state.temps.insert(state.temps.end(), argv, argv + argc);
+
   if(has_rest) {
     if(argc > arity) {
-      state.temps.clear();
-      state.temps.insert(state.temps.end(), &argv[arity], &argv[argc]);
-      rest_list = state.temps_to_list(0);
+      rest_list = state.temps_to_list(arity);
     } else {
       rest_list = C_NIL;
     }
@@ -436,7 +442,7 @@ Value apply_interpreter(State& state, size_t argc, Value* argv, void* fnp) {
   new_env = state.make_call_env(fn.function_parent_env(), npairs);
 
   for(size_t i = 0; i < arity; ++i) {
-    state.env_push_binding(new_env, fn_args.car(), argv[i]);
+    state.env_push_binding(new_env, fn_args.car(), state.temps[i]);
     fn_args = fn_args.cdr();
   }
 

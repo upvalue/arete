@@ -116,6 +116,73 @@
 
 (define (identifier->keyword x) (string->symbol (string-append (symbol->string (rename-strip x)) ":")))
 
+;; ---------------------------------------------------------------------------
+;; Helpers for optional/keyword argument destructuring
+;; ---------------------------------------------------------------------------
+;; The expander rewrites lambdas with #!optional/#!key into plain variadic
+;; lambdas with inline destructuring code.  These helpers are called at
+;; runtime by the generated code.  They are referenced via qualified symbols
+;; (##arete#...) so they cannot be shadowed by user bindings.
+
+;; Create a qualified ##arete# symbol reference for use in generated code.
+(define (core-ref name)
+  (string->symbol (string-append "##arete#" (symbol->string name))))
+
+;; (%check-arity rest max-optional fn-name)
+;; Called after all optionals have been consumed.  Raises if rest is non-empty.
+(define (%check-arity rest max-optional fn-name)
+  (if (pair? rest)
+    (raise 'arity
+           (string-append fn-name ": too many arguments; expected at most "
+                          (number->string max-optional) " optional argument"
+                          (if (fx= max-optional 1) "" "s"))
+           (list rest))))
+
+;; (check-keywords rest valid-keywords fn-name)
+;; Validates that rest is a well-formed keyword argument list.
+(define (%keywords-string kws)
+  ((lambda (loop) (loop loop kws ""))
+   (lambda (loop ks acc)
+     (if (null? ks)
+       acc
+       (loop loop (cdr ks)
+             (string-append acc (if (string=? acc "") "" ", ")
+                            (symbol->string (car ks))))))))
+
+(define (%check-keywords rest valid-keywords fn-name)
+  ((lambda (check) (check check rest))
+   (lambda (check r)
+     (if (null? r) #t
+       (if (null? (cdr r))
+         (raise 'arity
+                (string-append fn-name ": keyword argument list has odd length; "
+                               "missing value after " (symbol->string (car r)))
+                (list rest))
+         (if (not (keyword? (car r)))
+           (raise 'type
+                  (string-append fn-name ": expected a keyword argument but got "
+                                 (symbol->string (car r))
+                                 "; valid keywords are "
+                                 (%keywords-string valid-keywords))
+                  (list (car r) rest))
+           (if (not (memq (car r) valid-keywords))
+             (raise 'arity
+                    (string-append fn-name ": unknown keyword " (symbol->string (car r))
+                                   "; valid keywords are "
+                                   (%keywords-string valid-keywords))
+                    (list (car r) rest))
+             (check check (cddr r)))))))))
+
+;; (%keyword-lookup rest keyword default-thunk) -> value
+;; Returns the value stored after `keyword` in the plist `rest`, or the
+;; result of calling `default-thunk` if not present. A thunk is used
+;; (rather than an "absent" sentinel) so the default expression is evaluated
+;; lazily only when the keyword is missing.
+(define (%keyword-lookup rest keyword default-thunk)
+  (if (null? rest) (default-thunk)
+    (if (eq? (car rest) keyword) (cadr rest)
+      (%keyword-lookup (cddr rest) keyword default-thunk))))
+
 (define (string-map-i i limit src dst fn)
   (string-set! dst i (fn (string-ref src i)))
   (if (not (fx= (fx+ i 1) limit))
@@ -728,120 +795,256 @@
 ;; Expanding the default values of optional and keyword arguments
 ;; Prepending expressions to the body of the lambda in question to execute said defaults
 
+;; Fast-path predicate: does `x` have no #!optional/#!key/#!rest/#!keys markers
+;; and no default-value pairs? Covers the common cases `(lambda (a b c) ...)`,
+;; `(lambda (a b . rest) ...)` and `(lambda () ...)` — the vast majority of
+;; lambdas in practice — so we can skip the destructuring machinery below.
+;;
+;; NOTE: uses only `if` (not `cond`/`and`/`or`) because this function is defined
+;; in expand.scm, which loads before the expander is installed. pull-up-bootstraps
+;; compiles it directly from raw source, so macros aren't available.
+(define (plain-arg-list? x)
+  (if (null? x) #t
+    (if (identifier? x) #t
+      (if (pair? x)
+        (if (eq? (car x) #!optional) #f
+          (if (eq? (car x) #!key) #f
+            (if (eq? (car x) #!rest) #f
+              (if (eq? (car x) #!keys) #f
+                (if (pair? (car x)) #f
+                  (plain-arg-list? (cdr x)))))))
+        #f))))
+
 (define (expand-argument-list x env new-env)
+  (if (plain-arg-list? x)
+    ;; Fast path: no markers, no default-valued args. Single-pass walk via the
+    ;; C builtin `map-improper`, same shape as before the optional/keyword
+    ;; migration. Bootstrap takes this path for ~all of its lambdas.
+    (cons
+      (if (identifier? x)
+        (define-argument! new-env x)
+        (map-improper (lambda (a) (define-argument! new-env a)) x))
+      '())
+    (expand-argument-list-slow x env new-env)))
+
+;; Slow path: handles #!optional/#!key/#!rest/#!keys and default-valued args.
+;; Must be in the memq list in `recompile-function` (compiler.scm) because it
+;; uses `cond`/macros.
+(define (expand-argument-list-slow x env new-env)
   (define seen-optional #f)
   (define seen-rest #f) ;; #f = not seen, 1 = seen and expecting symbol, 2 = not expecting symbol
   (define seen-keys #f) ;; same as above
-  (define seen-key #f)  
+  (define seen-key #f)
   (define argi 0)
-  (define body '())
+  (define body '())            ;; prepended body forms (in reverse)
+  (define required-args '())   ;; required arg names (in reverse)
+  (define rest-gensym #f)      ;; gensym for the rest parameter (created on demand)
+  (define optional-count 0)    ;; count of optional args (for arity check)
+  (define keyword-names '())   ;; list of keyword symbols (for check-keywords)
+  (define user-rest-name #f)   ;; user's #!rest binding name (if any)
 
-  (define result 
-    (if (identifier? x)
-      (define-argument! new-env x)
-      (map-improper
-        (lambda (a)
-          (cond 
-            ((eq? a #!optional)
+  ;; Lazily create the rest parameter gensym
+  (define (ensure-rest!)
+    (if (not rest-gensym)
+      (begin
+        (set! rest-gensym (gensym '%rest))
+        (define-argument! new-env rest-gensym))))
 
-             (if seen-optional (raise-source x 'expand "multiple #!optional in lambda arguments list" (list x)))
+  ;; Emit: (define <name> (if (##arete#pair? %rest) (##arete#car %rest) <default>))
+  ;;       (set! %rest (if (##arete#pair? %rest) (##arete#cdr %rest) '()))
+  (define (emit-optional-pop! name default)
+    (set! body (cons
+      (list (make-rename #f 'set!) rest-gensym
+            (list (make-rename #f 'if) (list (core-ref 'pair?) rest-gensym)
+                  (list (core-ref 'cdr) rest-gensym)
+                  (list (make-rename #f 'quote) '())))
+      (cons
+        (list (make-rename #f 'define) name
+              (list (make-rename #f 'if) (list (core-ref 'pair?) rest-gensym)
+                    (list (core-ref 'car) rest-gensym)
+                    default))
+        body))))
 
-             (if seen-rest
-               (raise-source x 'expand "#!optional in lambda arguments list not allowed after #!rest" (list x)))
+  ;; Emit: (define <name>
+  ;;         (##arete#%keyword-lookup %rest '<keyword> (lambda () <default>)))
+  ;; The thunk keeps the default lazy — it is only evaluated when the keyword
+  ;; is not supplied, so side effects in defaults fire at most once per call.
+  (define (emit-keyword-lookup! name keyword default)
+    (set! body (cons
+      (list (make-rename #f 'define) name
+            (list (core-ref '%keyword-lookup) rest-gensym
+                  (list (make-rename #f 'quote) keyword)
+                  (list (make-rename #f 'lambda) '() default)))
+      body)))
 
-             (if seen-keys (raise-source x 'expand "#!optional and #!keys cannot be mixed" (list x)))
+  (define simple-rest-arg #f)
 
-             (if seen-key (raise-source x 'expand "#!optional and #!key cannot be mixed" (list x)))
+  (define (process-arg! a)
+    (cond
+      ((eq? a #!optional)
+       (if seen-optional (raise-source x 'expand "multiple #!optional in lambda arguments list" (list x)))
+       (if seen-rest (raise-source x 'expand "#!optional in lambda arguments list not allowed after #!rest" (list x)))
+       (if seen-keys (raise-source x 'expand "#!optional and #!keys cannot be mixed" (list x)))
+       (if seen-key (raise-source x 'expand "#!optional and #!key cannot be mixed" (list x)))
+       (set! seen-optional #t)
+       (ensure-rest!))
 
-             (set! seen-optional #t)
-             #!optional)
+      ((eq? a #!rest)
+       (if seen-rest (raise-source x 'expand "multiple #!rest in lambda arguments list" (list x)))
+       (if seen-keys (raise-source x 'expand "#!rest and #!keys cannot be mixed" (list x)))
+       (if seen-key (raise-source x 'expand "#!rest and #!key cannot be mixed" (list x)))
+       (set! seen-rest 1)
+       (ensure-rest!))
 
-            ((eq? a #!rest)
-             (if seen-rest
-               (raise-source x 'expand "multiple #!rest in lambda arguments list" (list x)))
+      ((eq? a #!key)
+       (if seen-rest (raise-source x 'expand "#!rest and #!key cannot be mixed" (list x)))
+       (if seen-keys (raise-source x 'expand "#!key and #!keys cannot be mixed" (list x)))
+       (if seen-optional (raise-source x 'expand "#!key and #!optional cannot be mixed" (list x)))
+       (if seen-key (raise-source x 'expand "duplicate #!key in lambda arguments list" (list x)))
+       (set! seen-key #t)
+       (ensure-rest!))
 
-             (if seen-keys (raise-source x 'expand "#!rest and #!keys cannot be mixed" (list x)))
-             (if seen-key (raise-source x 'expand "#!rest and #!key cannot be mixed" (list x)))
+      ((eq? a #!keys)
+       (if seen-keys (raise-source x 'expand "multiple #!keys in lambda arguments list" (list x)))
+       (if seen-key (raise-source x 'expand "#!key and #!keys cannot be mixed" (list x)))
+       (if seen-rest (raise-source x 'expand "#!rest and #!keys cannot be mixed" (list x)))
+       (set! seen-keys 1)
+       (ensure-rest!))
 
-             (set! seen-rest 1)
-             #!rest)
+      ((identifier? a)
+       (if (eq? seen-rest 2)
+         (raise-source x 'expand "identifier in lambda arguments list after #!rest argument" (list x)))
+       (if (eq? seen-keys 2)
+         (raise-source x 'expand "identifier in lambda arguments list after #!keys argument" (list x)))
 
-            ((eq? a #!key)
-             (if seen-rest (raise-source x 'expand "#!rest and #!key cannot be mixed" (list x)))
+       (cond
+         (seen-optional
+          (if (eq? seen-rest 1)
+            ;; #!rest name after optionals
+            (begin
+              (set! user-rest-name (define-argument! new-env a))
+              (set! seen-rest 2))
+            (begin
+              (set! optional-count (fx+ optional-count 1))
+              (emit-optional-pop! (define-argument! new-env a) #f))))
+         (seen-key
+          ((lambda (name)
+             (set! keyword-names (cons (identifier->keyword a) keyword-names))
+             (emit-keyword-lookup! name (identifier->keyword a) #f))
+           (define-argument! new-env a)))
+         ((or (eq? seen-rest 1) (eq? seen-keys 1))
+          ;; This is the #!rest or #!keys binding name
+          (set! user-rest-name (define-argument! new-env a))
+          (if seen-rest (set! seen-rest 2))
+          (if seen-keys (set! seen-keys 2)))
+         (else
+          ;; Required argument
+          (set! required-args (cons (define-argument! new-env a) required-args)))))
 
-             (if seen-keys (raise-source x 'expand "#!key and #!keys cannot be mixed" (list x)))
-             (if seen-optional (raise-source x 'expand "#!key and #!optional cannot be mixed" (list x)))
-             (if seen-key (raise-source x 'expand "duplicate #!key in lambda arguments list" (list x)))
+      ((pair? a)
+       (if seen-rest
+         (raise-source x 'expand "pair item in lambda arguments list after #!rest argument" (list x)))
+       (if seen-keys
+         (raise-source x 'expand "pair item in lambda arguments list after #!keys argument" (list x)))
+       (if (not (or seen-optional seen-key))
+         (raise-source a 'expand "required argument cannot have default value" (list a)))
+       (if (not (identifier? (car a)))
+         (raise-source a 'expand "argument name must be a valid identifier" (list a)))
 
-             (set! seen-key #t)
-             #!key)
+       ((lambda (default)
+          (cond
+            (seen-key
+             ((lambda (name)
+                (set! keyword-names (cons (identifier->keyword (car a)) keyword-names))
+                (emit-keyword-lookup! name (identifier->keyword (car a)) default))
+              (define-argument! new-env (car a))))
+            (seen-optional
+             (set! optional-count (fx+ optional-count 1))
+             (emit-optional-pop! (define-argument! new-env (car a)) default))))
+        (expand (cdr a) new-env '((disallow-defines . #t)))))
 
-            ((eq? a #!keys)
-             (if seen-keys
-               (raise-source x 'expand "multiple #!keys in lambda arguments list" (list x)))
+      (else
+        (raise-source x 'expand (print-string "invalid element" a "in arguments list: must be an identifier, a #! specifier like #!optional, or a pair of an identifier and default argument") (list x)))))
 
-             (if seen-key
-               (raise-source x 'expand "#!key and #!keys cannot be mixed" (list x)))
+  (if (identifier? x)
+    ;; Simple variadic: (lambda rest ...)
+    (set! simple-rest-arg (define-argument! new-env x))
+    (begin
+      ;; Walk the proper pairs of the list, processing each element.
+      ;; Do NOT use map-improper -- we need to handle the dotted tail separately.
+      ((lambda (walk) (walk walk x))
+       (lambda (walk lst)
+         (if (pair? lst)
+           (begin
+             (process-arg! (car lst))
+             (walk walk (cdr lst))))))
 
-             (if seen-rest
-               (raise-source x 'expand "#!rest and #!keys cannot be mixed" (list x)))
+      ;; Handle improper list tail: (lambda (a b . rest) ...)
+      (if (not (list? x))
+        ((lambda (tail-id)
+           (if rest-gensym
+             ;; Had #!optional/#!key — rest gensym already created; the dotted
+             ;; tail is the user's rest binding name (like #!rest <name>)
+             (if (not user-rest-name)
+               (set! user-rest-name (define-argument! new-env tail-id)))
+             ;; Plain variadic (no #!optional/#!key): define the tail directly
+             (set! rest-gensym (define-argument! new-env tail-id))))
+         ((lambda (find-tail) (find-tail find-tail x))
+          (lambda (find-tail lst)
+            (if (pair? (cdr lst)) (find-tail find-tail (cdr lst)) (cdr lst))))))))
 
-             (set! seen-keys 1)
-             #!keys)
+  ;; Assemble the final prepend-body in correct order:
+  ;;   1. keyword validation (if #!key)
+  ;;   2. optional/keyword destructuring (from body, reversed)
+  ;;   3. arity check (if #!optional without #!rest)
+  ;;   4. user rest binding (if #!rest after optionals)
+  (define prepend-body
+    (if rest-gensym
+      ((lambda (result)
+         ;; Append arity check (wrapped in set! for zero stack effect)
+         (if (and seen-optional (not user-rest-name) (not seen-rest))
+           (set! result (append result
+             (list (list (make-rename #f 'set!) rest-gensym
+                         (list (make-rename #f 'begin)
+                               (list (core-ref '%check-arity) rest-gensym
+                                     optional-count
+                                     (list (make-rename #f 'quote) "lambda"))
+                               rest-gensym))))))
+         ;; Append user rest binding
+         (if user-rest-name
+           (set! result (append result
+             (list (list (make-rename #f 'define) user-rest-name rest-gensym)))))
+         result)
+       ;; Start with keyword validation (if needed) + destructuring
+       ;; Note: validation calls are wrapped in (set! %rest (begin (check ...) %rest))
+       ;; so they have zero net stack effect in the lambda body.
+       (if seen-key
+         (cons
+           (list (make-rename #f 'set!) rest-gensym
+                 (list (make-rename #f 'begin)
+                       (list (core-ref '%check-keywords) rest-gensym
+                             (list (make-rename #f 'quote) (reverse keyword-names))
+                             (list (make-rename #f 'quote) "lambda"))
+                       rest-gensym))
+           (reverse body))
+         (reverse body)))
+      '()))
 
-            ((identifier? a)
-             (if (eq? seen-rest 2)
-               (raise-source x 'expand "identifier in lambda arguments list after #!rest argument" (list x)))
+  ;; Build the output argument list
+  (define result-args
+    (if simple-rest-arg
+      simple-rest-arg
+      (if rest-gensym
+        ;; Build (required-arg1 required-arg2 ... . rest-gensym)
+        ((lambda (build) (build build (reverse required-args)))
+         (lambda (build args)
+           (if (null? args)
+             rest-gensym
+             (cons (car args) (build build (cdr args))))))
+        ;; No optionals/keys — reconstruct proper list from required-args
+        (reverse required-args))))
 
-             (if (eq? seen-keys 2)
-               (raise-source x 'expand "identifier in lambda arguments list after #!keys argument" (list x)))
-
-             (set! argi (fx+ argi 1))
-
-             ((lambda (arg)
-                (if seen-optional
-                  (set! body (cons (list (make-rename #f '$optional) argi #f) body)))
-                (if seen-key
-                  (set! body (cons (list (make-rename #f '$key) argi (identifier->keyword a) #f) body)))
-                (if seen-rest
-                  (set! seen-rest 2))
-                (if seen-keys
-                  (set! seen-keys 2))
-                arg)
-              (define-argument! new-env a)))
-
-            ((pair? a)
-             (if seen-rest
-               (raise-source x 'expand "pair item in lambda arguments list after #!rest argument" (list x)))
-
-             (if seen-keys
-               (raise-source x 'expand "pair item in lambda arguments list after #!keys argument" (list x)))
-
-             (if (not (or seen-optional seen-key))
-               (raise-source a 'expand "required argument cannot have default value" (list a)))
-
-             (if (not (identifier? (car a)))
-               (raise-source a 'expand "argument name must be a valid identifier" (list a)))
-
-             ((lambda (default)
-               (set! body (cons
-                            (if seen-key
-                              (list (make-rename #f '$key) argi (identifier->keyword (car a)) default)
-                              (list (make-rename #f '$optional) argi default))
-                            body)))
-              (expand (cdr a) new-env '((disallow-defines . #t))))
-
-             (set! argi (fx+ argi 1))
-
-             (cons (define-argument! new-env (car a)) (cdr a)))
-
-            (else
-              (raise-source x 'expand (print-string "invalid element" a "in arguments list: must be an identifier, a #! specifier like #!optional, or a pair of an identifier and default argument") (list x)))))
-
-        x)
-      ))
-
-  (cons result body))
+  (cons result-args prepend-body))
 
 (define (expand-lambda x env params)
   (if (fx< (length x) 3)
@@ -859,13 +1062,13 @@
 
   (define bindings-and-body (expand-argument-list (cadr x) env new-env))
   (define bindings (car bindings-and-body))
-  (define prepend-body (reverse (cdr bindings-and-body)))
+  (define prepend-body (cdr bindings-and-body))
   (define body (expand-map (cddr x) new-env '()))
 
   (cons-source x (make-rename #f 'lambda) (cons-source x bindings
                                                        (if (null? prepend-body)
                                                          body
-                                                         (append1 (reverse prepend-body) (cons-source x (list (make-rename #f '$label-past-optionals)) body))))))
+                                                         (append prepend-body body)))))
 
 (define (expand-if x env params)
   (define len (length x))
