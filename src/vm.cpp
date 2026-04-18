@@ -291,7 +291,6 @@ tail:
     &&LABEL_OP_FX_LT,
     &&LABEL_OP_FX_ADD,
     &&LABEL_OP_FX_SUB,
-    &&LABEL_OP_CONS,
   };
 #endif
 
@@ -844,14 +843,6 @@ tail:
         VM_FX_CHECK("fx-");
         *(stack - 2) = Value::make_fixnum(STACK_PICK(2).fixnum_value() - STACK_PICK(1).fixnum_value());
         stack--;
-        VM_DISPATCH();
-      }
-
-      VM_CASE(OP_CONS): {
-        Value pair = state.make_pair(STACK_PICK(2), STACK_PICK(1));
-        *(stack - 2) = pair;
-        stack--;
-        VM2_RESTORE_GC();
         VM_DISPATCH();
       }
     }
