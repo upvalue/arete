@@ -23,6 +23,8 @@ vgcore*
 /scraps
 /results.Arete
 /modal-results
+/saved-experiments
+/utils/__pycache__/
 /.codex
 /web/benchmarks/node_modules
 /web/benchmarks/reports/*.html
