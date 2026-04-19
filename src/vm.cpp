@@ -586,6 +586,7 @@ tail:
         } else {
           VM2_EXCEPTION("eval", "vm: attempt to apply non-applicable value " << afn);
         }
+        goto ret;
       }
 
       // Exp 8: fused callee-load + apply. Operands: {callee-source-idx, argc}.
