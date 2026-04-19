@@ -2540,15 +2540,6 @@ enum {
   OP_CAAR = 44,    // (car (car X)) — car, car
   OP_CDAR = 45,    // (cdr (car X)) — car, cdr
   OP_CADDR = 46,   // (car (cdr (cdr X))) — cdr, cdr, car
-  // Exp 8: fused callee-load + apply opcodes. Operands: {callee-slot, argc}.
-  // The callee is not pushed onto the operand stack — it is read directly
-  // from its source (constant pool for global, locals[] for local, closure
-  // upvalue for upvalue) at apply time. Saves one dispatch and one stack
-  // push/pop per call. Semantics otherwise identical to OP_APPLY/OP_APPLY_TAIL.
-  OP_APPLY_GLOBAL = 47,       // {const-idx, argc}
-  OP_APPLY_TAIL_GLOBAL = 48,  // {const-idx, argc}
-  OP_APPLY_LOCAL = 49,        // {local-idx, argc}
-  OP_APPLY_TAIL_LOCAL = 50,   // {local-idx, argc}
 };
 
 inline Type Value::type() const {

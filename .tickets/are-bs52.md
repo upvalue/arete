@@ -1,6 +1,6 @@
 ---
 id: are-bs52
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-04-18T21:53:55Z
