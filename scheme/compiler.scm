@@ -34,8 +34,91 @@
 ;; before loading code you want to validate.
 (set-top-level-value! 'NATIVE-VM-STRICT #t)
 
+;; If #t, the compiler emits CAPTURE_* opcodes for free-variable captures the
+;; mutability analysis proves are never `set!`'d, storing the value directly
+;; in the Closure's capture vector rather than boxing it in a Box. Runtime
+;; support (CAPTURE_FROM_LOCAL / CAPTURE_FROM_CLOSURE / CAPTURE_GET) is
+;; unconditional — the flag only controls emission. Toggle via
+;;   --set COMPILER-DISPLAY-CLOSURES "#t"/"#f"
+;; (the reader parses bare t/f as symbols; the boolean needs "#t").
+(set-top-level-value! 'COMPILER-DISPLAY-CLOSURES #t)
+
 (define (compiler-inline-car) (eq? (top-level-value 'COMPILER-INLINE-CAR) #t))
 (define (compiler-ddcg) (eq? (top-level-value 'COMPILER-CONTROL-DESTINATION) #t))
+(define (compiler-display-closures) (eq? (top-level-value 'COMPILER-DISPLAY-CLOSURES) #t))
+
+;; Set by compile-toplevel before any lambda compiles, read by OpenFn/define!
+;; and register-free-variable. The expander alpha-renames every lexical
+;; binding to a unique gensym, so name-level identity is binding-level
+;; identity — scanning for (set! NAME ...) and marking every Var whose name
+;; matches a scanned target is both necessary and sufficient.
+(set-top-level-value! '*compiler-mutable-names* #f)
+
+(define (var-name-mutable? name)
+  (aif (top-level-value '*compiler-mutable-names*)
+    (eq? (table-ref it (if (identifier? name) (rename-strip name) name)) #t)
+    #f))
+
+;; Walk a source form and populate `tbl` with every binding that needs a
+;; by-reference capture. That's every `(set! NAME ...)` target AND every
+;; internal `(define NAME ...)` target — because Arete pre-declares locals
+;; at scan-local-defines time and assigns them later via `local-set`, so a
+;; closure built between the declaration and the assignment would see an
+;; uninitialized slot if the capture were by-value. The classic case is a
+;; self-recursive internal define: `(lambda () (define loop (lambda () (loop))))`.
+;; Conservative but sound — worst case is a spurious Box allocation.
+;;
+;; Descends into nested lambdas (their set!s/defines affect our bindings if
+;; they capture). Skips quoted subtrees.
+(define (scan-mutable-names-into! tbl x)
+  (when (pair? x)
+    (let ((head (car x)))
+      (cond
+        ((and (identifier? head) (eq? (rename-strip head) 'quote)) #f)
+        ((and (identifier? head) (eq? (rename-strip head) 'set!))
+         ;; Key by rename-strip: elsewhere (OpenFn/define!, register-free-variable,
+         ;; compile-inline-call, compile-named-loop) Vars are created from the
+         ;; stripped name, so storing the raw rename here would cause silent
+         ;; lookup misses in psyntax.pp, where set!/define LHSs are often
+         ;; renames but the binding site uses the bare symbol.
+         (when (and (pair? (cdr x)) (identifier? (cadr x)))
+           (table-set! tbl (rename-strip (cadr x)) #t))
+         (when (and (pair? (cdr x)) (pair? (cddr x)))
+           (scan-mutable-names-into! tbl (caddr x))))
+        ;; `(define NAME VAL)` is a forward-declared binding — semantically a
+        ;; set! against a local slot that was pre-allocated by scan-local-defines.
+        ;; A closure built between the declaration and the assignment would see
+        ;; an uninitialized slot if display-captured, so treat define targets
+        ;; like set! targets. Classic motivating case: (lambda () (define loop
+        ;; (lambda () (loop)))).
+        ((and (identifier? head) (eq? (rename-strip head) 'define))
+         (when (and (pair? (cdr x)) (identifier? (cadr x)))
+           (table-set! tbl (rename-strip (cadr x)) #t))
+         (when (and (pair? (cdr x)) (pair? (cddr x)))
+           (scan-mutable-names-into! tbl (caddr x))))
+        (else
+          (for-each-improper
+            (lambda (y) (scan-mutable-names-into! tbl y))
+            x))))))
+
+(define (scan-mutable-names body)
+  (let ((tbl (make-table)))
+    (scan-mutable-names-into! tbl body)
+    tbl))
+
+;; Save/restore `*compiler-mutable-names*` around `thunk` so nested compile
+;; entries (REPL inside a REPL, `eval` during macroexpansion) don't clobber
+;; each other. The per-compile table is rebuilt from the current source form,
+;; or cleared to #f if display closures are disabled.
+(define (with-mutable-names-from source thunk)
+  (let ((saved (top-level-value '*compiler-mutable-names* #f)))
+    (set-top-level-value! '*compiler-mutable-names*
+                          (if (compiler-display-closures)
+                            (scan-mutable-names source)
+                            #f))
+    (let ((result (thunk)))
+      (set-top-level-value! '*compiler-mutable-names* saved)
+      result)))
 
 ;; OpenFn is a record representing a function in the process of being compiled.
 
@@ -69,13 +152,14 @@
   var-arity ;; 11
   ;; Depth of the function
   depth ;; 12
-  ;; If this is a closure, this will be a vector of upvalue locations e.g.
-  ;; #(#t 0 #f 0) = capture local variable 0 from the calling function, capture enclosed value 0 from the calling
-  ;; functions closure
+  ;; If this is a closure, a vector of Var records describing each capture
+  ;; slot this function needs. At close-over time the parent walks this
+  ;; vector and emits one BOX_FROM_* or CAPTURE_FROM_* per slot.
   closure ;; 13
-  ;; Free variable count
+  ;; Number of captures that need per-frame Box allocation (i.e., mutable
+  ;; captures). Display captures bypass this.
   free-variable-count ;; 14
-  ;; Vector of free variables
+  ;; Vector of local indices that must be boxed at frame entry.
   free-variables ;; 15
   ;; Labels
   labels ;; 16
@@ -94,25 +178,42 @@
 ;; call stack
 
 ;; For example, in the expression (lambda (a) (lambda () (lambda () a)))
-;; When A is accessed from the third lambda expression, a Var will be added to it and the one above marking it as an
-;; upvalue
+;; When A is accessed from the third lambda expression, a Var will be added
+;; to it and the one above marking it as captured-from-parent.
 
 (define-record Var
   idx
   name
-  ;; If #t, this is a reference to a free variable
-  upvalue?
-  ;; If not #f, index in f.fn->upvalues. Mutually exclusive with upvalue?
+  ;; If #t, this Var's source slot lives in the enclosing frame's
+  ;; capture vector (either boxed as a Box* or stored raw as a display
+  ;; capture). If #f, this Var refers to a local in the current frame.
+  captured?
+  ;; If not #f, index into the parent frame's box-slot area (the region
+  ;; just past locals where allocate_box stores each Box for this frame's
+  ;; mutable captures). Set only for captures whose source is a local in
+  ;; the parent frame and which need boxing — immutable/display captures
+  ;; leave this #f and use Var/idx directly.
   free-variable-id
+  ;; If #t, this binding is the target of a `set!` somewhere in the program.
+  ;; Populated up-front by scan-mutable-names before any lambda compiles, so
+  ;; compile-lambda's close-over emission and compile-identifier's access-side
+  ;; emission both know, in source-order-independent fashion, whether the
+  ;; binding is display-closure-eligible.
+  mutable?
   )
 
 (define %Var/make Var/make)
+;; Every local-binding Var is born with its `mutable?` flag already set,
+;; based on the scan-mutable-names table populated by the enclosing
+;; compile-toplevel / recompile-function call. That way both the emission
+;; site (close-over) and the access site (compile-identifier) agree on
+;; whether a capture is display-eligible without a second pass.
 (set! Var/make
-  (lambda (id name) (%Var/make id name #f #f)))
+  (lambda (id name) (%Var/make id name #f #f (var-name-mutable? name))))
 
 (define AVar/make
   (lambda (id name fn)
-    (%Var/make id name #f #f #f (OpenFn/depth fn))))
+    (%Var/make id name #f #f (var-name-mutable? name) (OpenFn/depth fn))))
 
 ;; Print a list of INSNs with labels added in pairs. Note: does not work with multiple labels at same spot
 (define (print-insns fn)
@@ -173,8 +274,8 @@
 (define insn-list
   '(bad
     push-constant push-immediate pop
-    global-get global-set local-get local-set upvalue-get upvalue-set
-    close-over upvalue-from-local upvalue-from-closure
+    global-get global-set local-get local-set box-get box-set
+    close-over box-from-local box-from-closure
     apply apply-tail
     return
     jump jump-when jump-when-pop jump-unless
@@ -194,7 +295,9 @@
     ;; Callee is read directly (no operand-stack push) — from the constant pool
     ;; (global) or from locals[] (local). Saves one dispatch + one push/pop per
     ;; call at known-binding sites.
-    apply-global apply-tail-global apply-local apply-tail-local))
+    apply-global apply-tail-global apply-local apply-tail-local
+    ;; Display-closure capture opcodes (immutable by-value captures).
+    capture-from-local capture-from-closure capture-get))
 
 (define static-labels '())
 
@@ -226,9 +329,10 @@
 (define stack-effects
   (let ((table (make-table))
         (lst '(
-               (-1 pop jump-when-pop global-set eq? list-ref local-set upvalue-set fx< fx- fx+ jump-if-not-nil jump-if-nil jump-if-not-pair jump-if-pair jump-if-eq-imm jump-if-not-eq-imm)
+               (-1 pop jump-when-pop global-set eq? list-ref local-set box-set fx< fx- fx+ jump-if-not-nil jump-if-nil jump-if-not-pair jump-if-pair jump-if-eq-imm jump-if-not-eq-imm)
                (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest cadr cddr caar cdar caddr)
-               (1 push-immediate push-constant global-get local-get upvalue-get upvalue-from-closure upvalue-from-local)
+               (1 push-immediate push-constant global-get local-get box-get box-from-closure box-from-local
+                  capture-from-local capture-from-closure capture-get)
                )))
     (let loop ((elt (car lst)) (rest (cdr lst)))
       (let loop2 ((insns (cdr elt)))
@@ -626,7 +730,13 @@
 
         (unless (null? rest)
           (loop (fx+ i 1) (car rest) (cdr rest)))))
-    (OpenFn/local-count! fn (fx+ locals (length (cdr x)))))
+    ;; Take the max: nested inline-calls inside arg-eval can bump local-count
+    ;; past `locals + N`, and clobbering it here shrinks vfn->local_count
+    ;; below the highest slot in use. Invisible under boxed captures (the Box
+    ;; pointer remains valid even if the computation stack overlaps the slot)
+    ;; but display captures snapshot the raw slot and so expose the drift.
+    (OpenFn/local-count! fn (max (OpenFn/local-count fn)
+                                 (fx+ locals (length (cdr x))))))
 
   ;(pretty-print fn)
 
@@ -702,10 +812,11 @@
 
           (set! primitive it)))
         ;; Exp 8: if kar is a bare (un-renamed) identifier that resolves to a
-        ;; global or a plain local (not an upvalue and not a named-loop marker),
-        ;; skip the operand-stack push and defer to a fused op after arg-eval.
-        ;; Falls through to compile-expr for upvalues, lambda forms, and any
-        ;; other non-trivial callee shapes — preserving existing behavior.
+        ;; global or a plain local (not a parent-captured binding and not a
+        ;; named-loop marker), skip the operand-stack push and defer to a
+        ;; fused op after arg-eval. Falls through to compile-expr for captured
+        ;; bindings, lambda forms, and any other non-trivial callee shapes —
+        ;; preserving existing behavior.
         (aif (and (symbol? kar)
                   (identifier? kar)
                   (not (rename? (car x)))
@@ -810,11 +921,13 @@
 ;; the virtual machine to save these free variables either from its locals array (if it was where the free variable
 ;; occurred, or from its closure (and so on up the line).
 
-;; These free variables are saved in the form of Upvalues, heap-allocated values which point at the locals array of a 
-;; function until it returns, at which point they are "converted" and function essentially as pointers. 
+;; Mutable free variables ride in Boxes — heap-allocated cells that point
+;; at the declaring frame's local slot while it's live, then close into a
+;; self-contained value when that frame returns. Proven-immutable captures
+;; skip the Box and travel as raw Values (display captures).
 
-;; We also have to keep track of the amount of free variables in each function, because a special array is allocated on
-;; the stack to store these Upvalues during function execution.
+;; The per-frame `free-variables` vector lists the local indices that must
+;; have Boxes allocated at frame entry, so only mutable captures contribute.
 (define (register-free-variable fn x)
   ;; Go up through function stack, adding variable X to environment as necessary
   (unless (OpenFn/closure fn)
@@ -834,8 +947,12 @@
 
         (Var/idx! var (vector-length closure))
 
-        ;; This is an upvalue
-        (Var/upvalue?! var #t)
+        ;; Source slot lives in the parent's capture vector.
+        (Var/captured?! var #t)
+
+        ;; Inherit mutability from the parent's Var so this fn's lookups know
+        ;; whether to emit BOX_* or CAPTURE_* at the access site.
+        (Var/mutable?! var (Var/mutable? it))
 
         ;; Add to function environment
         (table-set! (OpenFn/env fn) x var)
@@ -843,8 +960,11 @@
         #;(when (Var/free-variable-id it)
           (raise 'compile "duplicate free variable" (list it)))
 
-        ;; If this is a free variable and it hasn't been noted as such, do so now
-        (unless (or (Var/upvalue? it) (Var/free-variable-id it))
+        ;; If this is a free variable and it hasn't been noted as such, do so now.
+        ;; Only mutable captures need a per-frame Box allocation; immutable ones
+        ;; are propagated as raw Values and skip the free-variables vector.
+        (unless (or (Var/captured? it) (Var/free-variable-id it)
+                    (and (compiler-display-closures) (not (Var/mutable? it))))
           (Var/free-variable-id! it (OpenFn/free-variable-count parent-fn))
           (OpenFn/free-variable-count! parent-fn (fx+ (OpenFn/free-variable-count parent-fn) 1))
           (unless (OpenFn/free-variables parent-fn)
@@ -871,14 +991,14 @@
             (cons 'global x))
           (aif (table-ref (OpenFn/env search-fn) x)
             (begin
-              (if (and (eq? fn search-fn) (not (Var/upvalue? it)))
+              (if (and (eq? fn search-fn) (not (Var/captured? it)))
                 (cons 'local (Var/idx it))
-                ;; This is an upvalue
+                ;; Captured from enclosing scope.
                 (if (eq? fn search-fn)
-                  ;; This upvalue has already been added to the closure
+                  ;; Already added to the closure's capture vector.
                   (begin
-                    (compiler-log fn "found existing upvalue" it)
-                    (cons 'upvalue (Var/idx it)))
+                    (compiler-log fn "found existing capture" it)
+                    (cons 'captured (Var/idx it)))
                   (begin
                     (register-free-variable fn x)
                     (fn-lookup fn x src))))
@@ -900,7 +1020,13 @@
   (case (car result)
     (local (emit fn 'local-get (cdr result)))
     (global (emit fn 'global-get (register-constant fn x)))
-    (upvalue (emit fn 'upvalue-get (cdr result)))
+    (captured
+      ;; Display closures: emit capture-get for immutable captures. The Var
+      ;; in fn's own env carries the propagated mutability flag.
+      (let ((var (table-ref (OpenFn/env fn) x)))
+        (if (and (compiler-display-closures) (not (Var/mutable? var)))
+          (emit fn 'capture-get (cdr result))
+          (emit fn 'box-get (cdr result)))))
     (else (raise 'compile-internal ":(" (list x))))
 )
 
@@ -1002,18 +1128,31 @@
     (when fn
       (emit fn 'push-constant (register-constant fn procedure))
 
-      ;; Finally, if this function encloses free variables, we emit an instruction
-      ;; That will create a closure at runtime out of the compiled function
+      ;; If this function encloses free variables, emit a push per capture
+      ;; then OP_CLOSE_OVER to build the Closure at runtime. Per-slot shape:
+      ;;   display-eligible (flag on, immutable): raw Value → capture-from-*
+      ;;   otherwise (mutable or flag off): Box → box-from-*
+      ;; `Var/captured?` tells us whether the source is the parent's capture
+      ;; vector (box-from-closure / capture-from-closure) or a local in
+      ;; the parent's frame (box-from-local uses the parent's free-variable
+      ;; slot index; capture-from-local reads the raw local).
       (aif (OpenFn/closure sub-fn)
-        (begin
+        (let ((count (vector-length it)))
           (let loop ((i 0))
-            (unless (eq? i (vector-length it))
-              (let ((var (vector-ref it i)))
-                (if (Var/upvalue? var)
-                  (emit fn 'upvalue-from-closure (Var/idx var))
-                  (emit fn 'upvalue-from-local (Var/free-variable-id var))))
+            (when (fx< i count)
+              (let* ((var (vector-ref it i))
+                     (display? (and (compiler-display-closures) (not (Var/mutable? var))))
+                     (from-parent? (Var/captured? var)))
+                (emit fn
+                  (cond ((and display?      from-parent?)      'capture-from-closure)
+                        (display?                              'capture-from-local)
+                        (from-parent?                          'box-from-closure)
+                        (else                                  'box-from-local))
+                  (if (and (not display?) (not from-parent?))
+                    (Var/free-variable-id var)
+                    (Var/idx var))))
               (loop (fx+ i 1))))
-          (emit fn 'close-over (vector-length it)))))
+          (emit fn 'close-over count))))
       procedure)
 )
 
@@ -1048,8 +1187,8 @@
         (emit fn 'global-set 1 (register-constant fn name))))
     (local
       (emit fn 'local-set (cdr result)))
-    (upvalue
-      (emit fn 'upvalue-set (cdr result))))
+    (captured
+      (emit fn 'box-set (cdr result))))
 )
 
 ;; Compiling expressions with conditional evaluation is a little tricky, because we need to jump to a location in the
@@ -1113,7 +1252,7 @@
        (let ((head (car expr)))
          (and (identifier? head)
               (eq? (rename-strip head) sym)
-              ;; Ensure head isn't shadowed by a local/upvalue binding.
+              ;; Ensure head isn't shadowed by a local/captured binding.
               (eq? (car (fn-lookup fn (rename-strip head) expr)) 'global)
               ;; Require the primitive path to actually be active; otherwise
               ;; the argument wouldn't be inlined as a value anyway.
@@ -1380,11 +1519,11 @@
 
   (OpenFn/toplevel?! fn #t)
 
-  (compile fn (list body))
-  (compile-finish fn)
-
-  (let ((result (OpenFn->procedure fn)))
-    result))
+  (with-mutable-names-from body
+    (lambda ()
+      (compile fn (list body))
+      (compile-finish fn)
+      (OpenFn->procedure fn))))
 
 ;; A copying append that uses source information
 (define (append-source src lst elt)
@@ -1427,16 +1566,21 @@
              fn-expr))
          )
 
-    (let ((fn (compile-lambda #f fn-exxxpr)))
-      (when fn-name
-        (set-function-name! fn fn-name))
-      (when (or is-procedural-macro? is-identifier-macro?)
-        (set-function-macro-env! fn (function-env oldfn)))
-      (when is-procedural-macro?
-        (set-function-macro-bit! fn))
-      (when is-identifier-macro?
-        (set-function-identifier-macro-bit! fn))
-      fn)
+    ;; Bootstrap re-compiles interpreter-defined functions here — this is the
+    ;; second entry point (alongside compile-toplevel) that needs its own
+    ;; mutability scan before any Var is created.
+    (with-mutable-names-from fn-exxxpr
+      (lambda ()
+        (let ((fn (compile-lambda #f fn-exxxpr)))
+          (when fn-name
+            (set-function-name! fn fn-name))
+          (when (or is-procedural-macro? is-identifier-macro?)
+            (set-function-macro-env! fn (function-env oldfn)))
+          (when is-procedural-macro?
+            (set-function-macro-bit! fn))
+          (when is-identifier-macro?
+            (set-function-identifier-macro-bit! fn))
+          fn)))
   ))
 
 (define (time-function str cb)

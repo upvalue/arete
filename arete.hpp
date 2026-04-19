@@ -280,7 +280,13 @@ enum Type {
   RECORD_TYPE = 18,
   VMFUNCTION = 19,
   CLOSURE = 20,
-  UPVALUE = 21,
+  // Mutable-capture box. When the function declaring the captured local is
+  // still on the stack the Box is "open" (points at the stack slot); when
+  // that frame returns the Box is "closed" (holds the value inline). Arete
+  // uses Boxes for captures the mutability analysis couldn't prove immutable;
+  // proven-immutable captures live directly in the Closure's capture vector
+  // (no Box — "display closure").
+  BOX = 21,
   FILE_PORT = 23,
 };
 
@@ -780,17 +786,17 @@ struct Value {
   Value vm_function_code() const;
   VectorStorage* vm_function_constants() const;
 
-  // UPVALUES
-  
-  /** Determine whether an upvalue has been closed-over or not */
-  bool upvalue_closed() const;
-  /** Dereference an upvalue */
-  Value upvalue();
+  // BOXES (mutable-capture cells)
 
-  /** Set an upvalue */
-  void upvalue_set(const Value);
+  /** Determine whether a Box has been closed-over or not */
+  bool box_closed() const;
+  /** Dereference a Box */
+  Value box_deref();
 
-  void upvalue_close();
+  /** Set a Box */
+  void box_set(const Value);
+
+  void box_close();
 
   // CLOSURES
 
@@ -800,8 +806,8 @@ struct Value {
   /** If a type is a closure, return its function */
   Value closure_unbox() const;
 
-  static const unsigned UPVALUE_CLOSED_BIT = 1 << 10;
-  static const unsigned UPVALUE_POINTER_BIT = 1 << 11;
+  static const unsigned BOX_CLOSED_BIT = 1 << 10;
+  static const unsigned BOX_POINTER_BIT = 1 << 11;
 
   // RECORD
   Value record_type() const;
@@ -1162,7 +1168,7 @@ struct VMFunction : Procedure {
    */
   Bytevector* code;
 
-  unsigned min_arity, max_arity, stack_max, local_count, upvalue_count, calls;
+  unsigned min_arity, max_arity, stack_max, local_count, box_count, calls;
 
   static const unsigned CLASS_TYPE = VMFUNCTION;
 
@@ -1196,11 +1202,16 @@ inline VectorStorage* Value::vm_function_constants() const {
 }
 
 /**
- * A free variable. When the function it is in is still alive on the stack, the upvalue contains
- * an index into the stack noting where that variable can be found.
- * After that function exits, it is converted into a freestanding garbage-collected variable
+ * A mutable-capture cell. While the function that owns the captured local is
+ * still on the stack the Box is "open": its union holds a pointer into that
+ * stack slot (or the slot index), and all reads/writes go through the live
+ * stack. When the owning frame returns, the Box is "closed": the current
+ * value is copied into the `converted` slot and the Box becomes self-contained.
+ * The compiler emits Boxes only for captures the mutability analysis could
+ * not prove immutable; proven-immutable captures sit directly in the
+ * Closure's capture vector (no Box — "display closure").
  */
-struct Upvalue : HeapValue {
+struct Box : HeapValue {
   union U {
     U(): converted(C_FALSE) {}
 
@@ -1209,47 +1220,52 @@ struct Upvalue : HeapValue {
     Value converted;
   } U;
 
-  static const unsigned CLASS_TYPE = UPVALUE;
+  static const unsigned CLASS_TYPE = BOX;
 };
 
 // Note: use AR_ASSERT instead of AR_TYPE_ASSERT here; user code
-// will never use Upvalues
+// will never see a Box directly
 
-inline bool Value::upvalue_closed() const {
-  AR_ASSERT(type() == UPVALUE);
-  return heap->get_header_bit(UPVALUE_CLOSED_BIT);
+inline bool Value::box_closed() const {
+  AR_ASSERT(type() == BOX);
+  return heap->get_header_bit(BOX_CLOSED_BIT);
 }
 
-inline void Value::upvalue_set(const Value rhs) {
-  AR_ASSERT(type() == UPVALUE);
-  if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
-    static_cast<Upvalue*>(heap)->U.converted = rhs;
+inline void Value::box_set(const Value rhs) {
+  AR_ASSERT(type() == BOX);
+  if(heap->get_header_bit(BOX_CLOSED_BIT)) {
+    static_cast<Box*>(heap)->U.converted = rhs;
   } else {
-    (*static_cast<Upvalue*>(heap)->U.local) = rhs;
-    AR_ASSERT(rhs.type() != UPVALUE);
+    (*static_cast<Box*>(heap)->U.local) = rhs;
+    AR_ASSERT(rhs.type() != BOX);
   }
 }
 
-inline Value Value::upvalue() {
-  AR_ASSERT(type() == UPVALUE);
-  if(heap->get_header_bit(UPVALUE_CLOSED_BIT)) {
-    return as<Upvalue>()->U.converted;
+inline Value Value::box_deref() {
+  AR_ASSERT(type() == BOX);
+  if(heap->get_header_bit(BOX_CLOSED_BIT)) {
+    return as<Box>()->U.converted;
   } else {
-    return *(as<Upvalue>()->U.local);
+    return *(as<Box>()->U.local);
   }
 }
 
-inline void Value::upvalue_close() {
-  AR_ASSERT(type() == UPVALUE);
-  AR_ASSERT(!upvalue_closed());
-  heap->set_header_bit(UPVALUE_CLOSED_BIT);
-  as<Upvalue>()->U.converted = (*as<Upvalue>()->U.local);
-  AR_ASSERT(upvalue_closed());
+inline void Value::box_close() {
+  AR_ASSERT(type() == BOX);
+  AR_ASSERT(!box_closed());
+  heap->set_header_bit(BOX_CLOSED_BIT);
+  as<Box>()->U.converted = (*as<Box>()->U.local);
+  AR_ASSERT(box_closed());
 }
 
 struct Closure : Procedure {
   Value function;
-  VectorStorage* upvalues;
+  // Heterogeneous capture vector. Each slot holds either a Box* (when the
+  // captured binding is mutable or the display-closures optimization is
+  // disabled for this slot) or a raw Value (when the mutability analysis
+  // proved the capture is never `set!`'d — "display capture"). GC traces
+  // each slot as a Value regardless.
+  VectorStorage* captures;
 
   static const unsigned CLASS_TYPE = CLOSURE;
 };
@@ -2467,11 +2483,11 @@ enum {
   OP_GLOBAL_SET = 5,
   OP_LOCAL_GET = 6,
   OP_LOCAL_SET = 7,
-  OP_UPVALUE_GET = 8,
-  OP_UPVALUE_SET = 9,
+  OP_BOX_GET = 8,
+  OP_BOX_SET = 9,
   OP_CLOSE_OVER = 10,
-  OP_UPVALUE_FROM_LOCAL = 11,
-  OP_UPVALUE_FROM_CLOSURE = 12,
+  OP_BOX_FROM_LOCAL = 11,
+  OP_BOX_FROM_CLOSURE = 12,
   // Application
   OP_APPLY = 13,
   OP_APPLY_TAIL = 14,
@@ -2542,13 +2558,20 @@ enum {
   OP_CADDR = 46,   // (car (cdr (cdr X))) — cdr, cdr, car
   // Exp 8: fused callee-load + apply opcodes. Operands: {callee-slot, argc}.
   // The callee is not pushed onto the operand stack — it is read directly
-  // from its source (constant pool for global, locals[] for local, closure
-  // upvalue for upvalue) at apply time. Saves one dispatch and one stack
-  // push/pop per call. Semantics otherwise identical to OP_APPLY/OP_APPLY_TAIL.
+  // from its source (constant pool for global, locals[] for local) at apply
+  // time. Saves one dispatch and one stack push/pop per call. Semantics
+  // otherwise identical to OP_APPLY/OP_APPLY_TAIL.
   OP_APPLY_GLOBAL = 47,       // {const-idx, argc}
   OP_APPLY_TAIL_GLOBAL = 48,  // {const-idx, argc}
   OP_APPLY_LOCAL = 49,        // {local-idx, argc}
   OP_APPLY_TAIL_LOCAL = 50,   // {local-idx, argc}
+  // Display-closure capture opcodes. Unlike BOX_* these store values directly
+  // in the Closure's `captures` VectorStorage rather than through a
+  // heap-allocated Box cell. Emitted only for captures the mutability analysis
+  // proves are never `set!`'d; mutable captures continue to use the BOX_* ops.
+  OP_CAPTURE_FROM_LOCAL = 51,   // {local-idx} — push locals[idx] raw
+  OP_CAPTURE_FROM_CLOSURE = 52, // {capture-idx} — push closure->captures->data[idx] raw
+  OP_CAPTURE_GET = 53,          // {capture-idx} — read slot, no Box dispatch
 };
 
 inline Type Value::type() const {

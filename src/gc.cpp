@@ -524,12 +524,12 @@ void GCSemispace::collect(size_t request, bool force) {
       // No pointers
       case FLONUM: case CHARACTER: case STRING: case BYTEVECTOR: break;
       // One pointer
-      case UPVALUE:
-        if(!obj->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
+      case BOX:
+        if(!obj->get_header_bit(Value::BOX_CLOSED_BIT)) {
           // There is no need to do anything here as the local will be updated by copy_roots
           break;
         } else {
-          AR_COPY(Upvalue, U.converted);
+          AR_COPY(Box, U.converted);
           break;
         }
       case VECTOR:
@@ -567,7 +567,7 @@ void GCSemispace::collect(size_t request, bool force) {
         break;
       case CLOSURE:
         AR_COPY(Closure, function);
-        AR_COPY(Closure, upvalues);
+        AR_COPY(Closure, captures);
         break;
       case VMFUNCTION:
         AR_COPY(VMFunction, name);

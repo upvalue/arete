@@ -57,7 +57,7 @@ void load_native_compiler(State&) {}
 // remove the need for some MOV instructions. 
 
 // TODO: GC frames can be trivially omitted in certain cases; if a function
-// does not have upvalues, never calls other functions or allocation primitives
+// does not have box captures, never calls other functions or allocation primitives
 
 // A function like say, memv or assq might benefit heavily from this, but we'd probably need to
 // inline recursive calls in the Scheme compiler in order to make it easy to determine whether this
@@ -108,7 +108,7 @@ void load_native_compiler(State&) {}
 // 8-16 = count of gc'd values
 // 16-a = computation stack
 // a-b = local values
-// b-c = upvalues
+// b-c = boxes
 
 // Stack
 // rsp+0 = pointer to previous stack frame
@@ -116,14 +116,14 @@ void load_native_compiler(State&) {}
 // rsp+16 = vmfunction pointer
 // rsp+24 = closure pointer (if any)
 // rsp+32 = gc scratch for debugging purposes
-// 32 - kUpvalueOffset = local variables
-// kUpvalueOffset - kCompStackOffset = upvalues
+// 32 - kBoxesOffset = local variables
+// kBoxesOffset - kCompStackOffset = boxes
 // kCompStackOffset - rsp = computation stack
 
 // TODO: Use offsetof and other stuff instead of calling functions to retrieve information
 // about a particular State
 
-// TODO: There is no need to store Closure pointer, we could store the VectorStorage of upvalues
+// TODO: There is no need to store Closure pointer, we could store the VectorStorage of boxes
 // directly in the frame pointer
 
 #define DASM_CHECKS
@@ -253,10 +253,10 @@ enum {
 
 // Exception source codes
 enum {
-  E_UPVALUES_NOT_SUPPORTED,
-  E_UPVALUE_CLOSED,
-  E_UPVALUE_NATIVE,
-  E_UPVALUE_VM,
+  E_CAPTURES_NOT_SUPPORTED,
+  E_BOX_CLOSED,
+  E_BOX_NATIVE,
+  E_BOX_VM,
   E_UNDEFINED,
   E_ARITY_CHECK_EQ,
   E_ARITY_CHECK_GTE,
@@ -318,7 +318,7 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
 
   bool check_code = true;
   switch(exc->src) {
-    case E_UPVALUES_NOT_SUPPORTED: {
+    case E_CAPTURES_NOT_SUPPORTED: {
       check_code = false;
       os << "closures not supported :(";
       break;
@@ -336,12 +336,12 @@ ptrdiff_t native_throw_exception(NativeException* exc) {
       break;
     }
 
-    case E_UPVALUE_NATIVE: check_code = false; os << "native upvalue"; break;
-    case E_UPVALUE_CLOSED: check_code = false; os << "closed upvalue"; break;
-    case E_UPVALUE_VM: {
+    case E_BOX_NATIVE: check_code = false; os << "native box"; break;
+    case E_BOX_CLOSED: check_code = false; os << "closed box"; break;
+    case E_BOX_VM: {
       check_code = false;
       os << (size_t) exc->state->gc.vm_stack << " -> " << (size_t) exc->arg1 << std::endl;
-      os << " !! vm upvalue";
+      os << " !! vm box";
       break;
     }
 
@@ -438,37 +438,34 @@ struct NativeFrameSize {
   Value scratch;
 };
 
-void upvalue_close(State* state, Value upval) {
-  //std::cout << "closing upvalue " << upval.bits <<  ' ' << upval.type() << std::endl;
-  AR_ASSERT(state->gc.live(upval.heap));
-  AR_ASSERT(upval.type() == UPVALUE);
-  upval.upvalue_close();
+void box_close_native(State* state, Value box) {
+  AR_ASSERT(state->gc.live(box.heap));
+  AR_ASSERT(box.type() == BOX);
+  box.box_close();
 }
 
-size_t allocate_upvalue(State* state, Value* local) {
-  Value upvalue = state->gc.allocate(UPVALUE, sizeof(Upvalue));
-  upvalue.heap->set_header_bit(Value::UPVALUE_POINTER_BIT);
-  upvalue.as_unsafe<Upvalue>()->U.local = local;
-  AR_LOG_JIT("allocating upvalue " << upvalue.bits << " to stack location " << (size_t) local);
+size_t allocate_box(State* state, Value* local) {
+  Value box = state->gc.allocate(BOX, sizeof(Box));
+  box.heap->set_header_bit(Value::BOX_POINTER_BIT);
+  box.as_unsafe<Box>()->U.local = local;
+  AR_LOG_JIT("allocating box " << box.bits << " to stack location " << (size_t) local);
 
-  return (size_t) upvalue.bits;
-
+  return (size_t) box.bits;
 }
 
-size_t make_closure(State* state, size_t upvalues, Value* stack_start) {
+size_t make_closure(State* state, size_t captures, Value* stack_start) {
   Value storage, closure, vmf(stack_start[0]);
   AR_FRAME(*state, vmf, storage, closure, vmf);
-  AR_LOG_JIT("make-closure upvalues: " << upvalues << " function: " << vmf);
+  AR_LOG_JIT("make-closure captures: " << captures << " function: " << vmf);
 
-
-  storage = state->make_vector_storage(upvalues);
-  for(size_t i = 0; i != upvalues; i++) {
+  // A slot may hold an Box (mutable capture) or a raw Value (display capture).
+  storage = state->make_vector_storage(captures);
+  for(size_t i = 0; i != captures; i++) {
     state->vector_storage_append(storage, stack_start[1+i]);
-    AR_ASSERT(stack_start[i+1].heap_type_equals(UPVALUE));
   }
 
   closure = state->gc.allocate(CLOSURE, sizeof(Closure));
-  closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
+  closure.as_unsafe<Closure>()->captures = storage.as<VectorStorage>();
 
   closure.as_unsafe<Closure>()->function = vmf;
   closure.procedure_install(vmf.as_unsafe<Procedure>()->procedure_addr);
@@ -491,13 +488,13 @@ Value compile_native(State& state, Value vfn_) {
 
   unsigned local_count = vmf->local_count;
   unsigned stack_max = vmf->stack_max;
-  unsigned upvalue_count = vmf->upvalue_count;
+  unsigned box_count = vmf->box_count;
   unsigned label = 0;
 
   // Using the otherwise not-used-in-this codebase kBlah style to denote things that will become
   // constants in the compiled code
 
-  unsigned total_stack = local_count + stack_max + upvalue_count;
+  unsigned total_stack = local_count + stack_max + box_count;
   unsigned kFrameValues = total_stack + 3;
   // Locals + computation stack + pointer to VMFunction and Closure and scratch
 
@@ -506,8 +503,8 @@ Value compile_native(State& state, Value vfn_) {
 
   // Stack frame offsets
   unsigned kLocalsOffset = (unsigned)kFrameSize;
-  unsigned kUpvaluesOffset = (unsigned)(kFrameSize + (local_count * sizeof(void*)));
-  unsigned kCompStackOffset = (unsigned)(kFrameSize + ((local_count + upvalue_count) * sizeof(void*)));
+  unsigned kBoxesOffset = (unsigned)(kFrameSize + (local_count * sizeof(void*)));
+  unsigned kCompStackOffset = (unsigned)(kFrameSize + ((local_count + box_count) * sizeof(void*)));
 
   unsigned kTotalStackSize = (unsigned)(kFrameSize + (total_stack * 8));
   unsigned kTotalStackSizeAligned = kTotalStackSize;
@@ -522,12 +519,12 @@ Value compile_native(State& state, Value vfn_) {
 
   AR_LOG_JIT("function frame info. stack_max " << stack_max << " kTotalStackSize " << kTotalStackSize << \
     " kTotalStackSizeAligned " << kTotalStackSizeAligned << " kLocalsOffset " << kLocalsOffset << 
-    " kUpvaluesOffset " << kUpvaluesOffset << \
+    " kBoxesOffset " << kBoxesOffset << \
     " kCompStackOffset " << kCompStackOffset \
 		<< " kFrameValues " << kFrameValues << " kFrameSize " << kFrameSize);
 
   // A note on a possible source of confusion: in the virtual machine, the stack is a separately
-  // allocated data structure from locals and upvalues. Thus there's the computation stack which
+  // allocated data structure from locals and boxes. Thus there's the computation stack which
   // exists only metaphorically here and is where the values of temporary computation are stored and
   // tracked by the garbage collector, and the actual stack i.e. rsp.
 
@@ -860,7 +857,7 @@ Value compile_native(State& state, Value vfn_) {
 
   // TODO: Not necessary to zero out whole frame
 
-  // Should be able to just zero out upvalues + computation stack. 
+  // Should be able to just zero out boxes + computation stack. 
   // Locals (except rest) will be initialized before any collection
 
   // TODO: Except what if a function call causes an exception e.g. an arity error?
@@ -879,11 +876,11 @@ Value compile_native(State& state, Value vfn_) {
   | cmp ARG1, ARG2
   | jne ->gc_zero
 
-  if(upvalue_count) {
-    for(size_t i = 0; i != upvalue_count; i++) {
+  if(box_count) {
+    for(size_t i = 0; i != box_count; i++) {
       size_t idx = vmf->free_variables->bv_ref<size_t>(i);
 
-      AR_LOG_JIT("allocating upvalue[" << i << "] from local idx " << idx);
+      AR_LOG_JIT("allocating box[" << i << "] from local idx " << idx);
 
       | mov ARG1, STATE
       | mov ARG2, rsp
@@ -891,12 +888,12 @@ Value compile_native(State& state, Value vfn_) {
 
       | push ARG3; push ARG4;
       | push rbp; push rsp;
-      | mov64 rax, (size_t) allocate_upvalue; call rax
+      | mov64 rax, (size_t) allocate_box; call rax
       | pop rsp; pop rbp;
       | pop ARG4; pop ARG3
 
       | mov ARG1, rsp
-      | add ARG1, (kUpvaluesOffset + (i * 8))
+      | add ARG1, (kBoxesOffset + (i * 8))
       | mov [ARG1], rax
     }
 
@@ -905,7 +902,7 @@ Value compile_native(State& state, Value vfn_) {
       | simpCall print_stack_frame
     }
 
-    //| throwNativeException 0, E_EVAL, E_UPVALUES_NOT_SUPPORTED, 0, 0
+    //| throwNativeException 0, E_EVAL, E_CAPTURES_NOT_SUPPORTED, 0, 0
   }
 
   if(dbg) {
@@ -951,12 +948,15 @@ Value compile_native(State& state, Value vfn_) {
       case OP_APPLY_TAIL:
       case OP_PUSH_IMMEDIATE:
       case OP_GLOBAL_GET:
-      case OP_UPVALUE_GET:
-      case OP_UPVALUE_SET:
+      case OP_BOX_GET:
+      case OP_BOX_SET:
       case OP_LOCAL_GET:
       case OP_LOCAL_SET:
-      case OP_UPVALUE_FROM_LOCAL:
-      case OP_UPVALUE_FROM_CLOSURE:
+      case OP_BOX_FROM_LOCAL:
+      case OP_BOX_FROM_CLOSURE:
+      case OP_CAPTURE_FROM_LOCAL:
+      case OP_CAPTURE_FROM_CLOSURE:
+      case OP_CAPTURE_GET:
       case OP_CLOSE_OVER:
       case OP_ARGC_EQ:
       case OP_ARGC_GTE:
@@ -1122,51 +1122,51 @@ Value compile_native(State& state, Value vfn_) {
         break;
       }
 
-      case OP_UPVALUE_GET: {
+      case OP_BOX_GET: {
         size_t idx = code[code_offset++];
 
-        AR_LOG_JIT("upvalue-get " << idx);
+        AR_LOG_JIT("box-get " << idx);
 
-        |.macro getUpvalue, store, idx
+        |.macro getBox, store, idx
         | mov store, sFrameClosure
-        | add store, (&((Closure*)0)->upvalues)
+        | add store, (&((Closure*)0)->captures)
         | mov store, [rax]
         | add store, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
         | mov store, [rax]
         |.endmacro
 
-        // Jumps to labels based on type of upvalue in rax
-        // If upvalue is closed, jumps to >2
-        // If upvalue is native, jumps to >1
-        // If upvalue is VM, code immediately afterwards is executed
-        |.macro upvalueDispatch
+        // Jumps to labels based on type of Box slot in rax
+        // If Box is closed, jumps to >2
+        // If Box is native (pointer mode), jumps to >1
+        // If Box is VM (vm_local_idx mode), code immediately afterwards is executed
+        |.macro boxDispatch
         | mov ARG1, [rax]
-        | and ARG1, (Value::UPVALUE_CLOSED_BIT)
-        | cmp ARG1, (Value::UPVALUE_CLOSED_BIT)
+        | and ARG1, (Value::BOX_CLOSED_BIT)
+        | cmp ARG1, (Value::BOX_CLOSED_BIT)
         | je >2
         | mov ARG1, [rax]
-        | and ARG1, (Value::UPVALUE_POINTER_BIT)
-        | cmp ARG1, (Value::UPVALUE_POINTER_BIT)
+        | and ARG1, (Value::BOX_POINTER_BIT)
+        | cmp ARG1, (Value::BOX_POINTER_BIT)
         | je >1
         |.endmacro
 
-        |.macro extractUpvaluePointer
+        |.macro extractBoxPointer
         | mov ARG2, rax
-        | add ARG2, (ptrdiff_t)(&((Upvalue*)0)->U.local)
+        | add ARG2, (ptrdiff_t)(&((Box*)0)->U.local)
         //| mov ARG2, [ARG2]
         |.endmacro
 
         // TODO: This adds a LOT of code. 
 
-        // Extract upvalue contents, which may either be a pointer, a stack offset, or a value
+        // Extract Box contents, which may either be a pointer, a stack offset, or a value
         // to be used immediately
 
-        | getUpvalue rax, idx
-        | extractUpvaluePointer
+        | getBox rax, idx
+        | extractBoxPointer
         | mov ARG2, [ARG2]
-        | upvalueDispatch
+        | boxDispatch
 
-        // The upvalue is an offset into the VM stack
+        // The Box is an offset into the VM stack
         // Get pointer to VM stack
         | mov ARG1, STATE
         | add ARG1, (ptrdiff_t)(&((arete::State*)0)->gc.vm_stack)
@@ -1188,15 +1188,15 @@ Value compile_native(State& state, Value vfn_) {
         break;
       }
 
-      case OP_UPVALUE_SET: {
+      case OP_BOX_SET: {
         size_t idx = code[code_offset++];
-        AR_LOG_JIT("upvalue-set " << idx);
+        AR_LOG_JIT("box-set " << idx);
 
-        | getUpvalue rax, idx
-        | extractUpvaluePointer
+        | getBox rax, idx
+        | extractBoxPointer
         | decStack
         | mov ARG3, [STACK]
-        | upvalueDispatch
+        | boxDispatch
         //
         // Get State::gc.vm_stack
         | mov ARG1, STATE
@@ -1216,23 +1216,23 @@ Value compile_native(State& state, Value vfn_) {
         | mov [ARG2], ARG3
         | jmp >3
         | 2:
-        // Upvalue is closed, this is a pointer
+        // Box is closed, this is a pointer
         //| mov rax, [STACK]
         | mov [ARG2], ARG3
         | 3: 
-        //| throwNativeException 0, E_EVAL, E_UPVALUE_CLOSED, 0, 0
+        //| throwNativeException 0, E_EVAL, E_BOX_CLOSED, 0, 0
 
 
         break;
       }
 
-      case OP_UPVALUE_FROM_CLOSURE: {
+      case OP_BOX_FROM_CLOSURE: {
         size_t idx = code[code_offset++];
 
-        AR_LOG_JIT("upvalue-from-closure " << idx);
+        AR_LOG_JIT("box-from-closure " << idx);
 
         | mov ARG1, sFrameClosure
-        | add ARG1, (&((Closure*)0)->upvalues)
+        | add ARG1, (&((Closure*)0)->captures)
         | mov ARG1, [ARG1]
         | add ARG1, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
         | mov ARG1, [ARG1]
@@ -1242,13 +1242,50 @@ Value compile_native(State& state, Value vfn_) {
         break;
       }
 
-      case OP_UPVALUE_FROM_LOCAL: {
+      case OP_BOX_FROM_LOCAL: {
         size_t idx = code[code_offset++];
 
-        AR_LOG_JIT("upvalue-from-local " << idx);
+        AR_LOG_JIT("box-from-local " << idx);
 
         | mov ARG1, rsp
-        | add ARG1, (kUpvaluesOffset + (idx * 8))
+        | add ARG1, (kBoxesOffset + (idx * 8))
+        | mov ARG1, [ARG1]
+        | mov [STACK], ARG1
+        | incStack
+
+        break;
+      }
+
+      // Display-closure: push locals[idx] raw (no Box indirection).
+      case OP_CAPTURE_FROM_LOCAL: {
+        size_t idx = code[code_offset++];
+        size_t stack_offset = (kLocalsOffset + (8 * idx));
+        AR_LOG_JIT("capture-from-local " << idx << " at stack location " << stack_offset);
+
+        | mov ARG1, rsp
+        | add ARG1, stack_offset
+        | mov ARG1, [ARG1]
+        | mov [STACK], ARG1
+        | incStack
+
+        break;
+      }
+
+      // Display-closure capture load: single indexed mov, no Box
+      // open/closed/pointer dispatch. FROM_CLOSURE forwards a parent capture
+      // into a fresh Closure at close-over; GET reads the current closure's
+      // capture slot at an access site. Emission is gated on the mutability
+      // analysis proving the capture is never `set!`'d.
+      case OP_CAPTURE_FROM_CLOSURE:
+      case OP_CAPTURE_GET: {
+        size_t idx = code[code_offset++];
+
+        AR_LOG_JIT("capture-ref " << idx);
+
+        | mov ARG1, sFrameClosure
+        | add ARG1, (&((Closure*)0)->captures)
+        | mov ARG1, [ARG1]
+        | add ARG1, (ptrdiff_t)((((ptrdiff_t)&((VectorStorage*)0)->data)) + (idx * 8))
         | mov ARG1, [ARG1]
         | mov [STACK], ARG1
         | incStack
@@ -1257,27 +1294,21 @@ Value compile_native(State& state, Value vfn_) {
       }
 
       case OP_CLOSE_OVER: {
-        size_t upvalues = code[code_offset++];
+        size_t captures = code[code_offset++];
 
-        AR_LOG_JIT("make-closure " << upvalues);
-
-        /*
-        | mov ARG1, rsp
-        | simpCall print_stack_frame
-        */
+        AR_LOG_JIT("make-closure " << captures);
 
         | mov ARG1, STATE
-        | mov64 ARG2, (size_t) upvalues
+        | mov64 ARG2, (size_t) captures
         | mov ARG3, STACK
-        // Stack position = stack - 8 - upvalues - 8 (for VMFunction at the beginning)
-        | sub ARG3, (((size_t)((upvalues * 8) + 8)))
+        // Stack position = stack - 8 - captures - 8 (for VMFunction at the beginning)
+        | sub ARG3, (((size_t)((captures * 8) + 8)))
         | mov64 rax, (size_t) make_closure
         | call rax
 
-        | sub STACK, (((size_t)((upvalues * 8) + 8)))
+        | sub STACK, (((size_t)((captures * 8) + 8)))
         | mov [STACK], rax
         | incStack
-
 
         break;
       }
@@ -2176,16 +2207,16 @@ Value compile_native(State& state, Value vfn_) {
     | simpCall sanity_log_end
   }
 
-  // Close over local upvalues
-  if(upvalue_count) {
+  // Close any still-open Boxes allocated for this frame's mutable captures.
+  if(box_count) {
     | mov sFrameScratch, STACK
-    for(size_t i = 0; i != upvalue_count; i++) {
+    for(size_t i = 0; i != box_count; i++) {
       | mov ARG2, rsp
-      | add ARG2, (kUpvaluesOffset + (i * 8))
+      | add ARG2, (kBoxesOffset + (i * 8))
       | mov ARG2, [ARG2]
-      
+
       | mov ARG1, STATE
-      | mov64 rax, (size_t) upvalue_close
+      | mov64 rax, (size_t) box_close_native
       | call rax
     }
     | mov STACK, sFrameScratch

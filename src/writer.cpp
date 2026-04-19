@@ -88,7 +88,7 @@ std::ostream& operator<<(std::ostream& os, Type type) {
     case EXCEPTION: return os << "exception";
     case FUNCTION: return os << "function";
     case BYTEVECTOR: return os << "bytevector";
-    case UPVALUE: return os << "upvalue";
+    case BOX: return os << "box";
     case VMFUNCTION: return os << "vmfunction";
     case CFUNCTION: return os << "cfunction";
     case CLOSURE: return os << "closure";
@@ -251,8 +251,8 @@ std::ostream& operator<<(std::ostream& os, Value v) {
       }
       return os << ' ' << path << '>';
     }
-    case UPVALUE:
-      return os << "#<upvalue " << v.bits << '>';
+    case BOX:
+      return os << "#<box " << v.bits << '>';
     case BYTEVECTOR: {
       os << "#u8(";
       for(size_t i = 0; i != v.bv_length(); i++) {
@@ -558,7 +558,7 @@ static Value pretty_print_sub(State& state, std::ostream& os, Value v, PrintStat
         VMFunction* vfn = v.as<VMFunction>();
         os2 << "#&vfn(";
         os2 << vfn->name << ' ';
-        os2 << vfn->min_arity << ' ' << vfn->max_arity << ' ' << vfn->stack_max << ' ' << vfn->local_count << ' ' << vfn->upvalue_count;
+        os2 << vfn->min_arity << ' ' << vfn->max_arity << ' ' << vfn->stack_max << ' ' << vfn->local_count << ' ' << vfn->box_count;
         os2 << ' ';
         std::string ins(vfn->code->data, vfn->code->length);
         std::string outs;

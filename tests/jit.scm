@@ -120,7 +120,7 @@
 
 (test-equals 6 (lambda () (define cl (make-closure 6)) (cl)))
 
-;; closure 2: access a native and closed upvalue from a native closure
+;; closure 2: access a native and closed box from a native closure
 
 (define (make-closure3)
   (define (closure) a)

@@ -155,7 +155,7 @@ struct PointerUpdater {
       case CLOSURE: {
         static_cast<VMFunction*>(heap)->procedure_addr = apply_vm_;
         static_cast<Closure*>(heap)->function = update_value(static_cast<Closure*>(heap)->function);
-        static_cast<Closure*>(heap)->upvalues = (VectorStorage*)update_heapvalue(static_cast<Closure*>(heap)->upvalues);
+        static_cast<Closure*>(heap)->captures = (VectorStorage*)update_heapvalue(static_cast<Closure*>(heap)->captures);
         break;
       }
 
@@ -204,8 +204,8 @@ struct PointerUpdater {
         static_cast<Symbol*>(heap)->value = update_value(static_cast<Symbol*>(heap)->value);
         break;
 
-      case UPVALUE:
-        static_cast<Upvalue*>(heap)->U.converted = update_value(static_cast<Upvalue*>(heap)->U.converted);
+      case BOX:
+        static_cast<Box*>(heap)->U.converted = update_value(static_cast<Box*>(heap)->U.converted);
         break;
 
       default:

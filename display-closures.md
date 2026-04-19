@@ -1,4 +1,158 @@
-# Plan: Display Closures for Arete
+# Display Closures — Implementation Status
+
+**Branch:** `opt-display-closures`
+**Baseline:** `master` (commit `01ded4a`)
+
+Original plan is preserved below in the "Original Plan" section. This top section is the live status / handoff for the next agent.
+
+---
+
+## TL;DR
+
+- **Runtime fully landed** — `OP_CAPTURE_FROM_LOCAL` / `OP_CAPTURE_FROM_CLOSURE` / `OP_CAPTURE_GET` work in interpreter, native VM, and JIT. Validated by 8 hand-crafted bytecode tests in `tests/display-closures/runtime-smoke.scm`.
+- **Compiler emission landed, flag-gated** — `COMPILER-DISPLAY-CLOSURES` (default `#t` in `scheme/compiler.scm:53`) controls whether `CAPTURE_*` is emitted for immutable captures.
+- **One pre-existing bug found and fixed** — `compile-inline-call` clobbered `local-count` after nested inline-calls bumped it. Fix at `scheme/compiler.scm:720-728`.
+- **Save+load blocker FIXED** — the interpreter's computed-goto `dispatch_table` in `src/vm.cpp:280-319` was missing entries for the three new opcodes. Off-the-end reads returned null → `goto *NULL` on first `CAPTURE_*` dispatch post-load. Invisible pre-save because `native_vm_function_eligible` routed all `CAPTURE_*`-bearing functions to `apply_native_vm`; `image.cpp:141-145` strips `VMFUNCTION_NATIVE_VM_BIT` on save, forcing the interpreter path on load, which is when the missing table entries crash. Fix: append the three labels to the dispatch table.
+
+## What works right now
+
+Commands to verify:
+
+```
+bin/arete boot.scm                                # boots cleanly
+bin/arete boot.scm --save-image heap.boot         # heap saves cleanly
+bin/arete bootstrap-and-psyntax.scm               # psyntax.pp compiles + sc-expand works (byte-identical to master modulo timing line)
+bin/arete heap.boot tests/display-closures/runtime-smoke.scm   # all 8 runtime tests pass
+python3 utils/run-tests.py                        # 82/82
+bin/arete boot.scm tests/jit.scm                  # 41/41
+```
+
+For the psyntax stress class (historical flake per `.tickets/aov-md9k.md`): 30/30 clean, 100/100 clean earlier.
+
+## What's broken
+
+Nothing known. The save+load segfault is resolved by the `src/vm.cpp` dispatch-table patch.
+
+## Files touched
+
+| File | What |
+|---|---|
+| `arete.hpp:2551-2562` | Added `OP_CAPTURE_FROM_LOCAL=51`, `OP_CAPTURE_FROM_CLOSURE=52`, `OP_CAPTURE_GET=53`. Opcode numbers appended so `heap.boot` compat preserved. |
+| `src/vm.cpp:442, 488-507` | Relaxed `AR_ASSERT(...==BOX)` in `OP_CLOSE_OVER` to allow raw-value slots. Added 3 interp handlers. |
+| `src/vm-native-x64.cpp.dasc:70, 121-124, 795-829` | Resized `dispatch_table`. Added to `NATIVE_VM_DISPATCH_OPS` macro. Added 3 DynASM handlers next to `op_close_over`. |
+| `src/vm-native.cpp:77-80, 212-214` | Added `OP_CAPTURE_*` to `native_vm_opcode_supported` **and** to the stride switch in `native_vm_function_eligible` (the eligibility walker — easy to miss; its omission caused an early auto-install bug, see commit history / first run of runtime-smoke). |
+| `src/compile-x64.cpp.dasc:467, 961-963, 1259-1303` | Relaxed `AR_ASSERT` in `make_closure`. Added to label-gen stride switch. Added 3 JIT handlers. |
+| `scheme/compiler.scm` | Whole feature. See next section. |
+| `tests/display-closures/runtime-smoke.scm` | 8 hand-crafted tests across all 3 engines. New file. |
+| `tests/display-closures/run-tests-flag-on.sh` | All existing suites under flag on. New file. |
+
+## Key compiler.scm changes
+
+Line refs approximate — source moves.
+
+- `COMPILER-DISPLAY-CLOSURES` flag at `:53` (default `#t`). Opt out with `--set COMPILER-DISPLAY-CLOSURES "#f"`. **Note:** the reader parses bare `t`/`f` as **symbols**; the boolean needs quoting as `"#t"` / `"#f"`.
+- `Var` record gained a `mutable?` field at `:103`. Default `#f`.
+- `scan-mutable-names-into!` at `:82-112` — pre-scan populates a per-compile table of all names that need a Box capture. Treats **both** `set!` and `define` targets (internal defines are forward-declared, so between scan-local-defines and local-set the slot is uninitialized — a closure built mid-window needs late-binding via Box. Classic case: `(lambda () (define loop (lambda () (loop))))`). Keys by `rename-strip` so lookup sites that pass stripped symbols hit.
+- `var-name-mutable?` at `:66-69` — looks up with `rename-strip`.
+- `compile-toplevel` at `:1478-1490` and `recompile-function` at `:1525-1543` populate `*compiler-mutable-names*` before any lambda compiles, restore afterward (nested compile entries are reentrancy-safe).
+- Every `Var/make` site now sets `mutable?`:
+  - `OpenFn/define!` at `:1000`
+  - `register-free-variable` at `:913-917` (copies from parent Var)
+  - `compile-inline-call` at `:712-714`
+  - `compile-named-loop` at `:605-607`
+- **Critical bug fix:** `compile-inline-call` final `local-count` update at `:720-728`. Was an unconditional set; now uses max-of-current-and-proposed. See "The compile-inline-call bug" section below.
+- Close-over emission at `:1094-1111` — per-slot picks `capture-from-*` vs `box-from-*` based on `Var/mutable?` and flag.
+- `compile-identifier` captured branch at `:992-1000` — picks `capture-get` vs `box-get`.
+- `register-free-variable` skips the free-variable-id / free-variables bookkeeping when the capture is immutable and flag is on (no Box needed).
+
+## The compile-inline-call bug
+
+This was the core fix that unblocked psyntax. Worth reading top-to-bottom since it's the most surprising part of the branch.
+
+**Pre-existing**: `compile-inline-call` finalizes `(OpenFn/local-count! fn (fx+ locals N))` unconditionally after compiling the inline-lambda's args and body. Nested inline-calls inside the arg evaluation can bump `local-count` higher (e.g., to `locals+N+K`). The unconditional set shrinks it back to `locals+N`, losing the higher watermark.
+
+**Why it was invisible on master**: all free-variable captures went through Boxes. Boxes are heap objects pointing at a specific stack slot. Even if the VMFunction's `local_count` was set too small (so the VM's computation stack overlapped with slots the bytecode still used as locals), the Box pointer held a stable address — reads/writes through the Box still landed on the right stack word. Any computation-stack writes to the same word were transient and didn't outlive a closure capture.
+
+**Why display closures exposed it**: `OP_CAPTURE_GET` snapshots the raw slot value. If the VM's `local_count` is too small, the snapshot can race with stack operations that write the same word during arg evaluation of a later expression. Result: a closure's display capture holds the wrong value. In psyntax, the symptom was that `sym2077` (the arg of an outer inline-lambda whose arg-eval chain contained two more inline-lambdas) came out as `#f` instead of `'x`. Cascaded into psyntax's `(eq? (id-var-name id empty-wrap) valsym)` check failing with `"definition not permitted"`.
+
+**Fix** at `scheme/compiler.scm:720-728`:
+
+```scheme
+(let ((proposed (fx+ locals (length (cdr x))))
+      (current (OpenFn/local-count fn)))
+  (when (fx< current proposed)
+    (OpenFn/local-count! fn proposed)))
+```
+
+**How this was found**: instrumented the failing psyntax.pp site (the compiled chi-definition branch) to print captured values; saw `e2082` coming out as the wrong symbol ('DBG-e2082 instead of 'x), traced that to slot-value drift, traced that to `compile-inline-call`'s local-count shrinkage. The technique (print values inside psyntax.pp, temporarily) is the right move if the next debugging session also needs internal psyntax visibility — see `tests/psyntax/psyntax.pp:2077, 2175` for where I added `(print 'DBG-... ...)` wrappers and matched the extra `)` on line 2174 before reverting.
+
+## The save+load segfault (remaining blocker)
+
+**Repro:**
+
+```
+bin/arete boot.scm --save-image /tmp/h.boot     # flag is on by default
+bin/arete /tmp/h.boot --eval '1'                # segfault, exit 139
+```
+
+With flag off (`--set COMPILER-DISPLAY-CLOSURES "#f"` before `boot.scm`, AND flipping the `set-top-level-value!` line in `scheme/compiler.scm:53` to `#f` so it doesn't overwrite the CLI value — the current setter is unconditional), save+load works.
+
+**Single-process operation is fine.** Everything in one `bin/arete` invocation works: `bin/arete bootstrap-and-psyntax.scm` runs psyntax correctly under flag on. The bug only manifests when closures with display-captured heap-pointer slots pass through image save → image load.
+
+### Evidence / things already checked
+
+- Not the `compile-inline-call` fix — reverting it keeps the save+load segfault.
+- Not about the flag being overwritten at load — `(top-level-value 'COMPILER-DISPLAY-CLOSURES)` correctly shows `#t` after loading a flag-on heap (tested via wrapping `--eval` tricks).
+- `runtime-smoke.scm` under `heap.boot` loads and passes. So the load path itself works; the bug is about specific closures saved with raw-value display captures.
+
+### Most likely suspects
+
+1. **Image load of a `Closure` with raw Values in its `captures` VectorStorage**. See `src/image.cpp:155-160` (Closure case) and `:195-200` (VECTOR_STORAGE case). `update_value` at `:65-70` handles immediates vs heap pointers correctly on the surface, so the slot contents should relocate properly. Worth re-reading for a second pair of eyes.
+
+2. **GC after load but before first function call**. The initial `boot_common` / `boot_from_image` path may collect. A Closure's `captures` VectorStorage tracer (in `src/gc.cpp:605-611`) treats each slot as a Value via `copy()` — same as VectorStorage elsewhere. In theory that's correct.
+
+3. **Native-VM bit handling**. `src/image.cpp:141-145` strips `VMFUNCTION_NATIVE_VM_BIT` on save and resets `procedure_addr` to `apply_vm_` on load. Closures (`:155-160`) reset procedure_addr but don't touch `VMFUNCTION_NATIVE_VM_BIT` on the underlying VMFunction (which is reached via `Closure::function`). After load, `native_vm_install_tree_visit` is **not** called automatically — so closures are reachable with procedure_addr = apply_vm but their function's native-VM bit state might be stale. This is pre-existing though; not specific to display closures. Worth confirming nothing new interacts badly.
+
+4. **`make_closure` helpers in `vm.cpp` and `compile-x64.cpp.dasc`**. After my assertion relaxations, both helpers iterate the stack-snapshot slots and insert them into the VectorStorage. At load time these helpers aren't called (closures come from the image directly). But if a flag-on-compiled function runs after load, it may create new closures with display captures — that path should be fine since the runtime handlers are tested by `runtime-smoke`.
+
+### Suggested next-step debugging
+
+- Narrow with `bin/arete /tmp/h.boot --eval '(car (quote (1 2)))'` and similar — does a pure immediate eval crash, or only ones that touch globals/closures?
+- Try `bin/arete --debug-gc /tmp/h.boot --eval '1'` to flush out a GC bug.
+- Save a heap with flag on, load it with `--interp-only` (clears bytecode compiler, code runs tree-walker). If that works, it narrows to the native-VM / JIT / apply_vm path. If it still crashes, it's in the tree-walker's touch of a closure.
+- Compare `heap.boot` byte size between flag-on save and flag-off save (both from the same `boot.scm` run). A wildly different size hints at structural difference.
+- Add a C++-side assertion in `Value` slot access that heap pointers are live GC objects, run under a flag-on heap's early post-load code, catch the exact first invalid deref.
+
+### Where I'd look first
+
+`src/image.cpp` VECTOR_STORAGE (`:195-200`) and Closure (`:155-160`) paths. The invariant "every slot is either a Box or a non-Box heap/immediate" is correct on the Scheme side but the image code doesn't know the difference — it treats each slot as a Value and calls `update_value`. For a Box slot, update_value follows the Box heap pointer. For a raw heap-value slot (e.g., a pair, a closure), same mechanism. Should work. But something subtle is off.
+
+## Known-good test bundle
+
+```bash
+# Single-process everything (flag default on)
+bin/arete bootstrap-and-psyntax.scm         # psyntax
+python3 utils/run-tests.py                  # 82/82
+bin/arete heap.boot tests/display-closures/runtime-smoke.scm  # 8 runtime tests
+bin/arete boot.scm tests/jit.scm            # 41 JIT tests
+bash tests/display-closures/run-tests-flag-on.sh    # 63 tests via --set CLI
+
+# Stress
+for i in $(seq 1 30); do bin/arete bootstrap-and-psyntax.scm > /dev/null 2>&1 || echo FAIL; done
+```
+
+All green. The only red cell is `bin/arete heap.boot --eval …`.
+
+## Tasks, in order of priority
+
+1. **Fix save+load segfault** (blocker). Probably in `src/image.cpp` around the Closure/VectorStorage paths. Once fixed, flag stays default on.
+2. **Perf measurement**. User deferred this to later. Baseline: `time bin/arete boot.scm`, `time bin/arete heap.boot compile.scm`, median of 10. Expectation: fewer Box allocations, `compile.scm` faster ≥5%.
+3. **Rename pass (`Upvalue` → `Box`)**. *Done.* Struct, enum, opcodes, bits, helpers, field names, and Scheme-level symbol names all migrated; historical references remain only in the "Original Plan" section below and in `.tickets/`.
+4. **Consider `EXP-*` flag naming style**. The codebase has `EXP-3`, `EXP-8` style naming for past experiments. Unifying this one would make the flag family consistent.
+
+---
+
+# Original Plan (preserved)
 
 ## What this means here
 
@@ -12,7 +166,7 @@ Mutated captures stay as boxes (their current representation) so that aliased `s
 
 | Aspect | Current Implementation | File:Line |
 |---|---|---|
-| Closure struct | `{function: VMFunction*, upvalues: VectorStorage*}` | `arete.hpp:1250` |
+| Closure struct | `{function: VMFunction*, captures: VectorStorage*}` | `arete.hpp:1250` |
 | Upvalue struct | `{local*, vm_local_idx, converted}` union | `arete.hpp:1203` |
 | Environment model | Parent-chain linked tables per OpenFn | `compiler.scm:748-789` |
 | Free var capture | Flat vector walk, propagate up parent chain | `compiler.scm:738-747` |

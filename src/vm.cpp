@@ -92,27 +92,26 @@ struct VMFrame2 {
     AR_ASSERT(state.gc.live(fn.heap));
     AR_ASSERT_LIVE(fn.heap);
     VMFunction* vfn = fn.as_unsafe<VMFunction>();
-    vm_stack_used = vfn->local_count + vfn->upvalue_count + vfn->stack_max;
+    vm_stack_used = vfn->local_count + vfn->box_count + vfn->stack_max;
     state.vm_depth++;
     //state.gc.grow_stack(vm_stack_used);
   }
 
   ~VMFrame2() {
     VMFunction* vfn = fn.as<VMFunction>();
-    Value* upvalues = &state.gc.vm_stack[state.gc.vm_stack_used - vm_stack_used + vfn->local_count];
-    //std::cout << "closing over " << vfn->upvalue_count << " upvalues" << std::endl;
-    for(size_t i = 0; i != vfn->upvalue_count; i++) {
-      if(!upvalues[i].heap_type_equals(UPVALUE) || upvalues[i].upvalue_closed()) {
+    Value* boxes = &state.gc.vm_stack[state.gc.vm_stack_used - vm_stack_used + vfn->local_count];
+    for(size_t i = 0; i != vfn->box_count; i++) {
+      if(!boxes[i].heap_type_equals(BOX) || boxes[i].box_closed()) {
         continue;
       }
 
-      size_t idx = upvalues[i].as_unsafe<Upvalue>()->U.vm_local_idx;
+      size_t idx = boxes[i].as_unsafe<Box>()->U.vm_local_idx;
       if(idx >= state.gc.vm_stack_used) {
         continue;
       }
 
-      upvalues[i].as_unsafe<Upvalue>()->U.converted = state.gc.vm_stack[idx];
-      upvalues[i].heap->set_header_bit(Value::UPVALUE_CLOSED_BIT);
+      boxes[i].as_unsafe<Box>()->U.converted = state.gc.vm_stack[idx];
+      boxes[i].heap->set_header_bit(Value::BOX_CLOSED_BIT);
     }
     state.gc.shrink_stack(vm_stack_used);
     state.vm_depth--;
@@ -145,8 +144,8 @@ struct VMFrame2 {
   vfn = f.fn.as_unsafe<VMFunction>(); \
   locals = &state.gc.vm_stack[sff_offset]; \
   /*std::cout << "stack offset:" << ((size_t)stack ) - ((size_t) sbegin) << std::endl; */\
-  stack = (Value*)(((size_t)&state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count] + (((((size_t)stack) - ((size_t)sbegin)))))); \
-  sbegin = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->upvalue_count]; \
+  stack = (Value*)(((size_t)&state.gc.vm_stack[sff_offset + vfn->local_count + vfn->box_count] + (((((size_t)stack) - ((size_t)sbegin)))))); \
+  sbegin = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->box_count]; \
   cp = (size_t*)((((size_t) vfn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
   code = vfn->code_pointer();
 
@@ -227,9 +226,9 @@ tail:
   VM2_RESTORE();
 
   // This has to be done in a somewhat funky order. Because allocations can occur here (if a function
-  // has upvalues, or if a function has rest arguments). We have to take care to make sure everything
-  // is garbage collected at the allocation points here. So we check function arity right before
-  // starting the actual function.
+  // has boxed captures, or if a function has rest arguments). We have to take care to make sure
+  // everything is garbage collected at the allocation points here. So we check function arity right
+  // before starting the actual function.
   //std::cout << (ptrdiff_t) state.gc.vm_stack << std::endl;
   //std::cout << (ptrdiff_t) locals << std::endl;
   AR_ASSERT((size_t)locals >= (size_t)state.gc.vm_stack && (size_t)locals <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*))));
@@ -243,26 +242,24 @@ tail:
   // TODO: Necessary?
   memset((void*)(((size_t)locals) + locals_size), 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
 
-  // Here we allocate all upvalues needed by functions that will be enclosed by this function.
-  // Each upvalue is tied to a local until control exits this function, at which point they become
-  // freestanding
-  if(vfn->upvalue_count) {
-    Value* upvalues = &state.gc.vm_stack[sff_offset + vfn->local_count];
+  // Here we allocate all Boxes needed for this frame's mutable captures.
+  // Each Box starts "open" pointing at its backing local slot; when control
+  // exits this function, ~VMFrame2 closes any still-open Box into its own
+  // `converted` field.
+  if(vfn->box_count) {
+    Value* boxes = &state.gc.vm_stack[sff_offset + vfn->local_count];
     state.gc.protect_argc = argc;
     state.gc.protect_argv = argv;
 
-    //AR_LOG_VM2("allocating space for " << vfn->free_variables->length << " upvalues");
-
     for(size_t i = 0; i != f.fn.as_unsafe<VMFunction>()->free_variables->length; i++) {
-      upvalues[i] = state.gc.allocate(UPVALUE, sizeof(Upvalue));
+      boxes[i] = state.gc.allocate(BOX, sizeof(Box));
       AR_ASSERT(state.gc.live(f.fn));
-      AR_ASSERT(state.gc.live(upvalues[i]));
+      AR_ASSERT(state.gc.live(boxes[i]));
       size_t idx = ((size_t*) f.fn.as_unsafe<VMFunction>()->free_variables->data)[i];
       size_t vm_stack_idx = ((size_t)&locals[idx] - (size_t) state.gc.vm_stack) / sizeof(void*);
 
-
-      AR_ASSERT(current_state->gc.live(upvalues[i]));
-      upvalues[i].as<Upvalue>()->U.vm_local_idx = vm_stack_idx;
+      AR_ASSERT(current_state->gc.live(boxes[i]));
+      boxes[i].as<Box>()->U.vm_local_idx = vm_stack_idx;
     }
 
     VM2_RESTORE_GC();
@@ -273,8 +270,8 @@ tail:
   static void* dispatch_table[] = {
     &&LABEL_OP_BAD, &&LABEL_OP_PUSH_CONSTANT, &&LABEL_OP_PUSH_IMMEDIATE, &&LABEL_OP_POP,
     &&LABEL_OP_GLOBAL_GET, &&LABEL_OP_GLOBAL_SET, &&LABEL_OP_LOCAL_GET, &&LABEL_OP_LOCAL_SET,
-    &&LABEL_OP_UPVALUE_GET, &&LABEL_OP_UPVALUE_SET,
-    &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_UPVALUE_FROM_LOCAL, &&LABEL_OP_UPVALUE_FROM_CLOSURE,
+    &&LABEL_OP_BOX_GET, &&LABEL_OP_BOX_SET,
+    &&LABEL_OP_CLOSE_OVER, &&LABEL_OP_BOX_FROM_LOCAL, &&LABEL_OP_BOX_FROM_CLOSURE,
     &&LABEL_OP_APPLY, &&LABEL_OP_APPLY_TAIL,
     &&LABEL_OP_RETURN,
     &&LABEL_OP_JUMP, &&LABEL_OP_JUMP_WHEN, &&LABEL_OP_JUMP_WHEN_POP, &&LABEL_OP_JUMP_UNLESS,
@@ -306,6 +303,9 @@ tail:
     &&LABEL_OP_APPLY_TAIL_GLOBAL,
     &&LABEL_OP_APPLY_LOCAL,
     &&LABEL_OP_APPLY_TAIL_LOCAL,
+    &&LABEL_OP_CAPTURE_FROM_LOCAL,
+    &&LABEL_OP_CAPTURE_FROM_CLOSURE,
+    &&LABEL_OP_CAPTURE_GET,
   };
 #endif
 
@@ -388,67 +388,63 @@ tail:
         VM_DISPATCH();
       }
 
-      VM_CASE(OP_UPVALUE_GET): {
+      VM_CASE(OP_BOX_GET): {
         size_t idx = VM_NEXT_INSN();
-        AR_LOG_VM2("upvalue-get " << idx);
-        Value upvalue = f.closure.as_unsafe<Closure>()->upvalues->data[idx];
-        if(!upvalue.heap_type_equals(UPVALUE)) {
-          (*stack++) = upvalue;
+        AR_LOG_VM2("box-get " << idx);
+        Value slot = f.closure.as_unsafe<Closure>()->captures->data[idx];
+        if(!slot.heap_type_equals(BOX)) {
+          (*stack++) = slot;
           VM_DISPATCH();
         }
 
-        Upvalue* upval = upvalue.as_unsafe<Upvalue>();
-        if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
-          (*stack++) = upval->U.converted;
+        Box* box = slot.as_unsafe<Box>();
+        if(box->get_header_bit(Value::BOX_CLOSED_BIT)) {
+          (*stack++) = box->U.converted;
         } else {
-          if(upval->get_header_bit(Value::UPVALUE_POINTER_BIT)) {
-            (*stack++) = upval->U.local->bits;
+          if(box->get_header_bit(Value::BOX_POINTER_BIT)) {
+            (*stack++) = box->U.local->bits;
           } else {
-            (*stack++) = state.gc.vm_stack[upval->U.vm_local_idx];
+            (*stack++) = state.gc.vm_stack[box->U.vm_local_idx];
           }
         }
-        // (*stack++) = upval.upvalue();
         VM_DISPATCH();
       }
 
-      VM_CASE(OP_UPVALUE_SET): {
+      VM_CASE(OP_BOX_SET): {
         size_t idx = VM_NEXT_INSN();
         Value val = (*--stack);
-        Value upvalue = f.closure.as_unsafe<Closure>()->upvalues->data[idx];
-        if(!upvalue.heap_type_equals(UPVALUE)) {
-          f.closure.as_unsafe<Closure>()->upvalues->data[idx] = val;
-          AR_LOG_VM2("upvalue-set " << idx << " = " << val);
+        Value slot = f.closure.as_unsafe<Closure>()->captures->data[idx];
+        if(!slot.heap_type_equals(BOX)) {
+          f.closure.as_unsafe<Closure>()->captures->data[idx] = val;
+          AR_LOG_VM2("box-set " << idx << " = " << val);
           VM_DISPATCH();
         }
 
-        Upvalue* upval = upvalue.as_unsafe<Upvalue>();
-        if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
-          upval->U.converted = val;
+        Box* box = slot.as_unsafe<Box>();
+        if(box->get_header_bit(Value::BOX_CLOSED_BIT)) {
+          box->U.converted = val;
         } else {
-          state.gc.vm_stack[upval->U.vm_local_idx] = val;
+          state.gc.vm_stack[box->U.vm_local_idx] = val;
         }
-        //upval.upvalue_set(val);
-        AR_LOG_VM2("upvalue-set " << idx << " = " << val);
+        AR_LOG_VM2("box-set " << idx << " = " << val);
         VM_DISPATCH();
       }
 
       VM_CASE(OP_CLOSE_OVER): {
-        size_t upvalue_count = VM_NEXT_INSN();
-        AR_LOG_VM2("close-over " << upvalue_count);
+        size_t capture_count = VM_NEXT_INSN();
+        AR_LOG_VM2("close-over " << capture_count);
 
         {
           Value storage, closure;
           AR_FRAME(state, storage, closure);
-          storage = state.make_vector_storage(upvalue_count);
-          for(size_t i = upvalue_count; i != 0; i--) {
+          storage = state.make_vector_storage(capture_count);
+          // A slot may hold a Box (mutable) or a raw Value (display capture).
+          for(size_t i = capture_count; i != 0; i--) {
             state.vector_storage_append(storage, STACK_PICK(i));
-            //std::cout << i << std::endl;
-            //std::cout << STACK_PICK(i) << std::endl;
-            AR_ASSERT(STACK_PICK(i).type() == UPVALUE);
           }
           closure = state.gc.allocate(CLOSURE, sizeof(Closure));
-          closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
-          stack -= upvalue_count;
+          closure.as_unsafe<Closure>()->captures = storage.as<VectorStorage>();
+          stack -= capture_count;
           closure.as_unsafe<Closure>()->function = *(stack - 1);
           // We have to extract procedure_addr because this function may be native-compiled
           closure.procedure_install(*(stack-1)->as_unsafe<Procedure>()->procedure_addr);
@@ -467,21 +463,38 @@ tail:
         VM_DISPATCH();  
       }
 
-      VM_CASE(OP_UPVALUE_FROM_CLOSURE): {
+      VM_CASE(OP_BOX_FROM_CLOSURE): {
         size_t idx = VM_NEXT_INSN();
-        AR_LOG_VM2("upvalue-from-closure" << idx);
-        (*stack++) = f.closure.as<Closure>()->upvalues->data[idx];
-        AR_ASSERT((*(stack - 1)).heap_type_equals(UPVALUE));
-        VM_DISPATCH();  
+        AR_LOG_VM2("box-from-closure " << idx);
+        (*stack++) = f.closure.as<Closure>()->captures->data[idx];
+        AR_ASSERT((*(stack - 1)).heap_type_equals(BOX));
+        VM_DISPATCH();
       }
 
-      VM_CASE(OP_UPVALUE_FROM_LOCAL): {
+      VM_CASE(OP_BOX_FROM_LOCAL): {
         size_t idx = VM_NEXT_INSN();
         (*stack++) = state.gc.vm_stack[sff_offset + vfn->local_count + idx];
-        AR_LOG_VM2("upvalue-from-local " << idx << ' ' << *(stack - 1));
+        AR_LOG_VM2("box-from-local " << idx << ' ' << *(stack - 1));
+        AR_ASSERT((*(stack - 1)).heap_type_equals(BOX));
+        VM_DISPATCH();
+      }
 
-        //(*stack++) = (&state.gc.vm_stack[sff_offset + vfn->local_count])[idx];
-        AR_ASSERT((*(stack - 1)).heap_type_equals(UPVALUE));
+      VM_CASE(OP_CAPTURE_FROM_LOCAL): {
+        size_t idx = VM_NEXT_INSN();
+        AR_LOG_VM2("capture-from-local " << idx);
+        (*stack++) = locals[idx];
+        VM_DISPATCH();
+      }
+
+      // FROM_CLOSURE (emitted in parent at close-over) and GET (emitted in
+      // child at access) both read `current_closure->captures[idx]` raw. The
+      // distinction is which closure is current at the time — two opcodes
+      // for one code path keeps disassembly legible.
+      VM_CASE(OP_CAPTURE_FROM_CLOSURE):
+      VM_CASE(OP_CAPTURE_GET): {
+        size_t idx = VM_NEXT_INSN();
+        AR_LOG_VM2("capture-from-closure/get " << idx);
+        (*stack++) = f.closure.as_unsafe<Closure>()->captures->data[idx];
         VM_DISPATCH();
       }
 

@@ -56,8 +56,8 @@ extern size_t native_vm_stat_apply_tail_c_path;
 // that was active when control returned from asm.
 //
 // closure_ref points to a GC-tracked slot holding the Closure (or VMFunction)
-// that this frame is executing. Used by upvalue opcodes to reach the
-// Closure's upvalue storage.
+// that this frame is executing. Used by box/capture opcodes to reach the
+// Closure's capture storage.
 typedef Value (*native_vm_dispatch_fn)(
     State* state, Value* vfn_ref, Value* locals, Value* stack,
     size_t argc, size_t* cp, size_t* sff_ref, Value* closure_ref);
@@ -67,7 +67,7 @@ static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 // Direct-indexed by opcode. Dispatch tail does `jmp [r11 + rax*8]`. Slots
 // this core doesn't yet handle point at the bad-opcode trampoline so an
 // eligibility bug manifests as a readable exception, not wild control flow.
-static void* dispatch_table[OP_APPLY_TAIL_LOCAL + 1];
+static void* dispatch_table[OP_CAPTURE_GET + 1];
 
 #define NATIVE_VM_PAIR_CAR_OFF ((ptrdiff_t) offsetof(Pair, data_car))
 #define NATIVE_VM_PAIR_CDR_OFF ((ptrdiff_t) offsetof(Pair, data_cdr))
@@ -101,10 +101,10 @@ static void* dispatch_table[OP_APPLY_TAIL_LOCAL + 1];
   _(OP_LT, op_lt) \
   _(OP_APPLY, op_apply) \
   _(OP_APPLY_TAIL, op_apply_tail) \
-  _(OP_UPVALUE_FROM_LOCAL, op_upvalue_from_local) \
-  _(OP_UPVALUE_FROM_CLOSURE, op_upvalue_from_closure) \
-  _(OP_UPVALUE_GET, op_upvalue_get) \
-  _(OP_UPVALUE_SET, op_upvalue_set) \
+  _(OP_BOX_FROM_LOCAL, op_box_from_local) \
+  _(OP_BOX_FROM_CLOSURE, op_box_from_closure) \
+  _(OP_BOX_GET, op_box_get) \
+  _(OP_BOX_SET, op_box_set) \
   _(OP_CLOSE_OVER, op_close_over) \
   _(OP_ARGV_REST, op_argv_rest) \
   _(OP_JUMP_IF_NOT_NIL, op_jump_if_not_nil) \
@@ -121,7 +121,11 @@ static void* dispatch_table[OP_APPLY_TAIL_LOCAL + 1];
   _(OP_APPLY_GLOBAL, op_apply_global) \
   _(OP_APPLY_TAIL_GLOBAL, op_apply_tail_global) \
   _(OP_APPLY_LOCAL, op_apply_local) \
-  _(OP_APPLY_TAIL_LOCAL, op_apply_tail_local)
+  _(OP_APPLY_TAIL_LOCAL, op_apply_tail_local) \
+  _(OP_CAPTURE_FROM_LOCAL, op_capture_from_local) \
+  /* FROM_CLOSURE and GET share a label: both read current_closure->captures[idx] raw. */ \
+  _(OP_CAPTURE_FROM_CLOSURE, op_capture_ref) \
+  _(OP_CAPTURE_GET, op_capture_ref)
 
 // Called from assembly when OP_ARGC_EQ fails.
 static Value native_vm_argc_error(State* state, size_t got, size_t expected) {
@@ -294,23 +298,23 @@ static void native_vm_grow_stack(State* state, size_t size) {
   state->gc.grow_stack(size);
 }
 
-static void native_vm_close_frame_upvalues(
+static void native_vm_close_frame_boxes(
     State* state, VMFunction* vfn, size_t sff_offset) {
-  if(vfn->upvalue_count == 0) return;
+  if(vfn->box_count == 0) return;
 
-  Value* upvalues = &state->gc.vm_stack[sff_offset + 5 + vfn->local_count];
-  for(size_t i = 0; i != vfn->upvalue_count; i++) {
-    if(!upvalues[i].heap_type_equals(UPVALUE) || upvalues[i].upvalue_closed()) {
+  Value* boxes = &state->gc.vm_stack[sff_offset + 5 + vfn->local_count];
+  for(size_t i = 0; i != vfn->box_count; i++) {
+    if(!boxes[i].heap_type_equals(BOX) || boxes[i].box_closed()) {
       continue;
     }
 
-    size_t idx = upvalues[i].as_unsafe<Upvalue>()->U.vm_local_idx;
+    size_t idx = boxes[i].as_unsafe<Box>()->U.vm_local_idx;
     if(idx >= state->gc.vm_stack_used) {
       continue;
     }
 
-    upvalues[i].as_unsafe<Upvalue>()->U.converted = state->gc.vm_stack[idx];
-    upvalues[i].heap->set_header_bit(Value::UPVALUE_CLOSED_BIT);
+    boxes[i].as_unsafe<Box>()->U.converted = state->gc.vm_stack[idx];
+    boxes[i].heap->set_header_bit(Value::BOX_CLOSED_BIT);
   }
 }
 
@@ -377,38 +381,38 @@ struct TailResult {
   ptrdiff_t is_tail;
   Value     result;
 };
-// S9 helpers — closures + upvalues.
+// S9 helpers — closures + captures.
 
-// Read a closure's idx'th upvalue, dereferencing through the Upvalue object
-// if present. Matches apply_vm's OP_UPVALUE_GET semantics.
-static Value native_vm_upvalue_get(State* state, Value closure, size_t idx) {
-  Value upvalue = closure.as_unsafe<Closure>()->upvalues->data[idx];
-  if(!upvalue.heap_type_equals(UPVALUE)) return upvalue;
-  Upvalue* upval = upvalue.as_unsafe<Upvalue>();
-  if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) return upval->U.converted;
-  if(upval->get_header_bit(Value::UPVALUE_POINTER_BIT)) return *upval->U.local;
-  return state->gc.vm_stack[upval->U.vm_local_idx];
+// Read a closure's idx'th capture slot, dereferencing through the Box
+// object if the slot is boxed. Matches apply_vm's OP_BOX_GET semantics.
+static Value native_vm_box_get(State* state, Value closure, size_t idx) {
+  Value slot = closure.as_unsafe<Closure>()->captures->data[idx];
+  if(!slot.heap_type_equals(BOX)) return slot;
+  Box* box = slot.as_unsafe<Box>();
+  if(box->get_header_bit(Value::BOX_CLOSED_BIT)) return box->U.converted;
+  if(box->get_header_bit(Value::BOX_POINTER_BIT)) return *box->U.local;
+  return state->gc.vm_stack[box->U.vm_local_idx];
 }
 
-static void native_vm_upvalue_set(State* state, Value closure, size_t idx, Value val) {
-  Value upvalue = closure.as_unsafe<Closure>()->upvalues->data[idx];
-  if(!upvalue.heap_type_equals(UPVALUE)) {
-    closure.as_unsafe<Closure>()->upvalues->data[idx] = val;
+static void native_vm_box_set(State* state, Value closure, size_t idx, Value val) {
+  Value slot = closure.as_unsafe<Closure>()->captures->data[idx];
+  if(!slot.heap_type_equals(BOX)) {
+    closure.as_unsafe<Closure>()->captures->data[idx] = val;
     return;
   }
-  Upvalue* upval = upvalue.as_unsafe<Upvalue>();
-  if(upval->get_header_bit(Value::UPVALUE_CLOSED_BIT)) {
-    upval->U.converted = val;
+  Box* box = slot.as_unsafe<Box>();
+  if(box->get_header_bit(Value::BOX_CLOSED_BIT)) {
+    box->U.converted = val;
   } else {
-    state->gc.vm_stack[upval->U.vm_local_idx] = val;
+    state->gc.vm_stack[box->U.vm_local_idx] = val;
   }
 }
 
-// Allocate a VectorStorage + Closure, copy `count` upvalues from the stack
-// top, wire up function + procedure_addr. Returns the new Closure Value.
-// The caller pops `count + 1` slots and writes the result to stack[-1].
+// Allocate a VectorStorage + Closure, copy `count` capture slots from the
+// stack top, wire up function + procedure_addr. Returns the new Closure
+// Value. The caller pops `count + 1` slots and writes the result to stack[-1].
 static Value native_vm_close_over(State* state, Value* stack_top, size_t count) {
-  // stack_top points one past the topmost stack value. Upvalues live at
+  // stack_top points one past the topmost stack value. Captures live at
   // stack_top-count .. stack_top-1; fn is at stack_top-(count+1).
   Value storage, closure, fn;
   AR_FRAME(*state, storage, closure, fn);
@@ -417,13 +421,13 @@ static Value native_vm_close_over(State* state, Value* stack_top, size_t count) 
 
   storage = state->make_vector_storage(count);
   for(size_t i = 0; i < count; i++) {
-    // apply_vm iterates from the bottommost upvalue upward via STACK_PICK(count-i).
+    // apply_vm iterates from the bottommost capture upward via STACK_PICK(count-i).
     // With storage appending in order, this matches: storage[i] = stack_top[-(count - i)].
     state->vector_storage_append(storage, stack_top[-(ptrdiff_t)(count - i)]);
   }
 
   closure = state->gc.allocate(CLOSURE, sizeof(Closure));
-  closure.as_unsafe<Closure>()->upvalues = storage.as<VectorStorage>();
+  closure.as_unsafe<Closure>()->captures = storage.as<VectorStorage>();
   closure.as_unsafe<Closure>()->function = fn;
   closure.procedure_install(fn.as_unsafe<Procedure>()->procedure_addr);
   return closure;
@@ -740,9 +744,9 @@ void init_native_vm(State& state) {
   |->op_argv_rest:
   | jmp ->dispatch
 
-  // --- OP_UPVALUE_FROM_LOCAL (S9) -------------------------------------------
-  // Push the Upvalue sitting in this frame's upvalue area just past locals.
-  |->op_upvalue_from_local:
+  // --- OP_BOX_FROM_LOCAL (S9) -------------------------------------------
+  // Push the Box sitting in this frame's box area just past locals.
+  |->op_box_from_local:
   | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
   | fetchOperand rax
   | add rdx, rax
@@ -750,36 +754,37 @@ void init_native_vm(State& state) {
   | pushReg rcx
   | jmp ->dispatch
 
-  // --- OP_UPVALUE_FROM_CLOSURE (S9) ------------------------------------------
-  // Push closure->upvalues->data[idx].
-  |->op_upvalue_from_closure:
+  // --- OP_BOX_FROM_CLOSURE (S9) ------------------------------------------
+  // Push closure->captures->data[idx] raw (still-boxed Box*, to be
+  // forwarded into a fresh Closure's capture vector by op_close_over).
+  |->op_box_from_closure:
   | mov rdx, [rsp + 16]          // closure_ref
   | mov rdx, [rdx]               // Closure* (as heap pointer)
-  | mov rdx, [rdx + (ptrdiff_t) offsetof(Closure, upvalues)]
+  | mov rdx, [rdx + (ptrdiff_t) offsetof(Closure, captures)]
   | fetchOperand rax
   | mov rcx, [rdx + rax*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
   | pushReg rcx
   | jmp ->dispatch
 
-  // --- OP_UPVALUE_GET (S9) ---------------------------------------------------
-  // idx: push dereferenced upvalue from closure. Goes through a C helper so
-  // we don't re-implement Upvalue's open/closed/pointer branching in asm.
-  |->op_upvalue_get:
+  // --- OP_BOX_GET (S9) ---------------------------------------------------
+  // idx: push dereferenced capture from closure. Goes through a C helper so
+  // we don't re-implement Box's open/closed/pointer branching in asm.
+  |->op_box_get:
   | mov rdi, STATE
   | mov rdx, sClosureRef
   | mov rsi, [rdx]               // closure value
   | mov rdx, [CP]
   | add CP, 8
-  | mov64 rax, (ptrdiff_t) &native_vm_upvalue_get
+  | mov64 rax, (ptrdiff_t) &native_vm_box_get
   | call rax
   | restoreAfterHelperCall
   | mov [STACK], rax
   | add STACK, 8
   | jmp ->dispatch
 
-  // --- OP_UPVALUE_SET (S9) ---------------------------------------------------
-  // idx: closure upvalue[idx] = pop.
-  |->op_upvalue_set:
+  // --- OP_BOX_SET (S9) ---------------------------------------------------
+  // idx: closure capture[idx] = pop.
+  |->op_box_set:
   | mov rdi, STATE
   | mov rdx, sClosureRef
   | mov rsi, [rdx]               // closure value
@@ -787,15 +792,40 @@ void init_native_vm(State& state) {
   | add CP, 8
   | sub STACK, 8
   | mov rcx, [STACK]             // val
-  | mov64 rax, (ptrdiff_t) &native_vm_upvalue_set
+  | mov64 rax, (ptrdiff_t) &native_vm_box_set
   | call rax
   | restoreAfterHelperCall
   | jmp ->dispatch
 
+  // --- OP_CAPTURE_FROM_LOCAL (display closures) -----------------------------
+  // Push locals[idx] raw (no Box indirection). Mirrors op_local_get —
+  // the compiler emits this for immutable free-variable slots whose value
+  // the enclosing function wants to stash directly into a fresh Closure.
+  |->op_capture_from_local:
+  | fetchOperand rax
+  | mov rdx, [LOCALS + rax*8]
+  | pushReg rdx
+  | jmp ->dispatch
+
+  // --- OP_CAPTURE_FROM_CLOSURE / OP_CAPTURE_GET (display closures) ----------
+  // Single indexed load of current_closure->captures[idx] — no Box
+  // open/closed/pointer dispatch. FROM_CLOSURE is emitted in the parent at
+  // close-over (forwards a parent's capture into a fresh child Closure);
+  // GET is emitted in the child at an access site (the slot holds the
+  // value directly). Both ops route here via NATIVE_VM_DISPATCH_OPS.
+  |->op_capture_ref:
+  | mov rdx, [rsp + 16]          // closure_ref
+  | mov rdx, [rdx]               // Closure* (as heap pointer)
+  | mov rdx, [rdx + (ptrdiff_t) offsetof(Closure, captures)]
+  | fetchOperand rax
+  | mov rcx, [rdx + rax*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
+  | pushReg rcx
+  | jmp ->dispatch
+
   // --- OP_CLOSE_OVER (S9) ----------------------------------------------------
-  // count: allocate Closure from the top function + `count` upvalues, pop
-  // them all, push the fresh Closure. Done in a C helper because allocation +
-  // procedure_addr plumbing is non-trivial.
+  // count: allocate Closure from the top function + `count` capture slots,
+  // pop them all, push the fresh Closure. Done in a C helper because
+  // allocation + procedure_addr plumbing is non-trivial.
   |->op_close_over:
   | mov rdi, STATE
   | mov rsi, STACK
@@ -848,7 +878,7 @@ void init_native_vm(State& state) {
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz >9
-  // Fast reuse only for exact-arity, non-variadic, no-upvalue callees whose
+  // Fast reuse only for exact-arity, non-variadic, no-box callees whose
   // frame fits in the current allocation.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
@@ -857,11 +887,11 @@ void init_native_vm(State& state) {
   | jne >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz >9
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz >9
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | add rcx, rdx
   | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
   | add rcx, rdx
@@ -872,7 +902,7 @@ void init_native_vm(State& state) {
   | add rdx, 5                         // callee_frame_size
   | cmp rdx, rcx
   | ja >9
-  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz >9
   // Copy args into current locals.
@@ -893,7 +923,7 @@ void init_native_vm(State& state) {
   |5:
   // Zero the remaining portion of the current frame.
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | add rcx, rdx
   | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
   | add rcx, rdx
@@ -1025,7 +1055,7 @@ void init_native_vm(State& state) {
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz >9
-  // C1 fast path only: exact-arity, non-variadic, no-upvalue VM callees.
+  // C1 fast path only: exact-arity, non-variadic, no-box VM callees.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne >9
@@ -1033,7 +1063,7 @@ void init_native_vm(State& state) {
   | jne >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz >9
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz >9
   // Save fargc, args_start word index, and callee fn value across a potential
@@ -1045,7 +1075,7 @@ void init_native_vm(State& state) {
   | shr rdx, 3
   | mov [rsp + 40], rdx
   | mov [rsp + 48], r9
-  // frame_size = 5 + local_count + upvalue_count + stack_max. upvalue_count is 0 here.
+  // frame_size = 5 + local_count + box_count + stack_max. box_count is 0 here.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
   | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
   | add rcx, rdx
@@ -1260,7 +1290,7 @@ void init_native_vm(State& state) {
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz >9
-  // C1 fast path: exact-arity, non-variadic, no-upvalue VM callees only.
+  // C1 fast path: exact-arity, non-variadic, no-box VM callees only.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne >9
@@ -1268,7 +1298,7 @@ void init_native_vm(State& state) {
   | jne >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz >9
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz >9
   | mov [rsp + 32], rax                // spill fargc
@@ -1495,7 +1525,7 @@ void init_native_vm(State& state) {
   | jne >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz >9
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz >9
   | mov [rsp + 32], rax                // spill fargc
@@ -1709,11 +1739,11 @@ void init_native_vm(State& state) {
   | jne >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz >9
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz >9
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | add rcx, rdx
   | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
   | add rcx, rdx
@@ -1724,7 +1754,7 @@ void init_native_vm(State& state) {
   | add rdx, 5
   | cmp rdx, rcx
   | ja >9
-  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz >9
   // NOTE: r9 = fn from LOCALS[idx]. If idx overlaps destination LOCALS we
@@ -1746,7 +1776,7 @@ void init_native_vm(State& state) {
   | jmp <4
   |5:
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | add rcx, rdx
   | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
   | add rcx, rdx
@@ -1878,11 +1908,11 @@ void init_native_vm(State& state) {
   | jne >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz >9
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz >9
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | add rcx, rdx
   | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
   | add rcx, rdx
@@ -1893,7 +1923,7 @@ void init_native_vm(State& state) {
   | add rdx, 5
   | cmp rdx, rcx
   | ja >9
-  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz >9
   | mov [rsp + 32], rax
@@ -1912,7 +1942,7 @@ void init_native_vm(State& state) {
   | jmp <4
   |5:
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | add rcx, rdx
   | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
   | add rcx, rdx
@@ -2574,7 +2604,7 @@ void init_native_vm(State& state) {
   | mov rcx, [rsp + 8]
   | mov rdi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
   | lea rdi, [rdi + rcx*8]             // rdi = current frame base
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test rdx, rdx
   | jz >1
   | push rax
@@ -2582,7 +2612,7 @@ void init_native_vm(State& state) {
   | mov rdi, STATE
   | mov rsi, VFN
   | mov rdx, [rsp + 24]
-  | mov64 rax, (ptrdiff_t) &native_vm_close_frame_upvalues
+  | mov64 rax, (ptrdiff_t) &native_vm_close_frame_boxes
   | call rax
   | pop rax
   | pop rax
@@ -2758,7 +2788,7 @@ tail:
   if(vfn->code == nullptr) {
     return state.eval_error("native VM expected vm function with code", fn);
   }
-  size_t frame_words = 5 + vfn->local_count + vfn->upvalue_count + vfn->stack_max;
+  size_t frame_words = 5 + vfn->local_count + vfn->box_count + vfn->stack_max;
 
   size_t sff_offset = state.gc.vm_stack_used;
   size_t current_sff_offset = sff_offset;
@@ -2787,7 +2817,7 @@ tail:
 
   Value* frame  = &state.gc.vm_stack[sff_offset];
   Value* locals = frame + 5;
-  Value* stack  = locals + vfn->local_count + vfn->upvalue_count;
+  Value* stack  = locals + vfn->local_count + vfn->box_count;
 
   frame[0] = Value((ptrdiff_t) C_EOF);
   frame[1] = Value::make_fixnum(0);
@@ -2823,19 +2853,19 @@ tail:
   }
 
   // If this function will create closures over any of its locals, allocate
-  // the Upvalue objects that those closures will share. Mirrors apply_vm's
+  // the Box objects that those closures will share. Mirrors apply_vm's
   // setup at src/vm.cpp:250.
-  if(vfn->upvalue_count) {
-    Value* upvalues = locals + vfn->local_count;
+  if(vfn->box_count) {
+    Value* boxes = locals + vfn->local_count;
     state.gc.protect_argc = argc;
     state.gc.protect_argv = argv;
     size_t fv_length = fn.as_unsafe<VMFunction>()->free_variables->length;
     for(size_t i = 0; i != fv_length; i++) {
-      upvalues[i] = state.gc.allocate(UPVALUE, sizeof(Upvalue));
+      boxes[i] = state.gc.allocate(BOX, sizeof(Box));
       vfn = fn.as_unsafe<VMFunction>();
       size_t local_idx = ((size_t*) vfn->free_variables->data)[i];
       size_t vm_stack_idx = sff_offset + 5 + local_idx;
-      upvalues[i].as<Upvalue>()->U.vm_local_idx = vm_stack_idx;
+      boxes[i].as<Box>()->U.vm_local_idx = vm_stack_idx;
     }
     state.gc.protect_argc = 0;
     vfn = fn.as_unsafe<VMFunction>();
@@ -2845,13 +2875,13 @@ tail:
   Value result = native_vm_dispatch(&state, &fn, locals, stack, argc,
                                     vfn->code_pointer(), &current_sff_offset, &frame[2]);
 
-  // Close any still-open upvalues before shrinking the stack so inner
+  // Close any still-open Boxes before shrinking the stack so inner
   // closures see captured locals instead of reclaimed slots. Mirrors
   // VMFrame2::~VMFrame2 at src/vm.cpp:100.
   vfn = fn.as_unsafe<VMFunction>();
   frame_words = state.gc.vm_stack_used - current_sff_offset;
-  if(vfn->upvalue_count) {
-    native_vm_close_frame_upvalues(&state, vfn, current_sff_offset);
+  if(vfn->box_count) {
+    native_vm_close_frame_boxes(&state, vfn, current_sff_offset);
   }
 
   state.gc.shrink_stack(frame_words);
