@@ -279,21 +279,6 @@ static Value native_vm_op_type_check(Value v, size_t tipe) {
   return Value((ptrdiff_t)(v.type() == (Type) tipe));
 }
 
-// Returned via rax:rdx on SysV (16-byte POD), which is exactly what the
-// dispatch core wants — one helper call repopulates both LOCALS and STACK
-// after a potential gc.vm_stack realloc.
-struct FrameRefresh {
-  Value* locals;
-  Value* stack;
-};
-static FrameRefresh native_vm_refresh(
-    State* state, size_t frame_word_offset, size_t stack_word_offset) {
-  FrameRefresh r;
-  r.locals = &state->gc.vm_stack[frame_word_offset + 5];
-  r.stack  = &state->gc.vm_stack[stack_word_offset];
-  return r;
-}
-
 static void native_vm_grow_stack(State* state, size_t size) {
   state->gc.grow_stack(size);
 }
@@ -551,6 +536,32 @@ void init_native_vm(State& state) {
   | mov sCodeBase, r8
   | sub CP, r9
   | add CP, r8
+  |.endmacro
+
+  // Inline replacement for native_vm_refresh. The refresh helper just recomputed
+  // LOCALS = &gc.vm_stack[sff_offset+5] and STACK = &gc.vm_stack[stack_word_off];
+  // all five slow-path apply helpers do this after a call that may have realloced
+  // gc.vm_stack. Inlining also preserves rax (the helper's caller must otherwise
+  // push/pop the result around the call), so sites drop a push/push/pop/pop pair
+  // plus the full SysV call.
+  //
+  // stack_word_off: caller-provided register holding the post-call stack top
+  //   (word index into gc.vm_stack). Clobbers r8 and rsi.
+  |.macro inlineFrameRefresh, stack_word_off
+  | mov r8, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rsi, sSffOffset
+  | lea LOCALS, [r8 + rsi*8 + 40]
+  | lea STACK,  [r8 + stack_word_off*8]
+  |.endmacro
+
+  // Same as inlineFrameRefresh but also re-derives closure_ref (&frame[2]) and
+  // writes it back to sClosureRef. Used by the non-tail apply fallbacks; the
+  // tail-apply fallbacks skip it because they jump to op_return, which rederives
+  // closure_ref itself. Clobbers r8, rsi, rdi.
+  |.macro inlineFrameRefreshFull, stack_word_off
+  | inlineFrameRefresh stack_word_off
+  | lea rdi, [r8 + rsi*8 + 16]
+  | mov sClosureRef, rdi
   |.endmacro
 
   |.macro restoreAfterStateCall
@@ -1004,20 +1015,11 @@ void init_native_vm(State& state) {
   | mov rax, r9                        // rax = result
   // Rebuild LOCALS/STACK after the helper call; post-apply stack top is
   // old_top - fargc because the result overwrites the function slot.
-  | push rax                           // result
-  | push rax                           // align slot
   | sub rdx, rcx
-  | mov rdi, STATE
-  | mov rsi, [rsp + 24]                // sff_offset (was [rsp+8] before pushes)
-  | mov64 rax, (ptrdiff_t) &native_vm_refresh
-  | call rax
-  | mov LOCALS, rax
-  | mov STACK, rdx
-  | mov VFN, [rsp + 16]                // vfn_ref (was [rsp] before pushes)
-  | mov VFN, [VFN]
+  | inlineFrameRefresh rdx
   | reloadDtable
-  | pop rax                            // align slot
-  | pop rax                            // result
+  | mov VFN, sVfnRef
+  | mov VFN, [VFN]
   | jumpIfActiveException rax, rcx
   |->apply_tail_helper_result_ready:
   | mov [STACK - 8], rax
@@ -1211,39 +1213,15 @@ void init_native_vm(State& state) {
   // rax = result Value
   | pop rcx                            // rcx = fargc
   | pop rdx                            // rdx = stack_word_offset_before
-  // Save rax across the upcoming refresh call; two pushes keep alignment.
-  | push rax                           // result
-  | push rax                           // (align slot)
   // stack_word_offset_after = before - fargc
   | sub rdx, rcx
-  // Call refresh(state, sff_offset, stack_word_offset_after)
-  | mov rdi, STATE
-  | mov rsi, [rsp + 24]                // sff_offset (was [rsp+8] before pushes)
-  // rdx already holds stack_word_offset_after
-  | mov64 rax, (ptrdiff_t) &native_vm_refresh
-  | call rax
-  // rax = LOCALS ptr, rdx = STACK ptr
-  | mov LOCALS, rax
-  | mov STACK, rdx
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 24]                // sff_offset (was [rsp+8] before the 2 pushes)
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 32], rdx                // closure_ref (was [rsp+16] before the 2 pushes)
-  // Reload DTABLE + VFN
+  | inlineFrameRefreshFull rdx
   | reloadDtable
-  | mov VFN, [rsp + 16]                // vfn_ref (was [rsp] before pushes)
+  | mov VFN, sVfnRef
   | mov VFN, [VFN]
-  // Recover result
-  | pop rax                            // align slot
-  | pop rax                            // result
   // CP reload — the invoked procedure may have allocated (or recursively
   // entered apply_native_vm), so the bytecode Bytevector may have moved.
-  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | mov r9, [rsp + 24]
-  | mov [rsp + 24], r8
-  | sub CP, r9
-  | add CP, r8
+  | rebaseCpFromVfn
   // Active-exception check (immediate + EXCEPTION + ACTIVE)
   | test rax, rax
   | jz >1
@@ -1443,32 +1421,14 @@ void init_native_vm(State& state) {
   | call rax
   | pop rcx                            // rcx = fargc
   | pop rdx                            // rdx = stack_word_offset_before
-  | push rax                           // result
-  | push rax                           // align
   // stack_word_offset_after = before - fargc + 1 (result replaces arg1).
   | sub rdx, rcx
   | inc rdx
-  | mov rdi, STATE
-  | mov rsi, [rsp + 24]                // sff_offset
-  | mov64 rax, (ptrdiff_t) &native_vm_refresh
-  | call rax
-  | mov LOCALS, rax
-  | mov STACK, rdx
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 24]                // sff_offset
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 32], rdx                // closure_ref
+  | inlineFrameRefreshFull rdx
   | reloadDtable
-  | mov VFN, [rsp + 16]                // vfn_ref
+  | mov VFN, sVfnRef
   | mov VFN, [VFN]
-  | pop rax                            // align slot
-  | pop rax                            // result
-  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | mov r9, [rsp + 24]
-  | mov [rsp + 24], r8
-  | sub CP, r9
-  | add CP, r8
+  | rebaseCpFromVfn
   | test rax, rax
   | jz >1
   | test rax, 3
@@ -1663,31 +1623,13 @@ void init_native_vm(State& state) {
   | call rax
   | pop rcx
   | pop rdx
-  | push rax
-  | push rax
   | sub rdx, rcx
   | inc rdx                            // result replaces arg1 — see op_apply_local helper path
-  | mov rdi, STATE
-  | mov rsi, [rsp + 24]
-  | mov64 rax, (ptrdiff_t) &native_vm_refresh
-  | call rax
-  | mov LOCALS, rax
-  | mov STACK, rdx
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, [rsp + 24]
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov [rsp + 32], rdx
+  | inlineFrameRefreshFull rdx
   | reloadDtable
-  | mov VFN, [rsp + 16]
+  | mov VFN, sVfnRef
   | mov VFN, [VFN]
-  | pop rax
-  | pop rax
-  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
-  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
-  | mov r9, [rsp + 24]
-  | mov [rsp + 24], r8
-  | sub CP, r9
-  | add CP, r8
+  | rebaseCpFromVfn
   | test rax, rax
   | jz >1
   | test rax, 3
@@ -1847,22 +1789,13 @@ void init_native_vm(State& state) {
   | test r8, r8
   | jnz ->tail_return_marker
   | mov rax, r9
-  | push rax
-  | push rax
   // stack_word_offset_after = before - fargc + 1 (result replaces arg1).
   | sub rdx, rcx
   | inc rdx
-  | mov rdi, STATE
-  | mov rsi, [rsp + 24]
-  | mov64 rax, (ptrdiff_t) &native_vm_refresh
-  | call rax
-  | mov LOCALS, rax
-  | mov STACK, rdx
-  | mov VFN, [rsp + 16]
-  | mov VFN, [VFN]
+  | inlineFrameRefresh rdx
   | reloadDtable
-  | pop rax
-  | pop rax
+  | mov VFN, sVfnRef
+  | mov VFN, [VFN]
   | jumpIfActiveException rax, rcx
   | mov [STACK - 8], rax
   | jmp ->op_return
@@ -2012,21 +1945,12 @@ void init_native_vm(State& state) {
   | test r8, r8
   | jnz ->tail_return_marker
   | mov rax, r9
-  | push rax
-  | push rax
   | sub rdx, rcx
   | inc rdx
-  | mov rdi, STATE
-  | mov rsi, [rsp + 24]
-  | mov64 rax, (ptrdiff_t) &native_vm_refresh
-  | call rax
-  | mov LOCALS, rax
-  | mov STACK, rdx
-  | mov VFN, [rsp + 16]
-  | mov VFN, [VFN]
+  | inlineFrameRefresh rdx
   | reloadDtable
-  | pop rax
-  | pop rax
+  | mov VFN, sVfnRef
+  | mov VFN, [VFN]
   | jumpIfActiveException rax, rcx
   | mov [STACK - 8], rax
   | jmp ->op_return
