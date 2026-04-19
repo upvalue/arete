@@ -91,6 +91,11 @@ static bool native_vm_opcode_supported(size_t op) {
     case OP_CAAR:
     case OP_CDAR:
     case OP_CADDR:
+    // Fused callee-load + apply for global/local bindings (exp 8):
+    case OP_APPLY_GLOBAL:
+    case OP_APPLY_TAIL_GLOBAL:
+    case OP_APPLY_LOCAL:
+    case OP_APPLY_TAIL_LOCAL:
       return true;
     default:
       return false;
@@ -226,6 +231,11 @@ bool native_vm_function_eligible(VMFunction* vfn) {
       case OP_GLOBAL_SET:
       case OP_JUMP_IF_EQ_IMM:
       case OP_JUMP_IF_NOT_EQ_IMM:
+      // Exp 8: opcode + idx + fargc
+      case OP_APPLY_GLOBAL:
+      case OP_APPLY_TAIL_GLOBAL:
+      case OP_APPLY_LOCAL:
+      case OP_APPLY_TAIL_LOCAL:
         i += 3; break;
 
       default:
@@ -301,6 +311,20 @@ static Value fn_native_vm_eligible_p(State& state, size_t argc, Value* argv, voi
   return Value::make_boolean(native_vm_function_eligible(fn.as_unsafe<VMFunction>()));
 }
 AR_DEFUN("native-vm-eligible?", fn_native_vm_eligible_p, 1);
+
+// Exposes the C++-side opcode-coverage list to the Scheme compiler so the
+// compiler can warn (in strict mode) the moment it would emit an opcode the
+// native VM cannot execute. Single source of truth lives in
+// native_vm_opcode_supported above.
+static Value fn_native_vm_opcode_supported_p(State& state, size_t argc, Value* argv, void*) {
+  static const char* fn_name = "native-vm-opcode-supported?";
+  AR_FN_ARGC_EQ(state, argc, 1);
+  AR_FN_EXPECT_TYPE(state, argv, 0, FIXNUM);
+  ptrdiff_t op = argv[0].fixnum_value();
+  if(op < 0) return C_FALSE;
+  return Value::make_boolean(native_vm_opcode_supported((size_t) op));
+}
+AR_DEFUN("native-vm-opcode-supported?", fn_native_vm_opcode_supported_p, 1);
 
 static Value fn_native_vm_stats(State& state, size_t argc, Value* argv, void*) {
   static const char* fn_name = "native-vm-stats";

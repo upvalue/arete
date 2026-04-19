@@ -67,7 +67,7 @@ static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 // Direct-indexed by opcode. Dispatch tail does `jmp [r11 + rax*8]`. Slots
 // this core doesn't yet handle point at the bad-opcode trampoline so an
 // eligibility bug manifests as a readable exception, not wild control flow.
-static void* dispatch_table[OP_CADDR + 1];
+static void* dispatch_table[OP_APPLY_TAIL_LOCAL + 1];
 
 #define NATIVE_VM_PAIR_CAR_OFF ((ptrdiff_t) offsetof(Pair, data_car))
 #define NATIVE_VM_PAIR_CDR_OFF ((ptrdiff_t) offsetof(Pair, data_cdr))
@@ -117,7 +117,11 @@ static void* dispatch_table[OP_CADDR + 1];
   _(OP_CDDR, op_cddr) \
   _(OP_CAAR, op_caar) \
   _(OP_CDAR, op_cdar) \
-  _(OP_CADDR, op_caddr)
+  _(OP_CADDR, op_caddr) \
+  _(OP_APPLY_GLOBAL, op_apply_global) \
+  _(OP_APPLY_TAIL_GLOBAL, op_apply_tail_global) \
+  _(OP_APPLY_LOCAL, op_apply_local) \
+  _(OP_APPLY_TAIL_LOCAL, op_apply_tail_local)
 
 // Called from assembly when OP_ARGC_EQ fails.
 static Value native_vm_argc_error(State* state, size_t got, size_t expected) {
@@ -1222,6 +1226,780 @@ void init_native_vm(State& state) {
   |1:
   | mov [STACK - 8], rax
   | jmp ->dispatch
+
+  // --- OP_APPLY_LOCAL (exp 8) -----------------------------------------------
+  // APPLY_LOCAL idx fargc: like OP_APPLY but the callee is loaded from
+  // LOCALS[idx] rather than popped from the operand stack. The stack contains
+  // only [arg1 … argN] — there is NO fn slot. After the call the result
+  // replaces arg1 and STACK moves to args_start+1.
+  // Interpreter counterpart: src/vm.cpp OP_APPLY_LOCAL (around line 675).
+  |->op_apply_local:
+  | fetchOperand rcx                   // rcx = local idx
+  | mov r9, [LOCALS + rcx*8]           // r9 = fn value (from locals[idx])
+  | fetchOperand rax                   // rax = fargc
+  | mov rcx, rax
+  | shl rcx, 3                         // rcx = fargc*8
+  | mov r8, STACK
+  | sub r8, rcx                        // r8 = args_start = STACK - fargc*8
+  | test r9, r9
+  | je ->apply_error
+  | test r9, 3
+  | jnz ->apply_error
+  | mov rdx, [r9]
+  | test rdx, (ptrdiff_t) Value::VALUE_PROCEDURE_BIT
+  | jz ->apply_error
+  | movzx rcx, dl
+  | cmp rcx, VMFUNCTION
+  | je >1
+  | cmp rcx, CLOSURE
+  | jne >9
+  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
+  | jmp >2
+  |1:
+  | mov r10, r9
+  |2:
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
+  | jz >9
+  // C1 fast path: exact-arity, non-variadic, no-upvalue VM callees only.
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
+  | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
+  | jne >9
+  | cmp rax, rcx
+  | jne >9
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz >9
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | test ecx, ecx
+  | jnz >9
+  | mov [rsp + 32], rax                // spill fargc
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rdx, r8
+  | sub rdx, rcx
+  | shr rdx, 3
+  | mov [rsp + 40], rdx                // spill args_start word offset
+  | mov [rsp + 48], r9                 // spill callee fn value
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | add rcx, 5
+  | mov rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
+  | add rdx, rcx
+  | cmp rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_size))]
+  | jbe >3
+  | mov rdi, STATE
+  | mov rsi, rcx
+  | mov64 rax, (ptrdiff_t) &native_vm_grow_stack
+  | call rax
+  | reloadDtable
+  | jmp >4
+  |3:
+  | mov [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))], rdx
+  |4:
+  | mov r9, [rsp + 48]
+  | mov rdx, [r9]
+  | movzx rcx, dl
+  | cmp rcx, CLOSURE
+  | jne >5
+  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
+  | jmp >6
+  |5:
+  | mov r10, r9
+  |6:
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | add rcx, 5
+  | mov r11, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
+  | sub r11, rcx                       // r11 = new_sff_offset
+  | mov rdi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov r8, [rsp + 40]
+  | lea r8, [rdi + r8*8]               // r8 = args_start reloaded
+  | lea rsi, [rdi + r11*8]             // rsi = new frame base
+  // Build frame link.
+  | mov rcx, [rsp + 16]
+  | mov rcx, [rcx]
+  | test rcx, rcx
+  | jz >7
+  | mov rdx, [rcx]
+  | movzx rdx, dl
+  | cmp rdx, CLOSURE
+  | jne >7
+  | mov rcx, [rcx + (ptrdiff_t) offsetof(Closure, function)]
+  |7:
+  | mov [rsi], rcx                     // saved_vfn
+  | mov rcx, CP
+  | sub rcx, [rsp + 24]
+  | shr rcx, 3
+  | shl rcx, 1
+  | add rcx, 1
+  | mov [rsi + 8], rcx                 // saved_cp_offset
+  | mov rcx, [rsp + 48]
+  | mov [rsi + 16], rcx                // current closure/current-fn
+  | mov rcx, [rsp + 8]
+  | shl rcx, 1
+  | add rcx, 1
+  | mov [rsi + 24], rcx                // saved_sff_offset
+  | mov rcx, [rsp + 40]                // args_start word offset
+  // NOTE: no `dec rcx` — the fused APPLY_LOCAL has no fn slot on the stack,
+  // so the result slot IS args_start (where arg1 was).
+  | shl rcx, 1
+  | add rcx, 1
+  | mov [rsi + 32], rcx                // saved_ret_slot
+  // Copy args into callee LOCALS.
+  | lea LOCALS, [rsi + 40]
+  | mov rcx, [rsp + 32]
+  |->apply_local_copy_loop:
+  | test rcx, rcx
+  | jz ->apply_local_copy_done
+  | mov rdx, [r8]
+  | mov [LOCALS], rdx
+  | add r8, 8
+  | add LOCALS, 8
+  | dec rcx
+  | jmp ->apply_local_copy_loop
+  |->apply_local_copy_done:
+  // Zero remaining locals + stack slots.
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | sub rcx, [rsp + 32]
+  | xor edx, edx
+  |->apply_local_zero_loop:
+  | test rcx, rcx
+  | jz ->apply_local_zero_done
+  | mov [LOCALS], rdx
+  | add LOCALS, 8
+  | dec rcx
+  | jmp ->apply_local_zero_loop
+  |->apply_local_zero_done:
+  // Enter callee frame.
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_vm_path
+  | inc qword [rcx]
+  | mov VFN, r10
+  | mov rcx, [rsp]
+  | mov [rcx], VFN
+  | lea LOCALS, [rsi + 40]
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | lea STACK, [LOCALS + rcx*8]
+  | mov ARGC, [rsp + 32]
+  | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
+  | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
+  | mov [rsp + 24], CP
+  | mov [rsp + 8], r11
+  | mov rcx, [rsp + 56]
+  | mov [rcx], r11
+  | lea rax, [rsi + 16]
+  | mov [rsp + 16], rax
+  | reloadDtable
+  | jmp ->dispatch
+
+  // Helper fallback (CFUNCTION / non-VM-native callees).
+  // rax = fargc, r8 = args_start, r9 = fn value. Stack still holds the
+  // fargc args (no fn slot to clean up afterwards).
+  |9:
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rdx, STACK
+  | sub rdx, rcx
+  | shr rdx, 3                         // rdx = STACK word offset (before)
+  | push rdx                           // saved: stack_word_offset_before
+  | push rax                           // saved: fargc
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_path
+  | inc qword [rcx]
+  | mov rdi, STATE
+  | mov rsi, rax                       // fargc
+  | mov rdx, r8                        // args_start
+  | mov rcx, r9                        // fn heap
+  | mov rax, [r9 + (ptrdiff_t) offsetof(Procedure, procedure_addr)]
+  | call rax
+  | pop rcx                            // rcx = fargc
+  | pop rdx                            // rdx = stack_word_offset_before
+  | push rax                           // result
+  | push rax                           // align
+  // stack_word_offset_after = before - fargc + 1 (result replaces arg1).
+  | sub rdx, rcx
+  | inc rdx
+  | mov rdi, STATE
+  | mov rsi, [rsp + 24]                // sff_offset
+  | mov64 rax, (ptrdiff_t) &native_vm_refresh
+  | call rax
+  | mov LOCALS, rax
+  | mov STACK, rdx
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rdx, [rsp + 24]                // sff_offset
+  | lea rdx, [rcx + rdx*8 + 16]
+  | mov [rsp + 32], rdx                // closure_ref
+  | reloadDtable
+  | mov VFN, [rsp + 16]                // vfn_ref
+  | mov VFN, [VFN]
+  | pop rax                            // align slot
+  | pop rax                            // result
+  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
+  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
+  | mov r9, [rsp + 24]
+  | mov [rsp + 24], r8
+  | sub CP, r9
+  | add CP, r8
+  | test rax, rax
+  | jz >1
+  | test rax, 3
+  | jnz >1
+  | mov rdx, [rax]
+  | and rdx, 2047
+  | cmp rdx, (EXCEPTION + Value::EXCEPTION_ACTIVE_BIT)
+  | je ->exception_return
+  |1:
+  | mov [STACK - 8], rax
+  | jmp ->dispatch
+
+  // --- OP_APPLY_GLOBAL (exp 8) ----------------------------------------------
+  // APPLY_GLOBAL idx fargc: callee loaded from
+  // vfn->constants->data[idx].symbol_value(). Undefined value raises the
+  // same reference-to-undefined-variable exception as OP_GLOBAL_GET. Stack
+  // contains only [arg1 … argN] (no fn slot).
+  // Interpreter counterpart: src/vm.cpp OP_APPLY_GLOBAL (around line 584).
+  |->op_apply_global:
+  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, constants)]
+  | fetchOperand rdx                   // rdx = const idx
+  | mov rdx, [rcx + rdx*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
+  | mov r9, [rdx + (ptrdiff_t) offsetof(Symbol, value)]
+  | cmp r9, C_UNDEFINED
+  | je ->global_undefined              // rdx holds the symbol — trampoline expects that
+  | fetchOperand rax                   // rax = fargc
+  | mov rcx, rax
+  | shl rcx, 3
+  | mov r8, STACK
+  | sub r8, rcx                        // r8 = args_start
+  | test r9, r9
+  | je ->apply_error
+  | test r9, 3
+  | jnz ->apply_error
+  | mov rdx, [r9]
+  | test rdx, (ptrdiff_t) Value::VALUE_PROCEDURE_BIT
+  | jz ->apply_error
+  | movzx rcx, dl
+  | cmp rcx, VMFUNCTION
+  | je >1
+  | cmp rcx, CLOSURE
+  | jne >9
+  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
+  | jmp >2
+  |1:
+  | mov r10, r9
+  |2:
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
+  | jz >9
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
+  | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
+  | jne >9
+  | cmp rax, rcx
+  | jne >9
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz >9
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | test ecx, ecx
+  | jnz >9
+  | mov [rsp + 32], rax                // spill fargc
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rdx, r8
+  | sub rdx, rcx
+  | shr rdx, 3
+  | mov [rsp + 40], rdx
+  | mov [rsp + 48], r9
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | add rcx, 5
+  | mov rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
+  | add rdx, rcx
+  | cmp rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_size))]
+  | jbe >3
+  | mov rdi, STATE
+  | mov rsi, rcx
+  | mov64 rax, (ptrdiff_t) &native_vm_grow_stack
+  | call rax
+  | reloadDtable
+  | jmp >4
+  |3:
+  | mov [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))], rdx
+  |4:
+  | mov r9, [rsp + 48]
+  | mov rdx, [r9]
+  | movzx rcx, dl
+  | cmp rcx, CLOSURE
+  | jne >5
+  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
+  | jmp >6
+  |5:
+  | mov r10, r9
+  |6:
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | add rcx, 5
+  | mov r11, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
+  | sub r11, rcx
+  | mov rdi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov r8, [rsp + 40]
+  | lea r8, [rdi + r8*8]
+  | lea rsi, [rdi + r11*8]
+  | mov rcx, [rsp + 16]
+  | mov rcx, [rcx]
+  | test rcx, rcx
+  | jz >7
+  | mov rdx, [rcx]
+  | movzx rdx, dl
+  | cmp rdx, CLOSURE
+  | jne >7
+  | mov rcx, [rcx + (ptrdiff_t) offsetof(Closure, function)]
+  |7:
+  | mov [rsi], rcx                     // saved_vfn
+  | mov rcx, CP
+  | sub rcx, [rsp + 24]
+  | shr rcx, 3
+  | shl rcx, 1
+  | add rcx, 1
+  | mov [rsi + 8], rcx                 // saved_cp_offset
+  | mov rcx, [rsp + 48]
+  | mov [rsi + 16], rcx                // current closure/current-fn
+  | mov rcx, [rsp + 8]
+  | shl rcx, 1
+  | add rcx, 1
+  | mov [rsi + 24], rcx                // saved_sff_offset
+  | mov rcx, [rsp + 40]
+  // NOTE: no `dec rcx` — same reasoning as op_apply_local.
+  | shl rcx, 1
+  | add rcx, 1
+  | mov [rsi + 32], rcx                // saved_ret_slot
+  | lea LOCALS, [rsi + 40]
+  | mov rcx, [rsp + 32]
+  |->apply_global_copy_loop:
+  | test rcx, rcx
+  | jz ->apply_global_copy_done
+  | mov rdx, [r8]
+  | mov [LOCALS], rdx
+  | add r8, 8
+  | add LOCALS, 8
+  | dec rcx
+  | jmp ->apply_global_copy_loop
+  |->apply_global_copy_done:
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | sub rcx, [rsp + 32]
+  | xor edx, edx
+  |->apply_global_zero_loop:
+  | test rcx, rcx
+  | jz ->apply_global_zero_done
+  | mov [LOCALS], rdx
+  | add LOCALS, 8
+  | dec rcx
+  | jmp ->apply_global_zero_loop
+  |->apply_global_zero_done:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_vm_path
+  | inc qword [rcx]
+  | mov VFN, r10
+  | mov rcx, [rsp]
+  | mov [rcx], VFN
+  | lea LOCALS, [rsi + 40]
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | lea STACK, [LOCALS + rcx*8]
+  | mov ARGC, [rsp + 32]
+  | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
+  | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
+  | mov [rsp + 24], CP
+  | mov [rsp + 8], r11
+  | mov rcx, [rsp + 56]
+  | mov [rcx], r11
+  | lea rax, [rsi + 16]
+  | mov [rsp + 16], rax
+  | reloadDtable
+  | jmp ->dispatch
+
+  // Helper fallback (CFUNCTION / non-VM-native callees).
+  |9:
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rdx, STACK
+  | sub rdx, rcx
+  | shr rdx, 3
+  | push rdx
+  | push rax
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_path
+  | inc qword [rcx]
+  | mov rdi, STATE
+  | mov rsi, rax
+  | mov rdx, r8
+  | mov rcx, r9
+  | mov rax, [r9 + (ptrdiff_t) offsetof(Procedure, procedure_addr)]
+  | call rax
+  | pop rcx
+  | pop rdx
+  | push rax
+  | push rax
+  | sub rdx, rcx
+  | inc rdx                            // result replaces arg1 — see op_apply_local helper path
+  | mov rdi, STATE
+  | mov rsi, [rsp + 24]
+  | mov64 rax, (ptrdiff_t) &native_vm_refresh
+  | call rax
+  | mov LOCALS, rax
+  | mov STACK, rdx
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rdx, [rsp + 24]
+  | lea rdx, [rcx + rdx*8 + 16]
+  | mov [rsp + 32], rdx
+  | reloadDtable
+  | mov VFN, [rsp + 16]
+  | mov VFN, [VFN]
+  | pop rax
+  | pop rax
+  | mov r8, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
+  | lea r8, [r8 + (ptrdiff_t) offsetof(Bytevector, data)]
+  | mov r9, [rsp + 24]
+  | mov [rsp + 24], r8
+  | sub CP, r9
+  | add CP, r8
+  | test rax, rax
+  | jz >1
+  | test rax, 3
+  | jnz >1
+  | mov rdx, [rax]
+  | and rdx, 2047
+  | cmp rdx, (EXCEPTION + Value::EXCEPTION_ACTIVE_BIT)
+  | je ->exception_return
+  |1:
+  | mov [STACK - 8], rax
+  | jmp ->dispatch
+
+  // --- OP_APPLY_TAIL_LOCAL (exp 8) -------------------------------------------
+  // Tail variant of OP_APPLY_LOCAL. Fast-path in-place frame reuse matches
+  // op_apply_tail; the only changes are where we get the fn (LOCALS[idx]) and
+  // that the operand stack has no fn slot.
+  // Interpreter counterpart: src/vm.cpp OP_APPLY_TAIL_LOCAL (around line 696).
+  |->op_apply_tail_local:
+  | fetchOperand rcx                   // rcx = local idx
+  | mov r9, [LOCALS + rcx*8]           // r9 = fn value
+  | fetchOperand rax                   // rax = fargc
+  | mov rcx, rax
+  | shl rcx, 3
+  | mov r8, STACK
+  | sub r8, rcx                        // r8 = args_start
+  | test r9, r9
+  | je ->apply_error
+  | test r9, 3
+  | jnz ->apply_error
+  | mov rdx, [r9]
+  | test rdx, (ptrdiff_t) Value::VALUE_PROCEDURE_BIT
+  | jz ->apply_error
+  | movzx rcx, dl
+  | cmp rcx, VMFUNCTION
+  | je >1
+  | cmp rcx, CLOSURE
+  | jne >9
+  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
+  | jmp >2
+  |1:
+  | mov r10, r9
+  |2:
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
+  | jz >9
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
+  | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
+  | jne >9
+  | cmp rax, rcx
+  | jne >9
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz >9
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | test ecx, ecx
+  | jnz >9
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | add rcx, rdx
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | add rcx, 5
+  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rdx, rsi
+  | add rdx, 5
+  | cmp rdx, rcx
+  | ja >9
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | test ecx, ecx
+  | jnz >9
+  // NOTE: r9 = fn from LOCALS[idx]. If idx overlaps destination LOCALS we
+  // could clobber it during the arg copy, but we spill it to [rsp+48] and
+  // reload after the copy, just like op_apply_tail does with the stack slot.
+  | mov [rsp + 32], rax                // spill fargc
+  | mov [rsp + 48], r9                 // spill fn value
+  | mov rsi, r8                        // src = args_start
+  | mov rdi, LOCALS                    // dst = current locals
+  | mov rcx, rax
+  |4:
+  | test rcx, rcx
+  | jz >5
+  | mov rdx, [rsi]
+  | mov [rdi], rdx
+  | add rsi, 8
+  | add rdi, 8
+  | dec rcx
+  | jmp <4
+  |5:
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | add rcx, rdx
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | sub rcx, [rsp + 32]
+  | xor edx, edx
+  |->apply_tail_local_zero_loop:
+  | test rcx, rcx
+  | jz ->apply_tail_local_zero_done
+  | mov [rdi], rdx
+  | add rdi, 8
+  | dec rcx
+  | jmp ->apply_tail_local_zero_loop
+  |->apply_tail_local_zero_done:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_vm_path
+  | inc qword [rcx]
+  | mov r9, [rsp + 48]
+  | mov rdx, [r9]
+  | movzx rcx, dl
+  | cmp rcx, CLOSURE
+  | jne >6
+  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
+  | jmp >7
+  |6:
+  | mov r10, r9
+  |7:
+  | mov [rsp + 16], LOCALS
+  | sub qword [rsp + 16], 24
+  | mov rax, [rsp + 48]
+  | mov rcx, [rsp + 16]
+  | mov [rcx], rax
+  | mov VFN, r10
+  | mov rcx, [rsp]
+  | mov [rcx], VFN
+  | mov ARGC, [rsp + 32]
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | lea STACK, [LOCALS + rcx*8]
+  | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
+  | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
+  | mov [rsp + 24], CP
+  | reloadDtable
+  | jmp ->dispatch
+  |9:
+  // Helper fallback (complex tail / CFUNCTION target).
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_c_path
+  | inc qword [rcx]
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov r10, [rsp + 8]
+  | mov r10, [rcx + r10*8]
+  | xor r11, r11
+  | cmp r10, C_EOF
+  | sete r11b
+  | mov rdx, STACK
+  | sub rdx, rcx
+  | shr rdx, 3
+  | push rdx                           // stack_word_offset_before
+  | push rax                           // fargc
+  | mov rdi, STATE
+  | mov rsi, r9                        // fn value
+  | mov rdx, r8                        // args_start
+  | mov rcx, rax                       // fargc
+  | mov r8, r11                        // allow_tail
+  | mov64 rax, (ptrdiff_t) &native_vm_op_apply_tail
+  | call rax
+  | mov r8, rax
+  | mov r9, rdx
+  | pop rcx                            // fargc
+  | pop rdx                            // stack_word_offset_before
+  | test r8, r8
+  | jnz ->tail_return_marker
+  | mov rax, r9
+  | push rax
+  | push rax
+  // stack_word_offset_after = before - fargc + 1 (result replaces arg1).
+  | sub rdx, rcx
+  | inc rdx
+  | mov rdi, STATE
+  | mov rsi, [rsp + 24]
+  | mov64 rax, (ptrdiff_t) &native_vm_refresh
+  | call rax
+  | mov LOCALS, rax
+  | mov STACK, rdx
+  | mov VFN, [rsp + 16]
+  | mov VFN, [VFN]
+  | reloadDtable
+  | pop rax
+  | pop rax
+  | jumpIfActiveException rax, rcx
+  | mov [STACK - 8], rax
+  | jmp ->op_return
+
+  // --- OP_APPLY_TAIL_GLOBAL (exp 8) ------------------------------------------
+  // Tail variant of OP_APPLY_GLOBAL.
+  // Interpreter counterpart: src/vm.cpp OP_APPLY_TAIL_GLOBAL (around line 609).
+  |->op_apply_tail_global:
+  | mov rcx, [VFN + (ptrdiff_t) offsetof(VMFunction, constants)]
+  | fetchOperand rdx                   // rdx = const idx
+  | mov rdx, [rcx + rdx*8 + (ptrdiff_t) offsetof(VectorStorage, data)]
+  | mov r9, [rdx + (ptrdiff_t) offsetof(Symbol, value)]
+  | cmp r9, C_UNDEFINED
+  | je ->global_undefined
+  | fetchOperand rax                   // rax = fargc
+  | mov rcx, rax
+  | shl rcx, 3
+  | mov r8, STACK
+  | sub r8, rcx
+  | test r9, r9
+  | je ->apply_error
+  | test r9, 3
+  | jnz ->apply_error
+  | mov rdx, [r9]
+  | test rdx, (ptrdiff_t) Value::VALUE_PROCEDURE_BIT
+  | jz ->apply_error
+  | movzx rcx, dl
+  | cmp rcx, VMFUNCTION
+  | je >1
+  | cmp rcx, CLOSURE
+  | jne >9
+  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
+  | jmp >2
+  |1:
+  | mov r10, r9
+  |2:
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
+  | jz >9
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
+  | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
+  | jne >9
+  | cmp rax, rcx
+  | jne >9
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz >9
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | test ecx, ecx
+  | jnz >9
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | add rcx, rdx
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | add rcx, 5
+  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rdx, rsi
+  | add rdx, 5
+  | cmp rdx, rcx
+  | ja >9
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | test ecx, ecx
+  | jnz >9
+  | mov [rsp + 32], rax
+  | mov [rsp + 48], r9
+  | mov rsi, r8
+  | mov rdi, LOCALS
+  | mov rcx, rax
+  |4:
+  | test rcx, rcx
+  | jz >5
+  | mov rdx, [rsi]
+  | mov [rdi], rdx
+  | add rsi, 8
+  | add rdi, 8
+  | dec rcx
+  | jmp <4
+  |5:
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, upvalue_count)]
+  | add rcx, rdx
+  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rdx
+  | sub rcx, [rsp + 32]
+  | xor edx, edx
+  |->apply_tail_global_zero_loop:
+  | test rcx, rcx
+  | jz ->apply_tail_global_zero_done
+  | mov [rdi], rdx
+  | add rdi, 8
+  | dec rcx
+  | jmp ->apply_tail_global_zero_loop
+  |->apply_tail_global_zero_done:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_vm_path
+  | inc qword [rcx]
+  | mov r9, [rsp + 48]
+  | mov rdx, [r9]
+  | movzx rcx, dl
+  | cmp rcx, CLOSURE
+  | jne >6
+  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
+  | jmp >7
+  |6:
+  | mov r10, r9
+  |7:
+  | mov [rsp + 16], LOCALS
+  | sub qword [rsp + 16], 24
+  | mov rax, [rsp + 48]
+  | mov rcx, [rsp + 16]
+  | mov [rcx], rax
+  | mov VFN, r10
+  | mov rcx, [rsp]
+  | mov [rcx], VFN
+  | mov ARGC, [rsp + 32]
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | lea STACK, [LOCALS + rcx*8]
+  | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
+  | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
+  | mov [rsp + 24], CP
+  | reloadDtable
+  | jmp ->dispatch
+  |9:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_c_path
+  | inc qword [rcx]
+  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov r10, [rsp + 8]
+  | mov r10, [rcx + r10*8]
+  | xor r11, r11
+  | cmp r10, C_EOF
+  | sete r11b
+  | mov rdx, STACK
+  | sub rdx, rcx
+  | shr rdx, 3
+  | push rdx
+  | push rax
+  | mov rdi, STATE
+  | mov rsi, r9
+  | mov rdx, r8
+  | mov rcx, rax
+  | mov r8, r11
+  | mov64 rax, (ptrdiff_t) &native_vm_op_apply_tail
+  | call rax
+  | mov r8, rax
+  | mov r9, rdx
+  | pop rcx
+  | pop rdx
+  | test r8, r8
+  | jnz ->tail_return_marker
+  | mov rax, r9
+  | push rax
+  | push rax
+  | sub rdx, rcx
+  | inc rdx
+  | mov rdi, STATE
+  | mov rsi, [rsp + 24]
+  | mov64 rax, (ptrdiff_t) &native_vm_refresh
+  | call rax
+  | mov LOCALS, rax
+  | mov STACK, rdx
+  | mov VFN, [rsp + 16]
+  | mov VFN, [VFN]
+  | reloadDtable
+  | pop rax
+  | pop rax
+  | jumpIfActiveException rax, rcx
+  | mov [STACK - 8], rax
+  | jmp ->op_return
 
   // --- OP_FX_ADD (S6) --------------------------------------------------------
   // Fixnum addition. Type-check skipped — compiler only emits fx+ on arguments

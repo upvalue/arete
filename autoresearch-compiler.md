@@ -17,10 +17,9 @@ That baseline was captured with an R7RS CPU limit of 120 seconds. Plain
 `compare` runs inherit the limit from the baseline, so you do not need to pass
 it again unless you are intentionally overriding it.
 
-To compare the current tree against that baseline:
+To compare the current tree against that baseline, run:
 
 ```sh
-# Rebuild arete and heap.boot before re-running
 python3 utils/benchmark-report.py compare \
   --baseline scratch/compiler-baseline-2026-04-18-peval.json
 ```
