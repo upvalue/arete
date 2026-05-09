@@ -326,24 +326,32 @@
 (define (assoc obj alist) (assoc-impl equal? obj alist))
 
 (define (map pred . lsts)
-  (if (null? (car lsts))
-    '()
-    (let loop ((args (map1 (lambda (lst) (car lst)) lsts))
-               (rest (map1 (lambda (lst) (cdr lst)) lsts)))
-      (cons (apply pred args)
-            (if (null? (car rest))
-              '()
-              (loop (map1 (lambda (lst) (car lst)) rest) (map1 (lambda (lst) (cdr lst)) rest)))))))
+  ;; Single-list fast path: forward to the C builtin map1 directly. peval
+  ;; (and most callers of map in this codebase) only ever pass one list,
+  ;; so the multi-list rendezvous below was paying 2× map1 + 1× apply per
+  ;; element for nothing — see are-8qgc histogram.
+  (if (null? (cdr lsts))
+    (map1 pred (car lsts))
+    (if (null? (car lsts))
+      '()
+      (let loop ((args (map1 (lambda (lst) (car lst)) lsts))
+                 (rest (map1 (lambda (lst) (cdr lst)) lsts)))
+        (cons (apply pred args)
+              (if (null? (car rest))
+                '()
+                (loop (map1 (lambda (lst) (car lst)) rest) (map1 (lambda (lst) (cdr lst)) rest))))))))
 
 (define (for-each pred . lsts)
-  (if (null? (car lsts))
-    unspecified
-    (let loop ((args (map1 (lambda (lst) (car lst)) lsts))
-               (rest (map1 (lambda (lst) (cdr lst)) lsts)))
-      (apply pred args)
-      (if (null? (car rest))
-        unspecified
-        (loop (map1 (lambda (lst) (car lst)) rest) (map1 (lambda (lst) (cdr lst)) rest))))))
+  (if (null? (cdr lsts))
+    (for-each1 pred (car lsts))
+    (if (null? (car lsts))
+      unspecified
+      (let loop ((args (map1 (lambda (lst) (car lst)) lsts))
+                 (rest (map1 (lambda (lst) (cdr lst)) lsts)))
+        (apply pred args)
+        (if (null? (car rest))
+          unspecified
+          (loop (map1 (lambda (lst) (car lst)) rest) (map1 (lambda (lst) (cdr lst)) rest)))))))
 
 #;(define (filter fn lst)
   (if (null? lst)

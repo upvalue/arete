@@ -1394,7 +1394,15 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
 
   fn = vfn;
 
+#if NATIVE_VM_ONLY
+  // apply_vm is a guarded stub in this build configuration; install the
+  // native dispatch core directly. Eligibility is a static property of the
+  // bytecode and the native core covers every opcode the compiler emits, so
+  // a failure here is a coverage bug, not a runtime fallback.
+  fn.procedure_install((c_closure_t)&apply_native_vm);
+#else
   fn.procedure_install((c_closure_t)&apply_vm);
+#endif
 
   vfn->constants = rec.record_ref(2).vector_storage().as<VectorStorage>();
 
@@ -1407,7 +1415,11 @@ Value fn_openfn_to_procedure(State& state, size_t argc, Value* argv, void* v) {
   // supported. Must happen AFTER the bytecode is copied — eligibility walks
   // vfn->code. See docs/Native VM.md. Gated by the NATIVE_VM_DEFAULT compile flag
   // while we stabilize; remove the gate after S12.
-#if NATIVE_VM_DEFAULT
+#if NATIVE_VM_ONLY
+  vfn->set_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT);
+  AR_ASSERT(native_vm_function_eligible(vfn) &&
+            "NATIVE_VM_ONLY: every VMFunction must be eligible for the native VM");
+#elif NATIVE_VM_DEFAULT
   if(native_vm_function_eligible(vfn)) {
     vfn->set_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT);
     vfn->procedure_addr = (c_closure_t) &apply_native_vm;

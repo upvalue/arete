@@ -82,7 +82,15 @@ struct PointerUpdater {
   }
   
   void update_pointers(HeapValue* heap) {
+#if NATIVE_VM_ONLY
+      // apply_vm aborts in this build; route image-loaded VMFunctions to
+      // the native dispatch core directly. Saved images already strip
+      // VMFUNCTION_NATIVE_VM_BIT below, but we re-apply it on read so the
+      // dispatch core treats the function as a fast-path callee.
+      c_closure_t apply_vm_ = (c_closure_t)&arete::apply_native_vm;
+#else
       c_closure_t apply_vm_ = (c_closure_t)&arete::apply_vm;
+#endif
 
     switch(heap->get_type()) {
       case FLONUM: case STRING: case CHARACTER: case BYTEVECTOR: 
@@ -143,6 +151,14 @@ struct PointerUpdater {
         }
         static_cast<VMFunction*>(heap)->calls = 0;
         static_cast<VMFunction*>(heap)->procedure_addr = apply_vm_;
+#if NATIVE_VM_ONLY
+        // Re-set the native-vm bit on read so the dispatch core's fast path
+        // recognizes this function as a VM callee. Saved images intentionally
+        // omit the bit (see strip above) but in this build it is mandatory.
+        if(reading) {
+          static_cast<VMFunction*>(heap)->set_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT);
+        }
+#endif
         static_cast<VMFunction*>(heap)->name = update_value(static_cast<VMFunction*>(heap)->name);
         static_cast<VMFunction*>(heap)->constants = (VectorStorage*)update_heapvalue(static_cast<VMFunction*>(heap)->constants);
         static_cast<VMFunction*>(heap)->macro_env = update_value(static_cast<VMFunction*>(heap)->macro_env);

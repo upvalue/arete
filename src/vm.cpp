@@ -40,6 +40,15 @@ namespace arete {
 
 extern Value fn_apply(State& state, size_t argc, Value* argv, void* v);
 
+/**
+ * Like SourceLocation, but includes a code offset. Used by trace_function
+ * regardless of which dispatch core is active.
+ */
+struct VMSourceLocation {
+  unsigned code, source, line, begin, length;
+};
+
+#if !NATIVE_VM_ONLY
 static Value vm_flatten_apply_arguments(State& state, size_t argc, Value* argv, Value& fn) {
   fn = argv[0];
 
@@ -69,13 +78,6 @@ static Value vm_flatten_apply_arguments(State& state, size_t argc, Value* argv, 
   AR_ASSERT(state.temps.size() == lst_length);
   return C_FALSE;
 }
-
-/**
- * Like SourceLocation, but includes a code offset
- */
-struct VMSourceLocation {
-  unsigned code, source, line, begin, length;
-};
 
 std::ostream& operator<<(std::ostream& os, const VMSourceLocation& loc) {
   os << "#<VMSourceLocation code-position: " << loc.code << ' ' <<
@@ -306,6 +308,8 @@ tail:
     &&LABEL_OP_CAPTURE_FROM_LOCAL,
     &&LABEL_OP_CAPTURE_FROM_CLOSURE,
     &&LABEL_OP_CAPTURE_GET,
+    &&LABEL_OP_VALUE_TYPE,
+    &&LABEL_OP_VALUE_HEADER_BIT,
   };
 #endif
 
@@ -1192,6 +1196,26 @@ tail:
         stack--;
         VM_DISPATCH();
       }
+
+      VM_CASE(OP_VALUE_TYPE): {
+        *(stack - 1) = Value::make_fixnum((ptrdiff_t) STACK_PICK(1).type());
+        VM_DISPATCH();
+      }
+
+      VM_CASE(OP_VALUE_HEADER_BIT): {
+        Value bit = STACK_PICK(1);
+        Value v = STACK_PICK(2);
+        if(!bit.fixnump()) {
+          VM2_EXCEPTION("type", "vm primitive value-header-bit? expected a fixnum bit index");
+        }
+        if(v.immediatep()) {
+          VM2_EXCEPTION("eval", "value-header bit got immediate object");
+        }
+        *(stack - 2) = Value::make_boolean(
+            v.heap->get_header_bit(1u << (unsigned) bit.fixnum_value()));
+        stack--;
+        VM_DISPATCH();
+      }
     }
 
   }
@@ -1205,6 +1229,16 @@ tail:
   ret:
   return *(stack - 1);
 }
+#else
+// NATIVE_VM_ONLY=1: the C++ bytecode interpreter is dead code. apply_vm stays
+// as a linkable symbol that aborts if reached — that means a VMFunction's
+// procedure_addr was left pointing here (coverage bug, not a fallback).
+Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
+  (void) state; (void) argc; (void) argv; (void) fnp;
+  AR_ASSERT(0 && "apply_vm called in NATIVE_VM_ONLY build");
+  std::abort();
+}
+#endif // NATIVE_VM_ONLY
 
 void State::trace_function(Value fn, size_t frames_lost, size_t code_offset) {
   Value sources(fn.as<VMFunction>()->sources);

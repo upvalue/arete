@@ -26,6 +26,18 @@ size_t native_vm_stat_apply_c_path = 0;
 size_t native_vm_stat_apply_tail_vm_path = 0;
 size_t native_vm_stat_apply_tail_c_path = 0;
 
+// Per-reason histogram for op_apply / op_apply_global / op_apply_local
+// slow-path entries. Together these sum to the same call count that
+// native_vm_stat_apply_c_path records (op_apply only) — but split by why
+// the C1 fast path bailed. Used by are-8qgc to figure out which structural
+// fix has the highest leverage.
+size_t native_vm_stat_apply_c_cfunction = 0;     // target was not VMFUNCTION/CLOSURE
+size_t native_vm_stat_apply_c_no_native_bit = 0; // VM target without VMFUNCTION_NATIVE_VM_BIT
+size_t native_vm_stat_apply_c_arity_range = 0;   // min_arity != max_arity
+size_t native_vm_stat_apply_c_argc_mismatch = 0; // argc != min_arity
+size_t native_vm_stat_apply_c_variadic = 0;      // VARIABLE_ARITY_BIT set
+size_t native_vm_stat_apply_c_boxed = 0;         // box_count != 0
+
 // Opcodes the native VM can currently execute. Every opcode in a VMFunction's
 // body must be present here for the function to be eligible.
 //
@@ -100,6 +112,9 @@ static bool native_vm_opcode_supported(size_t op) {
     case OP_CAPTURE_FROM_LOCAL:
     case OP_CAPTURE_FROM_CLOSURE:
     case OP_CAPTURE_GET:
+    // Inlined value-type / value-header-bit? (are-8qgc):
+    case OP_VALUE_TYPE:
+    case OP_VALUE_HEADER_BIT:
       return true;
     default:
       return false;
@@ -165,6 +180,12 @@ static Value native_vm_stats_alist(State& state) {
     result = state.make_pair(pair, result);
   };
 
+  push("apply-c-boxed",         native_vm_stat_apply_c_boxed);
+  push("apply-c-variadic",      native_vm_stat_apply_c_variadic);
+  push("apply-c-argc-mismatch", native_vm_stat_apply_c_argc_mismatch);
+  push("apply-c-arity-range",   native_vm_stat_apply_c_arity_range);
+  push("apply-c-no-native-bit", native_vm_stat_apply_c_no_native_bit);
+  push("apply-c-cfunction",     native_vm_stat_apply_c_cfunction);
   push("apply-tail-c", native_vm_stat_apply_tail_c_path);
   push("apply-tail-vm", native_vm_stat_apply_tail_vm_path);
   push("apply-c", native_vm_stat_apply_c_path);
@@ -202,6 +223,8 @@ bool native_vm_function_eligible(VMFunction* vfn) {
       case OP_CAAR:
       case OP_CDAR:
       case OP_CADDR:
+      case OP_VALUE_TYPE:
+      case OP_VALUE_HEADER_BIT:
         i += 1; break;
 
       case OP_PUSH_CONSTANT:
@@ -347,6 +370,12 @@ static Value fn_native_vm_reset_stats(State& state, size_t argc, Value* argv, vo
   native_vm_stat_apply_c_path = 0;
   native_vm_stat_apply_tail_vm_path = 0;
   native_vm_stat_apply_tail_c_path = 0;
+  native_vm_stat_apply_c_cfunction = 0;
+  native_vm_stat_apply_c_no_native_bit = 0;
+  native_vm_stat_apply_c_arity_range = 0;
+  native_vm_stat_apply_c_argc_mismatch = 0;
+  native_vm_stat_apply_c_variadic = 0;
+  native_vm_stat_apply_c_boxed = 0;
   return C_UNSPECIFIED;
 }
 AR_DEFUN("native-vm-reset-stats!", fn_native_vm_reset_stats, 0);

@@ -43,6 +43,12 @@ extern size_t native_vm_stat_apply_vm_path;
 extern size_t native_vm_stat_apply_c_path;
 extern size_t native_vm_stat_apply_tail_vm_path;
 extern size_t native_vm_stat_apply_tail_c_path;
+extern size_t native_vm_stat_apply_c_cfunction;
+extern size_t native_vm_stat_apply_c_no_native_bit;
+extern size_t native_vm_stat_apply_c_arity_range;
+extern size_t native_vm_stat_apply_c_argc_mismatch;
+extern size_t native_vm_stat_apply_c_variadic;
+extern size_t native_vm_stat_apply_c_boxed;
 
 // Signature of the assembled dispatch entry. vfn_ref is a *pointer* to a
 // GC-updated Value slot (the fn variable in apply_native_vm, registered with
@@ -67,7 +73,7 @@ static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 // Direct-indexed by opcode. Dispatch tail does `jmp [r11 + rax*8]`. Slots
 // this core doesn't yet handle point at the bad-opcode trampoline so an
 // eligibility bug manifests as a readable exception, not wild control flow.
-static void* dispatch_table[OP_CAPTURE_GET + 1];
+static void* dispatch_table[OP_VALUE_HEADER_BIT + 1];
 
 #define NATIVE_VM_PAIR_CAR_OFF ((ptrdiff_t) offsetof(Pair, data_car))
 #define NATIVE_VM_PAIR_CDR_OFF ((ptrdiff_t) offsetof(Pair, data_cdr))
@@ -125,7 +131,9 @@ static void* dispatch_table[OP_CAPTURE_GET + 1];
   _(OP_CAPTURE_FROM_LOCAL, op_capture_from_local) \
   /* FROM_CLOSURE and GET share a label: both read current_closure->captures[idx] raw. */ \
   _(OP_CAPTURE_FROM_CLOSURE, op_capture_ref) \
-  _(OP_CAPTURE_GET, op_capture_ref)
+  _(OP_CAPTURE_GET, op_capture_ref) \
+  _(OP_VALUE_TYPE, op_value_type) \
+  _(OP_VALUE_HEADER_BIT, op_value_header_bit)
 
 // Called from assembly when OP_ARGC_EQ fails.
 static Value native_vm_argc_error(State* state, size_t got, size_t expected) {
@@ -157,6 +165,19 @@ static Value native_vm_global_undefined(State* state, Value sym, size_t was_set)
     os << "reference to undefined variable " << sym;
   }
   return state->make_exception(State::S_EVAL_ERROR, os.str());
+}
+
+// Error helper for OP_VALUE_HEADER_BIT when v is an immediate. Mirrors the
+// fn_value_header_bit error path verbatim.
+static Value native_vm_value_header_bit_immediate_error(State* state) {
+  return state->make_exception(State::S_EVAL_ERROR,
+      "value-header bit got immediate object");
+}
+
+// Error helper for OP_VALUE_HEADER_BIT when bit-idx isn't a fixnum.
+static Value native_vm_value_header_bit_nonfixnum_error(State* state) {
+  return state->make_exception(
+      "type", "vm primitive value-header-bit? expected a fixnum bit index");
 }
 
 // Type-error helper for CAR/CDR (pair check).
@@ -1049,25 +1070,25 @@ void init_native_vm(State& state) {
   | cmp rcx, VMFUNCTION
   | je >1
   | cmp rcx, CLOSURE
-  | jne >9
+  | jne ->op_apply_bail_cfunction
   | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
   | jmp >2
   |1:
   | mov r10, r9
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
-  | jz >9
+  | jz ->op_apply_bail_no_native_bit
   // C1 fast path only: exact-arity, non-variadic, no-box VM callees.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
-  | jne >9
+  | jne ->op_apply_bail_arity_range
   | cmp rax, rcx
-  | jne >9
+  | jne ->op_apply_bail_argc_mismatch
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
-  | jnz >9
+  | jnz ->op_apply_bail_variadic
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
-  | jnz >9
+  | jnz ->op_apply_bail_boxed
   // Save fargc, args_start word index, and callee fn value across a potential
   // stack-grow helper call.
   | mov [rsp + 32], rax
@@ -1193,6 +1214,7 @@ void init_native_vm(State& state) {
   | reloadDtable
   | jmp ->dispatch
   |9:
+  |->op_apply_slow:
   // Compute absolute stack-top word index relative to gc.vm_stack, save it.
   // This survives a callee realloc'ing gc.vm_stack.
   | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
@@ -1235,6 +1257,36 @@ void init_native_vm(State& state) {
   | mov [STACK - 8], rax
   | jmp ->dispatch
 
+  // --- op_apply bail-reason histogram (are-8qgc diagnostic) -----------------
+  // Each trampoline records why the C1 fast path was rejected, then falls
+  // into the existing C-fallback slow path. Cold paths only — no fast-path
+  // cost. r9/r8/rax are preserved by the jcc itself, so the slow path's
+  // register expectations (rax=fargc, r8=args_start, r9=fn) are intact.
+  |->op_apply_bail_cfunction:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_cfunction
+  | inc qword [rcx]
+  | jmp ->op_apply_slow
+  |->op_apply_bail_no_native_bit:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_no_native_bit
+  | inc qword [rcx]
+  | jmp ->op_apply_slow
+  |->op_apply_bail_arity_range:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_arity_range
+  | inc qword [rcx]
+  | jmp ->op_apply_slow
+  |->op_apply_bail_argc_mismatch:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_argc_mismatch
+  | inc qword [rcx]
+  | jmp ->op_apply_slow
+  |->op_apply_bail_variadic:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_variadic
+  | inc qword [rcx]
+  | jmp ->op_apply_slow
+  |->op_apply_bail_boxed:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_boxed
+  | inc qword [rcx]
+  | jmp ->op_apply_slow
+
   // --- OP_APPLY_LOCAL (exp 8) -----------------------------------------------
   // APPLY_LOCAL idx fargc: like OP_APPLY but the callee is loaded from
   // LOCALS[idx] rather than popped from the operand stack. The stack contains
@@ -1260,25 +1312,25 @@ void init_native_vm(State& state) {
   | cmp rcx, VMFUNCTION
   | je >1
   | cmp rcx, CLOSURE
-  | jne >9
+  | jne ->op_apply_local_bail_cfunction
   | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
   | jmp >2
   |1:
   | mov r10, r9
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
-  | jz >9
+  | jz ->op_apply_local_bail_no_native_bit
   // C1 fast path: exact-arity, non-variadic, no-box VM callees only.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
-  | jne >9
+  | jne ->op_apply_local_bail_arity_range
   | cmp rax, rcx
-  | jne >9
+  | jne ->op_apply_local_bail_argc_mismatch
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
-  | jnz >9
+  | jnz ->op_apply_local_bail_variadic
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
-  | jnz >9
+  | jnz ->op_apply_local_bail_boxed
   | mov [rsp + 32], rax                // spill fargc
   | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
   | mov rdx, r8
@@ -1405,6 +1457,7 @@ void init_native_vm(State& state) {
   // rax = fargc, r8 = args_start, r9 = fn value. Stack still holds the
   // fargc args (no fn slot to clean up afterwards).
   |9:
+  |->op_apply_local_slow:
   | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
   | mov rdx, STACK
   | sub rdx, rcx
@@ -1441,6 +1494,32 @@ void init_native_vm(State& state) {
   | mov [STACK - 8], rax
   | jmp ->dispatch
 
+  // --- op_apply_local bail-reason histogram (are-8qgc diagnostic) -----------
+  |->op_apply_local_bail_cfunction:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_cfunction
+  | inc qword [rcx]
+  | jmp ->op_apply_local_slow
+  |->op_apply_local_bail_no_native_bit:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_no_native_bit
+  | inc qword [rcx]
+  | jmp ->op_apply_local_slow
+  |->op_apply_local_bail_arity_range:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_arity_range
+  | inc qword [rcx]
+  | jmp ->op_apply_local_slow
+  |->op_apply_local_bail_argc_mismatch:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_argc_mismatch
+  | inc qword [rcx]
+  | jmp ->op_apply_local_slow
+  |->op_apply_local_bail_variadic:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_variadic
+  | inc qword [rcx]
+  | jmp ->op_apply_local_slow
+  |->op_apply_local_bail_boxed:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_boxed
+  | inc qword [rcx]
+  | jmp ->op_apply_local_slow
+
   // --- OP_APPLY_GLOBAL (exp 8) ----------------------------------------------
   // APPLY_GLOBAL idx fargc: callee loaded from
   // vfn->constants->data[idx].symbol_value(). Undefined value raises the
@@ -1470,24 +1549,24 @@ void init_native_vm(State& state) {
   | cmp rcx, VMFUNCTION
   | je >1
   | cmp rcx, CLOSURE
-  | jne >9
+  | jne ->op_apply_global_bail_cfunction
   | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
   | jmp >2
   |1:
   | mov r10, r9
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
-  | jz >9
+  | jz ->op_apply_global_bail_no_native_bit
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
-  | jne >9
+  | jne ->op_apply_global_bail_arity_range
   | cmp rax, rcx
-  | jne >9
+  | jne ->op_apply_global_bail_argc_mismatch
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
-  | jnz >9
+  | jnz ->op_apply_global_bail_variadic
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
-  | jnz >9
+  | jnz ->op_apply_global_bail_boxed
   | mov [rsp + 32], rax                // spill fargc
   | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
   | mov rdx, r8
@@ -1607,6 +1686,7 @@ void init_native_vm(State& state) {
 
   // Helper fallback (CFUNCTION / non-VM-native callees).
   |9:
+  |->op_apply_global_slow:
   | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
   | mov rdx, STACK
   | sub rdx, rcx
@@ -1641,6 +1721,32 @@ void init_native_vm(State& state) {
   |1:
   | mov [STACK - 8], rax
   | jmp ->dispatch
+
+  // --- op_apply_global bail-reason histogram (are-8qgc diagnostic) ----------
+  |->op_apply_global_bail_cfunction:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_cfunction
+  | inc qword [rcx]
+  | jmp ->op_apply_global_slow
+  |->op_apply_global_bail_no_native_bit:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_no_native_bit
+  | inc qword [rcx]
+  | jmp ->op_apply_global_slow
+  |->op_apply_global_bail_arity_range:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_arity_range
+  | inc qword [rcx]
+  | jmp ->op_apply_global_slow
+  |->op_apply_global_bail_argc_mismatch:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_argc_mismatch
+  | inc qword [rcx]
+  | jmp ->op_apply_global_slow
+  |->op_apply_global_bail_variadic:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_variadic
+  | inc qword [rcx]
+  | jmp ->op_apply_global_slow
+  |->op_apply_global_bail_boxed:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_boxed
+  | inc qword [rcx]
+  | jmp ->op_apply_global_slow
 
   // --- OP_APPLY_TAIL_LOCAL (exp 8) -------------------------------------------
   // Tail variant of OP_APPLY_LOCAL. Fast-path in-place frame reuse matches
@@ -2023,6 +2129,55 @@ void init_native_vm(State& state) {
   | and rax, 1
   | shl rax, 1
   | mov [STACK - 8], rax
+  | jmp ->dispatch
+
+  // --- OP_VALUE_TYPE (are-8qgc) --------------------------------------------
+  // Pop v, push (fixnum) v.type_unsafe(). Mirrors Value::type_unsafe:
+  //   bits & 3 == 0 -> if bits == 0 then CONSTANT, else heap->get_type()
+  //   bits & 1     -> FIXNUM
+  //   else         -> CONSTANT
+  // Result is fixnum-tagged: ((type << 1) | 1).
+  |->op_value_type:
+  | mov rax, [STACK - 8]
+  | test rax, 3
+  | jz >2                                // heap or zero
+  | test rax, 1
+  | jz >1                                // bit 1 set, bit 0 clear -> CONSTANT
+  | mov rax, ((FIXNUM << 1) | 1)
+  | jmp >3
+  |1:
+  | mov rax, ((CONSTANT << 1) | 1)
+  | jmp >3
+  |2:
+  | test rax, rax
+  | jz <1                                // rax == 0 -> CONSTANT
+  | movzx rax, byte [rax]                // type tag is low 8 bits of header
+  | shl rax, 1
+  | or rax, 1
+  |3:
+  | mov [STACK - 8], rax
+  | jmp ->dispatch
+
+  // --- OP_VALUE_HEADER_BIT (are-8qgc) --------------------------------------
+  // Pop bit-idx (fixnum) and v (heap), push (#t/#f). bit-idx is fixnum 0..63;
+  // result is true iff (heap[v]->header >> bit-idx) & 1. Errors when bit-idx
+  // is not a fixnum or v is an immediate.
+  |->op_value_header_bit:
+  | mov rax, [STACK - 16]                // v
+  | mov rcx, [STACK - 8]                 // bit-idx (fixnum-tagged)
+  | sub STACK, 8                         // net pop one
+  | test rcx, 1
+  | jz ->value_header_bit_nonfixnum
+  | test rax, rax
+  | jz ->value_header_bit_immediate
+  | test rax, 3
+  | jnz ->value_header_bit_immediate
+  | shr rcx, 1                           // decode fixnum to bit index
+  | mov rdx, [rax]                       // header word
+  | shr rdx, cl                          // (header >> bit-idx); cl is count
+  | and rdx, 1                           // isolate bit
+  | shl rdx, 1                           // 0/1 -> 0/2 (C_FALSE / C_TRUE)
+  | mov [STACK - 8], rdx
   | jmp ->dispatch
 
   // --- OP_CAR / OP_CDR (S6) --------------------------------------------------
@@ -2630,6 +2785,19 @@ void init_native_vm(State& state) {
   | mov rsi, [STACK - 8]
   | mov edx, 1
   | mov64 rax, (ptrdiff_t) &native_vm_pair_error
+  | call rax
+  | returnEpilogue
+
+  // --- OP_VALUE_HEADER_BIT error trampolines (are-8qgc) ---------------------
+  |->value_header_bit_immediate:
+  | mov rdi, STATE
+  | mov64 rax, (ptrdiff_t) &native_vm_value_header_bit_immediate_error
+  | call rax
+  | returnEpilogue
+
+  |->value_header_bit_nonfixnum:
+  | mov rdi, STATE
+  | mov64 rax, (ptrdiff_t) &native_vm_value_header_bit_nonfixnum_error
   | call rax
   | returnEpilogue
 

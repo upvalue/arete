@@ -118,6 +118,25 @@
 # define NATIVE_VM_DEFAULT 1
 #endif
 
+// NATIVE_VM_ONLY=1 disables the C++ bytecode interpreter (apply_vm) entirely.
+// Every VMFunction is installed straight onto apply_native_vm; the
+// vm.cpp switch/computed-goto loop becomes an aborting stub. Only valid on
+// platforms that have an assembled dispatch core (x86-64 SysV today). Forces
+// NATIVE_VM_ENABLE=1 implicitly.
+#ifndef NATIVE_VM_ONLY
+# define NATIVE_VM_ONLY 0
+#endif
+
+#if NATIVE_VM_ONLY && !NATIVE_VM_ENABLE
+# error "NATIVE_VM_ONLY=1 requires NATIVE_VM_ENABLE=1"
+#endif
+
+#if NATIVE_VM_ONLY && \
+    (!(defined(__x86_64__) || defined(_M_X64)) || \
+     defined(_MSC_VER) || defined(__EMSCRIPTEN__))
+# error "NATIVE_VM_ONLY=1 requires the x86-64 SysV native dispatch core"
+#endif
+
 // Various internal log tags for debugging
 
 #define AR_LOG_TAG_GC (1 << 0)
@@ -2572,6 +2591,13 @@ enum {
   OP_CAPTURE_FROM_LOCAL = 51,   // {local-idx} — push locals[idx] raw
   OP_CAPTURE_FROM_CLOSURE = 52, // {capture-idx} — push closure->captures->data[idx] raw
   OP_CAPTURE_GET = 53,          // {capture-idx} — read slot, no Box dispatch
+  // Inlined value-type / value-header-bit? (are-8qgc). Together these were
+  // 56% of peval's slow-path apply-c-cfunction count, because the Scheme
+  // type predicates in scheme/expand.scm (`symbol?`, `keyword?`, `input-port?`,
+  // `output-port?`, `identifier?`, `symbol-qualified?`) all delegate through
+  // these two CFunctions.
+  OP_VALUE_TYPE = 54,        // pop v, push (fixnum) v.type_unsafe()
+  OP_VALUE_HEADER_BIT = 55,  // pop bit-idx, pop v, push (#t/#f) — errors on immediate v
 };
 
 inline Type Value::type() const {

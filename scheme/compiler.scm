@@ -297,7 +297,10 @@
     ;; call at known-binding sites.
     apply-global apply-tail-global apply-local apply-tail-local
     ;; Display-closure capture opcodes (immutable by-value captures).
-    capture-from-local capture-from-closure capture-get))
+    capture-from-local capture-from-closure capture-get
+    ;; Inlined value-type / value-header-bit? (are-8qgc): both heavily used
+    ;; by Scheme-defined type predicates in scheme/expand.scm.
+    value-type value-header-bit?))
 
 (define static-labels '())
 
@@ -329,8 +332,8 @@
 (define stack-effects
   (let ((table (make-table))
         (lst '(
-               (-1 pop jump-when-pop global-set eq? list-ref local-set box-set fx< fx- fx+ jump-if-not-nil jump-if-nil jump-if-not-pair jump-if-pair jump-if-eq-imm jump-if-not-eq-imm)
-               (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest cadr cddr caar cdar caddr)
+               (-1 pop jump-when-pop global-set eq? list-ref local-set box-set fx< fx- fx+ jump-if-not-nil jump-if-nil jump-if-not-pair jump-if-pair jump-if-eq-imm jump-if-not-eq-imm value-header-bit?)
+               (0 jump jump-when jump-unless words return car cdr not type-check fixnum? argc-eq argc-gte argv-rest cadr cddr caar cdar caddr value-type)
                (1 push-immediate push-constant global-get local-get box-get box-from-closure box-from-local
                   capture-from-local capture-from-closure capture-get)
                )))
@@ -428,6 +431,11 @@
     (- 0 0 #t #f)
     (car 1 1 #f #f)
     (cdr 1 1 #f #f)
+    ;; Inlined value-type / value-header-bit? (are-8qgc): both used by
+    ;; Scheme-defined type predicates in expand.scm; together they were
+    ;; ~56% of peval's CFunction-call slow-path bails.
+    (value-type 1 1 #f #f)
+    (value-header-bit? 2 2 #f #f)
     (not 1 1 #f #f)
     (eq? 2 2 #f #f)
     (null? 1 1 #f #f)
