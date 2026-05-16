@@ -114,6 +114,12 @@ bin/arete: $(CXXOBJS) src/main.o
 	$(call colorecho, "LD $@ ")
 	$(CXX) $(LDFLAGS) -o $@ $^ 
 
+bin/arete-rs: $(shell find rust/arete-rs/src -type f) rust/arete-rs/Cargo.toml rust/arete-rs/Cargo.lock
+	$(call colorecho, "CARGO $@ ")
+	cargo build --manifest-path rust/arete-rs/Cargo.toml
+	mkdir -p bin
+	cp rust/arete-rs/target/debug/arete-rs $@
+
 bin/arete32: $(CXXOBJS32) src/main.32.o
 	$(call colorecho, "LD32 $@ ")
 	$(CXX) $(LDFLAGS) -m32 -o $@ $^
@@ -155,6 +161,9 @@ test-all: bin/arete tests/test-semispace
 	tests/test-semispace
 	python3 utils/run-tests.py
 
+test-rust: bin/arete-rs
+	python3 utils/run-rust-tests.py
+
 # Run the ecraven/r7rs-benchmarks suite (vendored at vendor/r7rs-benchmarks)
 # under Arete. Usage:
 #   make r7rs-bench BENCH=fib
@@ -194,7 +203,7 @@ web/benchmarks/dist/report.css: web/benchmarks/src/report.css web/benchmarks/tai
 	npm --prefix web/benchmarks install
 	npm --prefix web/benchmarks run build
 
-.PHONY: count clean cleaner install r7rs-bench arete-bench bench-report-css bench-report-r7rs bench-report-arete bench-series bench-compare modal-bench
+.PHONY: count clean cleaner install test-rust r7rs-bench arete-bench bench-report-css bench-report-r7rs bench-report-arete bench-series bench-compare modal-bench
 
 count:
 	cloc arete.hpp $(wildcard src/*.cpp) $(wildcard scheme/*.scm)

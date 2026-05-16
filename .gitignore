@@ -13,6 +13,7 @@ vgcore*
 /web/arete.data
 /vendor/linenoise/*.d
 /bin/arete
+/bin/arete-rs
 /bin/arete32
 /heap.boot
 /heap32.boot
@@ -31,3 +32,4 @@ vgcore*
 /web/benchmarks/reports/*.json
 /web/benchmarks/reports/*.log
 /scratch
+/rust/arete-rs/target/
