@@ -9,10 +9,11 @@ borrow the parts that make cp0 durable: clear optimizer boundaries, context
 tracking, conservative binding analysis, guarded primitive folds, and a large
 correctness harness.
 
-The first implementation slice already introduced `scheme/optimizer.scm`,
-`COMPILER-OPTIMIZE`, `OPTIMIZER-INLINE-CAR`, `COMPILER-OPTIMIZER-LOG`, and the
-internal compiler form `##arete#inline-let`. The next work should continue the
-same direction: move remaining source-level optimizations out of
+The first implementation slices introduced `scheme/optimizer.scm`,
+`COMPILER-OPTIMIZE`, `OPTIMIZER-INLINE-CAR`, `OPTIMIZER-NAMED-LET`,
+`COMPILER-OPTIMIZER-LOG`, and the internal compiler forms
+`##arete#inline-let` and `##arete#named-loop`. The next work should continue
+the same direction: move remaining source-level optimizations out of
 `scheme/compiler.scm`, then add small cp0-inspired rewrites behind flags.
 
 Related context:
@@ -49,9 +50,10 @@ part of the source optimizer unless a later measured phase proves the need.
 
 The compiler still contains several optimization responsibilities:
 
-- Named-let recognition and loop lowering:
-  `named-loop-match`, `named-loop-usage-ok?`, `compile-named-loop`, and
-  `compile-named-loop-call`.
+- Named-loop bytecode lowering for optimizer-private `##arete#named-loop`
+  forms and tail self-calls through `compile-named-loop` and
+  `compile-named-loop-call`. Source-pattern recognition and refusal checks now
+  live in `scheme/optimizer.scm`.
 - Primitive opcode selection through `primitive-table`.
 - Fused conditional emission in `compile-if` for patterns such as `null?`,
   `pair?`, `not`, and safe-immediate `eq?`.
@@ -96,15 +98,22 @@ Acceptance:
 
 ## Phase 2: Migrate Named-Let Lowering
 
+Status: implemented. `OPTIMIZER-NAMED-LET` controls source recognition and
+refusal checks in `scheme/optimizer.scm`. The optimizer emits
+`##arete#named-loop`; `scheme/compiler.scm` only lowers that internal form and
+tail calls to the loop marker.
+
 Purpose: move the largest remaining source-pattern optimization out of code
 generation while preserving the current conservative safety checks.
 
-Current compiler ownership:
+Former compiler ownership:
 
-- `named-loop-match`
-- `named-loop-usage-ok?`
-- `compile-named-loop`
-- `compile-named-loop-call`
+- `named-loop-match`: moved to `optimizer-named-loop-match`.
+- `named-loop-usage-ok?`: moved to `optimizer-named-loop-usage-ok?`.
+- `compile-named-loop`: kept in the compiler, but now lowers only
+  `##arete#named-loop`.
+- `compile-named-loop-call`: kept in the compiler as VM-specific jump
+  emission.
 
 Plan:
 

@@ -468,161 +468,30 @@
   ))
 )
 
-;; Detect the named-let expansion pattern:
-;;   ((lambda () (define NAME (lambda ARGS BODY...)) (NAME INITS...)))
-;; Returns a list (NAME ARGS BODY INITS) if matched, otherwise #f.
-;; This is specifically the shape produced by the (let loop ...) macro in syntax.scm.
-(define (named-loop-match fn x)
-  (and (compiler-inline-car)
-       (not (OpenFn/toplevel? fn))
-       ;; Outer: ((lambda () ...))
-       (pair? (car x)) (null? (cdr x))
-       (eq? (rename-strip (caar x)) 'lambda)
-       (null? (cadar x)) ; outer args must be ()
-       ;; Outer body is exactly two expressions: DEF and CALL
-       (let ((outer-body (cddar x)))
-         (and (list? outer-body)
-              (fx= (length outer-body) 2)
-              (let ((def (car outer-body)) (call (cadr outer-body)))
-                (and (pair? def)
-                     (eq? (rename-strip (car def)) 'define)
-                     (fx= (length def) 3)
-                     (identifier? (cadr def))
-                     (pair? (caddr def))
-                     (eq? (rename-strip (car (caddr def))) 'lambda)
-                     (fx>= (length (caddr def)) 3)
-                     ;; CALL is (NAME INITS...) and NAME matches
-                     (pair? call)
-                     (identifier? (car call))
-                     (identifier=? (cadr def) (car call))
-                     ;; args list must be proper and all identifiers
-                     (let* ((inner-lambda (caddr def))
-                            (args (cadr inner-lambda))
-                            (body (cddr inner-lambda)))
-                       (and (list? args)
-                            (every identifier? args)
-                            ;; argc must match inits count
-                            (fx= (length args) (length (cdr call)))
-                            (list (cadr def) args body (cdr call))))))))))
-
-;; Scan BODY to verify that NAME is used only as the head of an application,
-;; every such application is in tail position, and NAME is never set! or captured.
-;; Returns #t if safe to lower; #f otherwise.
-(define (named-loop-usage-ok? name body tail?)
-  (let ((ok #t))
-    (define (ident=? x) (and (identifier? x) (identifier=? x name)))
-    (define (args-shadow? args)
-      (cond
-        ((null? args) #f)
-        ((identifier? args) (ident=? args))
-        ((pair? args) (or (ident=? (car args)) (args-shadow? (cdr args))))
-        (else #f)))
-    (define (scan-expr x tail?)
-      (when ok
-        (cond
-          ((identifier? x)
-           (when (ident=? x) (set! ok #f)))
-          ((pair? x)
-           (let ((head (car x)))
-             (cond
-               ((and (identifier? head) (eq? (rename-strip head) 'quote)) #f)
-               ((and (identifier? head) (eq? (rename-strip head) 'set!))
-                ;; (set! NAME ...) - reject. Also scan the value form.
-                (when (and (pair? (cdr x)) (ident=? (cadr x)))
-                  (set! ok #f))
-                (when (and ok (pair? (cdr x)) (pair? (cddr x)))
-                  (scan-expr (caddr x) #f)))
-               ((and (identifier? head) (eq? (rename-strip head) 'lambda))
-                ;; Inside a nested lambda, NAME must not be referenced at all —
-                ;; capturing NAME into a closure defeats the lowering. If the
-                ;; lambda's argument list shadows NAME, the body can't see it.
-                (unless (and (pair? (cdr x)) (args-shadow? (cadr x)))
-                  (scan-body-no-ref (cddr x))))
-               ((and (identifier? head) (eq? (rename-strip head) 'if))
-                ;; condition non-tail, branches inherit tail
-                (when (pair? (cdr x)) (scan-expr (cadr x) #f))
-                (when (and (pair? (cdr x)) (pair? (cddr x))) (scan-expr (caddr x) tail?))
-                (when (and (pair? (cdr x)) (pair? (cddr x)) (pair? (cdddr x)))
-                  (scan-expr (cadddr x) tail?)))
-               ((and (identifier? head) (eq? (rename-strip head) 'begin))
-                (scan-body (cdr x) tail?))
-               ((and (identifier? head) (eq? (rename-strip head) 'define))
-                ;; Shadowing NAME via an internal define is rejected for simplicity.
-                (when (and (pair? (cdr x)) (ident=? (cadr x)))
-                  (set! ok #f))
-                ;; non-tail value
-                (when (and ok (pair? (cdr x)) (pair? (cddr x)))
-                  (scan-expr (caddr x) #f)))
-               ((and (identifier? head) (or (eq? (rename-strip head) 'and)
-                                            (eq? (rename-strip head) 'or)))
-                (scan-body (cdr x) tail?))
-               (else
-                 ;; Application. Head may be NAME.
-                 (cond
-                   ((ident=? head)
-                    (unless tail? (set! ok #f))
-                    ;; And scan arguments non-tail — NAME must not appear in them
-                    (when ok (scan-args (cdr x))))
-                   ((and (pair? head)
-                         (identifier? (car head))
-                         (eq? (rename-strip (car head)) 'lambda)
-                         (pair? (cdr head))
-                         (list? (cadr head))
-                         (every identifier? (cadr head)))
-                    ;; Inline lambda-application: (((lambda (params) body...) args...)).
-                    ;; The lambda body inherits our tail position because the
-                    ;; the optimizer may inline it before this compiler pass.
-                    ;; Args are non-tail.
-                    (scan-args (cdr x))
-                    (when ok
-                      (unless (args-shadow? (cadr head))
-                        (scan-body (cddr head) tail?))))
-                   (else
-                     ;; head is not NAME; scan it as a non-tail expr, then scan args
-                     (scan-expr head #f)
-                     (when ok (scan-args (cdr x))))))))))))
-    (define (scan-args xs)
-      (when (and ok (pair? xs))
-        (scan-expr (car xs) #f)
-        (scan-args (cdr xs))))
-    (define (scan-body xs tail?)
-      (when (and ok (pair? xs))
-        (if (null? (cdr xs))
-          (scan-expr (car xs) tail?)
-          (begin
-            (scan-expr (car xs) #f)
-            (scan-body (cdr xs) tail?)))))
-    (define (scan-body-no-ref xs)
-      ;; Scan a body that must not reference NAME at all (e.g. inside a nested lambda).
-      (when (and ok (pair? xs))
-        (scan-expr-no-ref (car xs))
-        (scan-body-no-ref (cdr xs))))
-    (define (scan-expr-no-ref x)
-      (when ok
-        (cond
-          ((identifier? x) (when (ident=? x) (set! ok #f)))
-          ((pair? x)
-           (let ((head (car x)))
-             (cond
-               ((and (identifier? head) (eq? (rename-strip head) 'quote)) #f)
-               ((and (identifier? head) (eq? (rename-strip head) 'lambda))
-                ;; Skip the args list; only scan the body. Respect shadowing.
-                (unless (and (pair? (cdr x)) (args-shadow? (cadr x)))
-                  (scan-body-no-ref (cddr x))))
-               (else (for-each-improper scan-expr-no-ref x))))))))
-    (scan-body body tail?)
-    ok))
-
-;; Compile a named-let lowering. Expects tail? to be #t.
-;; pattern = (NAME ARGS BODY INITS)
-(define (compile-named-loop fn x tail? pattern)
-  (let* ((name (car pattern))
-         (args (cadr pattern))
-         (body (caddr pattern))
-         (inits (cadddr pattern))
+;; Lower the optimizer's internal named-loop form:
+;;   (##arete#named-loop NAME (ARG ...) (INIT ...) BODY ...)
+;;
+;; The optimizer owns source-pattern recognition and refusal checks. The
+;; compiler only allocates loop locals and turns tail calls to NAME into
+;; backward jumps.
+(define (compile-named-loop fn x tail?)
+  (let* ((name (cadr x))
+         (args (caddr x))
+         (inits (cadddr x))
+         (body (cdr (cdddr x)))
          (argc (length args))
          (base-local (OpenFn/local-count fn))
          (label (gensym 'named-loop)))
+    (unless (identifier? name)
+      (raise-source x 'compile-internal "named-loop expected an identifier name" (list x)))
+    (unless (and (list? args) (every identifier? args))
+      (raise-source x 'compile-internal "named-loop expected a proper identifier argument list" (list x)))
+    (unless (list? inits)
+      (raise-source x 'compile-internal "named-loop expected a proper init list" (list x)))
+    (unless (fx= (length inits) (length args))
+      (raise-source x 'compile
+        (print-string "named-loop expected" (length args) "initial values but got" (length inits))
+        (list x)))
     (compiler-log fn "lowering named loop" name "args" args "argc" argc)
     ;; Reserve one local slot per argument up front so subsequent compilation
     ;; does not reuse those slots.
@@ -756,8 +625,9 @@
 
   (compiler-log fn "compiling application" x)
 
-  ;; Named-let lowering: detect and compile the (let loop ...) expansion as a
-  ;; labeled-jump loop rather than a closure-allocating recursive call.
+  ;; Named-loop calls are only valid inside a compiler-private named-loop
+  ;; form. The optimizer has already proven that calls to NAME are tail calls
+  ;; in the loop body before emitting that form.
   (aif (and tail?
             (symbol? kar)
             (identifier? kar)
@@ -767,11 +637,7 @@
             (let ((entry (table-ref (OpenFn/env fn) kar)))
               (and (pair? entry) (eq? (car entry) 'named-loop) entry)))
     (compile-named-loop-call fn x it)
-    (aif (named-loop-match fn x)
-      (if (named-loop-usage-ok? (car it) (caddr it) tail?)
-        (compile-named-loop fn x tail? it)
-        (compile-apply/generic fn x tail? kar))
-      (compile-apply/generic fn x tail? kar)))
+    (compile-apply/generic fn x tail? kar))
 )
 
 (define (compile-apply/generic fn x tail? kar)
@@ -1434,6 +1300,7 @@
     (quote (compile-quote fn x))
     (begin (compile-begin fn x tail?))
     (##arete#inline-let (compile-inline-let fn x tail?))
+    (##arete#named-loop (compile-named-loop fn x tail?))
     (else
       (begin
         (raise 'compile-internal "unknown special form" (list type (car x)))))))
@@ -1445,7 +1312,7 @@
 
     (set! x (rename-expr x)))
 
-  (if (memq x '(lambda define set! if begin and or quote ##arete#inline-let)) x #f))
+  (if (memq x '(lambda define set! if begin and or quote ##arete#inline-let ##arete#named-loop)) x #f))
 
 (define (compile-expr fn x cd src tail?)
   (and #f #f)
