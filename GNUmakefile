@@ -25,7 +25,7 @@ CXXOBJS32 := $(patsubst %.o,%.32.o,$(CXXOBJS))
 DEPS := $(CXXOBJS:.o=.d) $(CXXOBJS32:.o=.d) $(ECXXOBJS:.o=.d) src/main.d 
 
 # Scheme sources, order is important
-SSRC := scheme/expand.scm scheme/syntax.scm scheme/types.scm scheme/compiler.scm scheme/library.scm
+SSRC := scheme/expand.scm scheme/syntax.scm scheme/types.scm scheme/optimizer.scm scheme/compiler.scm scheme/library.scm
 
 # Files to include with Emscripten builds
 EFILES := $(addprefix --preload-file ,$(wildcard heap32.boot scheme/*.scm))
@@ -153,7 +153,7 @@ tests/test-semispace: $(CXXOBJS) tests/test-semispace.o
 test-all: bin/arete tests/test-semispace
 	#tests/test-incremental
 	tests/test-semispace
-	python utils/run-tests.py
+	python3 utils/run-tests.py
 
 # Run the ecraven/r7rs-benchmarks suite (vendored at vendor/r7rs-benchmarks)
 # under Arete. Usage:

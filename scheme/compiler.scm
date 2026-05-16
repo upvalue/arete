@@ -77,7 +77,7 @@
         ((and (identifier? head) (eq? (rename-strip head) 'quote)) #f)
         ((and (identifier? head) (eq? (rename-strip head) 'set!))
          ;; Key by rename-strip: elsewhere (OpenFn/define!, register-free-variable,
-         ;; compile-inline-call, compile-named-loop) Vars are created from the
+         ;; compile-inline-let, compile-named-loop) Vars are created from the
          ;; stripped name, so storing the raw rename here would cause silent
          ;; lookup misses in psyntax.pp, where set!/define LHSs are often
          ;; renames but the binding site uses the bare symbol.
@@ -468,13 +468,6 @@
   ))
 )
 
-(define (apply-inlinable? fn x)
-  (and (compiler-inline-car)
-       (not (OpenFn/toplevel? fn))
-       (pair? (car x))
-       (eq? (rename-strip (caar x)) 'lambda)
-       (list? (cadar x))))
-
 ;; Detect the named-let expansion pattern:
 ;;   ((lambda () (define NAME (lambda ARGS BODY...)) (NAME INITS...)))
 ;; Returns a list (NAME ARGS BODY INITS) if matched, otherwise #f.
@@ -578,8 +571,8 @@
                          (every identifier? (cadr head)))
                     ;; Inline lambda-application: (((lambda (params) body...) args...)).
                     ;; The lambda body inherits our tail position because the
-                    ;; compiler will inline it via compile-inline-call. Args are
-                    ;; non-tail.
+                    ;; the optimizer may inline it before this compiler pass.
+                    ;; Args are non-tail.
                     (scan-args (cdr x))
                     (when ok
                       (unless (args-shadow? (cadr head))
@@ -715,43 +708,40 @@
         (vector? 9)
         (constant? (value-type #t))))))
 
-(define (compile-inline-call fn x tail?)
-  ;; inlining a function call:
-  ;; subsume all arguments as locals
-  ;; compile all arguments as local-sets
-  ;; compile body
-  (compiler-log fn "inlining function call" x)
+;; Lower the optimizer's internal inline-let form:
+;;   (##arete#inline-let (arg ...) (value ...) body ...)
+;;
+;; The optimizer owns deciding when this form is profitable. The compiler only
+;; allocates local slots, evaluates the RHSs left-to-right, and emits the body.
+(define (compile-inline-let fn x tail?)
+  (let ((args (cadr x))
+        (vals (caddr x))
+        (body (cdddr x))
+        (locals (OpenFn/local-count fn)))
+    (unless (and (list? args) (every identifier? args))
+      (raise-source x 'compile-internal "inline-let expected a proper identifier argument list" (list x)))
+    (unless (list? vals)
+      (raise-source x 'compile-internal "inline-let expected a proper value list" (list x)))
+    (unless (fx= (length vals) (length args))
+      (raise-source x 'compile
+        (print-string "inline procedure application expected" (length args)
+                      "arguments but got" (length vals))
+        (list x)))
 
-  (let ((args (cadar x)) (locals (OpenFn/local-count fn)))
-    (when (not (fx= (length (cdr x)) (length args)))
-      (raise-source x 'compile (print-string "inline procedure application expected" (length args) "arguments but got" (length (cdr x))) (list x)))
+    (let loop ((i 0) (as args) (vs vals))
+      (unless (null? as)
+        (let ((arg (car as)))
+          (table-set! (OpenFn/env fn) arg (Var/make (fx+ locals i) arg))
+          (compile-expr fn (car vs) #f vs #f)
+          (emit fn 'local-set (fx+ locals i))
+          (loop (fx+ i 1) (cdr as) (cdr vs)))))
 
-    (unless (null? args)
-      ;; TODO check args length
-      (let loop ((i 0) (item (car args)) (rest (cdr args)))
-
-        ;(compiler-log fn "inlining function arg" (car args))
-        (table-set! (OpenFn/env fn) item (Var/make (fx+ locals i) item))
-
-        (compile-expr fn (list-ref x (fx+ i 1)) #f (list-tail x i) #f)
-        (emit fn 'local-set (fx+ locals i))
-
-        (unless (null? rest)
-          (loop (fx+ i 1) (car rest) (cdr rest)))))
-    ;; Take the max: nested inline-calls inside arg-eval can bump local-count
-    ;; past `locals + N`, and clobbering it here shrinks vfn->local_count
-    ;; below the highest slot in use. Invisible under boxed captures (the Box
-    ;; pointer remains valid even if the computation stack overlaps the slot)
-    ;; but display captures snapshot the raw slot and so expose the drift.
     (OpenFn/local-count! fn (max (OpenFn/local-count fn)
-                                 (fx+ locals (length (cdr x))))))
+                                 (fx+ locals (length vals))))
 
-  ;(pretty-print fn)
-
-  (let ((body (cons (make-rename #f 'begin) (cddar x))))
-
-    (scan-local-defines fn body)
-    (compile-expr fn body #f (cdar x) tail?)))
+    (let ((body (cons (make-rename #f 'begin) body)))
+      (scan-local-defines fn body)
+      (compile-expr fn body #f (cdddr x) tail?))))
 
 (define (compile-apply fn x tail?)
   (define stack-check #f)
@@ -780,10 +770,8 @@
     (aif (named-loop-match fn x)
       (if (named-loop-usage-ok? (car it) (caddr it) tail?)
         (compile-named-loop fn x tail? it)
-        (compile-inline-call fn x tail?))
-      (if (apply-inlinable? fn x)
-        (compile-inline-call fn x tail?)
-        (compile-apply/generic fn x tail? kar))))
+        (compile-apply/generic fn x tail? kar))
+      (compile-apply/generic fn x tail? kar)))
 )
 
 (define (compile-apply/generic fn x tail? kar)
@@ -1445,6 +1433,7 @@
     (or (compile-condeval 'or fn x tail?))
     (quote (compile-quote fn x))
     (begin (compile-begin fn x tail?))
+    (##arete#inline-let (compile-inline-let fn x tail?))
     (else
       (begin
         (raise 'compile-internal "unknown special form" (list type (car x)))))))
@@ -1456,7 +1445,7 @@
 
     (set! x (rename-expr x)))
 
-  (if (memq x '(lambda define set! if begin and or quote)) x #f))
+  (if (memq x '(lambda define set! if begin and or quote ##arete#inline-let)) x #f))
 
 (define (compile-expr fn x cd src tail?)
   (and #f #f)
@@ -1524,12 +1513,13 @@
 ;; execution
 (define (compile-toplevel body)
   (define fn (OpenFn/make (aif (source-name body) (string->symbol (string-append "toplevel:" it)) 'vm-toplevel)))
+  (define optimized-body (optimize-toplevel body))
 
   (OpenFn/toplevel?! fn #t)
 
-  (with-mutable-names-from body
+  (with-mutable-names-from optimized-body
     (lambda ()
-      (compile fn (list body))
+      (compile fn (list optimized-body))
       (compile-finish fn)
       (OpenFn->procedure fn))))
 
@@ -1573,6 +1563,8 @@
              (expand-toplevel fn-expr #f)
              fn-expr))
          )
+
+    (set! fn-exxxpr (optimize-toplevel fn-exxxpr))
 
     ;; Bootstrap re-compiles interpreter-defined functions here — this is the
     ;; second entry point (alongside compile-toplevel) that needs its own

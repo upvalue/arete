@@ -63,6 +63,7 @@
 ;; Step 3) Load compiler and bootstrap
 (if (>= (top-level-value 'BOOT-STAGE 10) 3)
   (begin
+    (load "scheme/optimizer.scm")
     (load "scheme/compiler.scm")
 
     ;; Install compiler. All code loaded after this point (not including the currently executing file) will be compiled

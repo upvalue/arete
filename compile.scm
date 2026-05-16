@@ -11,7 +11,6 @@
 
 (time-function "full expand and compile on VM"
   (lambda ()
-    (for-each1 compile-file '("scheme/expand.scm" "scheme/syntax.scm" "scheme/types.scm" "scheme/compiler.scm"
-                              "scheme/library.scm"))
+    (for-each1 compile-file '("scheme/expand.scm" "scheme/syntax.scm" "scheme/types.scm" "scheme/optimizer.scm"
+                              "scheme/compiler.scm" "scheme/library.scm"))
 ))
-

@@ -17,14 +17,15 @@ ansi_escape = re.compile(r'\x1b[^m]*m')
 def arete_line(x):
     return not ansi_escape.sub('', x).startswith('arete:') and not ansi_escape.sub('', x).startswith(';;')
 
-def run_tests(path, args = []):
+def run_tests(path, args = [], source_path = None):
     global successful_tests, total_tests
     sys.stdout.write('running %s tests: ' % path)
 
     tests = []
+    test_dir = source_path or path
 
     # Get path of all tests
-    test_paths = glob.glob("tests/%s/*.scm" % path) + glob.glob("tests/%s/*.sld" % path)
+    test_paths = glob.glob("tests/%s/*.scm" % test_dir) + glob.glob("tests/%s/*.sld" % test_dir)
 
     for path in test_paths:
         expect_error = False
@@ -87,6 +88,9 @@ suites = (
     ('expander', ['--set', 'BOOT-STAGE', '2', 'boot.scm', '{}']),
     ('bootstrap', ['--set', 'BOOT-STAGE', '3', 'boot.scm', '{}']),
     ('compiler', ['--set', 'BOOT-STAGE', '3', 'boot.scm', '--set', 'compiler-test-file', '"{}"', 'tests/compiler-test.scm']),
+    ('compiler-noopt', ['--set', 'BOOT-STAGE', '3', '--set', 'COMPILER-OPTIMIZE', '#f',
+        'boot.scm', '--set', 'compiler-test-file', '"{}"', 'tests/compiler-test.scm'], 'compiler'),
+    ('optimizer', ['--set', 'BOOT-STAGE', '3', 'boot.scm', '{}']),
     ('modules', ['--set', 'BOOT-STAGE', '3 ', 'boot.scm',
         '--eval', "(set-top-level-value! '*module-paths* (append (top-level-value '*module-paths*) (list \"tests/modules\")))", '{}']),
     ('library', ['--set', 'BOOT-STAGE', '5', 'boot.scm', '{}']),
