@@ -14,6 +14,10 @@
      ((lambda (x) x) z)))
 
 (optimized
+  '(lambda ()
+     ((lambda (x) x) 1)))
+
+(optimized
   '(lambda (n)
      (let loop ((i n))
        (if i
@@ -24,6 +28,9 @@
 (optimized '(not x))
 (optimized '(if #t 1 2))
 (optimized '(if #f 1))
+(optimized '(if (if x #t #f) 1 2))
+(optimized '(if #t #t #f))
+(optimized '(if (not x) 1 2))
 
 (optimized
   '(lambda (n)
