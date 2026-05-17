@@ -1,0 +1,2 @@
+((inline-let-applied 1) (named-loop-applied 1) (primitive-fold-applied 1) (primitive-fold-refused-unknown 1) (constant-if-applied 1) (constant-if-refused-unspecified 1) (named-loop-refused-disabled 0) (named-loop-refused-usage 1))
+((inline-let-applied 0) (named-loop-applied 0) (primitive-fold-applied 0) (primitive-fold-refused-unknown 0) (constant-if-applied 0) (constant-if-refused-unspecified 0) (named-loop-refused-disabled 0) (named-loop-refused-usage 0))
