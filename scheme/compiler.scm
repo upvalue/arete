@@ -452,7 +452,7 @@
     (fx= 2 2 #f #f)
 
     ;; type checks
-    ;(symbol? 1 1 #f #t)
+    (symbol? 1 1 #f #t)
     (table? 1 1 #f #t)
     (pair? 1 1 #f #t)
     (function? 1 1 #f #t)

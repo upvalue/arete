@@ -94,6 +94,338 @@ Known limits:
 - The lexical model is still just lambda-body eligibility plus a small
   primitive-shadow set.
 
+## Execution Model
+
+The optimizer is deliberately a single recursive source walk. It receives
+already-expanded source from the expander and returns expanded source for the
+compiler. It does not own parsing, macro expansion, opcode selection, stack
+layout, closure conversion, or VM instruction emission.
+
+The entry point is:
+
+```scheme
+(optimize-toplevel expanded-form)
+```
+
+`optimize-toplevel` snapshots all top-level flags into one `OptimizerConfig`
+record before walking the form. This matters because optimization itself can
+call helpers that inspect or rewrite expanded code; reading mutable top-level
+flags repeatedly during the walk would make one form sensitive to flag changes
+that happen halfway through optimization.
+
+The main worker is:
+
+```scheme
+(optimizer-expr config expr ctxt in-lambda? shadowed)
+```
+
+Its parameters are:
+
+- `config`: the immutable snapshot of optimizer and compiler flags.
+- `expr`: the expanded source expression being optimized.
+- `ctxt`: the result context requested by the parent expression.
+- `in-lambda?`: whether compiler-private lambda-body rewrites are legal here.
+- `shadowed`: primitive names that cannot be trusted as global primitives in
+  the current lexical scope.
+
+The walk is local and syntax-directed. It does not build an AST with binding
+records. Each rewrite either recognizes a precise expanded-source shape or
+delegates to a generic recursive walk.
+
+The optimizer emits two compiler-private forms:
+
+```scheme
+(##arete#inline-let FORMALS VALUES BODY ...)
+(##arete#named-loop NAME FORMALS INITS BODY ...)
+```
+
+These forms are not user-facing Scheme. They are source-level markers for the
+compiler, and the compiler is responsible for lowering them into bytecode.
+
+## Source Representation
+
+The optimizer works on Arete's expanded source representation, where ordinary
+lists may carry source metadata. When constructing rewritten source, preserve
+metadata with the local constructors:
+
+- `list-source` when constructing a fresh proper list from a source form.
+- `cons-source` when rebuilding a pair while preserving the old pair's source.
+
+Do not use plain `cons` or `map` for source-tree rewrites unless source loss is
+intentional and harmless. Constant propagation is the most source-sensitive
+rewrite because it substitutes inside arbitrary subtrees; its generic list
+rebuild uses `cons-source` for this reason.
+
+Special-form heads are identifiers, often renames. Use `optimizer-head-name`
+instead of raw `car` comparison when matching forms:
+
+```scheme
+(eq? (optimizer-head-name x) 'if)
+```
+
+Use `identifier=?` for local binding equality. Use `rename-strip` only when
+comparing a head name to a core syntactic keyword or primitive name.
+
+Quote is a hard boundary for the optimizer. Rewrites must not inspect or
+substitute inside quoted data.
+
+## Result Contexts
+
+The optimizer carries explicit cp0-style result contexts:
+
+| Context | Meaning |
+| --- | --- |
+| `value` | The expression's value is needed as a normal value. |
+| `effect` | The expression is evaluated before a later body expression. |
+| `test` | The expression controls a conditional branch. |
+| `tail` | The expression is in tail position for the current lambda or loop. |
+| `application` | The expression is the callee of an application. |
+
+Current context use is intentionally modest:
+
+- `tail` controls named-loop lowering; the loop procedure may only be called
+  from tail positions.
+- `test` enables safe boolean-wrapper simplification and branch inversion.
+- `value`, `effect`, and `application` make traversal intent explicit and leave
+  room for later effect and callee analyses.
+
+Do not remove an `effect` expression merely because it appears simple. The
+optimizer does not yet have a complete effect model, and preserving error
+timing is part of the source optimizer contract.
+
+## Shadowing Model
+
+Primitive rewrites are guarded by a small lexical shadow set. The set contains
+primitive names that have been introduced as lambda formals or local defines in
+the current scope. If a name is in `shadowed`, the optimizer must not treat a
+use of that name as the global primitive.
+
+This model is intentionally conservative:
+
+- It tracks only primitive names that matter to optimizer metadata.
+- It is threaded through lambda bodies and body-level defines.
+- It is not a general lexical environment and does not know reference counts.
+
+When adding a primitive-dependent rewrite, require all of the following unless
+the rewrite has stronger binding facts:
+
+- The head name matches the primitive after stripping renames.
+- The primitive is not present in `shadowed`.
+- `COMPILER-VM-PRIMITIVES` is enabled if the rewrite depends on VM primitive
+  result behavior.
+- The arity matches `OptimizerPrimitive` metadata.
+
+## Rewrite Details
+
+### Direct Lambda Lowering
+
+Inside lambda bodies, a direct lambda application:
+
+```scheme
+((lambda (x y) body ...) a b)
+```
+
+lowers to:
+
+```scheme
+(##arete#inline-let (x y) (a b) body ...)
+```
+
+This is controlled by `OPTIMIZER-INLINE-CAR` and the compatibility flag
+`COMPILER-INLINE-CAR`. The rewrite is limited to lambda-body contexts because
+the compiler-private form is a compiler convention, not a general source form.
+
+Arguments are optimized in `value` context before the inline-let is emitted.
+The body is optimized in the parent context, so a direct lambda call in tail
+position keeps its body in tail context.
+
+### Constant Propagation
+
+`OPTIMIZER-CONSTANT-PROP` extends direct lambda lowering. Before emitting
+`##arete#inline-let`, it may substitute safe immediate argument constants into
+the direct lambda body and remove those formals from the inline-let binding
+list.
+
+Allowed propagated values are the same source-level immediates used for safe
+`eq?` reasoning:
+
+```scheme
+#t #f fixnums symbols ()
+```
+
+The rewrite requires:
+
+- Exact argument count.
+- A proper formal list of unique identifiers.
+- A value that `optimizer-immediate-constant-expr` can reify safely.
+- No `set!` or `define` of that formal in the body region where substitution
+  would apply.
+- Nested lambdas are scanned only when they do not shadow the formal.
+
+Pairs, vectors, strings, closures, and other heap objects are not propagated.
+Even when quoted, they may expose allocation or identity behavior that this
+optimizer does not yet model.
+
+Example:
+
+```scheme
+((lambda (x y) (fx+ x y)) 1 n)
+```
+
+can become an inline-let for only `y`, with `x` replaced by `1` in the body.
+
+### Named Let Lowering
+
+The expander currently produces a recognizable shape for named `let`:
+
+```scheme
+((lambda ()
+   (define loop (lambda (args ...) body ...))
+   (loop inits ...)))
+```
+
+`OPTIMIZER-NAMED-LET` lowers this to `##arete#named-loop` when all checks pass.
+The optimizer verifies that the loop procedure is used only as the head of tail
+calls, is not assigned, and is not captured by a nested lambda.
+
+The usage scan is intentionally strict. If the loop name appears as a value,
+inside a non-tail call, or inside a nested lambda that can capture it, the
+rewrite is refused.
+
+### Primitive Folding
+
+Primitive folding is controlled by `OPTIMIZER-PRIMITIVE-FOLD`. A fold requires:
+
+- `COMPILER-VM-PRIMITIVES` enabled.
+- The primitive not shadowed.
+- The primitive marked foldable and VM-backed in `OptimizerPrimitive`.
+- Exact arity.
+- All required arguments known as constants.
+
+Current folds cover:
+
+- `not` over a known constant.
+- `eq?` over safe immediates only.
+- `null?` over a known constant.
+- `fixnum?` over a known constant.
+- `fx+`, `fx-`, and `fx<` over small known fixnums.
+
+Small-fixnum checks deliberately refuse very large values. The optimizer should
+not create source constants that are outside the assumptions of the current VM
+fixnum fast paths.
+
+`pair?` and `symbol?` have metadata but are not broadly folded as source
+optimizer facts. `pair?` has compiled true-value caveats, and `symbol?` is not
+currently a compiler VM primitive.
+
+### Constant If
+
+`OPTIMIZER-CONSTANT-IF` simplifies conditionals whose optimized test is known.
+It is disabled by default because benchmark isolation did not show a runtime
+win.
+
+The false branch of a 4-armed `if` is not removed when it is the expander's
+unspecified value. This avoids making unspecified results more observable than
+they are in optimizer-off compiler behavior.
+
+### Boolean If And Test Rewrites
+
+`OPTIMIZER-TEST-IF` contains several conditional rewrites that rely on Scheme
+truthiness and exact boolean results.
+
+In `test` context:
+
+```scheme
+(if e #t #f)
+```
+
+can simplify to `e`, because both forms branch the same way. This is not
+generally valid in value context, where `(if e #t #f)` canonicalizes any
+truthy value to `#t`.
+
+In value-like contexts, the same wrapper is simplified only when the optimized
+condition is known to return exactly `#t` or `#f`. The current exact-boolean
+primitive set is:
+
+```scheme
+not eq? null? fixnum? fx<
+```
+
+These require VM primitives enabled, exact arity, and no primitive shadowing.
+
+The optimizer also inverts branches to remove negated test wrappers:
+
+```scheme
+(if (if e #f #t) then else)
+```
+
+becomes:
+
+```scheme
+(if e else then)
+```
+
+For primitive `not`, this:
+
+```scheme
+(if (not e) then else)
+```
+
+becomes:
+
+```scheme
+(if e else then)
+```
+
+The new condition is optimized in `test` context so composed wrappers can keep
+simplifying. The original branches are optimized in the original outer context
+after swapping, preserving tail/test/effect intent.
+
+These rewrites intentionally do not introduce a new `(not e)` call. Introducing
+`not` would add a binding reference that may be shadowed.
+
+## Counters And Logging
+
+Enable counters with:
+
+```scheme
+(set-top-level-value! 'COMPILER-OPTIMIZER-COUNTERS #t)
+(optimizer-reset-counters!)
+...
+(optimizer-counter-snapshot)
+```
+
+Counters are low-overhead attribution tools, not a full trace. Some refusal
+counts are expected to be noisy. For example, a primitive application can count
+as `primitive-fold-refused-unknown` before a later conditional rewrite removes
+the surrounding form.
+
+Enable textual logs with:
+
+```scheme
+(set-top-level-value! 'COMPILER-OPTIMIZER-LOG #t)
+```
+
+Logs should be used for short local investigations only. Tests should assert
+source shape, runtime behavior, or counters rather than exact log output.
+
+## Adding A Rewrite
+
+For each new optimizer rewrite:
+
+1. Add or reuse a dedicated top-level flag unless the rewrite is clearly part
+   of an existing family.
+2. Snapshot the flag in `OptimizerConfig`.
+3. Define the exact source shape accepted by the rewrite.
+4. State the safety proof in terms of value, effects, allocation, error timing,
+   and primitive shadowing.
+5. Preserve source metadata with `list-source` and `cons-source`.
+6. Add optimizer shape tests for positive and refusal cases.
+7. Add compiler/runtime tests when generated code behavior can change.
+8. Measure the family in isolation with a family-disabled heap.
+9. Document the result and leave the family disabled by default if benchmark
+   evidence is weak or mixed.
+
 ## Invariants
 
 Keep optimizer-off behavior as a permanent compatibility path. Every optimizer
