@@ -86,70 +86,56 @@ std::ostream& operator<<(std::ostream& os, const VMSourceLocation& loc) {
   return os;
 }
 
-struct VMFrame2 {
-  VMFrame2(State& state_, Value fnp): state(state_) {
-    closure = fnp;
-    fn = closure.closure_unbox();
-    AR_ASSERT(state.gc.live(closure.heap));
-    AR_ASSERT(state.gc.live(fn.heap));
-    AR_ASSERT_LIVE(fn.heap);
-    VMFunction* vfn = fn.as_unsafe<VMFunction>();
-    vm_stack_used = vfn->local_count + vfn->box_count + vfn->stack_max;
-    state.vm_depth++;
-    //state.gc.grow_stack(vm_stack_used);
-  }
-
-  ~VMFrame2() {
-    VMFunction* vfn = fn.as<VMFunction>();
-    Value* boxes = &state.gc.vm_stack[state.gc.vm_stack_used - vm_stack_used + vfn->local_count];
-    for(size_t i = 0; i != vfn->box_count; i++) {
-      if(!boxes[i].heap_type_equals(BOX) || boxes[i].box_closed()) {
-        continue;
-      }
-
-      size_t idx = boxes[i].as_unsafe<Box>()->U.vm_local_idx;
-      if(idx >= state.gc.vm_stack_used) {
-        continue;
-      }
-
-      boxes[i].as_unsafe<Box>()->U.converted = state.gc.vm_stack[idx];
-      boxes[i].heap->set_header_bit(Value::BOX_CLOSED_BIT);
+/**
+ * Close any still-open Boxes of the frame whose locals start at frame_base.
+ * Mirrors the old ~VMFrame2 logic: copy the backing vm_stack slot into the
+ * Box's `converted` field, innermost-first on unwind.
+ */
+static inline void vm_close_frame_boxes(State& state, VMFunction* vfn, size_t frame_base) {
+  if(!vfn->box_count) return;
+  Value* boxes = &state.gc.vm_stack[frame_base + vfn->local_count];
+  for(size_t i = 0; i != vfn->box_count; i++) {
+    if(!boxes[i].heap_type_equals(BOX) || boxes[i].box_closed()) {
+      continue;
     }
-    state.gc.shrink_stack(vm_stack_used);
-    state.vm_depth--;
+
+    size_t idx = boxes[i].as_unsafe<Box>()->U.vm_local_idx;
+    if(idx >= state.gc.vm_stack_used) {
+      continue;
+    }
+
+    boxes[i].as_unsafe<Box>()->U.converted = state.gc.vm_stack[idx];
+    boxes[i].heap->set_header_bit(Value::BOX_CLOSED_BIT);
   }
+}
 
-  State& state;
-  Value closure;
-  Value fn;
-  size_t vm_stack_used;
-  size_t depth;
-};
+// Pointers to garbage-collected values (vfn, code, cp, cur_closure) are kept
+// in locals so the compiler can put them in registers; the rooted copy lives
+// in the top VMCallFrame record. They must be restored after anything that can
+// allocate (GC moves the VMFunction and its bytecode).
 
-// It is possible for pointers to be moved around during program execution; however, putting them
-// in an AR_FRAME tracking structure means they can't be stored in registers.
+// VM2_RESTORE_GC restores only GC'd pointers and is called after allocations.
+// vm_stack itself is malloc'd and never moves during a collection, so locals/
+// stack stay valid.
 
-// We keep them out of registers and restore them using these macros after allocations
+#define VM2_RESTORE_GC() { \
+  size_t __cp_off = (size_t)(cp - code); \
+  cur_closure = state.gc.vm_frames.back().closure; \
+  vfn = cur_closure.closure_unbox().as_unsafe<VMFunction>(); \
+  code = vfn->code_pointer(); \
+  cp = code + __cp_off; }
 
-// VM2_RESTORE_GC restores only GC'd pointer and is called after allocations
+// VM2_RESTORE additionally recomputes vm_stack pointers from offsets and is
+// called after applications: a C callee can re-enter the VM and grow
+// (realloc) vm_stack. stack_off must be saved with VM2_SAVE_STACK() before
+// the call.
 
-#define VM2_RESTORE_GC() \
-  vfn = f.fn.as_unsafe<VMFunction>(); \
-  cp = (size_t*)((((size_t) vfn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
-  code = vfn->code_pointer();
+#define VM2_SAVE_STACK() stack_off = (size_t)(stack - state.gc.vm_stack)
 
-// VM2_RESTORE restores GC and stack pointers and is called after applications
-
-// TODO: Way to do this without division?
-
-#define VM2_RESTORE() \
-  vfn = f.fn.as_unsafe<VMFunction>(); \
+#define VM2_RESTORE() { \
+  VM2_RESTORE_GC(); \
   locals = &state.gc.vm_stack[sff_offset]; \
-  /*std::cout << "stack offset:" << ((size_t)stack ) - ((size_t) sbegin) << std::endl; */\
-  stack = (Value*)(((size_t)&state.gc.vm_stack[sff_offset + vfn->local_count + vfn->box_count] + (((((size_t)stack) - ((size_t)sbegin)))))); \
-  sbegin = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->box_count]; \
-  cp = (size_t*)((((size_t) vfn->code_pointer())) +  (((size_t) cp) - ((size_t) code))); \
-  code = vfn->code_pointer();
+  stack = &state.gc.vm_stack[stack_off]; }
 
 #define AR_LOG_VM2(msg) \
   if(((AR_LOG_TAGS & AR_LOG_TAG_VM) && (AR_VM_LOG_ALWAYS || vfn->get_header_bit(Value::VMFUNCTION_LOG_BIT)))) { \
@@ -159,113 +145,164 @@ struct VMFrame2 {
 extern Value compile_native(State&, Value);
 
 Value apply_vm(State& state, size_t argc, Value* argv, void* fnp) {
-  //std::cout << "apply_vm called" << std::endl;
-
   PerfScope perf_scope(state, PERF_VM, &state.perf.vm_calls);
 
-  size_t frames_lost = 0;
+  // Frames at or above this height belong to this C-level invocation
+  // ("session"). OP_RETURN/unwind never pop past it; only the session-base
+  // frame's return actually returns from this C function.
+  const size_t session_base = state.gc.vm_frames.size();
 
-  // Function frame, allocated on stack
-  size_t sff_offset = state.gc.vm_stack_used;
-  Value exception;
+  Value exception, return_value, cur_closure;
 
-tail:
+  // Registers for the active frame. The rooted copy of cur_closure lives in
+  // the top VMCallFrame; vfn/code/cp must be re-derived after anything that
+  // can GC (VM2_RESTORE_GC), and locals/stack after anything that can grow
+  // vm_stack (VM2_RESTORE).
+  VMFunction* vfn = 0;
+  Value *locals = 0, *stack = 0;
+  size_t *code = 0, *cp = 0;
+  size_t sff_offset = 0, stack_off = 0;
+
+  // Call linkage for the frame about to be entered, consumed by enter:.
+  // link_frame_base == VM_FRESH_FRAME means "allocate above vm_stack_used";
+  // otherwise it is the vm_stack offset the new frame's locals start at
+  // (zero-copy calls: arg0's slot; tail calls: the recycled frame's base).
+#define VM_FRESH_FRAME ((size_t) -1)
+  size_t link_return_cp = 0, link_result_slot = 0;
+  size_t link_frame_base = VM_FRESH_FRAME;
+  uint32_t link_frames_lost = 0;
+  bool link_is_base = true;
+
+enter:
   AR_ASSERT(fnp != (void*) C_EOF); // for debugging native code
   AR_ASSERT(state.gc.live((HeapValue*) fnp));
-  VMFrame2 f(state, Value((HeapValue*) fnp));
+  {
+    VMFunction* callee_vfn = Value((HeapValue*) fnp).closure_unbox().as_unsafe<VMFunction>();
+    size_t frame_slots = callee_vfn->local_count + callee_vfn->box_count + callee_vfn->stack_max;
 
-  // If argv points to somewhere on the existing stack, we need to update it
-  if(state.gc.stack_needs_realloc(f.vm_stack_used) && ((size_t)argv >= (size_t)state.gc.vm_stack && (size_t)argv <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*))))) {
-    size_t argv_offset = ((size_t)argv) - ((size_t) state.gc.vm_stack);
-
-    state.gc.grow_stack(f.vm_stack_used);
-
-    argv = (Value*) ((((size_t) state.gc.vm_stack) + argv_offset));
-  } else {
-    state.gc.grow_stack(f.vm_stack_used);
-  }
-
-  // TODO: CHECK RECURSION LIMIT
-
-  if(state.vm_depth >= state.recursion_limit) {
-    std::ostringstream os;
-    os << " non-tail recursive calls exceeded RECURSION-LIMIT (" << 
-      state.recursion_limit << ')';
-    exception = state.make_exception(State::S_EVAL_ERROR, os.str());
-    return exception;
-  }
-
-  AR_FRAME(state, f.fn, f.closure);
-
-  // We keep these pointers to garbage-collected values outside of the GC frame, because it allows
-  // the compiler to store them in registers, providing a modest speedup.
-
-  // But because of that, they have to be restored after anything that might call the GC
-
-  // In addition, pointers to the VM stack (which is managed manually, but can be realloc) have to
-  // be updated after anything that might result in another apply_vm call
-  VMFunction* vfn = static_cast<VMFunction*>(f.fn.heap);
-  // Highly complex and fine-tuned JIT compilation, this number was found by picking a random number
-  // that increases compilation speed by quite a bit.
-#if 0
-  if(vfn->calls++ >= 1000 && !vfn->get_header_bit(Value::VMFUNCTION_NATIVE_BIT)) {
-    // TODO: Existing closures will not receive the new procedure address
-
-    // Seems unlikely that that will ever matter in a way that leaves serious performance on the
-    // table
-
-    // We could update the closure's procedure address every time it's unboxed in the VM.
-
-    compile_native(state, f.closure);
-  }
-#endif 
-
-  Value *locals, *stack = 0, *sbegin = 0;
-  size_t  *code = 0;
-
-  size_t *cp = 0;
-  // Calculate initial pointers to info
-  VM2_RESTORE();
-
-  // This has to be done in a somewhat funky order. Because allocations can occur here (if a function
-  // has boxed captures, or if a function has rest arguments). We have to take care to make sure
-  // everything is garbage collected at the allocation points here. So we check function arity right
-  // before starting the actual function.
-  //std::cout << (ptrdiff_t) state.gc.vm_stack << std::endl;
-  //std::cout << (ptrdiff_t) locals << std::endl;
-  AR_ASSERT((size_t)locals >= (size_t)state.gc.vm_stack && (size_t)locals <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*))));
-
-  // Problem: ARGV is moved after stack growth!
-
-  size_t locals_size = std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*);
-  // Initialize local variables
-  memcpy(locals, argv, std::min(argc, (size_t)vfn->max_arity) * sizeof(Value*));
-  // Zero out whole stack
-  // TODO: Necessary?
-  memset((void*)(((size_t)locals) + locals_size), 0, (f.vm_stack_used * sizeof(Value*)) - locals_size);
-
-  // Here we allocate all Boxes needed for this frame's mutable captures.
-  // Each Box starts "open" pointing at its backing local slot; when control
-  // exits this function, ~VMFrame2 closes any still-open Box into its own
-  // `converted` field.
-  if(vfn->box_count) {
-    Value* boxes = &state.gc.vm_stack[sff_offset + vfn->local_count];
-    state.gc.protect_argc = argc;
-    state.gc.protect_argv = argv;
-
-    for(size_t i = 0; i != f.fn.as_unsafe<VMFunction>()->free_variables->length; i++) {
-      boxes[i] = state.gc.allocate(BOX, sizeof(Box));
-      AR_ASSERT(state.gc.live(f.fn));
-      AR_ASSERT(state.gc.live(boxes[i]));
-      size_t idx = ((size_t*) f.fn.as_unsafe<VMFunction>()->free_variables->data)[i];
-      size_t vm_stack_idx = ((size_t)&locals[idx] - (size_t) state.gc.vm_stack) / sizeof(void*);
-
-      AR_ASSERT(current_state->gc.live(boxes[i]));
-      boxes[i].as<Box>()->U.vm_local_idx = vm_stack_idx;
+    // Check the recursion limit before touching any state: on failure the
+    // registers still describe the frame that issued the call, which is what
+    // the unwind path needs. The +1 mirrors the old VMFrame2 ordering, which
+    // counted the callee frame before checking.
+    if(state.vm_depth + 1 >= state.recursion_limit) {
+      std::ostringstream os;
+      os << " non-tail recursive calls exceeded RECURSION-LIMIT (" <<
+        state.recursion_limit << ')';
+      exception = state.make_exception(State::S_EVAL_ERROR, os.str());
+      if(state.gc.vm_frames.size() == session_base) return exception;
+      goto exception;
     }
 
-    VM2_RESTORE_GC();
-    state.gc.protect_argc = 0;
+    // vm_stack_used is a session high-water mark: it never shrinks except at
+    // session exit. Any slot below it is either zero or a valid Value that
+    // every GC has kept updated, so growth (always into the entering frame's
+    // fully-initialized region) is the only event that needs care.
+    size_t frame_base;
+    bool args_in_place = false;
+    if(link_frame_base != VM_FRESH_FRAME) {
+      frame_base = link_frame_base;
+      args_in_place = (argv == &state.gc.vm_stack[frame_base]);
+      if(args_in_place && argc > (size_t) callee_vfn->max_arity) {
+        // The extra args would sit where the box/eval region goes. Stash
+        // them in temps and take the copy path into the SAME base — falling
+        // back to a fresh frame here would climb the high-water mark on
+        // every over-arity (tail) call and leak stack space.
+        state.temps.clear();
+        state.temps.insert(state.temps.end(), argv, argv + argc);
+        argv = state.temps.empty() ? nullptr : state.temps.data();
+        args_in_place = false;
+      }
+    } else {
+      frame_base = state.gc.vm_stack_used;
+    }
+
+    size_t extent = frame_base + frame_slots;
+    if(extent > state.gc.vm_stack_used) {
+      size_t old_used = state.gc.vm_stack_used;
+      size_t delta = extent - old_used;
+      // If argv points into the existing stack, it has to survive the realloc
+      if(state.gc.stack_needs_realloc(delta) && ((size_t)argv >= (size_t)state.gc.vm_stack && (size_t)argv <= ((size_t) state.gc.vm_stack + (size_t)(state.gc.vm_stack_used * sizeof(void*))))) {
+        size_t argv_offset = ((size_t)argv) - ((size_t) state.gc.vm_stack);
+
+        state.gc.grow_stack(delta);
+
+        argv = (Value*) ((((size_t) state.gc.vm_stack) + argv_offset));
+      } else {
+        state.gc.grow_stack(delta);
+      }
+      // Slots above the old high-water mark are realloc garbage, or stale
+      // values a GC ran past while a nested session had shrunk the mark.
+      // Everything below vm_stack_used must be scannable, so zero exactly
+      // the newly included region.
+      memset((void*) &state.gc.vm_stack[old_used], 0, delta * sizeof(Value*));
+    }
+
+    locals = &state.gc.vm_stack[frame_base];
+
+    // Only the locals and box slots need initialization: the eval region is
+    // write-before-read by the stack discipline, and every slot below the
+    // high-water mark already holds a GC-scannable Value (zero or stale-but-
+    // updated-by-every-collection).
+    size_t frame_init = (size_t) callee_vfn->local_count + callee_vfn->box_count;
+    if(args_in_place) {
+      // Args are already the first locals; zero box slots and unsupplied
+      // locals beyond them.
+      if(frame_init > argc) {
+        memset((void*) (locals + argc), 0, (frame_init - argc) * sizeof(Value*));
+      }
+    } else {
+      size_t ncopy = std::min(argc, (size_t)callee_vfn->max_arity);
+      // Initialize local variables
+      memcpy(locals, argv, ncopy * sizeof(Value*));
+      if(frame_init > ncopy) {
+        memset((void*) (locals + ncopy), 0, (frame_init - ncopy) * sizeof(Value*));
+      }
+    }
+
+    // The frame record roots the closure across the box allocations below and
+    // across the whole frame lifetime.
+    VMCallFrame rec;
+    rec.closure = Value((HeapValue*) fnp);
+    rec.frame_base = frame_base;
+    rec.return_cp = link_return_cp;
+    rec.result_slot = link_result_slot;
+    rec.frames_lost = link_frames_lost;
+    rec.flags = link_is_base ? (uint32_t) VMCallFrame::SESSION_BASE : 0;
+    state.gc.vm_frames.push_back(rec);
+    state.vm_depth++;
+
+    sff_offset = frame_base;
+    cur_closure = rec.closure;
+    vfn = callee_vfn;
+
+    // Allocate all Boxes needed for this frame's mutable captures. Each Box
+    // starts "open" pointing at its backing local slot; when control exits
+    // this function, the frame-pop logic closes any still-open Box into its
+    // own `converted` field.
+    if(vfn->box_count) {
+      Value* boxes = &state.gc.vm_stack[sff_offset + vfn->local_count];
+      state.gc.protect_argc = argc;
+      state.gc.protect_argv = argv;
+
+      for(size_t i = 0; i != vfn->free_variables->length; i++) {
+        boxes[i] = state.gc.allocate(BOX, sizeof(Box));
+        // The allocation may have moved the VMFunction; re-derive it from the
+        // rooted record before touching it again.
+        cur_closure = state.gc.vm_frames.back().closure;
+        vfn = cur_closure.closure_unbox().as_unsafe<VMFunction>();
+        AR_ASSERT(state.gc.live(cur_closure));
+        AR_ASSERT(state.gc.live(boxes[i]));
+        size_t idx = ((size_t*) vfn->free_variables->data)[i];
+
+        boxes[i].as<Box>()->U.vm_local_idx = sff_offset + idx;
+      }
+
+      state.gc.protect_argc = 0;
+    }
+
+    code = vfn->code_pointer();
+    cp = code;
+    stack = &state.gc.vm_stack[sff_offset + vfn->local_count + vfn->box_count];
   }
 
 #if AR_COMPUTED_GOTO
@@ -315,9 +352,10 @@ tail:
 
 
 #define STACK_PICK(i) (*(stack - (i)))
-  //std::cout << "Offset of frame storage: " << ((size_t)locals - (size_t)state.gc.vm_stack) << std::endl;
-  //std::cout << "Offset of stack: " << ((size_t)stack - (size_t)state.gc.vm_stack) << std::endl;
 
+#if !AR_COMPUTED_GOTO
+  dispatch_top:
+#endif
   while(true) {
 #if AR_COMPUTED_GOTO
     VM_DISPATCH();
@@ -395,7 +433,7 @@ tail:
       VM_CASE(OP_BOX_GET): {
         size_t idx = VM_NEXT_INSN();
         AR_LOG_VM2("box-get " << idx);
-        Value slot = f.closure.as_unsafe<Closure>()->captures->data[idx];
+        Value slot = cur_closure.as_unsafe<Closure>()->captures->data[idx];
         if(!slot.heap_type_equals(BOX)) {
           (*stack++) = slot;
           VM_DISPATCH();
@@ -417,9 +455,9 @@ tail:
       VM_CASE(OP_BOX_SET): {
         size_t idx = VM_NEXT_INSN();
         Value val = (*--stack);
-        Value slot = f.closure.as_unsafe<Closure>()->captures->data[idx];
+        Value slot = cur_closure.as_unsafe<Closure>()->captures->data[idx];
         if(!slot.heap_type_equals(BOX)) {
-          f.closure.as_unsafe<Closure>()->captures->data[idx] = val;
+          cur_closure.as_unsafe<Closure>()->captures->data[idx] = val;
           AR_LOG_VM2("box-set " << idx << " = " << val);
           VM_DISPATCH();
         }
@@ -470,7 +508,7 @@ tail:
       VM_CASE(OP_BOX_FROM_CLOSURE): {
         size_t idx = VM_NEXT_INSN();
         AR_LOG_VM2("box-from-closure " << idx);
-        (*stack++) = f.closure.as<Closure>()->captures->data[idx];
+        (*stack++) = cur_closure.as<Closure>()->captures->data[idx];
         AR_ASSERT((*(stack - 1)).heap_type_equals(BOX));
         VM_DISPATCH();
       }
@@ -498,7 +536,7 @@ tail:
       VM_CASE(OP_CAPTURE_GET): {
         size_t idx = VM_NEXT_INSN();
         AR_LOG_VM2("capture-from-closure/get " << idx);
-        (*stack++) = f.closure.as_unsafe<Closure>()->captures->data[idx];
+        (*stack++) = cur_closure.as_unsafe<Closure>()->captures->data[idx];
         VM_DISPATCH();
       }
 
@@ -507,6 +545,21 @@ tail:
         Value afn = *(stack - (fargc + 1));
         AR_LOG_VM2("apply " << fargc << " " << afn);
         if(afn.procedurep()) {
+          if(afn.as_unsafe<Procedure>()->procedure_addr == &apply_vm) {
+            // Flat Scheme->Scheme call: push a frame record and continue in
+            // this dispatch loop. No C recursion.
+            if(state.perf_report_enabled) state.perf.vm_calls++;
+            link_return_cp = (size_t)(cp - code);
+            link_result_slot = (size_t)((stack - (fargc + 1)) - state.gc.vm_stack);
+            link_frame_base = (size_t)((stack - fargc) - state.gc.vm_stack);
+            link_frames_lost = 0;
+            link_is_base = false;
+            argc = fargc;
+            argv = stack - fargc;
+            fnp = (void*) afn.bits;
+            goto enter;
+          }
+          VM2_SAVE_STACK();
           Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, afn.heap);
           VM2_RESTORE();
           *(stack - (fargc + 1)) = ret;
@@ -533,19 +586,29 @@ tail:
         AR_LOG_VM2("apply-tail fargc " << fargc << " fn: " << afn);
 
         if(afn.procedurep()) {
-          if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
-            frames_lost++;
+          if(afn.as_unsafe<Procedure>()->procedure_addr == &apply_vm) {
+            // Flat tail call: recycle this frame's record (return linkage is
+            // inherited, frames_lost bumped) and re-enter with the callee.
+            vm_close_frame_boxes(state, vfn, sff_offset);
+            {
+              VMCallFrame& top = state.gc.vm_frames.back();
+              link_return_cp = top.return_cp;
+              link_result_slot = top.result_slot;
+              link_frames_lost = top.frames_lost + 1;
+              link_is_base = (top.flags & VMCallFrame::SESSION_BASE) != 0;
+              link_frame_base = top.frame_base;
+            }
+            state.gc.vm_frames.pop_back();
+            state.vm_depth--;
+            // Slide the args down onto the recycled frame's base (regions can
+            // overlap); they become the callee's first locals in place.
+            memmove(&state.gc.vm_stack[link_frame_base], stack - fargc, fargc * sizeof(Value));
 
-            afn = afn.closure_unbox();
-
-            state.temps.clear();
-            state.temps.insert(state.temps.end(), stack - fargc, stack);
-
-            argv = state.temps.empty() ? nullptr : state.temps.data();
+            argv = &state.gc.vm_stack[link_frame_base];
             argc = fargc;
             fnp = (void*) to_apply.bits;
 
-            goto tail;
+            goto enter;
           } else {
             Value ret;
             if(afn.heap_type_equals(CFUNCTION) &&
@@ -560,21 +623,31 @@ tail:
               fargc = state.temps.size();
               Value* flat_argv = state.temps.empty() ? nullptr : state.temps.data();
 
-              if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
-                frames_lost++;
-
-                afn = afn.closure_unbox();
+              if(afn.as_unsafe<Procedure>()->procedure_addr == &apply_vm) {
+                vm_close_frame_boxes(state, vfn, sff_offset);
+                {
+                  VMCallFrame& top = state.gc.vm_frames.back();
+                  link_return_cp = top.return_cp;
+                  link_result_slot = top.result_slot;
+                  link_frames_lost = top.frames_lost + 1;
+                  link_is_base = (top.flags & VMCallFrame::SESSION_BASE) != 0;
+                  link_frame_base = top.frame_base;
+                }
+                state.gc.vm_frames.pop_back();
+                state.vm_depth--;
 
                 argv = flat_argv;
                 argc = fargc;
                 fnp = (void*) to_apply.bits;
 
-                goto tail;
+                goto enter;
               }
 
+              VM2_SAVE_STACK();
               ret = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, flat_argv,
                 (void*) to_apply.heap);
             } else {
+              VM2_SAVE_STACK();
               ret = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc,
                 (void*) to_apply.heap);
             }
@@ -590,7 +663,8 @@ tail:
         } else {
           VM2_EXCEPTION("eval", "vm: attempt to apply non-applicable value " << afn);
         }
-        goto ret;
+        return_value = *(stack - 1);
+        goto do_return;
       }
 
       // Exp 8: fused callee-load + apply. Operands: {callee-source-idx, argc}.
@@ -609,6 +683,21 @@ tail:
         }
         AR_LOG_VM2("apply-global " << fargc << " " << afn);
         if(afn.procedurep()) {
+          if(afn.as_unsafe<Procedure>()->procedure_addr == &apply_vm) {
+            // No fn slot on the operand stack for the fused variants: the
+            // result lands where arg0 sits.
+            if(state.perf_report_enabled) state.perf.vm_calls++;
+            link_return_cp = (size_t)(cp - code);
+            link_result_slot = (size_t)((stack - fargc) - state.gc.vm_stack);
+            link_frame_base = (size_t)((stack - fargc) - state.gc.vm_stack);
+            link_frames_lost = 0;
+            link_is_base = false;
+            argc = fargc;
+            argv = stack - fargc;
+            fnp = (void*) afn.bits;
+            goto enter;
+          }
+          VM2_SAVE_STACK();
           Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, afn.heap);
           VM2_RESTORE();
           *(stack - fargc) = ret;
@@ -638,15 +727,25 @@ tail:
         AR_LOG_VM2("apply-tail-global fargc " << fargc << " fn: " << afn);
 
         if(afn.procedurep()) {
-          if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
-            frames_lost++;
-            afn = afn.closure_unbox();
-            state.temps.clear();
-            state.temps.insert(state.temps.end(), stack - fargc, stack);
-            argv = state.temps.empty() ? nullptr : state.temps.data();
+          if(afn.as_unsafe<Procedure>()->procedure_addr == &apply_vm) {
+            vm_close_frame_boxes(state, vfn, sff_offset);
+            {
+              VMCallFrame& top = state.gc.vm_frames.back();
+              link_return_cp = top.return_cp;
+              link_result_slot = top.result_slot;
+              link_frames_lost = top.frames_lost + 1;
+              link_is_base = (top.flags & VMCallFrame::SESSION_BASE) != 0;
+              link_frame_base = top.frame_base;
+            }
+            state.gc.vm_frames.pop_back();
+            state.vm_depth--;
+            // Slide the args down onto the recycled frame's base (regions can
+            // overlap); they become the callee's first locals in place.
+            memmove(&state.gc.vm_stack[link_frame_base], stack - fargc, fargc * sizeof(Value));
+            argv = &state.gc.vm_stack[link_frame_base];
             argc = fargc;
             fnp = (void*) to_apply.bits;
-            goto tail;
+            goto enter;
           } else {
             Value ret;
             if(afn.heap_type_equals(CFUNCTION) &&
@@ -661,18 +760,29 @@ tail:
               fargc = state.temps.size();
               Value* flat_argv = state.temps.empty() ? nullptr : state.temps.data();
 
-              if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
-                frames_lost++;
-                afn = afn.closure_unbox();
+              if(afn.as_unsafe<Procedure>()->procedure_addr == &apply_vm) {
+                vm_close_frame_boxes(state, vfn, sff_offset);
+                {
+                  VMCallFrame& top = state.gc.vm_frames.back();
+                  link_return_cp = top.return_cp;
+                  link_result_slot = top.result_slot;
+                  link_frames_lost = top.frames_lost + 1;
+                  link_is_base = (top.flags & VMCallFrame::SESSION_BASE) != 0;
+                  link_frame_base = top.frame_base;
+                }
+                state.gc.vm_frames.pop_back();
+                state.vm_depth--;
                 argv = flat_argv;
                 argc = fargc;
                 fnp = (void*) to_apply.bits;
-                goto tail;
+                goto enter;
               }
 
+              VM2_SAVE_STACK();
               ret = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, flat_argv,
                 (void*) to_apply.heap);
             } else {
+              VM2_SAVE_STACK();
               ret = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc,
                 (void*) to_apply.heap);
             }
@@ -687,7 +797,8 @@ tail:
         } else {
           VM2_EXCEPTION("eval", "vm: attempt to apply non-applicable value " << afn);
         }
-        goto ret;  // tail-call from CFUNCTION path returns top-of-stack
+        return_value = *(stack - 1);  // tail-call from CFUNCTION path returns top-of-stack
+        goto do_return;
       }
 
       VM_CASE(OP_APPLY_LOCAL): {
@@ -696,6 +807,19 @@ tail:
         Value afn = locals[idx];
         AR_LOG_VM2("apply-local " << fargc << " " << afn);
         if(afn.procedurep()) {
+          if(afn.as_unsafe<Procedure>()->procedure_addr == &apply_vm) {
+            if(state.perf_report_enabled) state.perf.vm_calls++;
+            link_return_cp = (size_t)(cp - code);
+            link_result_slot = (size_t)((stack - fargc) - state.gc.vm_stack);
+            link_frame_base = (size_t)((stack - fargc) - state.gc.vm_stack);
+            link_frames_lost = 0;
+            link_is_base = false;
+            argc = fargc;
+            argv = stack - fargc;
+            fnp = (void*) afn.bits;
+            goto enter;
+          }
+          VM2_SAVE_STACK();
           Value ret =  afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc, afn.heap);
           VM2_RESTORE();
           *(stack - fargc) = ret;
@@ -721,15 +845,25 @@ tail:
         AR_LOG_VM2("apply-tail-local fargc " << fargc << " fn: " << afn);
 
         if(afn.procedurep()) {
-          if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
-            frames_lost++;
-            afn = afn.closure_unbox();
-            state.temps.clear();
-            state.temps.insert(state.temps.end(), stack - fargc, stack);
-            argv = state.temps.empty() ? nullptr : state.temps.data();
+          if(afn.as_unsafe<Procedure>()->procedure_addr == &apply_vm) {
+            vm_close_frame_boxes(state, vfn, sff_offset);
+            {
+              VMCallFrame& top = state.gc.vm_frames.back();
+              link_return_cp = top.return_cp;
+              link_result_slot = top.result_slot;
+              link_frames_lost = top.frames_lost + 1;
+              link_is_base = (top.flags & VMCallFrame::SESSION_BASE) != 0;
+              link_frame_base = top.frame_base;
+            }
+            state.gc.vm_frames.pop_back();
+            state.vm_depth--;
+            // Slide the args down onto the recycled frame's base (regions can
+            // overlap); they become the callee's first locals in place.
+            memmove(&state.gc.vm_stack[link_frame_base], stack - fargc, fargc * sizeof(Value));
+            argv = &state.gc.vm_stack[link_frame_base];
             argc = fargc;
             fnp = (void*) to_apply.bits;
-            goto tail;
+            goto enter;
           } else {
             Value ret;
             if(afn.heap_type_equals(CFUNCTION) &&
@@ -744,18 +878,29 @@ tail:
               fargc = state.temps.size();
               Value* flat_argv = state.temps.empty() ? nullptr : state.temps.data();
 
-              if(afn.heap_type_equals(VMFUNCTION) || afn.heap_type_equals(CLOSURE)) {
-                frames_lost++;
-                afn = afn.closure_unbox();
+              if(afn.as_unsafe<Procedure>()->procedure_addr == &apply_vm) {
+                vm_close_frame_boxes(state, vfn, sff_offset);
+                {
+                  VMCallFrame& top = state.gc.vm_frames.back();
+                  link_return_cp = top.return_cp;
+                  link_result_slot = top.result_slot;
+                  link_frames_lost = top.frames_lost + 1;
+                  link_is_base = (top.flags & VMCallFrame::SESSION_BASE) != 0;
+                  link_frame_base = top.frame_base;
+                }
+                state.gc.vm_frames.pop_back();
+                state.vm_depth--;
                 argv = flat_argv;
                 argc = fargc;
                 fnp = (void*) to_apply.bits;
-                goto tail;
+                goto enter;
               }
 
+              VM2_SAVE_STACK();
               ret = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, flat_argv,
                 (void*) to_apply.heap);
             } else {
+              VM2_SAVE_STACK();
               ret = afn.as_unsafe<Procedure>()->procedure_addr(state, fargc, stack - fargc,
                 (void*) to_apply.heap);
             }
@@ -770,11 +915,13 @@ tail:
         } else {
           VM2_EXCEPTION("eval", "vm: attempt to apply non-applicable value " << afn);
         }
-        goto ret;
+        return_value = *(stack - 1);
+        goto do_return;
       }
 
       VM_CASE(OP_RETURN): {
-        goto ret;
+        return_value = *(stack - 1);
+        goto do_return;
       }
 
       VM_CASE(OP_JUMP): {
@@ -1220,14 +1367,73 @@ tail:
 
   }
 
-  exception:
-  if(exception.exception_trace()) {
-    state.trace_function(f.fn, frames_lost, (((size_t) cp) - (size_t)f.fn.as_unsafe<VMFunction>()->code_pointer()) / sizeof(size_t));
-  }
+  do_return:
+  {
+    // Pop the active frame: close its boxes, release its vm_stack region.
+    vm_close_frame_boxes(state, vfn, sff_offset);
 
-  return exception;
-  ret:
-  return *(stack - 1);
+    VMCallFrame fr = state.gc.vm_frames.back();
+    state.gc.vm_frames.pop_back();
+    state.vm_depth--;
+
+    if(fr.flags & VMCallFrame::SESSION_BASE) {
+      // Control returns to the C caller of this apply_vm invocation. Session
+      // exit is the only point vm_stack_used shrinks: everything at or above
+      // this frame's base is dead, and the base equals the outer session's
+      // high-water mark (or 0), so the outer invariant is restored exactly.
+      state.gc.vm_stack_used = fr.frame_base;
+      return return_value;
+    }
+
+    // Resume the calling frame inside this dispatch loop.
+    cur_closure = state.gc.vm_frames.back().closure;
+    vfn = cur_closure.closure_unbox().as_unsafe<VMFunction>();
+    sff_offset = state.gc.vm_frames.back().frame_base;
+    locals = &state.gc.vm_stack[sff_offset];
+    code = vfn->code_pointer();
+    cp = code + fr.return_cp;
+    state.gc.vm_stack[fr.result_slot] = return_value;
+    stack = &state.gc.vm_stack[fr.result_slot + 1];
+
+    // Match the call-site exception check the C path performs on results.
+    if(return_value.is_active_exception()) {
+      exception = return_value;
+      goto exception;
+    }
+  }
+#if AR_COMPUTED_GOTO
+  VM_DISPATCH();
+#else
+  goto dispatch_top;
+#endif
+
+  exception:
+  {
+    // Unwind this session's frames innermost-first, closing boxes and
+    // emitting one stack-trace entry per frame. The top frame traces at the
+    // current instruction; parent frames trace at their call sites.
+    size_t trace_off = (size_t)(cp - code);
+    while(true) {
+      VMCallFrame fr = state.gc.vm_frames.back();
+      Value frame_fn = fr.closure.closure_unbox();
+
+      if(exception.exception_trace()) {
+        state.trace_function(frame_fn, fr.frames_lost, trace_off);
+      }
+
+      vm_close_frame_boxes(state, frame_fn.as_unsafe<VMFunction>(), fr.frame_base);
+      state.gc.vm_frames.pop_back();
+      state.vm_depth--;
+
+      if(fr.flags & VMCallFrame::SESSION_BASE) {
+        // See do_return: vm_stack_used only shrinks at session exit.
+        state.gc.vm_stack_used = fr.frame_base;
+        return exception;
+      }
+
+      trace_off = fr.return_cp;
+    }
+  }
 }
 #else
 // NATIVE_VM_ONLY=1: the C++ bytecode interpreter is dead code. apply_vm stays

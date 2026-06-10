@@ -9,6 +9,16 @@ suite fits with the other performance signals Arete tracks, see
 All 57 benchmarks were executed with `CPU_LIMIT=30` (per-run soft CPU
 limit, in seconds). Raw log: `results.Arete` in the repo root.
 
+**Update 2026-06-10 (flat calling convention, see [[VM Calling
+Convention]]):** the deep-recursion entries below are stale. `ack`, `takl`,
+`cpstak` and `ctak` all complete now (24–36s, so most still need
+`CPU_LIMIT` above 30): the VM no longer consumes a C stack frame per
+Scheme call, the default `RECURSION-LIMIT` rose 1500 → 100,000
+(`NATIVE_VM_DEFAULT=0` builds), and `set-top-level-value!` now actually
+syncs the cached limit — the prelude's `RECURSION-LIMIT 75000` had been
+silently ineffective. Perf-subset timings improved 10–24% across the
+board; see `scratch/flatcall/NOTES.md` for the sweep.
+
 ## Summary
 
 |    outcome    | count |
@@ -83,7 +93,7 @@ an immediate `reference to undefined variable` at first use.
 | cat        | `delete-file`         |
 | ray        | `delete-file`         |
 | tail       | `read-line`           |
-| ack        | (hits `RECURSION-LIMIT 1500` — non-tail recursive call depth cap, not a missing procedure but a runtime ceiling) |
+| ack        | (stale — completes since the flat calling convention; was: hits `RECURSION-LIMIT 1500`) |
 
 Shimming any of these in `utils/r7rs-bench-prelude.scm` would let the
 affected benchmarks start; we haven't done so because the brief was to
@@ -103,7 +113,9 @@ avoid pretending Arete supports features it doesn't.
 
 ### Runtime VM errors (2)
 
-- `ctak` — crashes inside the call/cc-heavy inner loop with
+- `ctak` — (stale — runs to completion with a correct result as of
+  2026-06-10, ~19s; leaving the original diagnosis for history.) Crashed
+  inside the call/cc-heavy inner loop with
   `< expects all numeric arguments but argument 2 is a constant`.
   This looks like a VM invariant violation around continuation
   invocation — a raw internal constant tag is leaking into an arithmetic

@@ -313,7 +313,8 @@ GCCommon::GCCommon(State& state_, size_t heap_size_):
   collect_time_us(0),
   longest_pause_us(0),
   start_time(std::chrono::steady_clock::now()) {
-
+  // Avoid push_back reallocation churn in the VM's call fast path.
+  vm_frames.reserve(1024);
 }
 
 GCCommon::~GCCommon() {
@@ -379,6 +380,10 @@ void GCCommon::visit_roots(T& walker) {
 
   for(size_t i = 0; i != vm_stack_used; i++) {
     walker.touch((HeapValue**) &vm_stack[i]);
+  }
+
+  for(size_t i = 0; i != vm_frames.size(); i++) {
+    walker.touch(vm_frames[i].closure.heap);
   }
 }
 

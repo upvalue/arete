@@ -1611,6 +1611,27 @@ struct Block {
   }
 };
 
+/**
+ * One active VM frame in apply_vm's flat calling convention. Scheme→Scheme
+ * calls push/pop these records inside one dispatch loop instead of recursing
+ * through the C stack. All locations are OFFSETS (into vm_stack / bytecode),
+ * never raw pointers: vm_stack can realloc and bytecode can move with GC.
+ *
+ * `return_cp` and `result_slot` describe where the CALLER resumes when this
+ * frame returns; they are meaningless for session-base frames (flags &
+ * SESSION_BASE), which return control to C instead.
+ */
+struct VMCallFrame {
+  Value closure;        /**< Active Closure or VMFunction; GC-traced root. */
+  size_t frame_base;    /**< vm_stack offset where this frame's locals start. */
+  size_t return_cp;     /**< Caller bytecode offset (in words) to resume at. */
+  size_t result_slot;   /**< vm_stack offset for the return value in the caller. */
+  uint32_t frames_lost; /**< Frames collapsed into this one by tail calls. */
+  uint32_t flags;
+
+  enum { SESSION_BASE = 1 };
+};
+
 /** Common GC variables */
 struct GCCommon {
   State& state;
@@ -1625,6 +1646,10 @@ struct GCCommon {
   Value* vm_stack;
   size_t vm_stack_size;
   size_t vm_stack_used;
+
+  /** Active VM frame records for apply_vm's flat calling convention.
+   * Each record's closure is a GC root. */
+  std::vector<VMCallFrame> vm_frames;
 
   // For virtual machine: protect a single array during function initialization
   size_t protect_argc;

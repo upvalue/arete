@@ -987,6 +987,16 @@ Value fn_set_top_level_value(State& state, size_t argc, Value* argv, void* v) {
     argv[0].heap->set_header_bit(Value::SYMBOL_ROOT_BIT);
   }
   argv[0].set_symbol_value(argv[1]);
+  // State caches mirrors of a few hot globals; writes through this builtin
+  // (e.g. the r7rs bench prelude raising RECURSION-LIMIT) must sync them,
+  // or the cached value silently stays stale.
+  if(argv[0].bits == state.globals.at((size_t) State::G_RECURSION_LIMIT).bits) {
+    state.recursion_limit = (size_t) argv[1].fixnum_value_or_zero();
+  } else if(argv[0].bits == state.globals.at((size_t) State::G_TCO_ENABLED).bits) {
+    state.tco_enabled = (argv[1] != C_FALSE);
+  } else if(argv[0].bits == state.globals.at((size_t) State::G_FORBID_INTERPRETER).bits) {
+    state.forbid_interpreter = (argv[1] == C_TRUE);
+  }
   return C_UNSPECIFIED;
 }
 AR_DEFUN("set-top-level-value!", fn_set_top_level_value, 2);

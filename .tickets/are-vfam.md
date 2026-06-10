@@ -1,6 +1,6 @@
 ---
 id: are-vfam
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-05-09T01:50:21Z
@@ -29,3 +29,13 @@ Prior closed work that touched this area but didn't close the gap: aov-qnia, aov
 
 Acceptance: measurable improvement on peval and nboyer (geomean target -10% or better) with full r7rs-benchmarks regression check. Update the perf-report VM/GC split numbers in the closing note.
 
+
+## Notes
+
+**2026-06-10T04:26:20Z**
+
+Closed by the flat calling convention rewrite (PLAN.md 'Flat VM Calling Convention', scratch/flatcall/). apply_vm no longer recurses through C for Scheme->Scheme calls: explicit VMCallFrame records (offsets only — the VM2_RESTORE division is gone), zero-copy args-in-place, memmove tail calls (state.temps round-trip deleted from direct tail sites), and frame init reduced to box slots + unsupplied locals (the '// TODO: Necessary?' memset is gone; GC safety now comes from the vm_stack high-water invariant, see docs/VM Calling Convention.md). VMFrame2, its dtor box-scan, and the per-call AR_FRAME are deleted.
+
+Numbers (x86-64, NATIVE_VM_DEFAULT=0, best-of-5, scratch/flatcall/baseline/{native0,flat-native0}): peval 16.86->13.40 (-20.5%), nboyer 9.99->8.11 (-18.9%) — acceptance was geomean -10%. Full perf-subset deltas: fib -19.7, tak -24.1, browse -24.0, destruc -10.0, mazefun -12.6. callrate microbench 16.96->13.49 ns/call. VM/GC split (perf reports, identical 411.9M vm_calls): peval vm 100%/gc 1.6%->2.2%, nboyer gc 12.9%->15.9% — absolute GC time flat, not cost-shifting. boot -0.7%, psyntax -10.1%.
+
+Post-change profile of fib/callrate: memset/memcpy/memmove GONE; 98.6% apply_vm, flat, dispatch-bound (top insn 2.3%). Remaining per-call cost is opcode dispatch — that is are-8qgc territory. Bonus: ack/takl/cpstak/ctak now complete (default RECURSION-LIMIT raised to 100K flat / 10K native builds); also fixed set-top-level-value! never syncing the cached recursion_limit (the bench prelude's 75000 silently stayed 1500).

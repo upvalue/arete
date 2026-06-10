@@ -201,6 +201,24 @@ Cherry-picked cases can be usable at reduced inputs — fib(30) finishes
 in ≈0.6 s under pure interpretation here, vs fib(40) as the upstream
 ecraven input.
 
+## VM call-rate microbenchmark
+
+`bench/vm/callrate.scm` is a 2-argument self-recursive non-tail function
+whose body is one compare, two calls and one add — nearly all of its time
+is the VM calling convention itself (see [[VM Calling Convention]]). Its
+call count is exact (18,454,929 = 2·fib(35)−1), so the driver reports
+ns/call without perf-report instrumentation overhead:
+
+```
+utils/run-callrate.sh                # best of 5, prints ns/call
+ARETE=bin/arete-other HEAP=other.boot RUNS=3 utils/run-callrate.sh
+```
+
+Caveat: `vm.calls` in perf reports only counts `apply_vm` C entries. On
+`NATIVE_VM_DEFAULT=1` builds the native fast path bypasses that counter,
+so use the analytic "wall / expected" line, or a `NATIVE_VM_DEFAULT=0`
+build, for per-call arithmetic.
+
 ## Perf reports
 
 Field reference: [[Performance Reports]]. Implementation and how to add

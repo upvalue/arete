@@ -21,12 +21,23 @@ extern void load_uv(State&);
 extern void load_native_compiler(State&);
 extern void load_native_vm(State&);
 
+// A flat VM frame costs ~130 bytes of malloc'd memory (VMCallFrame record +
+// vm_stack slots), so 100K of depth is ~13MB — measured via ack:3:12, which
+// peaks at 131072 vm_stack slots. Builds that default functions onto the
+// native VM still consume a C stack frame per non-tail native call, so they
+// keep a limit that fits in a typical 8MB stack rlimit.
+#if NATIVE_VM_DEFAULT
+# define AR_DEFAULT_RECURSION_LIMIT 10000
+#else
+# define AR_DEFAULT_RECURSION_LIMIT 100000
+#endif
+
 State::State():
   gc(*this, AR_HEAP_SIZE),
   gensym_counter(0),
   tco_enabled(true),
   forbid_interpreter(false),
-  recursion_limit(1500),
+  recursion_limit(AR_DEFAULT_RECURSION_LIMIT),
   booted(false),
   symbol_table(),
   source_names(),
@@ -169,7 +180,7 @@ void State::boot() {
   register_feature("uv");
 #endif
 
-  set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(1500));
+  set_global_value(G_RECURSION_LIMIT, Value::make_fixnum(AR_DEFAULT_RECURSION_LIMIT));
   set_global_value(G_COMMAND_LINE, C_NIL);
   set_global_value(G_TCO_ENABLED, C_TRUE);
   set_global_value(G_PRINT_READABLY, C_FALSE);

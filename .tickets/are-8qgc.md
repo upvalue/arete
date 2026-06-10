@@ -30,3 +30,15 @@ Scope for an actual rewrite (post-prerequisite):
 
 Acceptance: peval and nboyer within 10% of femtolisp h2h; psyntax expand within 1% of baseline (no regression); test suite stays green; native-vm-stats apply-c rate < 20% on the r7rs perf suite.
 
+
+## Notes
+
+**2026-06-10T04:26:35Z**
+
+Re-scoped after are-vfam closed via the flat calling convention (docs/VM Calling Convention.md). The C++ apply_vm now runs all Scheme->Scheme calls in one dispatch loop over explicit VMCallFrame records; profiles show the remaining per-call cost is pure opcode dispatch. This ticket's scope is therefore now: implement push/pop of the same VMCallFrame records in the DynASM core so the asm dispatch loop never returns to C between Scheme calls, using the C++ loop as the proven reference implementation and fallback. The native core currently still re-enters C per call and keeps its own VMFrame2-style prologue (vm-native-x64.cpp.dasc apply_zero_loop) — that prologue should also adopt the high-water invariant (init only locals+boxes, zero growth regions) instead of full-frame zero-fill. Mixed builds remain correct meanwhile because native frames allocate fresh at vm_stack_used and zero-fill (invariant-compatible); gates incl. GC stress + differential pass on NATIVE_VM_DEFAULT=1.
+
+Prerequisite numbers update (this box, best-of-5): flat C core fib 22.17s vs native1 baseline 20.77s — on this machine the old native core HELPS fib (unlike the +43% regression noted above), so combining flat frames with the asm core is the expected next win. fresh flat-native1 sweep numbers land in scratch/flatcall/baseline/flat-native1. Also note NATIVE_VM_DEFAULT=1 builds keep a conservative RECURSION-LIMIT default (10K vs 100K) because native non-tail calls still consume C stack — moving call/return into asm with VMCallFrame records removes that distinction too.
+
+**2026-06-10T04:36:49Z**
+
+Phase 3 sweep results (best-of-5, scratch/flatcall/baseline/): the flat C core now BEATS the NATIVE_VM_DEFAULT=1 build on call-heavy workloads — peval 13.40s vs 15.11s, nboyer 8.11 vs 8.92, tak 9.34 vs 9.91 — while fib (20.95 vs 22.17) and browse still favor the native core's opcode dispatch. flat-native1 vs old native1 is ~neutral (±2%) because natively-dispatched calls bypass apply_vm entirely. Net: the asm core's per-call C re-entry is now a measured regression on the workloads this epic targets; adopting VMCallFrame push/pop in asm is the unlock, and until then NATIVE_VM_DEFAULT=1 is a workload-dependent tradeoff rather than a win.
