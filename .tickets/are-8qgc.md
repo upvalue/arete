@@ -46,3 +46,7 @@ Phase 3 sweep results (best-of-5, scratch/flatcall/baseline/): the flat C core n
 **2026-06-10T17:05:19Z**
 
 Done (2026-06-10): call/return machinery now runs in asm via VMCallFrame records shared with the flat C++ core (PLAN.md, scratch/asmcall/). Native->native calls and tail calls (record recycling, any depth) never re-enter C; boxed callees get Boxes allocated post-entry via a C helper; image load now re-applies VMFUNCTION_NATIVE_VM_BIT (src/image.cpp), which alone moved 70.9M peval calls off the C path. RECURSION-LIMIT is now enforced on the asm fast path (baseline segfaulted), exception unwind + stack traces unified with apply_vm. peval: 15.106 (native1 baseline) -> 14.383 (-4.8%); flat C++ core remains faster at 13.397. Remaining C fallback on peval: 33.2M variadic-with-extra-args calls (argc-mismatch bucket), 19.5M CFunctions (inherent), tail-c 97.5M un-bucketed. Next candidate: variadic callee fast path; but the asm core still trails the flat C++ core overall on peval, so per-opcode body quality, not the call boundary, is now the gap.
+
+**2026-06-10T17:41:09Z**
+
+Follow-up shipped: variadic callees in the asm fast paths (commit 8bf0acb). apply-c-argc-mismatch 33.2M -> 0; peval 14.383 -> 13.970.
