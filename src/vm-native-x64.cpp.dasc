@@ -397,6 +397,47 @@ static void native_vm_alloc_frame_boxes(State* state) {
   }
 }
 
+// Cold path for the asm call fast paths: finish entering a just-committed
+// variadic frame (the top vm_frames record). The fast path skipped its
+// inline zero loop — that loop's count (local_count + box_count - argc)
+// goes negative when extras are supplied — so this does all slot init
+// beyond the args: build the rest list from the extras at
+// locals[max_arity..argc), store it at locals[max_arity], zero the
+// remaining locals + box slots, then allocate any open Boxes. Mirrors
+// apply_native_vm's variable-arity prologue (and apply_vm's OP_ARGV_REST,
+// src/vm.cpp:1068). temps_to_list can GC, so everything read from the
+// VMFunction is cached up front; the extras stay GC-scannable in vm_stack
+// throughout (they sit below the high-water mark) and temps are roots.
+static void native_vm_enter_variadic(State* state, size_t argc) {
+  Value closure = state->gc.vm_frames.back().closure;
+  VMFunction* vfn = closure.closure_unbox().as_unsafe<VMFunction>();
+  size_t frame_base = state->gc.vm_frames.back().frame_base;
+  size_t max_arity = vfn->max_arity;
+  size_t fi = (size_t) vfn->local_count + vfn->box_count;
+  size_t box_count = vfn->box_count;
+
+  Value rest = C_NIL;
+  if(argc > max_arity) {
+    Value* args = &state->gc.vm_stack[frame_base];
+    state->temps.clear();
+    state->temps.insert(state->temps.end(), &args[max_arity], &args[argc]);
+    rest = state->temps_to_list();
+  }
+  state->gc.vm_stack[frame_base + max_arity] = rest;
+
+  // Everything the skipped inline zero loop would have initialized,
+  // including slots where extras sat. Slots beyond fi need nothing: the
+  // eval region is write-before-read and already scannable.
+  if(fi > max_arity + 1) {
+    memset((void*) &state->gc.vm_stack[frame_base + max_arity + 1], 0,
+           (fi - max_arity - 1) * sizeof(Value));
+  }
+
+  if(box_count) {
+    native_vm_alloc_frame_boxes(state);
+  }
+}
+
 static Value native_vm_flatten_apply_arguments(
     State* state, size_t argc, Value* argv, Value* out_fn) {
   Value fn = argv[0];
@@ -1030,16 +1071,24 @@ void init_native_vm(State& state) {
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne >9
+  // argc == F enters directly (fixed or variadic — a variadic callee with
+  // exactly F args gets rest = '() from ->apply_enter_variadic). Otherwise
+  // only variadic callees with argc > F may enter; variadic with argc < F
+  // bails so the C slow path raises the proper arity exception.
   | cmp rax, rcx
-  | jne >9
+  | je >8
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
-  | jnz >9
+  | jz >9
+  | cmp rax, rcx
+  | jb >9
+  |8:
   // In-asm tail call with record recycling — works from ANY depth (nested
   // frames included): the record keeps its return linkage and frame_base, so
   // the eventual OP_RETURN resumes the original caller (or returns to C for
-  // a recycled session-base frame). The callee must be exact-arity,
-  // non-variadic, native; the CALLER may be anything. Boxed callees get
-  // their Boxes allocated post-entry via ->apply_enter_boxes.
+  // a recycled session-base frame). The callee must have min == max arity
+  // and be native; the CALLER may be anything. Boxed callees get their
+  // Boxes allocated post-entry via ->apply_enter_boxes; variadic callees
+  // finish entry via ->apply_enter_variadic.
   | mov [rsp + 32], rax                // spill fargc
   | mov [rsp + 48], r9                 // spill callee fn value
   | mov [rsp + 56], r10                // spill callee VMFunction* (no GC below)
@@ -1113,6 +1162,10 @@ void init_native_vm(State& state) {
   | mov [rcx], VFN
   | mov ARGC, [rsp + 32]
   // Memset diet: zero only unsupplied locals (rdi sits just past the args).
+  // Variadic callees skip the loop — its count goes negative with extras;
+  // ->apply_enter_variadic's helper does the slot init instead.
+  | test qword [VFN], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_tail_zero_done
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
   | add ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | sub rcx, [rsp + 32]
@@ -1132,6 +1185,8 @@ void init_native_vm(State& state) {
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
   | reloadDtable
+  | test qword [VFN], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_enter_variadic
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz ->apply_enter_boxes
@@ -1215,16 +1270,22 @@ void init_native_vm(State& state) {
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz ->op_apply_bail_no_native_bit
-  // C1 fast path: exact-arity, non-variadic VM callees. Boxed callees are
-  // handled too — their Boxes are allocated after frame entry via
-  // ->apply_enter_boxes.
+  // C1 fast path: VM callees with min == max arity, fixed or variadic.
+  // Boxed callees get their Boxes allocated after frame entry via
+  // ->apply_enter_boxes; variadic callees finish entry (rest list, slot
+  // init, boxes) via ->apply_enter_variadic. argc == F enters directly;
+  // otherwise only variadic with argc > F may enter — variadic with
+  // argc < F bails so the C slow path raises the proper arity exception.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne ->op_apply_bail_arity_range
   | cmp rax, rcx
-  | jne ->op_apply_bail_argc_mismatch
+  | je >8
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
-  | jnz ->op_apply_bail_variadic
+  | jz ->op_apply_bail_argc_mismatch
+  | cmp rax, rcx
+  | jb ->op_apply_bail_variadic
+  |8:
   // Recursion-depth check + commit (mirrors apply_vm's enter: ordering — on
   // failure the registers still describe the calling frame).
   | mov rcx, [STATE + (ptrdiff_t) offsetof(State, vm_depth)]
@@ -1297,6 +1358,11 @@ void init_native_vm(State& state) {
   // Memset diet: args are already the first locals; zero only unsupplied
   // locals and box slots. The eval region is write-before-read and every
   // slot below the high-water mark is GC-scannable already.
+  // Variadic callees skip the loop entirely: its count goes NEGATIVE when
+  // argc exceeds local_count + box_count; ->apply_enter_variadic's helper
+  // does all slot init beyond the args instead.
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_zero_done
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
   | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | sub rcx, [rsp + 32]                // local_count + box_count - argc
@@ -1327,6 +1393,8 @@ void init_native_vm(State& state) {
   | mov [rsp + 24], CP
   | mov [rsp + 8], r11
   | reloadDtable
+  | test qword [VFN], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_enter_variadic
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz ->apply_enter_boxes
@@ -1419,6 +1487,22 @@ void init_native_vm(State& state) {
   | mov ARGC, sScratch0
   | jmp ->dispatch
 
+  // --- Variadic frame entry (cold) ---------------------------------------------
+  // The just-entered frame is variadic: the C helper builds the rest list,
+  // finishes slot init (the fast path skipped its zero loop), and allocates
+  // any open Boxes. Same commit/restore discipline as ->apply_enter_boxes.
+  // ARGC must still be the ORIGINAL argc when the callee's OP_ARGC_GTE
+  // runs, hence the sScratch0 save/reload (ARGC is r10, caller-saved).
+  |->apply_enter_variadic:
+  | mov sScratch0, ARGC
+  | mov rdi, STATE
+  | mov rsi, ARGC
+  | mov64 rax, (ptrdiff_t) &native_vm_enter_variadic
+  | call rax
+  | restoreAfterGcHelperCall
+  | mov ARGC, sScratch0
+  | jmp ->dispatch
+
   // --- OP_APPLY_LOCAL (exp 8) -----------------------------------------------
   // APPLY_LOCAL idx fargc: like OP_APPLY but the callee is loaded from
   // LOCALS[idx] rather than popped from the operand stack. The stack contains
@@ -1452,14 +1536,18 @@ void init_native_vm(State& state) {
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz ->op_apply_local_bail_no_native_bit
-  // C1 fast path: exact-arity, non-variadic VM callees (boxed OK).
+  // C1 fast path: VM callees with min == max arity, fixed or variadic
+  // (boxed OK) — see op_apply for the check-chain reasoning.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne ->op_apply_local_bail_arity_range
   | cmp rax, rcx
-  | jne ->op_apply_local_bail_argc_mismatch
+  | je >8
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
-  | jnz ->op_apply_local_bail_variadic
+  | jz ->op_apply_local_bail_argc_mismatch
+  | cmp rax, rcx
+  | jb ->op_apply_local_bail_variadic
+  |8:
   // Recursion-depth check + commit (see op_apply).
   | mov rcx, [STATE + (ptrdiff_t) offsetof(State, vm_depth)]
   | inc rcx
@@ -1522,7 +1610,10 @@ void init_native_vm(State& state) {
   | mov sClosureRef, rcx
   | add rcx, FR_SIZE
   | mov [STATE + NATIVE_VM_FRAMES_FINISH_OFF], rcx
-  // Memset diet: zero only unsupplied locals and box slots (see op_apply).
+  // Memset diet: zero only unsupplied locals and box slots; variadic
+  // callees skip the loop — negative count (see op_apply).
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_local_zero_done
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
   | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | sub rcx, [rsp + 32]                // local_count + box_count - argc
@@ -1553,6 +1644,8 @@ void init_native_vm(State& state) {
   | mov [rsp + 24], CP
   | mov [rsp + 8], r11
   | reloadDtable
+  | test qword [VFN], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_enter_variadic
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz ->apply_enter_boxes
@@ -1658,13 +1751,17 @@ void init_native_vm(State& state) {
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz ->op_apply_global_bail_no_native_bit
+  // Fixed-or-variadic check chain — see op_apply.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne ->op_apply_global_bail_arity_range
   | cmp rax, rcx
-  | jne ->op_apply_global_bail_argc_mismatch
+  | je >8
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
-  | jnz ->op_apply_global_bail_variadic
+  | jz ->op_apply_global_bail_argc_mismatch
+  | cmp rax, rcx
+  | jb ->op_apply_global_bail_variadic
+  |8:
   // Recursion-depth check + commit (see op_apply).
   | mov rcx, [STATE + (ptrdiff_t) offsetof(State, vm_depth)]
   | inc rcx
@@ -1726,7 +1823,10 @@ void init_native_vm(State& state) {
   | mov sClosureRef, rcx
   | add rcx, FR_SIZE
   | mov [STATE + NATIVE_VM_FRAMES_FINISH_OFF], rcx
-  // Memset diet: zero only unsupplied locals and box slots (see op_apply).
+  // Memset diet: zero only unsupplied locals and box slots; variadic
+  // callees skip the loop — negative count (see op_apply).
+  | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_global_zero_done
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
   | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | sub rcx, [rsp + 32]                // local_count + box_count - argc
@@ -1756,6 +1856,8 @@ void init_native_vm(State& state) {
   | mov [rsp + 24], CP
   | mov [rsp + 8], r11
   | reloadDtable
+  | test qword [VFN], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_enter_variadic
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz ->apply_enter_boxes
@@ -1856,10 +1958,17 @@ void init_native_vm(State& state) {
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne >9
+  // argc == F enters directly (fixed or variadic — a variadic callee with
+  // exactly F args gets rest = '() from ->apply_enter_variadic). Otherwise
+  // only variadic callees with argc > F may enter; variadic with argc < F
+  // bails so the C slow path raises the proper arity exception.
   | cmp rax, rcx
-  | jne >9
+  | je >8
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
-  | jnz >9
+  | jz >9
+  | cmp rax, rcx
+  | jb >9
+  |8:
   // In-asm tail call with record recycling (see op_apply_tail). The fn came
   // from LOCALS[idx]; it is spilled before the arg slide can clobber it.
   | mov [rsp + 32], rax                // spill fargc
@@ -1927,7 +2036,10 @@ void init_native_vm(State& state) {
   | mov rcx, [rsp]
   | mov [rcx], VFN
   | mov ARGC, [rsp + 32]
-  // Memset diet: zero only unsupplied locals (rdi sits just past the args).
+  // Memset diet: zero only unsupplied locals; variadic callees skip the
+  // loop — negative count (see op_apply_tail).
+  | test qword [VFN], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_tail_local_zero_done
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
   | add ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | sub rcx, [rsp + 32]
@@ -1947,6 +2059,8 @@ void init_native_vm(State& state) {
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
   | reloadDtable
+  | test qword [VFN], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_enter_variadic
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz ->apply_enter_boxes
@@ -2027,10 +2141,17 @@ void init_native_vm(State& state) {
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne >9
+  // argc == F enters directly (fixed or variadic — a variadic callee with
+  // exactly F args gets rest = '() from ->apply_enter_variadic). Otherwise
+  // only variadic callees with argc > F may enter; variadic with argc < F
+  // bails so the C slow path raises the proper arity exception.
   | cmp rax, rcx
-  | jne >9
+  | je >8
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
-  | jnz >9
+  | jz >9
+  | cmp rax, rcx
+  | jb >9
+  |8:
   // In-asm tail call with record recycling (see op_apply_tail).
   | mov [rsp + 32], rax                // spill fargc
   | mov [rsp + 48], r9                 // spill callee fn value
@@ -2097,7 +2218,10 @@ void init_native_vm(State& state) {
   | mov rcx, [rsp]
   | mov [rcx], VFN
   | mov ARGC, [rsp + 32]
-  // Memset diet: zero only unsupplied locals (rdi sits just past the args).
+  // Memset diet: zero only unsupplied locals; variadic callees skip the
+  // loop — negative count (see op_apply_tail).
+  | test qword [VFN], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_tail_global_zero_done
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
   | add ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | sub rcx, [rsp + 32]
@@ -2117,6 +2241,8 @@ void init_native_vm(State& state) {
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
   | reloadDtable
+  | test qword [VFN], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
+  | jnz ->apply_enter_variadic
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
   | jnz ->apply_enter_boxes

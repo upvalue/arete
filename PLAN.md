@@ -1,255 +1,181 @@
-# Native VM: Flat Calls in Asm
+# Variadic callees in the native-VM asm fast paths
 
-Port the flat calling convention (commit 177166a, [[VM Calling Convention]])
-into the DynASM dispatch core (src/vm-native-x64.cpp.dasc) so native→native
-Scheme calls — including tail calls from nested frames — never re-enter C,
-and so both engines share one frame representation (`VMCallFrame` records in
-`state.gc.vm_frames`).
+Goal: eliminate the last large C-fallback bucket in the asm dispatch core —
+variadic VM functions called with extra args. On peval:2000 that is 33.2M
+non-tail calls (`apply-c-argc-mismatch` in native-vm-stats) plus an unknown
+share of the 97.5M `apply-tail-c` tail fallbacks. peval is the only r7rs
+benchmark where the asm core still trails the flat C++ core (14.38 vs 13.40);
+this traffic is why. Everything else already wins (see
+scratch/asmcall/NOTES.md, Phase 4). Predecessor plan: "Native VM: Flat Calls
+in Asm" (this file at commit de08445).
 
-Development and benchmarking target: **x86-64**, `NATIVE_VM_DEFAULT=1`
-builds throughout. Predecessor plan: "Flat VM Calling Convention"
-(PLAN.md at commit 177166a; results in scratch/flatcall/NOTES.md).
-Ticket: `are-8qgc` (re-scoped 2026-06-10; histogram numbers below are in
-its notes). Related: `aonv-2taa` postmortem, [[Benchmarking]],
-docs/Native VM.md.
+## Work mode (read this first)
 
-## Motivation (measured, 2026-06-10, best-of-5 unless noted)
+Per Phil: **do not take measurements between sub-steps.** No baselines, no
+per-change timing, no instrumentation passes, no diagnosis loops. Implement
+the whole change, then run the correctness battery once at the end, then
+take ONE speed measurement (peval best-of-3 + one native-vm-stats histogram
+run). If a gate fails, fix and re-run that gate; don't expand scope.
 
-The flat C++ core now **beats** the native-VM build on call-heavy
-workloads; the asm core's only losses are its call machinery:
+## Context you need (all verified 2026-06-10, don't re-derive)
 
-| bench | flat C core (`NATIVE_VM_DEFAULT=0`) | native build (`=1`) |
-|---|---|---|
-| peval | **13.397** | 15.106 |
-| nboyer | **8.109** | 8.921 |
-| tak | **9.335** | 9.911 |
-| fib | 22.174 | **20.946** |
-| browse | 1.499 | **1.549**\* |
-| callrate ns/call | 13.49 | 14.20 |
-
-\* browse is within noise; fib is the real native win (dispatch-bound).
-
-The native-vm-stats histogram on peval (flat-native1 build) localizes the
-problem precisely:
-
-- Non-tail: 217.9M asm fast path vs 105.1M through C. C-path reasons:
-  **70.9M no-native-bit**, 19.1M cfunction (legitimate), 15.1M boxed,
-  0 arity-range, 0 argc-mismatch, 0 variadic.
-- Tail: **only 48.9M asm vs 125.0M through C** — tail calls are the
-  dominant hole. Nested fast-path frames may not raise the tail flag at
-  all (`allow_tail=0`, vm-native-x64.cpp.dasc ~line 444): every tail call
-  made from a nested native frame becomes a non-tail C call — no TCO and
-  full SysV cost.
-
-Secondary motivations: the asm prologue still runs the full-frame
-`apply_zero_loop` zero-fill the C++ core no longer needs; native builds
-keep a 10,000 RECURSION-LIMIT (vs 100,000 flat) only because native
-non-tail calls still burn a C stack frame; and two competing frame
-formats (VMCallFrame records vs the asm core's 5-word inline frame links)
-are a standing maintenance hazard.
-
-## Facts the design relies on
-
-1. **The asm core already does flat calls in asm** — the "C1 fast path"
-   (op_apply at vm-native-x64.cpp.dasc ~1054): exact-arity, non-variadic,
-   box-free, native-bit callees get an inline 5-word frame
-   {saved_vfn, saved_cp_offset, current_closure, saved_sff_offset,
-   saved_ret_slot} pushed on vm_stack and control stays in the dispatch
-   loop. This work is a *re-targeting* of proven machinery, not a first
-   implementation.
-2. **Pinned registers** (callee-saved across the loop): r12=STATE, r13=CP,
-   r14=STACK, r15=LOCALS, rbx=VFN; r10=ARGC at entry; r11=DTABLE
-   (reloaded after C helpers via `reloadDtable`). C-side slots accessed
-   from asm: vfn_ref (GC-updated fn slot), sff_ref (current frame base),
-   closure_ref. The dispatch entry signature is in the .dasc header.
-3. **The flat C++ core is the reference implementation.** Its semantics
-   are pinned by the gate suite: run-tests 121, test-semispace 18,
-   GC-stress scripts, and scratch/flatcall/differential.sh (stdout/stderr/
-   exit/trace comparison against a pinned binary).
-4. **VMCallFrame + the vm_stack high-water invariant** are documented in
-   [[VM Calling Convention]]; `gc.vm_frames` is a `std::vector<VMCallFrame>`
-   (reserve 1024) traced as roots; vm_stack_used only shrinks at session
-   exit; growth zeroes exactly the newly included region.
-5. **Stats plumbing exists**: native_vm_stat_* counters, `(native-vm-stats)`,
-   `(native-vm-stats-reset!)` (vm-native.cpp) — per-change measurement of
-   path mix is one eval away.
-6. **Eligibility is per-function** (`native_vm_function_eligible`,
-   VMFUNCTION_NATIVE_VM_BIT set at OpenFn->procedure time and on image
-   load); `native-vm-install-tree!` exists for forced installation.
+- Build: `make bin/arete` (x86-64, NATIVE_VM_DEFAULT=1), bootstrap with
+  `bin/arete boot.scm`. The dispatch core is src/vm-native-x64.cpp.dasc
+  (DynASM; the generated .cpp is untracked). Semantic reference is
+  `apply_vm` in src/vm.cpp; pinned reference binary `bin/arete-flat-native0`.
+- Variadic VMFunctions have `min_arity == max_arity == F` (the fixed param
+  count) plus `VMFUNCTION_VARIABLE_ARITY_BIT`. That is why they land in the
+  argc-mismatch bucket: the fast-path checks compare argc to min BEFORE
+  testing the variadic bit (`apply-c-arity-range` is 0 on peval; the 344
+  `apply-c-variadic` hits are variadic functions called with exactly F args).
+- The rest param lives at `locals[F]` (= `locals[max_arity]`); it is a
+  normal local, counted in local_count.
+- `OP_ARGV_REST` in the asm core is a **no-op** (search `->op_argv_rest`):
+  the rest list is built before dispatch, in apply_native_vm's C prologue
+  ("Variable-arity prologue", src/vm-native-x64.cpp.dasc ~line 3058, which
+  mirrors apply_vm's OP_ARGV_REST at src/vm.cpp ~1069). The fast paths can
+  therefore build the rest list at frame entry and leave the opcode alone.
+- The boxed-callee work (commit de08445) added exactly the pattern to copy:
+  a cold shared continuation `->apply_enter_boxes` that runs after the frame
+  is fully committed, calls a C helper (`native_vm_alloc_frame_boxes`),
+  then `restoreAfterGcHelperCall` + reloads ARGC from sScratch0 (ARGC is
+  r10, caller-saved, and OP_ARGC_EQ/GTE still need it post-entry). LOCALS
+  and STACK need no post-helper fixup: the GC never moves vm_stack.
+- There are SIX call fast paths: op_apply / op_apply_local / op_apply_global
+  and their _tail variants. The boxed-callee diff touched all six the same
+  way; this change does too. Read that diff first:
+  `git show de08445 -- src/vm-native-x64.cpp.dasc`.
 
 ## Design
 
-### One frame representation
+At each fast path, the callee checks become:
 
-Replace the 5-word inline frame links with pushes/pops of the same
-`VMCallFrame` records the C++ core uses:
+  - min != max            -> bail (unchanged, arity_range)
+  - VARIABLE_ARITY bit set:
+      argc <  F (=min)    -> bail to the C slow path (it raises the proper
+                             arity exception; keeps error behavior identical
+                             with zero asm work)
+      argc >= F           -> take the fast path, variadic flavor
+  - else (fixed arity):
+      argc != F           -> bail (unchanged, argc_mismatch)
 
-- Asm call fast path: bounds-check `vm_frames` (size < capacity) and
-  recursion depth, write the record fields, bump size — all inline.
-  Overflow or depth-fail tail-calls a C helper (grow/raise). Pin the
-  vector layout with static_asserts (data/size/capacity offsets for this
-  libstdc++; a tiny POD mirror struct if that proves fragile).
-- Asm OP_RETURN: pop the record, restore VFN/CP/LOCALS/STACK from it
-  (offsets → pointers via gc.vm_stack base), write result to result_slot.
-  A session-base record returns to C as today.
-- `vm_depth` stays equal to frame count; sff_ref/closure_ref C-side slots
-  become derivable from the top record (keep them during transition,
-  delete at the end).
-- Exception unwind: once both engines speak VMCallFrame, the C++
-  unwind loop can pop asm-pushed frames identically — traces and box
-  closing unify. (Today's asm frames are invisible to trace_function
-  except via its own bookkeeping.)
+Variadic flavor of frame entry (delta vs the existing path):
 
-### Adopt the flat-call wins
+1. **extent is unchanged.** Zero-copy puts the args (including extras) at
+   [frame_base, frame_base+argc), which is inside the caller's eval region,
+   already below vm_stack_used — extras are GC-scannable for free. Same for
+   the tail variant after the arg slide (the slide loop is argc-driven
+   already).
+2. **Skip the inline zero loop for variadic callees.** The current count
+   `local_count + box_count - argc` goes NEGATIVE when argc > local_count +
+   box_count and the loop decrements toward it — this is the one place that
+   corrupts memory if missed. Let the helper do all slot init beyond the
+   args instead.
+3. After the frame is fully committed (record pushed/recycled, registers and
+   stack slots set — the point where the box-count test sits today), jump to
+   a new cold continuation:
 
-- **Zero-copy args**: callee frame_base = arg0's offset (args are already
-  on the caller's eval stack); kill the arg-copy loop for `argc <=
-  max_arity`. Over-arity: C helper (temps stash), same rule as the C++
-  core — never allocate a fresh frame above the high-water mark for a
-  recycled call (TCO space-leak rule; see NOTES on the mazefun
-  regression).
-- **Memset diet**: delete `apply_zero_loop`; zero only box slots +
-  unsupplied locals. The high-water invariant transfers as-is; the grow
-  helper already runs in C where the growth-zeroing lives.
-- **In-asm tail calls**: recycle the top record (inherit return linkage,
-  frames_lost++), memmove args to frame_base, jump to the callee's code.
-  This works from *nested* frames too — record recycling is exactly what
-  the tail_flag unwind dance was approximating from the top frame only.
-  The native_vm_tail_flag/buf machinery shrinks to the non-native-target
-  path (or dies entirely if that path goes through procedure_addr).
+     |->apply_enter_variadic:
+     | mov sScratch0, ARGC
+     | mov rdi, STATE
+     | mov rsi, ARGC
+     | mov64 rax, (ptrdiff_t) &native_vm_enter_variadic
+     | call rax
+     | restoreAfterGcHelperCall
+     | mov ARGC, sScratch0
+     | jmp ->dispatch
 
-### Coverage, in histogram order
+   The existing box test chains: test VARIABLE_ARITY first, jnz
+   ->apply_enter_variadic (whose helper also handles boxes); else the
+   existing box_count test -> ->apply_enter_boxes.
+4. C helper, next to native_vm_alloc_frame_boxes:
 
-1. **Tail calls to native callees from any depth** (kills most of the
-   125M apply-tail-c on peval).
-2. **no-native-bit (70.9M)**: diagnose before fixing — add a one-shot
-   per-callee log (or extend the histogram with callee name sampling) to
-   learn whether these are ineligible opcodes, functions created before
-   native_vm_ready, closures missing the bit propagation, or interpreted
-   functions. Fix is whatever the data says (eligibility widening,
-   boot-time install-tree, or bit propagation on closure creation).
-3. **Boxed callees (15.1M)**: C helper allocates the boxes (it can GC),
-   then re-enters the asm frame-entry path; the record roots the closure
-   across the helper.
-4. CFunction calls (19.1M) stay C calls — correct by design.
+     static void native_vm_enter_variadic(State* state, size_t argc)
 
-### Untouched
+   Derive vfn + frame_base from the top vm_frames record (the record roots
+   the closure; re-derive vfn after every allocation — the GC may move it).
+   With F = vfn->max_arity and fi = local_count + box_count:
+     - rest list: mirror the session prologue (dasc ~3058) / apply_vm's
+       OP_ARGV_REST. If argc == F, rest = C_NIL; else temps.clear(), insert
+       vm_stack[frame_base+F .. frame_base+argc), rest =
+       state->temps_to_list() (temps are GC roots; the source slots stay
+       scannable in vm_stack throughout). Store rest at
+       vm_stack[frame_base + F].
+     - zero vm_stack[frame_base + F + 1 .. frame_base + fi) — everything the
+       skipped inline loop would have initialized, including slots where
+       extras sat. (Slots beyond fi need nothing: the eval region is
+       write-before-read, and anything below the high-water mark is already
+       scannable.)
+     - if box_count: run the same loop as native_vm_alloc_frame_boxes (call
+       it or share the body).
+   Rest-then-boxes matches the session prologue; apply_vm does boxes first —
+   the orders are equivalent (a Box only records its backing slot index), so
+   match the session prologue since you're mirroring its rest code anyway.
+5. **Tail variants:** identical delta. Caller box close, record recycle, arg
+   slide, frames_lost++ all stay; skip the zero loop and take the
+   continuation when the variadic bit is set.
+6. ARGC must be the ORIGINAL argc when the callee's OP_ARGC_GTE runs — hence
+   the sScratch0 save/reload above (same as ->apply_enter_boxes).
 
-Bytecode format, compile.scm, eval.cpp, image format, the C++ apply_vm
-(reference), MSVC/non-x64 builds (NATIVE_VM_ENABLE=0 path), the method
-JIT (compile-x64.cpp.dasc — decision point *after* this work: if the asm
-interpreter saturates below compiled-Scheme targets, the next plan is the
-method JIT, which now inherits cheap calls).
+Not in scope: variadic calls with argc < F (slow path raises), CFunction
+calls, the `apply` builtin's list-flattening path, arity-range callees
+(bucket is 0 on peval), eligibility changes (OP_ARGV_REST is already
+eligible).
 
-## Phases
+## Danger spots (each cost a debug cycle in past phases)
 
-### Phase 0 — Baseline + diagnosis (~half a day)
+- The negative zero-count (design point 2). Audit all six paths.
+- DynASM edits: several sequences are textually identical across the six
+  paths — when search/replacing, verify the match count is exactly what you
+  expect (non-tail uses r10 + [rsp+32/40/48]; tail uses VFN + [rsp+56] too).
+- After any C helper that can GC: re-derive VFN from the traced *vfn_ref at
+  [rsp], rebase CP/sCodeBase — `restoreAfterGcHelperCall` does all of it.
+  Never cache a heap pointer across the call.
+- state->temps is clobbered by other helpers: clear-then-fill-then-consume
+  inside the helper only.
+- The [rsp+32..56] scratch slots are live during entry (fargc / args_off /
+  fn / callee-vfn spills) and only dead once `jmp ->dispatch` is reachable —
+  the continuation may use sScratch0 freely at that point, nothing earlier.
+- Run the differential's `applyfn` case early if confused: it exercises
+  variadic through `apply` with zero and multiple extras.
 
-1. Pin binaries: current master (177166a) built `NATIVE_VM_DEFAULT=1` and
-   `=0`, plus heap images. NOTE: build artifacts from before 2026-06-10
-   may reference a GC'd Nix store glibc — rebuild from scratch, verify
-   `bin/arete --eval '(display 1)'` runs.
-2. Capture with scratch/flatcall/capture-baseline.sh (RUNS=5) into
-   scratch/asmcall/baseline/{native1,native0}; carry over the existing
-   flat sweeps if the toolchain hasn't shifted timings (re-run fib+peval
-   to verify ±2% first).
-3. Histograms: `(native-vm-stats)` after peval, psyntax, nboyer, tak,
-   destruc — saved as JSON-ish text next to the captures.
-4. **no-native-bit diagnosis**: per-callee sample of bit-less callees on
-   peval (temporary counter/log build). This decides Phase 3's scope.
+## Verification (once, at the end)
 
-### Phase 1 — VMCallFrame records replace inline frames (correctness-first)
+Correctness battery (all must pass; reference = bin/arete-flat-native0):
+1. `make bin/arete && ./bin/arete boot.scm`
+2. `python3 utils/run-tests.py` (121/121) and `tests/test-semispace`
+   (build via `make tests/test-semispace`)
+3. `./bin/arete bootstrap-and-psyntax.scm` (fresh boot — do NOT pass
+   heap.boot first; exits 0)
+4. `bash scratch/flatcall/differential.sh ./bin/arete ./bin/arete-flat-native0`
+   -> ALL OK (covers traces, RECURSION-LIMIT, variadic `applyfn`)
+5. GC stress, flag AFTER the image:
+   `./bin/arete heap.boot --debug-gc <script>` vs the same under
+   bin/arete-flat-native0, byte-identical output. Scripts were
+   /tmp/gc-stress.scm + /tmp/gc-stress2.scm; if gone, recreate: a loop of
+   variadic calls at varying argc (0, 1, many extras) in non-tail AND tail
+   position, closures over rest params, and an exception thrown from a deep
+   variadic tail chain.
+6. Add to the stress the new code's hardest case, which nothing existing
+   covers: variadic + boxed combined, e.g.
+   `(define (f a . rest) (lambda () (set! a (cons a rest)) a))` in a loop.
+7. r7rs subset result validation (harness self-checks):
+   `ARETE=$PWD/bin/arete HEAP=$PWD/heap.boot TEMP=/tmp/r7 RESULTS=/tmp/r7.log
+    utils/run-r7rs-benchmarks.sh fib tak peval nboyer browse destruc mazefun`
 
-Keep the zero-loop and the arg copy; only swap the frame representation
-and the return path. The tail_flag mechanism stays. Build
-`NATIVE_VM_DEFAULT=1`.
+Speed (single measurement, after correctness is green):
+- peval best-of-3: `cd vendor/r7rs-benchmarks && <arete> <heap.boot>
+  /tmp/arete-r7rs-p1/peval.scm < inputs/peval.input` (that prepared copy has
+  the harness exit removed; if gone, step 7's harness reports times too).
+- One histogram run: a script that loads peval.scm then prints
+  `(native-vm-stats)` (pattern was /tmp/peval-stats.scm; recreate if gone).
 
-Gates (each must pass before the next):
-1. run-tests 121/121, test-semispace 18/18.
-2. boot + image save/reload; psyntax.
-3. r7rs subset output-correct (fib tak peval nboyer browse destruc mazefun).
-4. GC stress: preboot suite + the VM-heavy stress script under
-   `--debug-gc` (full bootstrap under stress is prohibitively slow).
-5. differential.sh vs pinned native1 baseline — traces, frames_lost,
-   exit classes identical.
-6. Histogram sanity: apply-vm/apply-c mix unchanged (±1%) vs Phase 0.
+Success: `apply-c-argc-mismatch` drops from 33.2M to ~0 and peval beats
+14.38s. Parity with flat-C (13.40) or better is the hoped-for outcome; if
+peval improves without reaching parity, ship anyway and record the number —
+do not start a diagnosis loop.
 
-Checkpoint: full subset timings. **Kill criterion: any benchmark >3%
-slower than Phase 0 native1 — the record push/pop must be cost-neutral
-against the 5-word inline frame before the wins land on top.**
-
-### Phase 2 — Flat-call wins in asm (one measured change at a time)
-
-Experiment-ticket style; each lands or reverts on its own delta, gates
-re-run per change:
-- (a) zero-copy args + memset diet (these interlock in asm; one change).
-- (b) in-asm tail calls with record recycling, nested frames included.
-  Watch mazefun and tak specifically (tail-heavy), and the
-  apply-tail-vm/apply-tail-c mix.
-- (c) delete the tail_flag/tail_buf machinery if (b) made it dead.
-
-Checkpoint after (b): **target: flat-native1 ≥ flat-native0 on peval and
-nboyer (the native build stops losing on call-heavy workloads). Kill: if
-after (a)+(b) peval is still >5% behind flat-native0, stop and re-profile
-— the C-fallback share, not per-call cost, is the bottleneck, and Phase 3
-must come first.**
-
-### Phase 3 — Coverage (histogram-ordered)
-
-- (a) Whatever the no-native-bit diagnosis prescribes (70.9M on peval).
-- (b) Boxed callees via C box-alloc helper (15.1M).
-- Re-measure the histogram after each; stop when apply-c (non-cfunction)
-  + apply-tail-c are each <20% of their totals on the perf suite, or when
-  remaining items are CFunction-legitimate.
-
-### Phase 4 — Re-baseline and conclude
-
-- Full sweeps both flag states; update scratch/asmcall/NOTES.md,
-  [[Benchmarking]] numbers, [[Benchmarks ecraven]] if outcomes change,
-  results.Arete via a canonical perf-group run.
-- Unify RECURSION-LIMIT defaults (asm frames no longer consume C stack →
-  100,000 for both builds; verify ack/takl/cpstak on the native build).
-- Decide NATIVE_VM_DEFAULT's default with data (it should now be a
-  strict win; if not, document why).
-- Close or re-scope are-8qgc with the numbers; open the method-JIT
-  decision ticket with the post-asm-interpreter gap to a compiled Scheme
-  (build femtolisp from the vendored checkout for a same-box h2h).
-
-## Measurement plan (primary numbers from x86-64, NATIVE_VM_DEFAULT=1)
-
-| Metric | Workload | Target / kill |
-|---|---|---|
-| Call-heavy parity then win | peval, nboyer, tak vs flat-native0 | ≥ parity after Phase 2; ≥10% win after Phase 3 |
-| Dispatch-bound win retained | fib, browse vs Phase 0 native1 | no regression >2% |
-| ns/call | callrate (utils/run-callrate.sh, analytic count) | ≤ 13.49 (flat C core); stretch ≤ 8 |
-| Tail coverage | apply-tail-vm / (vm+c) on peval | from 28% to >80% |
-| Non-tail C share | apply-c minus cfunction, peval | <20% of non-tail calls |
-| No-regression guard | boot, psyntax, RUNS=5 | within ±2% |
-| Frame-representation cost | Phase 1 full subset | within 3% of Phase 0 (kill) |
-| Deep recursion | ack/takl/cpstak on native build, Phase 4 | complete at unified 100K limit |
-
-Protocol: best-of-5 via capture-baseline.sh; histogram snapshot per
-sub-change; differential.sh after every change; per-change patches in
-scratch/asmcall/. The callrate caveat from [[Benchmarking]] applies:
-perf.vm_calls misses native-path calls — use the analytic count.
-
-## Risks
-
-1. **GC invariant violations in asm** — records root closures; every
-   helper that can allocate must be followed by VFN/CP reloads through
-   vfn_ref (existing pattern). GC-stress gate per change is the defense.
-2. **std::vector layout coupling** for gc.vm_frames asm access.
-   static_assert offsets; fall back to a hand-rolled POD
-   {data,size,capacity} frame stack on State if libstdc++ internals are
-   unstable across the toolchains in use (note: the build env on this box
-   shifted toolchains mid-June — pin and record `gcc --version` in
-   captures).
-3. **Tail-call semantics drift** (frames_lost counts, trace dedup,
-   box-close order on recycle). differential.sh covers traces; add a
-   tail-heavy trace case if coverage feels thin.
-4. **Histogram-blind optimization**: Phase 2's win is capped by the
-   C-fallback share — hence the Phase 2 kill criterion routing to
-   Phase 3 instead of asm micro-tuning.
-5. **Blast radius**: vm-native-x64.cpp.dasc call/return/tail sections,
-   vm-native.cpp helpers, no C++-core changes expected. The
-   NATIVE_VM_ENABLE=0 build must stay green (it compiles none of this).
+Wrap-up: append final numbers to scratch/asmcall/NOTES.md, save the
+cumulative diff as scratch/asmcall/phase5-variadic.patch, commit. Background
+ticket are-8qgc is closed — a one-line `ticket add-note are-8qgc` pointing
+at the commit is enough.
