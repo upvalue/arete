@@ -478,6 +478,41 @@ const char* State::boot_from_image(FILE* f) {
 
   boot_common();
 
+#if NATIVE_VM_ENABLE && NATIVE_VM_DEFAULT && !NATIVE_VM_ONLY
+  // Saved images strip VMFUNCTION_NATIVE_VM_BIT (native-vm eligibility is a
+  // property of this build, not of the image), so every VMFunction loaded
+  // above was routed to apply_vm. Re-run the OpenFn->procedure opt-in now
+  // that boot_common has initialized the native core. Closures need a second
+  // sweep because they copy procedure_addr from their function at creation
+  // and may precede it in the heap.
+  {
+    char* sweep = gc.active->data;
+    while(sweep != (gc.active->data + gc.block_cursor)) {
+      HeapValue* heap = (HeapValue*) sweep;
+      if(heap->get_type() == VMFUNCTION) {
+        VMFunction* vfn = static_cast<VMFunction*>(heap);
+        if(native_vm_function_eligible(vfn)) {
+          vfn->set_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT);
+          vfn->procedure_addr = (c_closure_t) &apply_native_vm;
+        }
+      }
+      sweep += heap->size;
+    }
+    sweep = gc.active->data;
+    while(sweep != (gc.active->data + gc.block_cursor)) {
+      HeapValue* heap = (HeapValue*) sweep;
+      if(heap->get_type() == CLOSURE) {
+        Closure* closure = static_cast<Closure*>(heap);
+        if(closure->function.heap_type_equals(VMFUNCTION) &&
+           closure->function.heap->get_header_bit(Value::VMFUNCTION_NATIVE_VM_BIT)) {
+          closure->procedure_addr = (c_closure_t) &apply_native_vm;
+        }
+      }
+      sweep += heap->size;
+    }
+  }
+#endif
+
   return 0;
 }
 
