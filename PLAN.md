@@ -1,236 +1,255 @@
-# Flat VM Calling Convention
+# Native VM: Flat Calls in Asm
 
-Restructure `apply_vm` so Scheme→Scheme calls and returns are handled inside
-one dispatch loop with an explicit frame stack, instead of recursing through
-the C stack with a heavyweight per-call prologue.
+Port the flat calling convention (commit 177166a, [[VM Calling Convention]])
+into the DynASM dispatch core (src/vm-native-x64.cpp.dasc) so native→native
+Scheme calls — including tail calls from nested frames — never re-enter C,
+and so both engines share one frame representation (`VMCallFrame` records in
+`state.gc.vm_frames`).
 
-Development and benchmarking target: **x86-64**. The benchmark goal is to
-improve the ecraven/r7rs and project-native workloads there. (This plan was
-drafted on an arm64 machine, where the native VM dispatch core never runs;
-all arm64 numbers are pure C++ core and are useful only as a secondary
-signal.)
+Development and benchmarking target: **x86-64**, `NATIVE_VM_DEFAULT=1`
+builds throughout. Predecessor plan: "Flat VM Calling Convention"
+(PLAN.md at commit 177166a; results in scratch/flatcall/NOTES.md).
+Ticket: `are-8qgc` (re-scoped 2026-06-10; histogram numbers below are in
+its notes). Related: `aonv-2taa` postmortem, [[Benchmarking]],
+docs/Native VM.md.
 
-Related: [[Benchmarking]], [[Benchmarks Arete]], [[Performance Reports]],
-tickets `are-vfam` (prologue cost), `are-8qgc` (native VM call machinery,
-blocked on this work), `aonv-2taa` (native VM epic), PLAN.org "Virtual
-machine" section (stack hunger).
+## Motivation (measured, 2026-06-10, best-of-5 unless noted)
 
-## Motivation (measured, not speculative)
+The flat C++ core now **beats** the native-VM build on call-heavy
+workloads; the asm core's only losses are its call machinery:
 
-- On peval there are **322M apply calls against 774M executed opcodes — 2.4
-  opcodes per call**. At that ratio the calling convention *is* the workload.
-- Per-call cost is ~95 ns vs femtolisp's ~52 ns (`are-vfam`). fib:40 spends
-  99.99% of ~28 s inside `apply_vm` with zero GC.
-- The native x86-64 dispatch core makes opcodes faster but still funnels
-  calls through the C `apply_vm` prologue: 69% of peval calls take the C
-  path (`native_vm_stat_apply_c_*` histogram, src/vm-native.cpp:34-39), and
-  the net effect is currently a regression (fib +43%). `are-8qgc` (move
-  call/return into asm) is blocked on exactly this protocol work.
-- Every non-tail Scheme call consumes a C stack frame, which is why
-  ack/takl/cpstak can't run at reasonable RECURSION-LIMIT values (PLAN.org).
+| bench | flat C core (`NATIVE_VM_DEFAULT=0`) | native build (`=1`) |
+|---|---|---|
+| peval | **13.397** | 15.106 |
+| nboyer | **8.109** | 8.921 |
+| tak | **9.335** | 9.911 |
+| fib | 22.174 | **20.946** |
+| browse | 1.499 | **1.549**\* |
+| callrate ns/call | 13.49 | 14.20 |
 
-Per-call costs to remove (src/vm.cpp:161-269): VMFrame2 ctor/dtor, separate
-stack-growth and recursion-limit branches, `AR_FRAME` root registration,
-whole-frame `memset` (vm.cpp:245, `// TODO: Necessary?`), argv `memcpy`,
-`state.temps` round-trip on every tail call (vm.cpp:541-544), and the
-pointer-reconstruction division in `VM2_RESTORE` (vm.cpp:143-152).
+\* browse is within noise; fib is the real native win (dispatch-bound).
+
+The native-vm-stats histogram on peval (flat-native1 build) localizes the
+problem precisely:
+
+- Non-tail: 217.9M asm fast path vs 105.1M through C. C-path reasons:
+  **70.9M no-native-bit**, 19.1M cfunction (legitimate), 15.1M boxed,
+  0 arity-range, 0 argc-mismatch, 0 variadic.
+- Tail: **only 48.9M asm vs 125.0M through C** — tail calls are the
+  dominant hole. Nested fast-path frames may not raise the tail flag at
+  all (`allow_tail=0`, vm-native-x64.cpp.dasc ~line 444): every tail call
+  made from a nested native frame becomes a non-tail C call — no TCO and
+  full SysV cost.
+
+Secondary motivations: the asm prologue still runs the full-frame
+`apply_zero_loop` zero-fill the C++ core no longer needs; native builds
+keep a 10,000 RECURSION-LIMIT (vs 100,000 flat) only because native
+non-tail calls still burn a C stack frame; and two competing frame
+formats (VMCallFrame records vs the asm core's 5-word inline frame links)
+are a standing maintenance hazard.
 
 ## Facts the design relies on
 
-1. **Exceptions propagate by return value** — every call site checks
-   `is_active_exception()` (vm.cpp:516). No longjmp/C++ unwinding to fight;
-   the `exception:` label becomes a frame-popping loop.
-2. **`call/cc` is `call/1cc`** — one-shot, escape-only, built on exceptions
-   (scheme/library.scm:333-337). No continuation capture of the frame stack.
-3. **The value stack is already unified and GC-scanned**: locals, boxes, and
-   eval stack all live in `state.gc.vm_stack`, a contiguous growable array
-   (arete.hpp:1625-1672). Only *control state* lives on the C stack today.
-4. C→VM entry points are few and auditable: eval.cpp:775,788,865,
-   `fn_apply` (builtins.cpp), and the native-VM shims.
+1. **The asm core already does flat calls in asm** — the "C1 fast path"
+   (op_apply at vm-native-x64.cpp.dasc ~1054): exact-arity, non-variadic,
+   box-free, native-bit callees get an inline 5-word frame
+   {saved_vfn, saved_cp_offset, current_closure, saved_sff_offset,
+   saved_ret_slot} pushed on vm_stack and control stays in the dispatch
+   loop. This work is a *re-targeting* of proven machinery, not a first
+   implementation.
+2. **Pinned registers** (callee-saved across the loop): r12=STATE, r13=CP,
+   r14=STACK, r15=LOCALS, rbx=VFN; r10=ARGC at entry; r11=DTABLE
+   (reloaded after C helpers via `reloadDtable`). C-side slots accessed
+   from asm: vfn_ref (GC-updated fn slot), sff_ref (current frame base),
+   closure_ref. The dispatch entry signature is in the .dasc header.
+3. **The flat C++ core is the reference implementation.** Its semantics
+   are pinned by the gate suite: run-tests 121, test-semispace 18,
+   GC-stress scripts, and scratch/flatcall/differential.sh (stdout/stderr/
+   exit/trace comparison against a pinned binary).
+4. **VMCallFrame + the vm_stack high-water invariant** are documented in
+   [[VM Calling Convention]]; `gc.vm_frames` is a `std::vector<VMCallFrame>`
+   (reserve 1024) traced as roots; vm_stack_used only shrinks at session
+   exit; growth zeroes exactly the newly included region.
+5. **Stats plumbing exists**: native_vm_stat_* counters, `(native-vm-stats)`,
+   `(native-vm-stats-reset!)` (vm-native.cpp) — per-change measurement of
+   path mix is one eval away.
+6. **Eligibility is per-function** (`native_vm_function_eligible`,
+   VMFUNCTION_NATIVE_VM_BIT set at OpenFn->procedure time and on image
+   load); `native-vm-install-tree!` exists for forced installation.
 
 ## Design
 
-### Frame records
+### One frame representation
 
-A growable array on `State` (traced as a GC root), one record per active VM
-frame:
+Replace the 5-word inline frame links with pushes/pops of the same
+`VMCallFrame` records the C++ core uses:
 
-```cpp
-struct VMCallFrame {
-  Value    closure;      // traced by GC; vfn derived via closure_unbox
-  size_t   return_cp;    // bytecode OFFSET, not pointer (code moves with GC)
-  size_t   frame_base;   // offset into vm_stack where locals start
-  size_t   caller_stack; // caller eval-stack offset to restore on return
-  uint32_t frames_lost;  // tail-call accounting for stack traces
-};
-```
+- Asm call fast path: bounds-check `vm_frames` (size < capacity) and
+  recursion depth, write the record fields, bump size — all inline.
+  Overflow or depth-fail tail-calls a C helper (grow/raise). Pin the
+  vector layout with static_asserts (data/size/capacity offsets for this
+  libstdc++; a tiny POD mirror struct if that proves fragile).
+- Asm OP_RETURN: pop the record, restore VFN/CP/LOCALS/STACK from it
+  (offsets → pointers via gc.vm_stack base), write result to result_slot.
+  A session-base record returns to C as today.
+- `vm_depth` stays equal to frame count; sff_ref/closure_ref C-side slots
+  become derivable from the top record (keep them during transition,
+  delete at the end).
+- Exception unwind: once both engines speak VMCallFrame, the C++
+  unwind loop can pop asm-pushed frames identically — traces and box
+  closing unify. (Today's asm frames are invisible to trace_function
+  except via its own bookkeeping.)
 
-Offsets everywhere, never raw pointers — this retires the `VM2_RESTORE`
-division and makes GC/realloc safety mechanical.
+### Adopt the flat-call wins
 
-Alternative considered (decide during Phase 1): inline frame metadata into
-`vm_stack` itself as tagged fixnum slots + the closure Value, so the GC
-traces it for free and locality improves. Start with the separate array; it
-is simpler to assert on and to dump.
+- **Zero-copy args**: callee frame_base = arg0's offset (args are already
+  on the caller's eval stack); kill the arg-copy loop for `argc <=
+  max_arity`. Over-arity: C helper (temps stash), same rule as the C++
+  core — never allocate a fresh frame above the high-water mark for a
+  recycled call (TCO space-leak rule; see NOTES on the mazefun
+  regression).
+- **Memset diet**: delete `apply_zero_loop`; zero only box slots +
+  unsupplied locals. The high-water invariant transfers as-is; the grow
+  helper already runs in C where the growth-zeroing lives.
+- **In-asm tail calls**: recycle the top record (inherit return linkage,
+  frames_lost++), memmove args to frame_base, jump to the callee's code.
+  This works from *nested* frames too — record recycling is exactly what
+  the tail_flag unwind dance was approximating from the top frame only.
+  The native_vm_tail_flag/buf machinery shrinks to the non-native-target
+  path (or dies entirely if that path goes through procedure_addr).
 
-### Call protocol
+### Coverage, in histogram order
 
-- `OP_APPLY` / `OP_APPLY_GLOBAL` / `OP_APPLY_LOCAL` on a VMFunction/Closure
-  callee (vm.cpp:505,602,693): push a frame record, set `vfn/cp/locals/stack`
-  for the callee, `continue` the dispatch loop. No C call, no VMFrame2, no
-  AR_FRAME.
-- **Zero-copy arguments**: at a call site the args already sit contiguously
-  at `stack - fargc`. The callee's `frame_base` is arg0's offset — args
-  become locals in place. (Phase 2; Phase 1 keeps the memcpy.)
-- `OP_RETURN` (vm.cpp:776): pop the record — close any open boxes (current
-  `~VMFrame2` logic, vm.cpp:102-120, guarded by `if (box_count)`), write the
-  return value into the callee's fn slot, restore caller offsets, continue.
-  Only at the session base does the C function actually return.
-- **Tail calls** (vm.cpp:527-594): `memmove` args down to the current
-  `frame_base`, reuse the frame record in place, bump `frames_lost`. The
-  `state.temps` copy path dies.
-- **CFunction callees**: unchanged — direct call from the loop, exception
-  check, continue. `fn_apply` flattening (vm.cpp:52-80) stays, but flattens
-  directly into the target frame.
-- **Exception unwind** (vm.cpp:1223): pop frames in a loop — close boxes,
-  call `trace_function` per frame with its `frames_lost` — down to the
-  session base, then return the exception value. Observable traces must
-  match today's dtor-driven output.
-
-### Sessions (re-entrancy)
-
-Each C-level `apply_vm` invocation records the frame-stack height at entry
-as its session base. A CFunction called from the VM that re-enters Scheme
-(eval, callbacks, fn_apply) opens a nested session above the current
-`vm_stack_used`; frames never pop past their session base. Same nesting the
-C stack provides today, made explicit.
-
-### Entry checks and frame initialization
-
-- One fused check per call: vm_stack room AND frame-record room AND
-  recursion depth (`vm_depth` == frame count), replacing the two branches at
-  vm.cpp:178-196.
-- `memset` shrinks to box slots + locals beyond supplied args. Full
-  elimination requires the GC to scan `vm_stack` precisely per frame
-  (records make this possible) — a separately measured Phase 2 experiment,
-  not part of the core change.
-- `argc` stays a register variable: arity opcodes (OP_ARGC_EQ/GTE,
-  OP_ARGV_REST) only run in a function's prologue, before any nested call.
-
-### Consequences
-
-- VM depth costs ~40 bytes of frame record + vm_stack slots instead of a
-  full C frame. RECURSION-LIMIT can rise 10-100x; ack/takl/cpstak become
-  runnable. Set the new default from measured per-frame footprint in Phase 3.
-- The native VM (x86-64) shares this protocol: `are-8qgc`'s asm call path
-  implements push/pop of the same records. During this work, build with
-  `NATIVE_VM_DEFAULT=0`; re-enable and re-scope `are-8qgc` afterward.
+1. **Tail calls to native callees from any depth** (kills most of the
+   125M apply-tail-c on peval).
+2. **no-native-bit (70.9M)**: diagnose before fixing — add a one-shot
+   per-callee log (or extend the histogram with callee name sampling) to
+   learn whether these are ineligible opcodes, functions created before
+   native_vm_ready, closures missing the bit propagation, or interpreted
+   functions. Fix is whatever the data says (eligibility widening,
+   boot-time install-tree, or bit propagation on closure creation).
+3. **Boxed callees (15.1M)**: C helper allocates the boxes (it can GC),
+   then re-enters the asm frame-entry path; the record roots the closure
+   across the helper.
+4. CFunction calls (19.1M) stay C calls — correct by design.
 
 ### Untouched
 
-eval.cpp, the bytecode format, compile.scm, image save/load, MSVC switch
-dispatch (the `VM_CASE`/`VM_DISPATCH` macros already abstract it — keep the
-Nmakefile build compiling).
+Bytecode format, compile.scm, eval.cpp, image format, the C++ apply_vm
+(reference), MSVC/non-x64 builds (NATIVE_VM_ENABLE=0 path), the method
+JIT (compile-x64.cpp.dasc — decision point *after* this work: if the asm
+interpreter saturates below compiled-Scheme targets, the next plan is the
+method JIT, which now inherits cheap calls).
 
 ## Phases
 
-Lesson from T5/T9 (aborted big-bang rewrites): stage it, gate each step.
+### Phase 0 — Baseline + diagnosis (~half a day)
 
-### Phase 0 — Baseline lock-in (x86-64, ~half a day)
+1. Pin binaries: current master (177166a) built `NATIVE_VM_DEFAULT=1` and
+   `=0`, plus heap images. NOTE: build artifacts from before 2026-06-10
+   may reference a GC'd Nix store glibc — rebuild from scratch, verify
+   `bin/arete --eval '(display 1)'` runs.
+2. Capture with scratch/flatcall/capture-baseline.sh (RUNS=5) into
+   scratch/asmcall/baseline/{native1,native0}; carry over the existing
+   flat sweeps if the toolchain hasn't shifted timings (re-run fib+peval
+   to verify ±2% first).
+3. Histograms: `(native-vm-stats)` after peval, psyntax, nboyer, tak,
+   destruc — saved as JSON-ish text next to the captures.
+4. **no-native-bit diagnosis**: per-callee sample of bit-less callees on
+   peval (temporary counter/log build). This decides Phase 3's scope.
 
-On the x86-64 dev box:
+### Phase 1 — VMCallFrame records replace inline frames (correctness-first)
 
-1. Build and pin a baseline binary (`bin/arete-baseline` from current
-   master), with the normal flag set.
-2. Capture to `scratch/flatcall/baseline/`:
-   - `make bench-report-arete` (boot, bootstrap-and-psyntax), RUNS=5.
-   - `bench/interp` microbenchmark suite, best-of-3 protocol.
-   - r7rs subset: fib, tak, peval, nboyer, browse, destruc, mazefun.
-   - Perf-report JSONs: `vm_calls`, wall, GC counters.
-   - All of the above **twice**: `NATIVE_VM_DEFAULT=1` and `=0`, so the C
-     path and native-fallback path are separable later.
-   - A CPU profile (perf) of fib and peval: snapshot of prologue cost
-     (VMFrame2, memset, memcpy, temps) for before/after comparison.
-3. Add a call-rate microbenchmark if none exists: 2-arg self-recursive
-   function, reports **ns/call** via wall ÷ `state.perf.vm_calls`.
-   Baseline expectation: ~95 ns.
+Keep the zero-loop and the arg copy; only swap the frame representation
+and the return path. The tail_flag mechanism stays. Build
+`NATIVE_VM_DEFAULT=1`.
 
-### Phase 1 — Frame records + flat calls, correctness-first
+Gates (each must pass before the next):
+1. run-tests 121/121, test-semispace 18/18.
+2. boot + image save/reload; psyntax.
+3. r7rs subset output-correct (fib tak peval nboyer browse destruc mazefun).
+4. GC stress: preboot suite + the VM-heavy stress script under
+   `--debug-gc` (full bootstrap under stress is prohibitively slow).
+5. differential.sh vs pinned native1 baseline — traces, frames_lost,
+   exit classes identical.
+6. Histogram sanity: apply-vm/apply-c mix unchanged (±1%) vs Phase 0.
 
-Implement the frame stack and in-loop call/return/tail/unwind in
-src/vm.cpp. Keep argument copying as-is (memcpy into the new frame) so the
-diff is purely control-flow. Delete VMFrame2. `vm_depth` = frame count.
-Build with `NATIVE_VM_DEFAULT=0`.
+Checkpoint: full subset timings. **Kill criterion: any benchmark >3%
+slower than Phase 0 native1 — the record push/pop must be cost-neutral
+against the 5-word inline frame before the wins land on top.**
 
-Gates, in order — each must pass before the next:
+### Phase 2 — Flat-call wins in asm (one measured change at a time)
 
-1. `tests/preboot` snapshots.
-2. `python3 utils/run-tests.py` — 105/105.
-3. `tests/test-semispace` — 18/18.
-4. Full `bin/arete boot.scm` bootstrap + image save/reload smoke test.
-5. `bin/arete bootstrap-and-psyntax.scm` stress.
-6. r7rs correctness subset (compare outputs, not times).
-7. **Entire suite again under GC stress mode**
-   (`collect_before_every_allocation`) — the main defense against
-   stale-pointer and rooting bugs.
-8. Differential run vs `bin/arete-baseline`: stdout, stderr class, exit
-   status; exception stack traces must match (frames_lost lines included).
+Experiment-ticket style; each lands or reverts on its own delta, gates
+re-run per change:
+- (a) zero-copy args + memset diet (these interlock in asm; one change).
+- (b) in-asm tail calls with record recycling, nested frames included.
+  Watch mazefun and tak specifically (tail-heavy), and the
+  apply-tail-vm/apply-tail-c mix.
+- (c) delete the tail_flag/tail_buf machinery if (b) made it dead.
 
-Checkpoint measurement: ns/call and fib on x86-64. **Kill criterion: if
-Phase 1 lands functionally correct but ns/call is >85, stop and re-profile
-before proceeding** — the thesis is wrong or the implementation missed.
+Checkpoint after (b): **target: flat-native1 ≥ flat-native0 on peval and
+nboyer (the native build stops losing on call-heavy workloads). Kill: if
+after (a)+(b) peval is still >5% behind flat-native0, stop and re-profile
+— the C-fallback share, not per-call cost, is the bottleneck, and Phase 3
+must come first.**
 
-### Phase 2 — Zero-copy and prologue diet (one measured change at a time)
+### Phase 3 — Coverage (histogram-ordered)
 
-Each lands or reverts on its own benchmark delta, experiment-ticket style:
+- (a) Whatever the no-native-bit diagnosis prescribes (70.9M on peval).
+- (b) Boxed callees via C box-alloc helper (15.1M).
+- Re-measure the histogram after each; stop when apply-c (non-cfunction)
+  + apply-tail-c are each <20% of their totals on the perf suite, or when
+  remaining items are CFunction-legitimate.
 
-- (a) Args-in-place locals (callee `frame_base` = arg0 offset); delete the
-  entry memcpy for VM→VM calls.
-- (b) memmove tail calls; delete the `state.temps` tail path.
-- (c) Fused entry check (single branch).
-- (d) memset reduction to box slots + unsupplied locals.
-- (e) *Experiment*: precise per-frame GC scanning of `vm_stack` to eliminate
-  eval-region zeroing entirely. Higher risk, gated on (d)'s numbers.
+### Phase 4 — Re-baseline and conclude
 
-### Phase 3 — Re-baseline and unblock the JIT
+- Full sweeps both flag states; update scratch/asmcall/NOTES.md,
+  [[Benchmarking]] numbers, [[Benchmarks ecraven]] if outcomes change,
+  results.Arete via a canonical perf-group run.
+- Unify RECURSION-LIMIT defaults (asm frames no longer consume C stack →
+  100,000 for both builds; verify ack/takl/cpstak on the native build).
+- Decide NATIVE_VM_DEFAULT's default with data (it should now be a
+  strict win; if not, document why).
+- Close or re-scope are-8qgc with the numbers; open the method-JIT
+  decision ticket with the post-asm-interpreter gap to a compiled Scheme
+  (build femtolisp from the vendored checkout for a same-box h2h).
 
-- Full benchmark sweep on x86-64, both NATIVE_VM states; update
-  [[Benchmarking]] and docs numbers; refresh `results.Arete`.
-- Raise default RECURSION-LIMIT from measured per-frame footprint; confirm
-  ack/takl/cpstak complete.
-- Re-scope `are-8qgc`: the native core's call fast path now means
-  "push/pop a VMCallFrame in asm," with the C++ loop as the proven
-  reference implementation and fallback.
+## Measurement plan (primary numbers from x86-64, NATIVE_VM_DEFAULT=1)
 
-## Measurement plan (all primary numbers from x86-64)
+| Metric | Workload | Target / kill |
+|---|---|---|
+| Call-heavy parity then win | peval, nboyer, tak vs flat-native0 | ≥ parity after Phase 2; ≥10% win after Phase 3 |
+| Dispatch-bound win retained | fib, browse vs Phase 0 native1 | no regression >2% |
+| ns/call | callrate (utils/run-callrate.sh, analytic count) | ≤ 13.49 (flat C core); stretch ≤ 8 |
+| Tail coverage | apply-tail-vm / (vm+c) on peval | from 28% to >80% |
+| Non-tail C share | apply-c minus cfunction, peval | <20% of non-tail calls |
+| No-regression guard | boot, psyntax, RUNS=5 | within ±2% |
+| Frame-representation cost | Phase 1 full subset | within 3% of Phase 0 (kill) |
+| Deep recursion | ack/takl/cpstak on native build, Phase 4 | complete at unified 100K limit |
 
-| Metric | Workload | How | Target / kill |
-|---|---|---|---|
-| ns per non-tail call | call-rate microbench; peval (322M calls) | wall ÷ `perf.vm_calls` | ≤55 ns (from ~95); kill >85 after Phase 1 |
-| Pure call throughput | fib:40 (99.99% VM, no GC) | benchmark runner, RUNS=5 best-of | ≥1.5x; stretch 2x |
-| Mixed workloads | peval, nboyer, browse, destruc | r7rs runner, geomean | ≥25%; stretch: peval ≤ femtolisp's 16.6 s |
-| Deep recursion | takl, cpstak, ack | r7rs runner, raised limit | complete at all (today: crash/timeout) |
-| No-regression guard | boot, bootstrap-and-psyntax | `make bench-report-arete`, RUNS=5 | within ±2% (VM ≈ 9% of boot) |
-| Tail-call cost | mazefun, tak | suite + microbench | improvement expected from temps removal; flat acceptable |
-| Native interplay | full subset, NATIVE_VM on vs off | both builds, Phase 3 | document; informs are-8qgc |
-| Memory | bytes/frame, vm_stack peak | counters | informational; sets RECURSION-LIMIT |
-
-Protocol: best-of-N (N≥5) per the existing runner; one before/after JSON
-pair per Phase 2 sub-change in `scratch/flatcall/`; post-change CPU profile
-of fib must show prologue symbols (memset/memcpy/frame setup) gone from the
-top — the mechanistic confirmation, independent of wall-clock noise.
+Protocol: best-of-5 via capture-baseline.sh; histogram snapshot per
+sub-change; differential.sh after every change; per-change patches in
+scratch/asmcall/. The callrate caveat from [[Benchmarking]] applies:
+perf.vm_calls misses native-path calls — use the analytic count.
 
 ## Risks
 
-1. **Stale pointers after `vm_stack` realloc or GC.** Mitigation: offsets in
-   records, raw pointers recomputed only after potential-GC operations, GC
-   stress mode in every gate.
-2. **Box-close ordering on unwind** must match today's innermost-first dtor
-   order. Covered by closure tests under stress mode and differential runs.
-3. **Stack-trace drift** (per-frame `trace_function`, `frames_lost`).
-   Covered by differential stderr comparison vs baseline.
-4. **Native VM is knowingly benched** during Phases 1-2 (`NATIVE_VM_DEFAULT=0`).
-   x86-64 benchmark comparisons during that window use the C-core baseline.
-5. **Blast radius**: confined to src/vm.cpp (1,288 lines; `apply_vm` is the
-   only restructured function), a small State/GC root addition, and the
-   vm-native build gate.
+1. **GC invariant violations in asm** — records root closures; every
+   helper that can allocate must be followed by VFN/CP reloads through
+   vfn_ref (existing pattern). GC-stress gate per change is the defense.
+2. **std::vector layout coupling** for gc.vm_frames asm access.
+   static_assert offsets; fall back to a hand-rolled POD
+   {data,size,capacity} frame stack on State if libstdc++ internals are
+   unstable across the toolchains in use (note: the build env on this box
+   shifted toolchains mid-June — pin and record `gcc --version` in
+   captures).
+3. **Tail-call semantics drift** (frames_lost counts, trace dedup,
+   box-close order on recycle). differential.sh covers traces; add a
+   tail-heavy trace case if coverage feels thin.
+4. **Histogram-blind optimization**: Phase 2's win is capped by the
+   C-fallback share — hence the Phase 2 kill criterion routing to
+   Phase 3 instead of asm micro-tuning.
+5. **Blast radius**: vm-native-x64.cpp.dasc call/return/tail sections,
+   vm-native.cpp helpers, no C++-core changes expected. The
+   NATIVE_VM_ENABLE=0 build must stay green (it compiles none of this).

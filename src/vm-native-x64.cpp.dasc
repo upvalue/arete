@@ -56,17 +56,15 @@ extern size_t native_vm_stat_apply_c_boxed;
 // slot after any C helper that might have allocated, since the moving GC
 // may have relocated the VMFunction in the meantime.
 //
-// sff_ref points at a C-side slot containing the current frame base word
-// index into state->gc.vm_stack. The dispatch core updates *sff_ref on every
-// frame transition so apply_native_vm can close/shrink the exact live frame
-// that was active when control returned from asm.
-//
-// closure_ref points to a GC-tracked slot holding the Closure (or VMFunction)
-// that this frame is executing. Used by box/capture opcodes to reach the
-// Closure's capture storage.
+// The current frame base and the current Closure are both derived from the
+// top VMCallFrame record in state->gc.vm_frames: the caller pushes the
+// session-base record before invoking the dispatch core, and the asm call /
+// return paths push and pop records exactly like apply_vm does. On exception
+// the core returns with this session's records still on vm_frames so
+// apply_native_vm can run the same unwind loop apply_vm uses.
 typedef Value (*native_vm_dispatch_fn)(
     State* state, Value* vfn_ref, Value* locals, Value* stack,
-    size_t argc, size_t* cp, size_t* sff_ref, Value* closure_ref);
+    size_t argc, size_t* cp);
 
 static native_vm_dispatch_fn native_vm_dispatch = nullptr;
 
@@ -77,6 +75,29 @@ static void* dispatch_table[OP_VALUE_HEADER_BIT + 1];
 
 #define NATIVE_VM_PAIR_CAR_OFF ((ptrdiff_t) offsetof(Pair, data_car))
 #define NATIVE_VM_PAIR_CDR_OFF ((ptrdiff_t) offsetof(Pair, data_cdr))
+
+// --- VMCallFrame record access from assembly --------------------------------
+// The asm core pushes/pops the same VMCallFrame records apply_vm uses, by
+// manipulating gc.vm_frames' libstdc++ internals directly: a std::vector is
+// {T* begin, T* finish, T* end_of_storage}. finish is the push/pop cursor;
+// finish == end_of_storage means a push must go through the C grow helper.
+// init_native_vm verifies this layout at startup and aborts on mismatch
+// (fallback then: hand-rolled POD frame stack on State).
+#define NATIVE_VM_FRAMES_OFF ((ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_frames)))
+#define NATIVE_VM_FRAMES_FINISH_OFF (NATIVE_VM_FRAMES_OFF + 8)
+#define NATIVE_VM_FRAMES_EOS_OFF (NATIVE_VM_FRAMES_OFF + 16)
+#define NATIVE_VM_STACK_OFF ((ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack)))
+#define NATIVE_VM_STACK_USED_OFF ((ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used)))
+#define NATIVE_VM_STACK_SIZE_OFF ((ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_size)))
+
+static_assert(sizeof(VMCallFrame) == 40, "asm frame push/pop assumes 40-byte VMCallFrame");
+static_assert(offsetof(VMCallFrame, closure) == 0, "asm assumes closure at +0");
+static_assert(offsetof(VMCallFrame, frame_base) == 8, "asm assumes frame_base at +8");
+static_assert(offsetof(VMCallFrame, return_cp) == 16, "asm assumes return_cp at +16");
+static_assert(offsetof(VMCallFrame, result_slot) == 24, "asm assumes result_slot at +24");
+static_assert(offsetof(VMCallFrame, frames_lost) == 32, "asm assumes frames_lost at +32");
+static_assert(offsetof(VMCallFrame, flags) == 36, "asm assumes flags at +36");
+#define FR_SIZE ((ptrdiff_t) sizeof(VMCallFrame))
 
 #define NATIVE_VM_DISPATCH_OPS(_) \
   _(OP_ARGC_EQ, op_argc_eq) \
@@ -153,6 +174,17 @@ static Value native_vm_argc_gte_error(State* state, size_t got, size_t expected)
 static Value native_vm_bad_opcode(State* state) {
   return state->make_exception(State::S_EVAL_ERROR,
       "native VM dispatched an unimplemented opcode; coverage bug");
+}
+
+// Raised from the asm call fast path when vm_depth + 1 would reach the
+// recursion limit. Mirrors apply_vm's message exactly. (The baseline asm
+// core skipped this check entirely and segfaulted on runaway non-tail
+// recursion once vm_stack realloc failed.)
+static Value native_vm_recursion_limit_error(State* state) {
+  std::ostringstream os;
+  os << " non-tail recursive calls exceeded RECURSION-LIMIT ("
+     << state->recursion_limit << ')';
+  return state->make_exception(State::S_EVAL_ERROR, os.str());
 }
 
 
@@ -304,11 +336,31 @@ static void native_vm_grow_stack(State* state, size_t size) {
   state->gc.grow_stack(size);
 }
 
+// Cold path for the asm call fast paths: raise the vm_stack high-water mark
+// to `extent` (growing the backing store if needed and zeroing exactly the
+// newly included region, mirroring apply_vm's enter:), and ensure vm_frames
+// has room for one more record. The asm side takes the inline path only when
+// extent is at or under the high-water mark AND a record slot is free.
+static void native_vm_prepare_frame(State* state, size_t extent) {
+  size_t old_used = state->gc.vm_stack_used;
+  if(extent > old_used) {
+    size_t delta = extent - old_used;
+    state->gc.grow_stack(delta);
+    // Slots above the old high-water mark are realloc garbage, or stale
+    // values a GC ran past while a nested session had shrunk the mark.
+    memset((void*) &state->gc.vm_stack[old_used], 0, delta * sizeof(Value));
+  }
+  std::vector<VMCallFrame>& v = state->gc.vm_frames;
+  if(v.size() == v.capacity()) {
+    v.reserve(v.capacity() ? v.capacity() * 2 : 1024);
+  }
+}
+
 static void native_vm_close_frame_boxes(
     State* state, VMFunction* vfn, size_t sff_offset) {
   if(vfn->box_count == 0) return;
 
-  Value* boxes = &state->gc.vm_stack[sff_offset + 5 + vfn->local_count];
+  Value* boxes = &state->gc.vm_stack[sff_offset + vfn->local_count];
   for(size_t i = 0; i != vfn->box_count; i++) {
     if(!boxes[i].heap_type_equals(BOX) || boxes[i].box_closed()) {
       continue;
@@ -321,6 +373,27 @@ static void native_vm_close_frame_boxes(
 
     boxes[i].as_unsafe<Box>()->U.converted = state->gc.vm_stack[idx];
     boxes[i].heap->set_header_bit(Value::BOX_CLOSED_BIT);
+  }
+}
+
+// Cold path for the asm call fast paths: allocate the open Boxes for the
+// frame just entered (the top vm_frames record). The frame is fully
+// committed before this runs: args sit in the frame's locals on vm_stack
+// (rooted by the stack scan) and the record roots the closure, so each
+// allocation may GC — re-derive the VMFunction from the record afterwards.
+// Mirrors apply_vm's enter: box loop (src/vm.cpp:282).
+static void native_vm_alloc_frame_boxes(State* state) {
+  Value closure = state->gc.vm_frames.back().closure;
+  VMFunction* vfn = closure.closure_unbox().as_unsafe<VMFunction>();
+  size_t sff_offset = state->gc.vm_frames.back().frame_base;
+  size_t fv_length = vfn->free_variables->length;
+  Value* boxes = &state->gc.vm_stack[sff_offset + vfn->local_count];
+  for(size_t i = 0; i != fv_length; i++) {
+    boxes[i] = state->gc.allocate(BOX, sizeof(Box));
+    closure = state->gc.vm_frames.back().closure;
+    vfn = closure.closure_unbox().as_unsafe<VMFunction>();
+    size_t local_idx = ((size_t*) vfn->free_variables->data)[i];
+    boxes[i].as<Box>()->U.vm_local_idx = sff_offset + local_idx;
   }
 }
 
@@ -360,6 +433,12 @@ static Value native_vm_apply_error(State* state, Value fn) {
   os << "vm: attempt to apply non-applicable value " << fn;
   return state->make_exception(State::S_EVAL_ERROR, os.str());
 }
+
+// Set by the asm exception epilogue: the current frame's bytecode offset (in
+// words) at the moment the exception left the dispatch core. apply_native_vm
+// uses it as the innermost frame's trace offset, mirroring apply_vm's
+// `trace_off = cp - code`. Single-threaded, like the tail stash below.
+static size_t native_vm_exc_cp_offset = 0;
 
 // Tail-call communication. The OP_APPLY_TAIL helper sets these; the outer
 // apply_native_vm loop reads them after the dispatch returns and, if
@@ -487,7 +566,40 @@ static TailResult native_vm_op_apply_tail(
   return r;
 }
 
+// Verify at startup that std::vector<VMCallFrame> has the {begin, finish,
+// end_of_storage} pointer layout the assembled push/pop code assumes. If a
+// toolchain ever breaks this, fail loudly at init rather than corrupting
+// memory at the first Scheme call. (Escape hatch then: replace gc.vm_frames
+// with a hand-rolled POD frame stack.)
+static void native_vm_verify_frames_layout(State& state) {
+  std::vector<VMCallFrame>& v = state.gc.vm_frames;
+  static_assert(sizeof(std::vector<VMCallFrame>) == 3 * sizeof(void*),
+                "vm_frames asm access expects a 3-pointer std::vector");
+  VMCallFrame probe;
+  probe.closure = C_FALSE;
+  probe.frame_base = 0;
+  probe.return_cp = 0;
+  probe.result_slot = 0;
+  probe.frames_lost = 0;
+  probe.flags = 0;
+  v.push_back(probe);
+  void** raw = (void**) &v;
+  bool ok = raw[0] == (void*) v.data() &&
+            (char*) raw[1] == (char*) v.data() + v.size() * sizeof(VMCallFrame) &&
+            (char*) raw[2] == (char*) v.data() + v.capacity() * sizeof(VMCallFrame);
+  v.pop_back();
+  if(!ok) {
+    fprintf(stderr,
+            "arete: std::vector<VMCallFrame> layout does not match native VM "
+            "assumptions; rebuild with NATIVE_VM_ENABLE=0 or port "
+            "vm-native-x64.cpp.dasc to this C++ runtime\n");
+    abort();
+  }
+}
+
 void init_native_vm(State& state) {
+  native_vm_verify_frames_layout(state);
+
   |.arch x64
   |.section code
 
@@ -521,7 +633,6 @@ void init_native_vm(State& state) {
   |.define sScratch0,   [rsp+32]
   |.define sScratch1,   [rsp+40]
   |.define sScratch2,   [rsp+48]
-  |.define sSffRef,     [rsp+56]
 
   |.macro returnEpilogue
   | add rsp, 72
@@ -543,11 +654,14 @@ void init_native_vm(State& state) {
   | mov VFN, [VFN]
   |.endmacro
 
+  // sClosureRef = &top_record.closure (closure is field 0, so this is just
+  // the top record's address: vm_frames.finish - sizeof(VMCallFrame)).
+  // Must be re-derived after any C call that could push frames or grow the
+  // vm_frames vector (i.e. anything that can re-enter Scheme).
   |.macro refreshClosureRef
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov rdx, sSffOffset
-  | lea rdx, [rcx + rdx*8 + 16]
-  | mov sClosureRef, rdx
+  | mov rcx, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | lea rcx, [rcx - FR_SIZE]
+  | mov sClosureRef, rcx
   |.endmacro
 
   |.macro rebaseCpFromVfn
@@ -569,19 +683,20 @@ void init_native_vm(State& state) {
   // stack_word_off: caller-provided register holding the post-call stack top
   //   (word index into gc.vm_stack). Clobbers r8 and rsi.
   |.macro inlineFrameRefresh, stack_word_off
-  | mov r8, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov r8, [STATE + NATIVE_VM_STACK_OFF]
   | mov rsi, sSffOffset
-  | lea LOCALS, [r8 + rsi*8 + 40]
+  | lea LOCALS, [r8 + rsi*8]
   | lea STACK,  [r8 + stack_word_off*8]
   |.endmacro
 
-  // Same as inlineFrameRefresh but also re-derives closure_ref (&frame[2]) and
-  // writes it back to sClosureRef. Used by the non-tail apply fallbacks; the
-  // tail-apply fallbacks skip it because they jump to op_return, which rederives
+  // Same as inlineFrameRefresh but also re-derives sClosureRef from the top
+  // frame record. Used by the non-tail apply fallbacks; the tail-apply
+  // fallbacks skip it because they jump to op_return, which rederives
   // closure_ref itself. Clobbers r8, rsi, rdi.
   |.macro inlineFrameRefreshFull, stack_word_off
   | inlineFrameRefresh stack_word_off
-  | lea rdi, [r8 + rsi*8 + 16]
+  | mov rdi, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | lea rdi, [rdi - FR_SIZE]
   | mov sClosureRef, rdi
   |.endmacro
 
@@ -674,7 +789,10 @@ void init_native_vm(State& state) {
   |.code
 
   // --- entry -----------------------------------------------------------------
-  // Args: rdi=State*, rsi=VMFunction*, rdx=locals*, rcx=stack*, r8=argc, r9=cp
+  // Args: rdi=State*, rsi=&fn (vfn_ref), rdx=locals*, rcx=stack*, r8=argc, r9=cp
+  // Precondition: the caller has already pushed this session's SESSION_BASE
+  // VMCallFrame record onto gc.vm_frames; the entry derives the current frame
+  // base and closure pointer from that top record.
   |->entry:
   | push rbx
   | push rbp
@@ -685,7 +803,7 @@ void init_native_vm(State& state) {
   // 72 bytes of per-invocation state plus alignment:
   //   [rsp]    = vfn_ref        (GC-tracked VMFunction slot)
   //   [rsp+8]  = current sff_offset (this frame's base word index in gc.vm_stack)
-  //   [rsp+16] = closure_ref    (GC-tracked Closure/VMFunction slot)
+  //   [rsp+16] = closure_ref    (&top_record.closure in gc.vm_frames)
   //   [rsp+24] = code_base      (current VMFunction->code->data pointer; used
   //                              to rebase CP after a C call that may have
   //                              triggered a GC which moved the Bytevector
@@ -693,7 +811,7 @@ void init_native_vm(State& state) {
   //   [rsp+32] = spare scratch
   //   [rsp+40] = spare scratch
   //   [rsp+48] = spare scratch
-  //   [rsp+56] = sff_ref        (&current_sff_offset in apply_native_vm)
+  //   [rsp+56] = spare scratch
   //   [rsp+64] = unused padding (keeps total reserve a multiple of 16)
   // Combined with the 6 callee-saved pushes (48 bytes) and the call's return
   // address (8), this leaves rsp at a multiple of 16 — ready for subsequent
@@ -712,15 +830,12 @@ void init_native_vm(State& state) {
   | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea rax, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov sCodeBase, rax
-  // 7th stack arg = sff_ref, 8th = closure_ref. Offsets from our rsp:
-  // 6 pushes (48) + 72-byte reserve + return address (8) = 128 for the 7th,
-  // 136 for the 8th.
-  | mov rax, [rsp + 128]
-  | mov sSffRef, rax
-  | mov rax, [rax]
-  | mov sSffOffset, rax
-  | mov rax, [rsp + 136]
+  // Current frame base + closure ref from the session-base record.
+  | mov rax, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | lea rax, [rax - FR_SIZE]
   | mov sClosureRef, rax
+  | mov rcx, [rax + 8]       // record.frame_base
+  | mov sSffOffset, rcx
   | reloadDtable
   // fall through into dispatch
 
@@ -910,8 +1025,8 @@ void init_native_vm(State& state) {
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz >9
-  // Fast reuse only for exact-arity, non-variadic, no-box callees whose
-  // frame fits in the current allocation.
+  // Record-recycling fast path for exact-arity, non-variadic callees
+  // (any caller, any depth).
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne >9
@@ -919,46 +1034,87 @@ void init_native_vm(State& state) {
   | jne >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz >9
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | test ecx, ecx
-  | jnz >9
-  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | add rcx, rdx
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | add rcx, 5                         // current_frame_size
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rdx, rsi
-  | add rdx, 5                         // callee_frame_size
-  | cmp rdx, rcx
-  | ja >9
+  // In-asm tail call with record recycling — works from ANY depth (nested
+  // frames included): the record keeps its return linkage and frame_base, so
+  // the eventual OP_RETURN resumes the original caller (or returns to C for
+  // a recycled session-base frame). The callee must be exact-arity,
+  // non-variadic, native; the CALLER may be anything. Boxed callees get
+  // their Boxes allocated post-entry via ->apply_enter_boxes.
+  | mov [rsp + 32], rax                // spill fargc
+  | mov [rsp + 48], r9                 // spill callee fn value
+  | mov [rsp + 56], r10                // spill callee VMFunction* (no GC below)
+  // args_start as a word offset (survives vm_stack realloc in helpers)
+  | mov rcx, [STATE + NATIVE_VM_STACK_OFF]
+  | mov rdx, r8
+  | sub rdx, rcx
+  | shr rdx, 3
+  | mov [rsp + 40], rdx
+  // Close the caller's still-open boxes before recycling its frame
+  // (mirrors apply_vm's vm_close_frame_boxes on tail recycle).
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
-  | jnz >9
-  // Copy args into current locals.
-  | mov [rsp + 32], rax                // spill fargc
-  | mov [rsp + 48], r9                 // spill current callee fn value
-  | mov rsi, r8                        // src = args_start
-  | mov rdi, LOCALS                    // dst = current locals
-  | mov rcx, rax
+  | jz >3
+  | mov rdi, STATE
+  | mov rsi, VFN
+  | mov rdx, [rsp + 8]
+  | mov64 rax, (ptrdiff_t) &native_vm_close_frame_boxes
+  | call rax
+  | reloadDtable
+  | mov r10, [rsp + 56]
+  |3:
+  // extent = frame_base + callee local_count + stack_max; climbing past the
+  // high-water mark goes through the grow+zero helper.
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rsi
+  | add rcx, [rsp + 8]
+  | cmp rcx, [STATE + NATIVE_VM_STACK_USED_OFF]
+  | jbe >4
+  | mov rdi, STATE
+  | mov rsi, rcx
+  | mov64 rax, (ptrdiff_t) &native_vm_prepare_frame
+  | call rax
+  | reloadDtable
+  | mov r10, [rsp + 56]
   |4:
+  // Slide the args down onto the recycled frame's base (dst <= src; the
+  // forward copy is overlap-safe).
+  | mov rdi, [STATE + NATIVE_VM_STACK_OFF]
+  | mov rcx, [rsp + 8]
+  | lea LOCALS, [rdi + rcx*8]          // dst = frame base (= callee locals)
+  | mov rcx, [rsp + 40]
+  | lea rsi, [rdi + rcx*8]             // src = args_start
+  | mov rdi, LOCALS
+  | mov rcx, [rsp + 32]
+  |->apply_tail_move_loop:
   | test rcx, rcx
-  | jz >5
+  | jz ->apply_tail_move_done
   | mov rdx, [rsi]
   | mov [rdi], rdx
   | add rsi, 8
   | add rdi, 8
   | dec rcx
-  | jmp <4
-  |5:
-  // Zero the remaining portion of the current frame.
+  | jmp ->apply_tail_move_loop
+  |->apply_tail_move_done:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_vm_path
+  | inc qword [rcx]
+  // Recycle the top frame record: same base + return linkage, new closure,
+  // frames_lost++. refreshClosureRef re-derives the record pointer (the
+  // prepare_frame helper may have moved vm_frames' storage) and leaves it
+  // in rcx.
+  | refreshClosureRef
+  | mov rax, [rsp + 48]
+  | mov [rcx], rax                     // record.closure = callee fn
+  | inc dword [rcx + 32]               // record.frames_lost++
+  | mov r10, [rsp + 56]
+  | mov VFN, r10
+  | mov rcx, [rsp]
+  | mov [rcx], VFN
+  | mov ARGC, [rsp + 32]
+  // Memset diet: zero only unsupplied locals (rdi sits just past the args).
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | add rcx, rdx
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
+  | add ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | sub rcx, [rsp + 32]
   | xor edx, edx
   |->apply_tail_zero_loop:
@@ -969,51 +1125,32 @@ void init_native_vm(State& state) {
   | dec rcx
   | jmp ->apply_tail_zero_loop
   |->apply_tail_zero_done:
-  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_vm_path
-  | inc qword [rcx]
-  | mov r9, [rsp + 48]
-  | mov rdx, [r9]
-  | movzx rcx, dl
-  | cmp rcx, CLOSURE
-  | jne >6
-  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
-  | jmp >7
-  |6:
-  | mov r10, r9
-  |7:
-  | mov [rsp + 16], LOCALS
-  | sub qword [rsp + 16], 24           // &frame[2] from LOCALS = frame+40
-  | mov rax, [rsp + 48]
-  | mov rcx, [rsp + 16]
-  | mov [rcx], rax
-  | mov VFN, r10
-  | mov rcx, [rsp]
-  | mov [rcx], VFN
-  | mov ARGC, [rsp + 32]
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | add ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | lea STACK, [LOCALS + rcx*8]
   | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
   | reloadDtable
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | test ecx, ecx
+  | jnz ->apply_enter_boxes
   | jmp ->dispatch
   |9:
   // Helper fallback for complex tail calls and all CFUNCTION targets.
   | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_c_path
   | inc qword [rcx]
-  // Compute allow_tail = (saved_vfn of current frame == C_EOF).
-  // saved_vfn lives at gc.vm_stack[sff_offset] = &frame[0]. Tail-flag is only
-  // safe at the top-level frame of this apply_native_vm call — in nested
+  // Compute allow_tail = (top frame record has SESSION_BASE). Tail-flag is
+  // only safe at the top-level frame of this apply_native_vm call — in nested
   // fast-path frames the flag would cause apply_native_vm to unwind the
   // wrong level.
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov r10, [rsp + 8]                 // sff_offset
-  | mov r10, [rcx + r10*8]             // saved_vfn
+  | mov rcx, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
   | xor r11, r11
-  | cmp r10, C_EOF
-  | sete r11b                          // allow_tail = 1 iff saved_vfn == C_EOF
+  | test dword [rcx - 4], 1            // top record flags & SESSION_BASE
+  | setnz r11b                         // allow_tail = 1 iff session-base frame
   // Save the current absolute stack-top word index so we can rebuild STACK
   // after a helper call that may realloc gc.vm_stack.
+  | mov rcx, [STATE + NATIVE_VM_STACK_OFF]
   | mov rdx, STACK
   | sub rdx, rcx
   | shr rdx, 3
@@ -1078,7 +1215,9 @@ void init_native_vm(State& state) {
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz ->op_apply_bail_no_native_bit
-  // C1 fast path only: exact-arity, non-variadic, no-box VM callees.
+  // C1 fast path: exact-arity, non-variadic VM callees. Boxed callees are
+  // handled too — their Boxes are allocated after frame entry via
+  // ->apply_enter_boxes.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne ->op_apply_bail_arity_range
@@ -1086,35 +1225,44 @@ void init_native_vm(State& state) {
   | jne ->op_apply_bail_argc_mismatch
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz ->op_apply_bail_variadic
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | test ecx, ecx
-  | jnz ->op_apply_bail_boxed
+  // Recursion-depth check + commit (mirrors apply_vm's enter: ordering — on
+  // failure the registers still describe the calling frame).
+  | mov rcx, [STATE + (ptrdiff_t) offsetof(State, vm_depth)]
+  | inc rcx
+  | cmp rcx, [STATE + (ptrdiff_t) offsetof(State, recursion_limit)]
+  | jae ->recursion_limit_error
+  | mov [STATE + (ptrdiff_t) offsetof(State, vm_depth)], rcx
   // Save fargc, args_start word index, and callee fn value across a potential
-  // stack-grow helper call.
+  // cold-path helper call.
   | mov [rsp + 32], rax
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rcx, [STATE + NATIVE_VM_STACK_OFF]
   | mov rdx, r8
   | sub rdx, rcx
   | shr rdx, 3
   | mov [rsp + 40], rdx
   | mov [rsp + 48], r9
-  // frame_size = 5 + local_count + box_count + stack_max. box_count is 0 here.
+  // Zero-copy: the args (already on the caller's eval stack) become the
+  // callee's first locals in place — frame_base = args_start. extent =
+  // frame_base + local_count + box_count + stack_max.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | add rcx, 5
-  | mov rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
-  | add rdx, rcx
-  | cmp rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_size))]
-  | jbe >3
-  | mov rdi, STATE
-  | mov rsi, rcx
-  | mov64 rax, (ptrdiff_t) &native_vm_grow_stack
-  | call rax
-  | reloadDtable
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rsi
+  | add rdx, rcx                       // rdx = extent
+  // Inline only when extent is at or under the high-water mark AND vm_frames
+  // has a record slot free; otherwise the helper grows + zeroes both.
+  | cmp rdx, [STATE + NATIVE_VM_STACK_USED_OFF]
+  | ja >3
+  | mov rax, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | cmp rax, [STATE + NATIVE_VM_FRAMES_EOS_OFF]
+  | jae >3
   | jmp >4
   |3:
-  | mov [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))], rdx
+  | mov rdi, STATE
+  | mov rsi, rdx                       // extent
+  | mov64 rax, (ptrdiff_t) &native_vm_prepare_frame
+  | call rax
+  | reloadDtable
   |4:
   // Reload callee + stack pointers after any realloc.
   | mov r9, [rsp + 48]
@@ -1127,63 +1275,33 @@ void init_native_vm(State& state) {
   |5:
   | mov r10, r9
   |6:
+  | mov rdi, [STATE + NATIVE_VM_STACK_OFF]
+  | mov r11, [rsp + 40]                // r11 = frame_base (= new sff_offset)
+  | lea rsi, [rdi + r11*8]             // rsi = frame base ptr = callee locals
+  // Push the callee's VMCallFrame record.
+  | mov rcx, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | mov rdx, [rsp + 48]
+  | mov [rcx], rdx                     // closure
+  | mov [rcx + 8], r11                 // frame_base
+  | mov rdx, CP
+  | sub rdx, sCodeBase
+  | shr rdx, 3
+  | mov [rcx + 16], rdx                // return_cp (word offset)
+  | mov rdx, [rsp + 40]
+  | dec rdx                            // result lands in the fn slot
+  | mov [rcx + 24], rdx                // result_slot
+  | mov qword [rcx + 32], 0            // frames_lost = 0, flags = 0
+  | mov sClosureRef, rcx
+  | add rcx, FR_SIZE
+  | mov [STATE + NATIVE_VM_FRAMES_FINISH_OFF], rcx
+  // Memset diet: args are already the first locals; zero only unsupplied
+  // locals and box slots. The eval region is write-before-read and every
+  // slot below the high-water mark is GC-scannable already.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | add rcx, 5
-  | mov r11, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
-  | sub r11, rcx                       // r11 = new_sff_offset
-  | mov rdi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov r8, [rsp + 40]
-  | lea r8, [rdi + r8*8]               // r8 = args_start (reloaded)
-  | lea rsi, [rdi + r11*8]             // rsi = new frame base
-  // Write frame-link.
-  | mov rcx, [rsp + 16]
-  | mov rcx, [rcx]
-  | test rcx, rcx
-  | jz ->apply_saved_vfn_ready
-  | mov rdx, [rcx]
-  | movzx rdx, dl
-  | cmp rdx, CLOSURE
-  | jne ->apply_saved_vfn_ready
-  | mov rcx, [rcx + (ptrdiff_t) offsetof(Closure, function)]
-  |->apply_saved_vfn_ready:
-  | mov [rsi], rcx                     // saved_vfn
-  | mov rcx, CP
-  | sub rcx, [rsp + 24]
-  | shr rcx, 3
-  | shl rcx, 1
-  | add rcx, 1
-  | mov [rsi + 8], rcx                 // saved_cp_offset
-  | mov rcx, [rsp + 48]
-  | mov [rsi + 16], rcx                // current closure/current-fn
-  | mov rcx, [rsp + 8]
-  | shl rcx, 1
-  | add rcx, 1
-  | mov [rsi + 24], rcx                // saved_sff_offset
-  | mov rcx, [rsp + 40]
-  | dec rcx
-  | shl rcx, 1
-  | add rcx, 1
-  | mov [rsi + 32], rcx                // saved_ret_slot
-  // Copy arguments into callee locals.
-  | lea LOCALS, [rsi + 40]
-  | mov rcx, [rsp + 32]
-  |7:
-  | test rcx, rcx
-  | jz >8
-  | mov rdx, [r8]
-  | mov [LOCALS], rdx
-  | add r8, 8
-  | add LOCALS, 8
-  | dec rcx
-  | jmp <7
-  |8:
-  // Zero remaining locals + stack slots.
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | sub rcx, [rsp + 32]
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | sub rcx, [rsp + 32]                // local_count + box_count - argc
+  | mov rdx, [rsp + 32]
+  | lea LOCALS, [rsi + rdx*8]
   | xor edx, edx
   |->apply_zero_loop:
   | test rcx, rcx
@@ -1199,19 +1317,19 @@ void init_native_vm(State& state) {
   | mov VFN, r10
   | mov rcx, [rsp]
   | mov [rcx], VFN
-  | lea LOCALS, [rsi + 40]
+  | mov LOCALS, rsi
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | lea STACK, [LOCALS + rcx*8]
   | mov ARGC, [rsp + 32]
   | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
   | mov [rsp + 8], r11
-  | mov rcx, [rsp + 56]
-  | mov [rcx], r11
-  | lea rax, [rsi + 16]
-  | mov [rsp + 16], rax
   | reloadDtable
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | test ecx, ecx
+  | jnz ->apply_enter_boxes
   | jmp ->dispatch
   |9:
   |->op_apply_slow:
@@ -1282,10 +1400,24 @@ void init_native_vm(State& state) {
   | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_variadic
   | inc qword [rcx]
   | jmp ->op_apply_slow
-  |->op_apply_bail_boxed:
-  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_boxed
-  | inc qword [rcx]
-  | jmp ->op_apply_slow
+
+  // --- Boxed frame entry (cold) ----------------------------------------------
+  // The just-entered frame has mutable captures: allocate its open Boxes via
+  // the C helper. The frame is fully committed (record pushed or recycled,
+  // locals + box slots zeroed, registers and stack slots set), so the only
+  // post-call fixups are the GC-movable derivations: VFN via the traced
+  // *vfn_ref and CP/sCodeBase (the bytecode Bytevector may move). LOCALS and
+  // STACK point into vm_stack, which the GC never moves. ARGC (r10,
+  // caller-saved) is preserved for OP_ARGC_EQ; the scratch slots are dead at
+  // entry-complete so sScratch0 is free.
+  |->apply_enter_boxes:
+  | mov sScratch0, ARGC
+  | mov rdi, STATE
+  | mov64 rax, (ptrdiff_t) &native_vm_alloc_frame_boxes
+  | call rax
+  | restoreAfterGcHelperCall
+  | mov ARGC, sScratch0
+  | jmp ->dispatch
 
   // --- OP_APPLY_LOCAL (exp 8) -----------------------------------------------
   // APPLY_LOCAL idx fargc: like OP_APPLY but the callee is loaded from
@@ -1320,7 +1452,7 @@ void init_native_vm(State& state) {
   |2:
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_NATIVE_VM_BIT
   | jz ->op_apply_local_bail_no_native_bit
-  // C1 fast path: exact-arity, non-variadic, no-box VM callees only.
+  // C1 fast path: exact-arity, non-variadic VM callees (boxed OK).
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, min_arity)]
   | cmp ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, max_arity)]
   | jne ->op_apply_local_bail_arity_range
@@ -1328,32 +1460,37 @@ void init_native_vm(State& state) {
   | jne ->op_apply_local_bail_argc_mismatch
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz ->op_apply_local_bail_variadic
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | test ecx, ecx
-  | jnz ->op_apply_local_bail_boxed
+  // Recursion-depth check + commit (see op_apply).
+  | mov rcx, [STATE + (ptrdiff_t) offsetof(State, vm_depth)]
+  | inc rcx
+  | cmp rcx, [STATE + (ptrdiff_t) offsetof(State, recursion_limit)]
+  | jae ->recursion_limit_error
+  | mov [STATE + (ptrdiff_t) offsetof(State, vm_depth)], rcx
   | mov [rsp + 32], rax                // spill fargc
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rcx, [STATE + NATIVE_VM_STACK_OFF]
   | mov rdx, r8
   | sub rdx, rcx
   | shr rdx, 3
   | mov [rsp + 40], rdx                // spill args_start word offset
   | mov [rsp + 48], r9                 // spill callee fn value
+  // Zero-copy frame entry: see op_apply. frame_base = args_start.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | add rcx, 5
-  | mov rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
-  | add rdx, rcx
-  | cmp rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_size))]
-  | jbe >3
-  | mov rdi, STATE
-  | mov rsi, rcx
-  | mov64 rax, (ptrdiff_t) &native_vm_grow_stack
-  | call rax
-  | reloadDtable
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rsi
+  | add rdx, rcx                       // rdx = extent
+  | cmp rdx, [STATE + NATIVE_VM_STACK_USED_OFF]
+  | ja >3
+  | mov rax, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | cmp rax, [STATE + NATIVE_VM_FRAMES_EOS_OFF]
+  | jae >3
   | jmp >4
   |3:
-  | mov [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))], rdx
+  | mov rdi, STATE
+  | mov rsi, rdx                       // extent
+  | mov64 rax, (ptrdiff_t) &native_vm_prepare_frame
+  | call rax
+  | reloadDtable
   |4:
   | mov r9, [rsp + 48]
   | mov rdx, [r9]
@@ -1365,64 +1502,32 @@ void init_native_vm(State& state) {
   |5:
   | mov r10, r9
   |6:
+  | mov rdi, [STATE + NATIVE_VM_STACK_OFF]
+  | mov r11, [rsp + 40]                // r11 = frame_base (= new sff_offset)
+  | lea rsi, [rdi + r11*8]             // rsi = frame base ptr = callee locals
+  // Push the callee's VMCallFrame record.
+  // NOTE: result_slot has no `dec` — the fused APPLY_LOCAL has no fn slot on
+  // the stack, so the result slot IS args_start (where arg1 was).
+  | mov rcx, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | mov rdx, [rsp + 48]
+  | mov [rcx], rdx                     // closure
+  | mov [rcx + 8], r11                 // frame_base
+  | mov rdx, CP
+  | sub rdx, sCodeBase
+  | shr rdx, 3
+  | mov [rcx + 16], rdx                // return_cp (word offset)
+  | mov rdx, [rsp + 40]
+  | mov [rcx + 24], rdx                // result_slot
+  | mov qword [rcx + 32], 0            // frames_lost = 0, flags = 0
+  | mov sClosureRef, rcx
+  | add rcx, FR_SIZE
+  | mov [STATE + NATIVE_VM_FRAMES_FINISH_OFF], rcx
+  // Memset diet: zero only unsupplied locals and box slots (see op_apply).
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | add rcx, 5
-  | mov r11, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
-  | sub r11, rcx                       // r11 = new_sff_offset
-  | mov rdi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov r8, [rsp + 40]
-  | lea r8, [rdi + r8*8]               // r8 = args_start reloaded
-  | lea rsi, [rdi + r11*8]             // rsi = new frame base
-  // Build frame link.
-  | mov rcx, [rsp + 16]
-  | mov rcx, [rcx]
-  | test rcx, rcx
-  | jz >7
-  | mov rdx, [rcx]
-  | movzx rdx, dl
-  | cmp rdx, CLOSURE
-  | jne >7
-  | mov rcx, [rcx + (ptrdiff_t) offsetof(Closure, function)]
-  |7:
-  | mov [rsi], rcx                     // saved_vfn
-  | mov rcx, CP
-  | sub rcx, [rsp + 24]
-  | shr rcx, 3
-  | shl rcx, 1
-  | add rcx, 1
-  | mov [rsi + 8], rcx                 // saved_cp_offset
-  | mov rcx, [rsp + 48]
-  | mov [rsi + 16], rcx                // current closure/current-fn
-  | mov rcx, [rsp + 8]
-  | shl rcx, 1
-  | add rcx, 1
-  | mov [rsi + 24], rcx                // saved_sff_offset
-  | mov rcx, [rsp + 40]                // args_start word offset
-  // NOTE: no `dec rcx` — the fused APPLY_LOCAL has no fn slot on the stack,
-  // so the result slot IS args_start (where arg1 was).
-  | shl rcx, 1
-  | add rcx, 1
-  | mov [rsi + 32], rcx                // saved_ret_slot
-  // Copy args into callee LOCALS.
-  | lea LOCALS, [rsi + 40]
-  | mov rcx, [rsp + 32]
-  |->apply_local_copy_loop:
-  | test rcx, rcx
-  | jz ->apply_local_copy_done
-  | mov rdx, [r8]
-  | mov [LOCALS], rdx
-  | add r8, 8
-  | add LOCALS, 8
-  | dec rcx
-  | jmp ->apply_local_copy_loop
-  |->apply_local_copy_done:
-  // Zero remaining locals + stack slots.
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | sub rcx, [rsp + 32]
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | sub rcx, [rsp + 32]                // local_count + box_count - argc
+  | mov rdx, [rsp + 32]
+  | lea LOCALS, [rsi + rdx*8]
   | xor edx, edx
   |->apply_local_zero_loop:
   | test rcx, rcx
@@ -1438,19 +1543,19 @@ void init_native_vm(State& state) {
   | mov VFN, r10
   | mov rcx, [rsp]
   | mov [rcx], VFN
-  | lea LOCALS, [rsi + 40]
+  | mov LOCALS, rsi
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | lea STACK, [LOCALS + rcx*8]
   | mov ARGC, [rsp + 32]
   | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
   | mov [rsp + 8], r11
-  | mov rcx, [rsp + 56]
-  | mov [rcx], r11
-  | lea rax, [rsi + 16]
-  | mov [rsp + 16], rax
   | reloadDtable
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | test ecx, ecx
+  | jnz ->apply_enter_boxes
   | jmp ->dispatch
 
   // Helper fallback (CFUNCTION / non-VM-native callees).
@@ -1515,10 +1620,6 @@ void init_native_vm(State& state) {
   | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_variadic
   | inc qword [rcx]
   | jmp ->op_apply_local_slow
-  |->op_apply_local_bail_boxed:
-  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_boxed
-  | inc qword [rcx]
-  | jmp ->op_apply_local_slow
 
   // --- OP_APPLY_GLOBAL (exp 8) ----------------------------------------------
   // APPLY_GLOBAL idx fargc: callee loaded from
@@ -1564,32 +1665,37 @@ void init_native_vm(State& state) {
   | jne ->op_apply_global_bail_argc_mismatch
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz ->op_apply_global_bail_variadic
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | test ecx, ecx
-  | jnz ->op_apply_global_bail_boxed
+  // Recursion-depth check + commit (see op_apply).
+  | mov rcx, [STATE + (ptrdiff_t) offsetof(State, vm_depth)]
+  | inc rcx
+  | cmp rcx, [STATE + (ptrdiff_t) offsetof(State, recursion_limit)]
+  | jae ->recursion_limit_error
+  | mov [STATE + (ptrdiff_t) offsetof(State, vm_depth)], rcx
   | mov [rsp + 32], rax                // spill fargc
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
+  | mov rcx, [STATE + NATIVE_VM_STACK_OFF]
   | mov rdx, r8
   | sub rdx, rcx
   | shr rdx, 3
   | mov [rsp + 40], rdx
   | mov [rsp + 48], r9
+  // Zero-copy frame entry: see op_apply. frame_base = args_start.
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | add rcx, 5
-  | mov rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
-  | add rdx, rcx
-  | cmp rdx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_size))]
-  | jbe >3
-  | mov rdi, STATE
-  | mov rsi, rcx
-  | mov64 rax, (ptrdiff_t) &native_vm_grow_stack
-  | call rax
-  | reloadDtable
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rsi
+  | add rdx, rcx                       // rdx = extent
+  | cmp rdx, [STATE + NATIVE_VM_STACK_USED_OFF]
+  | ja >3
+  | mov rax, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | cmp rax, [STATE + NATIVE_VM_FRAMES_EOS_OFF]
+  | jae >3
   | jmp >4
   |3:
-  | mov [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))], rdx
+  | mov rdi, STATE
+  | mov rsi, rdx                       // extent
+  | mov64 rax, (ptrdiff_t) &native_vm_prepare_frame
+  | call rax
+  | reloadDtable
   |4:
   | mov r9, [rsp + 48]
   | mov rdx, [r9]
@@ -1601,60 +1707,31 @@ void init_native_vm(State& state) {
   |5:
   | mov r10, r9
   |6:
+  | mov rdi, [STATE + NATIVE_VM_STACK_OFF]
+  | mov r11, [rsp + 40]                // r11 = frame_base (= new sff_offset)
+  | lea rsi, [rdi + r11*8]             // rsi = frame base ptr = callee locals
+  // Push the callee's VMCallFrame record.
+  // NOTE: result_slot has no `dec` — same reasoning as op_apply_local.
+  | mov rcx, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | mov rdx, [rsp + 48]
+  | mov [rcx], rdx                     // closure
+  | mov [rcx + 8], r11                 // frame_base
+  | mov rdx, CP
+  | sub rdx, sCodeBase
+  | shr rdx, 3
+  | mov [rcx + 16], rdx                // return_cp (word offset)
+  | mov rdx, [rsp + 40]
+  | mov [rcx + 24], rdx                // result_slot
+  | mov qword [rcx + 32], 0            // frames_lost = 0, flags = 0
+  | mov sClosureRef, rcx
+  | add rcx, FR_SIZE
+  | mov [STATE + NATIVE_VM_FRAMES_FINISH_OFF], rcx
+  // Memset diet: zero only unsupplied locals and box slots (see op_apply).
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | add rcx, 5
-  | mov r11, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))]
-  | sub r11, rcx
-  | mov rdi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov r8, [rsp + 40]
-  | lea r8, [rdi + r8*8]
-  | lea rsi, [rdi + r11*8]
-  | mov rcx, [rsp + 16]
-  | mov rcx, [rcx]
-  | test rcx, rcx
-  | jz >7
-  | mov rdx, [rcx]
-  | movzx rdx, dl
-  | cmp rdx, CLOSURE
-  | jne >7
-  | mov rcx, [rcx + (ptrdiff_t) offsetof(Closure, function)]
-  |7:
-  | mov [rsi], rcx                     // saved_vfn
-  | mov rcx, CP
-  | sub rcx, [rsp + 24]
-  | shr rcx, 3
-  | shl rcx, 1
-  | add rcx, 1
-  | mov [rsi + 8], rcx                 // saved_cp_offset
-  | mov rcx, [rsp + 48]
-  | mov [rsi + 16], rcx                // current closure/current-fn
-  | mov rcx, [rsp + 8]
-  | shl rcx, 1
-  | add rcx, 1
-  | mov [rsi + 24], rcx                // saved_sff_offset
-  | mov rcx, [rsp + 40]
-  // NOTE: no `dec rcx` — same reasoning as op_apply_local.
-  | shl rcx, 1
-  | add rcx, 1
-  | mov [rsi + 32], rcx                // saved_ret_slot
-  | lea LOCALS, [rsi + 40]
-  | mov rcx, [rsp + 32]
-  |->apply_global_copy_loop:
-  | test rcx, rcx
-  | jz ->apply_global_copy_done
-  | mov rdx, [r8]
-  | mov [LOCALS], rdx
-  | add r8, 8
-  | add LOCALS, 8
-  | dec rcx
-  | jmp ->apply_global_copy_loop
-  |->apply_global_copy_done:
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | sub rcx, [rsp + 32]
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | sub rcx, [rsp + 32]                // local_count + box_count - argc
+  | mov rdx, [rsp + 32]
+  | lea LOCALS, [rsi + rdx*8]
   | xor edx, edx
   |->apply_global_zero_loop:
   | test rcx, rcx
@@ -1669,19 +1746,19 @@ void init_native_vm(State& state) {
   | mov VFN, r10
   | mov rcx, [rsp]
   | mov [rcx], VFN
-  | lea LOCALS, [rsi + 40]
+  | mov LOCALS, rsi
   | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | lea STACK, [LOCALS + rcx*8]
   | mov ARGC, [rsp + 32]
   | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
   | mov [rsp + 8], r11
-  | mov rcx, [rsp + 56]
-  | mov [rcx], r11
-  | lea rax, [rsi + 16]
-  | mov [rsp + 16], rax
   | reloadDtable
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | test ecx, ecx
+  | jnz ->apply_enter_boxes
   | jmp ->dispatch
 
   // Helper fallback (CFUNCTION / non-VM-native callees).
@@ -1743,10 +1820,6 @@ void init_native_vm(State& state) {
   | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_variadic
   | inc qword [rcx]
   | jmp ->op_apply_global_slow
-  |->op_apply_global_bail_boxed:
-  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_c_boxed
-  | inc qword [rcx]
-  | jmp ->op_apply_global_slow
 
   // --- OP_APPLY_TAIL_LOCAL (exp 8) -------------------------------------------
   // Tail variant of OP_APPLY_LOCAL. Fast-path in-place frame reuse matches
@@ -1787,47 +1860,76 @@ void init_native_vm(State& state) {
   | jne >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz >9
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | test ecx, ecx
-  | jnz >9
-  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | add rcx, rdx
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | add rcx, 5
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rdx, rsi
-  | add rdx, 5
-  | cmp rdx, rcx
-  | ja >9
+  // In-asm tail call with record recycling (see op_apply_tail). The fn came
+  // from LOCALS[idx]; it is spilled before the arg slide can clobber it.
+  | mov [rsp + 32], rax                // spill fargc
+  | mov [rsp + 48], r9                 // spill callee fn value
+  | mov [rsp + 56], r10                // spill callee VMFunction* (no GC below)
+  | mov rcx, [STATE + NATIVE_VM_STACK_OFF]
+  | mov rdx, r8
+  | sub rdx, rcx
+  | shr rdx, 3
+  | mov [rsp + 40], rdx                // args_start word offset
+  // Close the caller's still-open boxes before recycling its frame.
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
-  | jnz >9
-  // NOTE: r9 = fn from LOCALS[idx]. If idx overlaps destination LOCALS we
-  // could clobber it during the arg copy, but we spill it to [rsp+48] and
-  // reload after the copy, just like op_apply_tail does with the stack slot.
-  | mov [rsp + 32], rax                // spill fargc
-  | mov [rsp + 48], r9                 // spill fn value
-  | mov rsi, r8                        // src = args_start
-  | mov rdi, LOCALS                    // dst = current locals
-  | mov rcx, rax
+  | jz >3
+  | mov rdi, STATE
+  | mov rsi, VFN
+  | mov rdx, [rsp + 8]
+  | mov64 rax, (ptrdiff_t) &native_vm_close_frame_boxes
+  | call rax
+  | reloadDtable
+  | mov r10, [rsp + 56]
+  |3:
+  // extent check; climb past the high-water mark via the grow+zero helper.
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rsi
+  | add rcx, [rsp + 8]
+  | cmp rcx, [STATE + NATIVE_VM_STACK_USED_OFF]
+  | jbe >4
+  | mov rdi, STATE
+  | mov rsi, rcx
+  | mov64 rax, (ptrdiff_t) &native_vm_prepare_frame
+  | call rax
+  | reloadDtable
+  | mov r10, [rsp + 56]
   |4:
+  // Slide the args down onto the recycled frame's base (forward copy).
+  | mov rdi, [STATE + NATIVE_VM_STACK_OFF]
+  | mov rcx, [rsp + 8]
+  | lea LOCALS, [rdi + rcx*8]          // dst = frame base (= callee locals)
+  | mov rcx, [rsp + 40]
+  | lea rsi, [rdi + rcx*8]             // src = args_start
+  | mov rdi, LOCALS
+  | mov rcx, [rsp + 32]
+  |->apply_tail_local_move_loop:
   | test rcx, rcx
-  | jz >5
+  | jz ->apply_tail_local_move_done
   | mov rdx, [rsi]
   | mov [rdi], rdx
   | add rsi, 8
   | add rdi, 8
   | dec rcx
-  | jmp <4
-  |5:
+  | jmp ->apply_tail_local_move_loop
+  |->apply_tail_local_move_done:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_vm_path
+  | inc qword [rcx]
+  // Recycle the top frame record (see op_apply_tail).
+  | refreshClosureRef
+  | mov rax, [rsp + 48]
+  | mov [rcx], rax                     // record.closure = callee fn
+  | inc dword [rcx + 32]               // record.frames_lost++
+  | mov r10, [rsp + 56]
+  | mov VFN, r10
+  | mov rcx, [rsp]
+  | mov [rcx], VFN
+  | mov ARGC, [rsp + 32]
+  // Memset diet: zero only unsupplied locals (rdi sits just past the args).
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | add rcx, rdx
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
+  | add ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | sub rcx, [rsp + 32]
   | xor edx, edx
   |->apply_tail_local_zero_loop:
@@ -1838,44 +1940,26 @@ void init_native_vm(State& state) {
   | dec rcx
   | jmp ->apply_tail_local_zero_loop
   |->apply_tail_local_zero_done:
-  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_vm_path
-  | inc qword [rcx]
-  | mov r9, [rsp + 48]
-  | mov rdx, [r9]
-  | movzx rcx, dl
-  | cmp rcx, CLOSURE
-  | jne >6
-  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
-  | jmp >7
-  |6:
-  | mov r10, r9
-  |7:
-  | mov [rsp + 16], LOCALS
-  | sub qword [rsp + 16], 24
-  | mov rax, [rsp + 48]
-  | mov rcx, [rsp + 16]
-  | mov [rcx], rax
-  | mov VFN, r10
-  | mov rcx, [rsp]
-  | mov [rcx], VFN
-  | mov ARGC, [rsp + 32]
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | add ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | lea STACK, [LOCALS + rcx*8]
   | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
   | reloadDtable
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | test ecx, ecx
+  | jnz ->apply_enter_boxes
   | jmp ->dispatch
   |9:
   // Helper fallback (complex tail / CFUNCTION target).
   | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_c_path
   | inc qword [rcx]
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov r10, [rsp + 8]
-  | mov r10, [rcx + r10*8]
+  | mov rcx, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
   | xor r11, r11
-  | cmp r10, C_EOF
-  | sete r11b
+  | test dword [rcx - 4], 1            // top record flags & SESSION_BASE
+  | setnz r11b
+  | mov rcx, [STATE + NATIVE_VM_STACK_OFF]
   | mov rdx, STACK
   | sub rdx, rcx
   | shr rdx, 3
@@ -1947,44 +2031,75 @@ void init_native_vm(State& state) {
   | jne >9
   | test qword [r10], (ptrdiff_t) Value::VMFUNCTION_VARIABLE_ARITY_BIT
   | jnz >9
-  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | test ecx, ecx
-  | jnz >9
-  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | add rcx, rdx
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
-  | add rcx, 5
-  | mov edx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rdx, rsi
-  | add rdx, 5
-  | cmp rdx, rcx
-  | ja >9
+  // In-asm tail call with record recycling (see op_apply_tail).
+  | mov [rsp + 32], rax                // spill fargc
+  | mov [rsp + 48], r9                 // spill callee fn value
+  | mov [rsp + 56], r10                // spill callee VMFunction* (no GC below)
+  | mov rcx, [STATE + NATIVE_VM_STACK_OFF]
+  | mov rdx, r8
+  | sub rdx, rcx
+  | shr rdx, 3
+  | mov [rsp + 40], rdx                // args_start word offset
+  // Close the caller's still-open boxes before recycling its frame.
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test ecx, ecx
-  | jnz >9
-  | mov [rsp + 32], rax
-  | mov [rsp + 48], r9
-  | mov rsi, r8
-  | mov rdi, LOCALS
-  | mov rcx, rax
+  | jz >3
+  | mov rdi, STATE
+  | mov rsi, VFN
+  | mov rdx, [rsp + 8]
+  | mov64 rax, (ptrdiff_t) &native_vm_close_frame_boxes
+  | call rax
+  | reloadDtable
+  | mov r10, [rsp + 56]
+  |3:
+  // extent check; climb past the high-water mark via the grow+zero helper.
+  | mov ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | add ecx, dword [r10 + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | mov esi, dword [r10 + (ptrdiff_t) offsetof(VMFunction, stack_max)]
+  | add rcx, rsi
+  | add rcx, [rsp + 8]
+  | cmp rcx, [STATE + NATIVE_VM_STACK_USED_OFF]
+  | jbe >4
+  | mov rdi, STATE
+  | mov rsi, rcx
+  | mov64 rax, (ptrdiff_t) &native_vm_prepare_frame
+  | call rax
+  | reloadDtable
+  | mov r10, [rsp + 56]
   |4:
+  // Slide the args down onto the recycled frame's base (forward copy).
+  | mov rdi, [STATE + NATIVE_VM_STACK_OFF]
+  | mov rcx, [rsp + 8]
+  | lea LOCALS, [rdi + rcx*8]          // dst = frame base (= callee locals)
+  | mov rcx, [rsp + 40]
+  | lea rsi, [rdi + rcx*8]             // src = args_start
+  | mov rdi, LOCALS
+  | mov rcx, [rsp + 32]
+  |->apply_tail_global_move_loop:
   | test rcx, rcx
-  | jz >5
+  | jz ->apply_tail_global_move_done
   | mov rdx, [rsi]
   | mov [rdi], rdx
   | add rsi, 8
   | add rdi, 8
   | dec rcx
-  | jmp <4
-  |5:
+  | jmp ->apply_tail_global_move_loop
+  |->apply_tail_global_move_done:
+  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_vm_path
+  | inc qword [rcx]
+  // Recycle the top frame record (see op_apply_tail).
+  | refreshClosureRef
+  | mov rax, [rsp + 48]
+  | mov [rcx], rax                     // record.closure = callee fn
+  | inc dword [rcx + 32]               // record.frames_lost++
+  | mov r10, [rsp + 56]
+  | mov VFN, r10
+  | mov rcx, [rsp]
+  | mov [rcx], VFN
+  | mov ARGC, [rsp + 32]
+  // Memset diet: zero only unsupplied locals (rdi sits just past the args).
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
-  | add rcx, rdx
-  | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, stack_max)]
-  | add rcx, rdx
+  | add ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | sub rcx, [rsp + 32]
   | xor edx, edx
   |->apply_tail_global_zero_loop:
@@ -1995,43 +2110,25 @@ void init_native_vm(State& state) {
   | dec rcx
   | jmp ->apply_tail_global_zero_loop
   |->apply_tail_global_zero_done:
-  | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_vm_path
-  | inc qword [rcx]
-  | mov r9, [rsp + 48]
-  | mov rdx, [r9]
-  | movzx rcx, dl
-  | cmp rcx, CLOSURE
-  | jne >6
-  | mov r10, [r9 + (ptrdiff_t) offsetof(Closure, function)]
-  | jmp >7
-  |6:
-  | mov r10, r9
-  |7:
-  | mov [rsp + 16], LOCALS
-  | sub qword [rsp + 16], 24
-  | mov rax, [rsp + 48]
-  | mov rcx, [rsp + 16]
-  | mov [rcx], rax
-  | mov VFN, r10
-  | mov rcx, [rsp]
-  | mov [rcx], VFN
-  | mov ARGC, [rsp + 32]
   | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, local_count)]
+  | add ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | lea STACK, [LOCALS + rcx*8]
   | mov rax, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea CP, [rax + (ptrdiff_t) offsetof(Bytevector, data)]
   | mov [rsp + 24], CP
   | reloadDtable
+  | mov ecx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
+  | test ecx, ecx
+  | jnz ->apply_enter_boxes
   | jmp ->dispatch
   |9:
   | mov64 rcx, (ptrdiff_t) &native_vm_stat_apply_tail_c_path
   | inc qword [rcx]
-  | mov rcx, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov r10, [rsp + 8]
-  | mov r10, [rcx + r10*8]
+  | mov rcx, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
   | xor r11, r11
-  | cmp r10, C_EOF
-  | sete r11b
+  | test dword [rcx - 4], 1            // top record flags & SESSION_BASE
+  | setnz r11b
+  | mov rcx, [STATE + NATIVE_VM_STACK_OFF]
   | mov rdx, STACK
   | sub rdx, rcx
   | shr rdx, 3
@@ -2678,11 +2775,11 @@ void init_native_vm(State& state) {
   | jmp ->dispatch
 
   // --- OP_RETURN -------------------------------------------------------------
+  // Pop the top VMCallFrame record. A SESSION_BASE record returns to C (the
+  // session's vm_stack region is released here, mirroring apply_vm's
+  // do_return); otherwise control resumes the caller frame in this loop.
   |->op_return:
   | mov rax, [STACK - 8]
-  | mov rcx, [rsp + 8]
-  | mov rdi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | lea rdi, [rdi + rcx*8]             // rdi = current frame base
   | mov edx, dword [VFN + (ptrdiff_t) offsetof(VMFunction, box_count)]
   | test rdx, rdx
   | jz >1
@@ -2690,46 +2787,54 @@ void init_native_vm(State& state) {
   | push rax
   | mov rdi, STATE
   | mov rsi, VFN
-  | mov rdx, [rsp + 24]
+  | mov rdx, [rsp + 24]                // sff_offset (rsp moved by 2 pushes)
   | mov64 rax, (ptrdiff_t) &native_vm_close_frame_boxes
   | call rax
   | pop rax
   | pop rax
   | reloadDtable
-  | mov rcx, [rsp + 8]
-  | mov rdi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | lea rdi, [rdi + rcx*8]
   |1:
-  | mov r10, [rdi]
-  | cmp r10, C_EOF
-  | jne >2
+  | mov rdi, [STATE + NATIVE_VM_FRAMES_FINISH_OFF]
+  | lea rdi, [rdi - FR_SIZE]           // rdi = top record (this frame)
+  | test dword [rdi + 36], 1           // SESSION_BASE?
+  | jz >2
+  // Session return: release the session's stack region, pop the record,
+  // hand the result back to apply_native_vm.
+  | mov rcx, [rdi + 8]                 // frame_base
+  | mov [STATE + NATIVE_VM_STACK_USED_OFF], rcx
+  | mov [STATE + NATIVE_VM_FRAMES_FINISH_OFF], rdi
   | returnEpilogue
   |2:
-  | mov r11, [rdi + 24]
-  | shr r11, 1                         // caller_sff_offset
-  | mov [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack_used))], rcx
-  | mov [rsp + 8], r11
-  | mov rcx, [rsp + 56]
-  | mov [rcx], r11
-  | mov VFN, r10
+  // Pop the record. vm_stack_used is a session high-water mark — it does NOT
+  // shrink on non-base returns (frames overlap-allocate by stack discipline;
+  // only session exit releases the region). Mirrors apply_vm's do_return.
+  | mov [STATE + NATIVE_VM_FRAMES_FINISH_OFF], rdi  // pop record
+  | dec qword [STATE + (ptrdiff_t) offsetof(State, vm_depth)]
+  // Caller state from the new top record (rdi - FR_SIZE).
+  | mov r11, [rdi - FR_SIZE]           // caller closure value
+  | mov rdx, [r11]
+  | movzx rdx, dl
+  | cmp rdx, CLOSURE
+  | jne >3
+  | mov r11, [r11 + (ptrdiff_t) offsetof(Closure, function)]
+  |3:
+  | mov VFN, r11
   | mov rcx, [rsp]
-  | mov [rcx], VFN
-  | mov rsi, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | lea rsi, [rsi + r11*8]             // caller frame base
-  | mov rcx, [rdi + 8]
-  | shr rcx, 1                         // saved_cp_offset
+  | mov [rcx], VFN                     // *vfn_ref = caller VMFunction
+  | mov r11, [rdi - FR_SIZE + 8]       // caller frame_base
+  | mov [rsp + 8], r11
   | mov rdx, [VFN + (ptrdiff_t) offsetof(VMFunction, code)]
   | lea rdx, [rdx + (ptrdiff_t) offsetof(Bytevector, data)]
-  | mov [rsp + 24], rdx
+  | mov [rsp + 24], rdx                // sCodeBase = caller code base
+  | mov rcx, [rdi + 16]                // popped record's return_cp (words)
   | lea CP, [rdx + rcx*8]
-  | lea LOCALS, [rsi + 40]
-  | mov rdx, [rdi + 32]
-  | shr rdx, 1                         // saved_ret_slot
-  | mov r8, [STATE + (ptrdiff_t)(offsetof(State, gc) + offsetof(GCCommon, vm_stack))]
-  | mov [r8 + rdx*8], rax
+  | mov r8, [STATE + NATIVE_VM_STACK_OFF]
+  | lea LOCALS, [r8 + r11*8]
+  | mov rdx, [rdi + 24]                // popped record's result_slot
+  | mov [r8 + rdx*8], rax              // write result into caller's stack
   | lea STACK, [r8 + rdx*8 + 8]
-  | lea rax, [rsi + 16]
-  | mov [rsp + 16], rax
+  | lea rcx, [rdi - FR_SIZE]
+  | mov [rsp + 16], rcx                // sClosureRef = caller record
   | reloadDtable
   | jmp ->dispatch
 
@@ -2740,7 +2845,7 @@ void init_native_vm(State& state) {
   | mov rdx, rax
   | mov64 rax, (ptrdiff_t) &native_vm_argc_error
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   // --- argc less-than-minimum error (S3) -------------------------------------
   |->argc_gte_error:
@@ -2749,7 +2854,7 @@ void init_native_vm(State& state) {
   | mov rdx, rax
   | mov64 rax, (ptrdiff_t) &native_vm_argc_gte_error
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   // --- undefined-variable error paths (S5) ----------------------------------
   // Entered from OP_GLOBAL_GET — rdx holds the symbol.
@@ -2759,7 +2864,7 @@ void init_native_vm(State& state) {
   | xor edx, edx
   | mov64 rax, (ptrdiff_t) &native_vm_global_undefined
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   // Entered from OP_GLOBAL_SET — rdx holds the symbol.
   |->set_undefined_error:
@@ -2768,7 +2873,7 @@ void init_native_vm(State& state) {
   | mov edx, 1
   | mov64 rax, (ptrdiff_t) &native_vm_global_undefined
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   // --- CAR/CDR type-error trampolines (S6) ----------------------------------
   // The offending value is still on top of the stack; fetch from there.
@@ -2778,7 +2883,7 @@ void init_native_vm(State& state) {
   | xor edx, edx
   | mov64 rax, (ptrdiff_t) &native_vm_pair_error
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   |->cdr_error:
   | mov rdi, STATE
@@ -2786,20 +2891,20 @@ void init_native_vm(State& state) {
   | mov edx, 1
   | mov64 rax, (ptrdiff_t) &native_vm_pair_error
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   // --- OP_VALUE_HEADER_BIT error trampolines (are-8qgc) ---------------------
   |->value_header_bit_immediate:
   | mov rdi, STATE
   | mov64 rax, (ptrdiff_t) &native_vm_value_header_bit_immediate_error
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   |->value_header_bit_nonfixnum:
   | mov rdi, STATE
   | mov64 rax, (ptrdiff_t) &native_vm_value_header_bit_nonfixnum_error
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   // --- OP_APPLY error path (S7) ---------------------------------------------
   // The offending fn value is at [STACK - (fargc+1)*8]; but fargc is in rax
@@ -2809,7 +2914,7 @@ void init_native_vm(State& state) {
   | mov rsi, r9
   | mov64 rax, (ptrdiff_t) &native_vm_apply_error
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   // --- tail-return epilogue (S8) --------------------------------------------
   // Same epilogue as exception_return; separate label for clarity. Reached
@@ -2818,17 +2923,34 @@ void init_native_vm(State& state) {
   |->tail_return_marker:
   | returnEpilogue
 
-  // --- variadic-arith exception propagation (S6) ----------------------------
-  // Reached with the exception value already in rax.
+  // --- exception epilogue ----------------------------------------------------
+  // Reached with the exception value already in rax, from every error
+  // trampoline and every post-call active-exception check. Exports the
+  // current frame's bytecode offset so the C-side unwind can trace the
+  // innermost frame at the faulting instruction. CP and sCodeBase are always
+  // updated together, so their difference is GC-safe even if the bytecode
+  // Bytevector moved since the last rebase.
   |->exception_return:
+  | mov rcx, CP
+  | sub rcx, sCodeBase
+  | shr rcx, 3
+  | mov64 rdx, (ptrdiff_t) &native_vm_exc_cp_offset
+  | mov [rdx], rcx
   | returnEpilogue
+
+  // --- recursion-limit error (asm call fast path) ----------------------------
+  |->recursion_limit_error:
+  | mov rdi, STATE
+  | mov64 rax, (ptrdiff_t) &native_vm_recursion_limit_error
+  | call rax
+  | jmp ->exception_return
 
   // --- unimplemented-opcode trampoline --------------------------------------
   |->bad_opcode:
   | mov rdi, STATE
   | mov64 rax, (ptrdiff_t) &native_vm_bad_opcode
   | call rax
-  | returnEpilogue
+  | jmp ->exception_return
 
   // --- non-sentinel frame-link return trap (Phase B stub) -------------------
   |->bad_frame_return:
@@ -2859,6 +2981,10 @@ Value apply_native_vm(State& state, size_t argc, Value* argv, void* fnp) {
 
   PerfScope perf_scope(state, PERF_VM, &state.perf.vm_calls);
 
+  // frames_lost carried across the tail_flag loop so a recycled session
+  // frame's record keeps counting like apply_vm's link_frames_lost does.
+  uint32_t session_frames_lost = 0;
+
 tail:
   // closure and fn live in the current block scope. AR_FRAME registers
   // their *addresses* with the GC so a collection inside the dispatch loop
@@ -2880,10 +3006,9 @@ tail:
   if(vfn->code == nullptr) {
     return state.eval_error("native VM expected vm function with code", fn);
   }
-  size_t frame_words = 5 + vfn->local_count + vfn->box_count + vfn->stack_max;
+  size_t frame_words = vfn->local_count + vfn->box_count + vfn->stack_max;
 
   size_t sff_offset = state.gc.vm_stack_used;
-  size_t current_sff_offset = sff_offset;
   state.vm_depth++;
 
   if(state.vm_depth >= state.recursion_limit) {
@@ -2907,20 +3032,28 @@ tail:
 
   vfn = fn.as_unsafe<VMFunction>();
 
-  Value* frame  = &state.gc.vm_stack[sff_offset];
-  Value* locals = frame + 5;
+  Value* locals = &state.gc.vm_stack[sff_offset];
   Value* stack  = locals + vfn->local_count + vfn->box_count;
-
-  frame[0] = Value((ptrdiff_t) C_EOF);
-  frame[1] = Value::make_fixnum(0);
-  frame[2] = closure;
-  frame[3] = Value::make_fixnum((ptrdiff_t) sff_offset);
-  frame[4] = Value::make_fixnum(0);
 
   size_t locals_size = std::min(argc, (size_t) vfn->max_arity) * sizeof(Value);
   memcpy(locals, argv, locals_size);
   memset(((char*) locals) + locals_size, 0,
-         ((frame_words - 5) * sizeof(Value)) - locals_size);
+         (frame_words * sizeof(Value)) - locals_size);
+
+  // Push this session's base frame record. The record roots `closure` for
+  // the GC; the asm core derives the current frame base + closure pointer
+  // from the top record, and pushes/pops the same records for nested calls.
+  const size_t session_base_idx = state.gc.vm_frames.size();
+  {
+    VMCallFrame rec;
+    rec.closure = closure;
+    rec.frame_base = sff_offset;
+    rec.return_cp = 0;
+    rec.result_slot = 0;
+    rec.frames_lost = session_frames_lost;
+    rec.flags = (uint32_t) VMCallFrame::SESSION_BASE;
+    state.gc.vm_frames.push_back(rec);
+  }
 
   // Variable-arity prologue: ARGV_REST is a prologue-only opcode, so build
   // the rest list eagerly here and keep the dispatch handler as a no-op.
@@ -2956,7 +3089,7 @@ tail:
       boxes[i] = state.gc.allocate(BOX, sizeof(Box));
       vfn = fn.as_unsafe<VMFunction>();
       size_t local_idx = ((size_t*) vfn->free_variables->data)[i];
-      size_t vm_stack_idx = sff_offset + 5 + local_idx;
+      size_t vm_stack_idx = sff_offset + local_idx;
       boxes[i].as<Box>()->U.vm_local_idx = vm_stack_idx;
     }
     state.gc.protect_argc = 0;
@@ -2965,27 +3098,59 @@ tail:
 
   native_vm_tail_flag = false;
   Value result = native_vm_dispatch(&state, &fn, locals, stack, argc,
-                                    vfn->code_pointer(), &current_sff_offset, &frame[2]);
-
-  // Close any still-open Boxes before shrinking the stack so inner
-  // closures see captured locals instead of reclaimed slots. Mirrors
-  // VMFrame2::~VMFrame2 at src/vm.cpp:100.
-  vfn = fn.as_unsafe<VMFunction>();
-  frame_words = state.gc.vm_stack_used - current_sff_offset;
-  if(vfn->box_count) {
-    native_vm_close_frame_boxes(&state, vfn, current_sff_offset);
-  }
-
-  state.gc.shrink_stack(frame_words);
+                                    vfn->code_pointer());
   state.vm_depth--;
 
-  if(native_vm_tail_flag) {
-    argc = native_vm_tail_argc;
-    argv = native_vm_tail_use_buf
-        ? native_vm_tail_buf
-        : (state.temps.empty() ? nullptr : state.temps.data());
-    fnp  = native_vm_tail_fnp;
-    goto tail;
+  // Three exits from the dispatch core:
+  //  1. Normal return — OP_RETURN on the session-base record already popped
+  //     it and released the session's vm_stack region; nothing left to do.
+  //  2. Tail flag — the session-base record is still on vm_frames; recycle
+  //     it (close boxes, release the region) and restart with the new fn.
+  //  3. Exception — this session's records (one per still-live frame) are
+  //     on vm_frames; unwind them innermost-first like apply_vm's exception
+  //     loop, closing boxes per frame.
+  if(state.gc.vm_frames.size() > session_base_idx) {
+    if(native_vm_tail_flag) {
+      AR_ASSERT(state.gc.vm_frames.size() == session_base_idx + 1);
+      VMCallFrame top = state.gc.vm_frames.back();
+      Value top_fn = top.closure.closure_unbox();
+      native_vm_close_frame_boxes(&state, top_fn.as_unsafe<VMFunction>(),
+                                  top.frame_base);
+      state.gc.vm_frames.pop_back();
+      state.gc.vm_stack_used = top.frame_base;
+      session_frames_lost = top.frames_lost + 1;
+
+      argc = native_vm_tail_argc;
+      argv = native_vm_tail_use_buf
+          ? native_vm_tail_buf
+          : (state.temps.empty() ? nullptr : state.temps.data());
+      fnp  = native_vm_tail_fnp;
+      goto tail;
+    }
+
+    // Unwind innermost-first, emitting one stack-trace entry per frame like
+    // apply_vm's exception loop: the innermost frame traces at the faulting
+    // instruction (exported by the asm exception epilogue), parents at their
+    // call sites.
+    size_t trace_off = native_vm_exc_cp_offset;
+    while(state.gc.vm_frames.size() > session_base_idx) {
+      VMCallFrame fr = state.gc.vm_frames.back();
+      Value frame_fn = fr.closure.closure_unbox();
+      if(result.exception_trace()) {
+        state.trace_function(frame_fn, fr.frames_lost, trace_off);
+      }
+      native_vm_close_frame_boxes(&state, frame_fn.as_unsafe<VMFunction>(),
+                                  fr.frame_base);
+      state.gc.vm_frames.pop_back();
+      if(fr.flags & VMCallFrame::SESSION_BASE) {
+        // The session's own vm_depth increment was already undone above.
+        state.gc.vm_stack_used = fr.frame_base;
+      } else {
+        // Undo the asm fast path's per-frame vm_depth increment.
+        state.vm_depth--;
+      }
+      trace_off = fr.return_cp;
+    }
   }
   return result;
   }
