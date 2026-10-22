@@ -784,25 +784,6 @@ Value XReader::read_aux(const std::string& text, unsigned highlight_size, Value 
   return make_src_pair(symbol, x, cline, cposition, position - cposition);
 }
 
-Value XReader::read_aux2(const std::string& text, unsigned highlight_size, Value symbol,
-    Value symbol2) {
-  unsigned cline = token_start_line, cposition = token_start_position;
-
-  Value x;
-  
-  AR_FRAME(state, x, symbol, symbol2);
-  bool qq_saved = quasiquote_renaming;
-  quasiquote_renaming = false;
-  x = read_aux(text, highlight_size, symbol);
-  quasiquote_renaming = qq_saved;
-  if(x.is_active_exception()) {
-    return x;
-  }
-
-  x = state.make_pair(x, C_NIL);
-  return make_src_pair(symbol2, x, cline, cposition, position - cposition);
-}
-
 Value XReader::read_expr(TokenType tk) {
 #define NEXT_TOKEN(name) \
     name = next_token(); AR_ASSERT(name <= TK_EOF); if(active_error != C_FALSE) { return active_error; }
@@ -851,13 +832,11 @@ Value XReader::read_expr(TokenType tk) {
         }
 
       }
-      // #`asdf => (quasiquote (rename 'asdf))
+      // Template identifiers capture their lexical environment in the expander.
       if(quasiquote_renaming && !sym.symbol_keyword()) {
         AR_FRAME(state, sym);
         sym = state.make_pair(sym, C_NIL);
-        sym = state.make_pair(state.globals[State::S_QUOTE], sym);
-        sym = state.make_pair(sym, C_NIL);
-        sym = state.make_pair(state.globals[State::S_RENAME], sym);
+        sym = state.make_pair(state.globals[State::S_SYNTAX_RENAME], sym);
         sym = state.make_pair(sym, C_NIL);
         sym = make_src_pair(state.globals[State::S_UNQUOTE], sym,
           token_start_line, token_start_position, position);
@@ -895,8 +874,7 @@ Value XReader::read_expr(TokenType tk) {
 
     }
     case TK_QUOTE: return read_aux("after '", 1, state.globals[State::S_QUOTE]);
-    case TK_RENAME: return read_aux2("after #'", 1, state.globals[State::S_QUOTE],
-      state.globals[State::S_RENAME]);
+    case TK_RENAME: return read_aux("after #'", 1, state.globals[State::S_SYNTAX_RENAME]);
     case TK_UNQUOTE_SPLICING:
      return read_aux("after ,@", 2, state.globals[State::S_UNQUOTE_SPLICING]);
 

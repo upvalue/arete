@@ -1861,6 +1861,7 @@ struct State {
     S_DEFINE_SYNTAX,
     S_LET_SYNTAX,
     S_LETREC_SYNTAX,
+    S_SYNTAX_RENAME,
     // Everything above this line will be set to C_SYNTAX
     // Used by interpreter
     S_ELSE,
@@ -2494,9 +2495,6 @@ struct XReader {
 
   /** Read auxiliary syntax (e.g. quote, quasiquote, etc) */
   Value read_aux(const std::string&, unsigned, Value, bool renaming = false);
-
-  /** Read rename auxiliary syntax */
-  Value read_aux2(const std::string&, unsigned, Value, Value);
 
   /** Read the next expression */
   Value read_expr(TokenType);

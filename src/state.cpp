@@ -95,6 +95,7 @@ void State::boot() {
     "quote", "begin", "define", "lambda", "if", "cond",  "and", "or", "set!", "let",
     "identifier-transformer", "combined-transformer",
     "module", "define-library", "import", "define-syntax", "let-syntax", "letrec-syntax",
+    "%syntax-rename",
     // Used by interpreter
     "else",
     // Used by reader      
@@ -145,7 +146,7 @@ void State::boot() {
       s = get_symbol(_symbols[i]);
       s.heap->set_header_bit(Value::SYMBOL_ROOT_BIT);
 
-      if(i <= S_LETREC_SYNTAX) {
+      if(i <= S_SYNTAX_RENAME) {
         s.as<Symbol>()->value = C_SYNTAX;
       } else {
         s.as<Symbol>()->value = C_UNDEFINED;

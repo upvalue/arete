@@ -731,6 +731,20 @@
       (map-improper strip-renames x)
       x)))
 
+(define (%make-syntax-rename env name)
+  ;; Nested templates referring to the same binding must produce equivalent
+  ;; identifiers. Unbound names retain their module for forward references.
+  (make-rename (car (env-lookup env name)) name))
+
+(define (expand-syntax-rename x env)
+  (if (or (not (fx= (length x) 2)) (not (symbol? (cadr x))))
+    (raise-source x 'expand "syntax rename expects one symbol" (list x)))
+
+  ;; Capture the template's scope, but allocate a fresh rename on each call.
+  (list-source x (core-ref '%make-syntax-rename)
+    (list (make-rename #f 'quote) env)
+    (list (make-rename #f 'quote) (cadr x))))
+
 (define (expand-quote x env params)
   (if (fx> (length x) 3)
     (raise-source x 'expand "quote only takes one argument" (list x)))
@@ -768,6 +782,7 @@
       ((eq? kar 'set!) (expand-set x env params))
       ((eq? kar 'cond) (expand-cond x env params))
       ((eq? kar 'quote) (expand-quote x env params))
+      ((eq? kar '%syntax-rename) (expand-syntax-rename x env))
       (else (raise-source x 'expand (print-string "unknown special form" (car x)) (list x))))
     ;; Normal function application
     ;; Needs to be annotated with src info, right?
