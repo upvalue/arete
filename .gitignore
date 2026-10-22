@@ -33,3 +33,4 @@ vgcore*
 /web/benchmarks/reports/*.log
 /scratch
 /rust/arete-rs/target/
+/bin/arete*
